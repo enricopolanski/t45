@@ -3,21 +3,14 @@ import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 
 import { StringId, NonNegativeInt } from "../models/primitives.ts";
-import { AvatarColor, DisplayName, MAX_AVATAR_BYTES, Refused, Role, User } from "../models/User.ts";
+import { Avatar, InvalidAvatar } from "../models/Avatar.ts";
+import { DisplayName, Refused, Role, User } from "../models/User.ts";
 import { AdminOnly } from "../Authorization.ts";
 import { NotFound } from "./errors.ts";
 
 export const UpdateProfileRequest = Schema.Struct({
   displayName: DisplayName,
-  avatar: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("keep") }),
-    Schema.Struct({ kind: Schema.Literal("initial"), color: AvatarColor }),
-    Schema.Struct({
-      kind: Schema.Literal("upload"),
-      contentType: Schema.Literals(["image/png", "image/jpeg", "image/webp"]),
-      data: Schema.String.check(Schema.isMaxLength(Math.ceil(MAX_AVATAR_BYTES / 3) * 4)),
-    }),
-  ]),
+  avatar: Avatar,
 });
 export type UpdateProfileRequest = typeof UpdateProfileRequest.Type;
 
@@ -29,7 +22,7 @@ export const Users = RpcGroup.make(
   Rpc.make("updateProfile", {
     payload: UpdateProfileRequest,
     success: User,
-    error: Schema.Union([Refused, NotFound]),
+    error: Schema.Union([InvalidAvatar, NotFound]),
   }),
   Rpc.make("approve", {
     payload: { userId: StringId, role: Role },

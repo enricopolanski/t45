@@ -6,7 +6,7 @@ import { api, type ApiInput } from "../../rpc/api";
 import { SavedInput } from "../SavedInput";
 import { Button } from "../ui/button";
 import { Label } from "../ui/label";
-import { BackLink, WorkFrame } from "../work/WorkFrame";
+import { WorkFrame } from "../work/WorkFrame";
 import { plural } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
 import { useWorkflowDetail } from "./useWorkflowDetail";
@@ -23,7 +23,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
 
   if (detail === null) {
     return (
-      <WorkFrame title="Workflow" back={<BackLink to="/settings/workflows">Workflows</BackLink>}>
+      <WorkFrame title="Workflow">
         <p role={error !== null ? "alert" : undefined} className="text-sm text-muted-foreground">
           {error ?? "Loading…"}
         </p>
@@ -38,8 +38,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
 
   return (
     <WorkFrame
-      title={`${workflow.name} · Workflow`}
-      back={<BackLink to="/settings/workflows">Workflows</BackLink>}
+      title={workflow.name}
       actions={
         steps > 0 ? (
           <Button

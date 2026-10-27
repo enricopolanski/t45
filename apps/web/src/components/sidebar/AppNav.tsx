@@ -27,7 +27,7 @@ export type NavLink = {
     | "/settings/agents"
     | "/settings/runner"
     | "/settings/automations"
-    | "/settings/members";
+    | "/settings/organization";
 };
 
 /** Everyone's areas. */

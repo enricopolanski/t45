@@ -2,17 +2,16 @@ import type { AssignmentView } from "@t45/contracts/resources/Assignments";
 import { Link } from "@tanstack/react-router";
 import * as DateTime from "effect/DateTime";
 
-import { useOrganization } from "../../state/organization";
 import { useMyWork } from "../../state/work";
 import { Badge } from "../ui/badge";
 import { NewItemDialog } from "./NewItemDialog";
 import { WorkFrame } from "./WorkFrame";
 import { formatDueDate, MY_WORK_TITLES } from "./workLogic";
 
-/** My work, under the organization's name. */
+/** The signed-in person's work. */
 export function MyWorkPage() {
   return (
-    <WorkFrame title={useOrganization().name ?? "My work"}>
+    <WorkFrame title="My work">
       <MyWork />
     </WorkFrame>
   );

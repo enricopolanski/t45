@@ -1,14 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { AgentEditor } from "../components/agents/AgentEditor";
-import { AgentsFrame } from "../components/agents/AgentsFrame";
+import { WorkFrame } from "../components/work/WorkFrame";
 
 function EditAgentView() {
   const { agentId } = Route.useParams();
   return (
-    <AgentsFrame key={agentId} title="Edit agent" back>
+    <WorkFrame key={agentId} title="Edit agent">
       <AgentEditor agentId={agentId} />
-    </AgentsFrame>
+    </WorkFrame>
   );
 }
 

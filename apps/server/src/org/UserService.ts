@@ -1,5 +1,4 @@
 import {
-  type AvatarColor,
   Refused,
   type Role,
   type User,
@@ -19,13 +18,6 @@ import { UserRepository } from "./UserRepository.ts";
 
 type Target = { readonly userId: string };
 type RoleChange = Target & { readonly role: Role };
-interface Profile {
-  readonly displayName: string;
-  readonly avatar:
-    | { readonly kind: "keep" }
-    | { readonly kind: "initial"; readonly color: AvatarColor }
-    | { readonly kind: "image"; readonly contentType: string; readonly content: Uint8Array };
-}
 
 const make = Effect.gen(function* () {
   const authentication = yield* Authentication.make;
@@ -50,10 +42,10 @@ const make = Effect.gen(function* () {
     users.list.pipe(Effect.flatMap((everyone) => refuse(lastAdminRefusal(everyone, user))));
 
   /** Stores the user's next value, stamped with the time of the change. */
-  const save = (user: User, avatarImage?: Uint8Array | null) =>
+  const save = (user: User, upload?: Uint8Array | null) =>
     Effect.gen(function* () {
       const saved = { ...user, updatedAt: yield* DateTime.now };
-      yield* users.update(saved, avatarImage);
+      yield* users.update(saved, upload);
       return saved;
     });
 
@@ -109,18 +101,16 @@ const make = Effect.gen(function* () {
           return yield* save({ ...target, state: "active" });
         }),
       ),
-    updateProfile: (userId: string, { displayName, avatar }: Profile) =>
+    /** Saves the name and avatar, with `upload` as its new image, and reads back where it's served. */
+    updateProfile: (
+      userId: string,
+      profile: Pick<User, "displayName" | "avatar">,
+      upload: Uint8Array | null = null,
+    ) =>
       transaction(
         Effect.gen(function* () {
-          const user = yield* load(userId);
-          return yield* save(
-            avatar.kind === "keep"
-              ? { ...user, displayName }
-              : avatar.kind === "initial"
-                ? { ...user, displayName, avatarColor: avatar.color, avatarContentType: null }
-                : { ...user, displayName, avatarContentType: avatar.contentType },
-            avatar.kind === "keep" ? undefined : avatar.kind === "image" ? avatar.content : null,
-          );
+          yield* save({ ...(yield* load(userId)), ...profile }, upload);
+          return yield* load(userId);
         }),
       ),
   };

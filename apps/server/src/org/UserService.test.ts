@@ -229,7 +229,7 @@ describe("UserService", () => {
       );
 
     /** The identity as an earlier sign-in registered it, with `changes` made since. */
-    const registered = (changes: Partial<User> = {}, avatarImage?: Uint8Array | null) =>
+    const registered = (changes: Partial<User> = {}, upload?: Uint8Array) =>
       Effect.gen(function* () {
         const users = yield* UserRepository.UserRepository;
         const user = yield* users.register({
@@ -238,7 +238,7 @@ describe("UserService", () => {
           displayName: "Kept name",
           createdAt: at,
         });
-        yield* users.update({ ...user, ...changes }, avatarImage);
+        yield* users.update({ ...user, ...changes }, upload);
       });
 
     it.effect(
@@ -314,11 +314,7 @@ describe("UserService", () => {
         const image = new Uint8Array([1, 2, 3]);
         if (scenario.edited) {
           yield* registered(
-            {
-              displayName: "Chosen name",
-              avatarColor: "green",
-              avatarContentType: "image/png",
-            },
+            { displayName: "Chosen name", avatar: { kind: "image", url: "/chosen.png" } },
             image,
           );
         } else {
@@ -332,8 +328,8 @@ describe("UserService", () => {
           [identity.email, scenario.expected],
         );
         if (scenario.edited) {
-          assert.strictEqual(stored?.avatarColor, "green");
-          assert.deepStrictEqual((yield* users.avatarImage(identity.subject))?.content, image);
+          assert.strictEqual(stored?.avatar.kind, "image");
+          assert.deepStrictEqual(yield* users.avatarImage(identity.subject), image);
         }
       }).pipe(Effect.provide(layer(() => Effect.succeed({ ...identity, name: scenario.name })))),
     );
@@ -770,31 +766,33 @@ describe("UserService", () => {
           const admin = yield* seedAdmin;
           const content = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
-          const withImage = yield* members.updateProfile(admin.id, {
-            displayName: "Ada",
-            avatar: { kind: "image", contentType: "image/png", content },
-          });
-          assert.deepStrictEqual(yield* stored(admin.id), withImage);
-          assert.deepStrictEqual(yield* users.avatarImage(admin.id), {
-            contentType: "image/png",
+          const withImage = yield* members.updateProfile(
+            admin.id,
+            {
+              displayName: "Ada",
+              avatar: { kind: "image", url: "data:image/png;base64,iVBORw==" },
+            },
             content,
-          });
+          );
+          assert.deepStrictEqual(yield* stored(admin.id), withImage);
+          assert.match(
+            withImage.avatar.kind === "image" ? withImage.avatar.url : "",
+            /^\/api\/avatars\/user_admin\?v=/,
+          );
+          assert.deepStrictEqual(yield* users.avatarImage(admin.id), content);
 
           const kept = yield* members.updateProfile(admin.id, {
             displayName: "Ada L.",
-            avatar: { kind: "keep" },
+            avatar: withImage.avatar,
           });
-          assert.deepStrictEqual(
-            [kept.displayName, kept.avatarContentType],
-            ["Ada L.", "image/png"],
-          );
-          assert.deepStrictEqual((yield* users.avatarImage(admin.id))?.content, content);
+          assert.deepStrictEqual([kept.displayName, kept.avatar.kind], ["Ada L.", "image"]);
+          assert.deepStrictEqual(yield* users.avatarImage(admin.id), content);
 
           const initial = yield* members.updateProfile(admin.id, {
             displayName: "Ada L.",
             avatar: { kind: "initial", color: "green" },
           });
-          assert.deepStrictEqual([initial.avatarColor, initial.avatarContentType], ["green", null]);
+          assert.deepStrictEqual(initial.avatar, { kind: "initial", color: "green" });
           assert.isNull(yield* users.avatarImage(admin.id));
         }).pipe(Effect.provide(harness.layer));
       }),
@@ -810,10 +808,7 @@ describe("UserService", () => {
 
           yield* Effect.all(
             [
-              members.updateProfile(member.id, {
-                displayName: "Renamed",
-                avatar: { kind: "keep" },
-              }),
+              members.updateProfile(member.id, { displayName: "Renamed", avatar: member.avatar }),
               members.changeRole({ userId: member.id, role: "admin" }),
             ],
             { concurrency: "unbounded" },
@@ -876,18 +871,16 @@ describe("UserService", () => {
           state: "deactivated",
           email: "renamed@example.test",
           displayName: "Ada",
-          avatarColor: "green",
-          avatarContentType: "image/png",
+          avatar: { kind: "image", url: "/api/avatars/user_first?v=2026-09-22T12:00:00.000Z" },
           updatedAt,
         };
         const content = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
         yield* users.update(user, content);
         assert.deepStrictEqual(yield* users.get(user.id), user);
-        assert.deepStrictEqual(yield* users.avatarImage(user.id), {
-          contentType: "image/png",
-          content,
-        });
-        yield* users.update({ ...user, avatarContentType: null }, null);
+        assert.deepStrictEqual(yield* users.avatarImage(user.id), content);
+        const initial: User = { ...user, avatar: { kind: "initial", color: "green" } };
+        yield* users.update(initial);
+        assert.deepStrictEqual(yield* users.get(user.id), initial);
         assert.isNull(yield* users.avatarImage(user.id));
 
         yield* users.remove(user.id);

@@ -85,26 +85,38 @@ export function readFileAsDataUrl(file: Blob): Promise<string> {
   });
 }
 
-/** The image cropped to a centered square at most 256 pixels wide, as a PNG data URL. */
-export async function squareImageDataUrl(file: Blob): Promise<string> {
+/**
+ * A PNG at most `maxSide` pixels on its longer side: a centered square crop for pictures and
+ * thumbnails, the whole image for logos (`fit`), or a logo on a transparent square for icons (`pad`).
+ */
+export async function imageDataUrl(
+  file: Blob,
+  { maxSide = 256, mode = "crop" }: { maxSide?: number; mode?: "crop" | "fit" | "pad" } = {},
+): Promise<string> {
   const bitmap = await createImageBitmap(file);
   try {
     const side = Math.min(bitmap.width, bitmap.height);
+    const sourceWidth = mode === "crop" ? side : bitmap.width;
+    const sourceHeight = mode === "crop" ? side : bitmap.height;
+    const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
     const canvas = document.createElement("canvas");
-    canvas.width = Math.min(side, 256);
-    canvas.height = canvas.width;
+    canvas.width = mode === "pad" ? Math.max(width, height) : width;
+    canvas.height = mode === "pad" ? canvas.width : height;
     const context = canvas.getContext("2d");
     if (context === null) throw new Error("This browser can't prepare the image.");
+    context.imageSmoothingQuality = "high";
     context.drawImage(
       bitmap,
-      (bitmap.width - side) / 2,
-      (bitmap.height - side) / 2,
-      side,
-      side,
-      0,
-      0,
-      canvas.width,
-      canvas.height,
+      (bitmap.width - sourceWidth) / 2,
+      (bitmap.height - sourceHeight) / 2,
+      sourceWidth,
+      sourceHeight,
+      (canvas.width - width) / 2,
+      (canvas.height - height) / 2,
+      width,
+      height,
     );
     return canvas.toDataURL("image/png");
   } finally {
@@ -151,7 +163,7 @@ const composerThumbnails = new WeakMap<File, Promise<string | null>>();
 export function createComposerImageThumbnail(file: File): Promise<string | null> {
   const cached = composerThumbnails.get(file);
   if (cached) return cached;
-  const thumbnail = squareImageDataUrl(file).catch(() => null);
+  const thumbnail = imageDataUrl(file).catch(() => null);
   composerThumbnails.set(file, thumbnail);
   return thumbnail;
 }

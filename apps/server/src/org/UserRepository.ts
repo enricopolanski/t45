@@ -10,12 +10,15 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-const decodeUsers = Schema.decodeUnknownEffect(Schema.Array(User));
+import { avatarJson, setAvatar } from "./avatars.ts";
+
+const Row = Schema.Struct({ ...User.fields, avatar: Schema.fromJsonString(User.fields.avatar) });
+const decodeUsers = Schema.decodeUnknownEffect(Schema.Array(Row));
 const encodeUser = Schema.encodeEffect(User);
 const encodeCreatedAt = Schema.encodeSync(User.fields.createdAt);
 
 const COLUMNS = `id, role, state, email, display_name AS "displayName",
-  avatar_color AS "avatarColor", avatar_content_type AS "avatarContentType",
+  ${avatarJson("'/api/avatars/' || id")} AS avatar,
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 export class UserRepository extends Context.Service<
@@ -34,13 +37,12 @@ export class UserRepository extends Context.Service<
       readonly displayName: string;
       readonly createdAt: User["createdAt"];
     }) => Effect.Effect<User>;
-    /** Writes the user and optional image bytes; undefined keeps the image, null clears it. */
-    readonly update: (user: User, avatarImage?: Uint8Array | null) => Effect.Effect<void>;
+    /** Writes the user, with `upload` as its new avatar image. */
+    readonly update: (user: User, upload?: Uint8Array | null) => Effect.Effect<void>;
     /** Removes a declined registration after its sessions have been revoked. */
     readonly remove: (userId: string) => Effect.Effect<void>;
-    readonly avatarImage: (
-      userId: string,
-    ) => Effect.Effect<{ readonly contentType: string; readonly content: Uint8Array } | null>;
+    /** The user's avatar image, a PNG. */
+    readonly avatarImage: (userId: string) => Effect.Effect<Uint8Array | null>;
   }
 >()("t45/org/UserRepository") {}
 
@@ -72,23 +74,20 @@ export const layer = Layer.effect(
           Effect.orDie,
         );
       },
-      update: (user, avatarImage) =>
+      update: (user, upload = null) =>
         Effect.gen(function* () {
           const row = yield* encodeUser(user);
           yield* sql`UPDATE users SET role = ${row.role}, state = ${row.state}, email = ${row.email},
-            display_name = ${row.displayName}, avatar_color = ${row.avatarColor},
-            avatar_content_type = ${row.avatarContentType},
-            avatar_image = ${avatarImage === undefined ? sql`avatar_image` : avatarImage},
+            display_name = ${row.displayName}, ${setAvatar(sql, user.avatar, upload)},
             updated_at = ${row.updatedAt} WHERE id = ${row.id}`;
         }).pipe(Effect.orDie),
       remove: (userId) =>
         sql`DELETE FROM users WHERE id = ${userId}`.pipe(Effect.asVoid, Effect.orDie),
       avatarImage: (userId) =>
-        sql<{ readonly contentType: string; readonly content: Uint8Array }>`
-          SELECT avatar_content_type AS "contentType", avatar_image AS content
-          FROM users WHERE id = ${userId} AND avatar_image IS NOT NULL
+        sql<{ readonly image: Uint8Array | null }>`
+          SELECT avatar_image AS image FROM users WHERE id = ${userId}
         `.pipe(
-          Effect.map(([image]) => image ?? null),
+          Effect.map(([row]) => row?.image ?? null),
           Effect.orDie,
         ),
     });

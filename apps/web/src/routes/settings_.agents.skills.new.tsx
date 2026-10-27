@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { AgentsFrame } from "../components/agents/AgentsFrame";
+import { WorkFrame } from "../components/work/WorkFrame";
 import { SkillEditor } from "../components/agents/SkillEditor";
 
 function NewSkillView() {
   return (
-    <AgentsFrame title="New skill" back>
+    <WorkFrame title="New skill">
       <SkillEditor skillId={null} />
-    </AgentsFrame>
+    </WorkFrame>
   );
 }
 

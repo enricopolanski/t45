@@ -20,7 +20,7 @@ import { Route as MyWorkIndexRouteImport } from './routes/my-work.index'
 import { Route as ChatsIndexRouteImport } from './routes/chats.index'
 import { Route as BoardsIndexRouteImport } from './routes/boards.index'
 import { Route as SettingsRunnerRouteImport } from './routes/settings.runner'
-import { Route as SettingsMembersRouteImport } from './routes/settings.members'
+import { Route as SettingsOrganizationRouteImport } from './routes/settings.organization'
 import { Route as SettingsAutomationsRouteImport } from './routes/settings.automations'
 import { Route as MyWorkStepIdRouteImport } from './routes/my-work.$stepId'
 import { Route as ChatsChatIdRouteImport } from './routes/chats.$chatId'
@@ -93,9 +93,9 @@ const SettingsRunnerRoute = SettingsRunnerRouteImport.update({
   path: '/runner',
   getParentRoute: () => SettingsRoute,
 } as any)
-const SettingsMembersRoute = SettingsMembersRouteImport.update({
-  id: '/members',
-  path: '/members',
+const SettingsOrganizationRoute = SettingsOrganizationRouteImport.update({
+  id: '/organization',
+  path: '/organization',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsAutomationsRoute = SettingsAutomationsRouteImport.update({
@@ -197,7 +197,7 @@ export interface FileRoutesByFullPath {
   '/chats/$chatId': typeof ChatsChatIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
-  '/settings/members': typeof SettingsMembersRoute
+  '/settings/organization': typeof SettingsOrganizationRoute
   '/settings/runner': typeof SettingsRunnerRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
@@ -227,7 +227,7 @@ export interface FileRoutesByTo {
   '/chats/$chatId': typeof ChatsChatIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
-  '/settings/members': typeof SettingsMembersRoute
+  '/settings/organization': typeof SettingsOrganizationRoute
   '/settings/runner': typeof SettingsRunnerRoute
   '/boards': typeof BoardsIndexRoute
   '/chats': typeof ChatsIndexRoute
@@ -258,7 +258,7 @@ export interface FileRoutesById {
   '/chats/$chatId': typeof ChatsChatIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
-  '/settings/members': typeof SettingsMembersRoute
+  '/settings/organization': typeof SettingsOrganizationRoute
   '/settings/runner': typeof SettingsRunnerRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
@@ -290,7 +290,7 @@ export interface FileRouteTypes {
     | '/chats/$chatId'
     | '/my-work/$stepId'
     | '/settings/automations'
-    | '/settings/members'
+    | '/settings/organization'
     | '/settings/runner'
     | '/boards/'
     | '/chats/'
@@ -320,7 +320,7 @@ export interface FileRouteTypes {
     | '/chats/$chatId'
     | '/my-work/$stepId'
     | '/settings/automations'
-    | '/settings/members'
+    | '/settings/organization'
     | '/settings/runner'
     | '/boards'
     | '/chats'
@@ -350,7 +350,7 @@ export interface FileRouteTypes {
     | '/chats/$chatId'
     | '/my-work/$stepId'
     | '/settings/automations'
-    | '/settings/members'
+    | '/settings/organization'
     | '/settings/runner'
     | '/boards/'
     | '/chats/'
@@ -476,11 +476,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRunnerRouteImport
       parentRoute: typeof SettingsRoute
     }
-    '/settings/members': {
-      id: '/settings/members'
-      path: '/members'
-      fullPath: '/settings/members'
-      preLoaderRoute: typeof SettingsMembersRouteImport
+    '/settings/organization': {
+      id: '/settings/organization'
+      path: '/organization'
+      fullPath: '/settings/organization'
+      preLoaderRoute: typeof SettingsOrganizationRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/automations': {
@@ -600,13 +600,13 @@ declare module '@tanstack/react-router' {
 
 interface SettingsRouteChildren {
   SettingsAutomationsRoute: typeof SettingsAutomationsRoute
-  SettingsMembersRoute: typeof SettingsMembersRoute
+  SettingsOrganizationRoute: typeof SettingsOrganizationRoute
   SettingsRunnerRoute: typeof SettingsRunnerRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAutomationsRoute: SettingsAutomationsRoute,
-  SettingsMembersRoute: SettingsMembersRoute,
+  SettingsOrganizationRoute: SettingsOrganizationRoute,
   SettingsRunnerRoute: SettingsRunnerRoute,
 }
 

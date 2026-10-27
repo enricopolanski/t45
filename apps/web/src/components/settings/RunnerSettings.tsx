@@ -5,7 +5,12 @@ import { Atom } from "effect/reactivity";
 import { apiQuery, useApiQuery } from "../../state/rpc";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Badge } from "../ui/badge";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsEmpty,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 
 const runnerStatus = apiQuery("runner.get")(undefined).pipe(Atom.withRefresh("5 seconds"));
 
@@ -35,7 +40,7 @@ export function RunnerSettings() {
   return (
     <SettingsPageContainer>
       {error ? <p className="text-sm text-destructive-foreground">{error}</p> : null}
-      <SettingsSection title="Runner">
+      <SettingsSection title="Runner" description="The machine that runs agents' chats.">
         <SettingsRow
           title="Status"
           description={
@@ -55,9 +60,9 @@ export function RunnerSettings() {
         />
       </SettingsSection>
       {status?.isAvailable ? (
-        <SettingsSection title="Chats">
+        <SettingsSection title="Chats" description="Chat environments on this runner.">
           {status.vms.length === 0 ? (
-            <SettingsRow title="No chat has run since the runner started" />
+            <SettingsEmpty>No chat has run since the runner started.</SettingsEmpty>
           ) : (
             status.vms.map((vm) => (
               <SettingsRow

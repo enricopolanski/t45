@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { AgentsFrame } from "../components/agents/AgentsFrame";
+import { WorkFrame } from "../components/work/WorkFrame";
 import { AgentList } from "../components/agents/AgentList";
 
 function AgentsIndexView() {
   return (
-    <AgentsFrame title="Agents" back={false}>
+    <WorkFrame title="Agents">
       <AgentList />
-    </AgentsFrame>
+    </WorkFrame>
   );
 }
 

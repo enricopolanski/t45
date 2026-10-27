@@ -20,7 +20,11 @@ export function OrganizationOnboarding() {
     pending: submitting,
     onSubmit,
   } = useSubmit(async (fields) => {
-    await api("organization.rename", { name: String(fields.get("name")).trim() });
+    // A new organization's avatar is its initial on slate.
+    await api("organization.update", {
+      name: String(fields.get("name")).trim(),
+      avatar: { kind: "initial", color: "slate" },
+    });
     // The root gate re-resolves on this navigation and admits the shell.
     await navigate({ to: "/", replace: true });
   });

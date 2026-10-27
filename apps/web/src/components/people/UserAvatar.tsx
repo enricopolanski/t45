@@ -1,13 +1,5 @@
-import type { Avatar, AvatarColor, User } from "@t45/contracts/models/User";
-
-/** How this user's avatar is served by the application. */
-export const getAvatar = (user: User): Avatar =>
-  user.avatarContentType === null
-    ? { kind: "initial", color: user.avatarColor }
-    : {
-        kind: "image",
-        url: `/api/avatars/${encodeURIComponent(user.id)}?v=${user.updatedAt.epochMilliseconds}`,
-      };
+import type { Avatar, AvatarColor } from "@t45/contracts/models/Avatar";
+import type { User } from "@t45/contracts/models/User";
 
 /** The look of each letter-avatar color. */
 export const AVATAR_COLOR_CLASSES: Record<AvatarColor, string> = {
@@ -29,14 +21,16 @@ const SIZE_CLASSES = {
   lg: "size-20 text-3xl",
 } as const;
 
+const initialOf = (name: string) => (name.trim().charAt(0) || "?").toUpperCase();
+
 /**
  * A user as others see them: their image, or the first letter of their name on a color, and a "?"
- * on slate while they are unknown. The profile passes a name and avatar to preview them instead.
+ * on slate while they are unknown. Editors pass a name and avatar to preview them instead.
  */
 export function UserAvatar({
   user,
   name = user?.displayName ?? "",
-  avatar = user === undefined ? { kind: "initial", color: "slate" } : getAvatar(user),
+  avatar = user?.avatar ?? { kind: "initial", color: "slate" },
   size = "sm",
 }: {
   readonly user?: User | undefined;
@@ -55,7 +49,33 @@ export function UserAvatar({
       aria-hidden
       className={`${sizeClass} ${AVATAR_COLOR_CLASSES[avatar.color]} flex shrink-0 items-center justify-center rounded-full font-semibold text-white`}
     >
-      {(name.trim().charAt(0) || "?").toUpperCase()}
+      {initialOf(name)}
+    </span>
+  );
+}
+
+/**
+ * The organization's avatar: its whole logo at the width `className` sets, as tall as its
+ * proportions make it, or else its initial on a square of that width.
+ */
+export function OrganizationAvatar({
+  name,
+  avatar,
+  className,
+}: {
+  readonly name: string;
+  readonly avatar: Avatar;
+  readonly className: string;
+}) {
+  if (avatar.kind === "image") {
+    return <img src={avatar.url} alt="" className={`${className} h-auto shrink-0`} />;
+  }
+  return (
+    <span
+      aria-hidden
+      className={`${className} ${AVATAR_COLOR_CLASSES[avatar.color]} flex aspect-square shrink-0 items-center justify-center rounded-sm font-semibold text-white`}
+    >
+      {initialOf(name)}
     </span>
   );
 }

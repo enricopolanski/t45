@@ -11,7 +11,7 @@ import { useWorkDirectory } from "./useWorkDirectory";
 import { actorName } from "./workLogic";
 
 /**
- * The signed-in person's avatar in page headers: their name, Settings and Members for admins, and
+ * The signed-in person's avatar in page headers: their name, Settings and Organization for admins, and
  * Sign out.
  */
 export function AccountMenu() {
@@ -37,9 +37,9 @@ export function AccountMenu() {
               <SettingsIcon />
               Settings
             </MenuLinkItem>
-            <MenuLinkItem render={<Link to="/settings/members" />}>
+            <MenuLinkItem render={<Link to="/settings/organization" />}>
               <UsersIcon />
-              Members
+              Organization
             </MenuLinkItem>
           </>
         ) : null}

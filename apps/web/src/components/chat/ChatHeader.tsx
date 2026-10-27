@@ -1,8 +1,7 @@
-import { Link, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { Button } from "../ui/button";
-import { AccountMenu } from "../work/AccountMenu";
 import type { ChatId } from "@t45/contracts/models/Chat";
-import { ChevronLeftIcon, ChevronDownIcon, PencilIcon, ShrinkIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, PencilIcon, ShrinkIcon, Trash2Icon } from "lucide-react";
 import {
   useRef,
   useState,
@@ -32,7 +31,7 @@ import { toastManager } from "../ui/toast";
 import { forgetChatDrafts } from "../../questionDrafts";
 import { api } from "../../rpc/api";
 import { describeFailure, isNotFound } from "../../lib/failures";
-import { PageBreadcrumb, PageBreadcrumbItem, PageBreadcrumbText } from "../PageBreadcrumb";
+import { PageBreadcrumb, PageBreadcrumbLink, PageBreadcrumbText } from "../PageBreadcrumb";
 
 interface ChatHeaderProps {
   activeChatId: ChatId;
@@ -146,21 +145,11 @@ export function ChatHeader({
         <ContextMenu disabled={renamingTitle !== null}>
           <ContextMenuTrigger className="flex min-w-0 flex-1">
             <PageBreadcrumb
-              ariaLabel="Chat breadcrumb"
+              parent={<PageBreadcrumbLink to="/chats">Chat</PageBreadcrumbLink>}
               className="flex-1 overflow-clip [overflow-clip-margin:2px]"
-            >
-              <PageBreadcrumbItem>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Back to Chat"
-                  render={<Link to="/chats" />}
-                >
-                  <ChevronLeftIcon />
-                </Button>
-              </PageBreadcrumbItem>
-              <PageBreadcrumbItem current className="min-w-10 flex-1">
-                {renamingTitle !== null ? (
+              currentClassName="min-w-10 flex-1"
+              title={
+                renamingTitle !== null ? (
                   <input
                     autoFocus
                     aria-label="Chat title"
@@ -203,15 +192,12 @@ export function ChatHeader({
                     </Tooltip>
                     {actions}
                   </Menu>
-                )}
-              </PageBreadcrumbItem>
-            </PageBreadcrumb>
+                )
+              }
+            />
           </ContextMenuTrigger>
           {actions}
         </ContextMenu>
-        <div className="flex shrink-0 items-center">
-          <AccountMenu />
-        </div>
       </div>
       <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
         <DialogPopup closeButton={false}>

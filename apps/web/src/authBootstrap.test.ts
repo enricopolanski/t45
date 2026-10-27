@@ -141,10 +141,20 @@ describe("resolveInitialServerAuthGateState", () => {
     installAuthRoutes({ session: sessions(() => signedIn("admin")) });
     const { resolveInitialServerAuthGateState } = await import("./http/auth");
 
-    rpc.organization = { name: null, createdAt: CREATED_AT, updatedAt: CREATED_AT };
+    rpc.organization = {
+      name: null,
+      avatar: { kind: "initial", color: "slate" },
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    };
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({ status: "onboarding" });
 
-    rpc.organization = { name: "Acme", createdAt: CREATED_AT, updatedAt: CREATED_AT };
+    rpc.organization = {
+      name: "Acme",
+      avatar: { kind: "initial", color: "slate" },
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    };
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "authenticated",
     });

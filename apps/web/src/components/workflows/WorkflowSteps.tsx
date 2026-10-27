@@ -6,7 +6,8 @@ import { useCallback, useState } from "react";
 
 import { api } from "../../rpc/api";
 import { Button } from "../ui/button";
-import { BackLink, WorkFrame } from "../work/WorkFrame";
+import { PageBreadcrumbLink } from "../PageBreadcrumb";
+import { WorkFrame } from "../work/WorkFrame";
 import { useWorkflowDefinitionDetail } from "./useWorkflowDefinitionDetail";
 import { WorkflowStepEditor } from "./WorkflowStepEditor";
 import { blankStep, cleanSteps, listEntries, stepPath, updateStep } from "./workflowLogic";
@@ -102,24 +103,24 @@ export function WorkflowSteps({
 
   return (
     <WorkFrame
-      title={`${definition.name} · Blueprint steps`}
-      back={
-        <div className="flex items-center justify-between gap-2">
-          <BackLink
-            to="/settings/workflow-blueprints/$definitionId"
-            params={{ definitionId: definition.id }}
-          >
-            {definition.name}
-          </BackLink>
-          <div className="flex items-center gap-2">
-            <span aria-live="polite" className="text-xs text-muted-foreground">
-              {dirty ? "Unsaved changes." : "All changes saved."}
-            </span>
-            <Button size="sm" disabled={disabled || !dirty} onClick={save}>
-              Save
-            </Button>
-          </div>
-        </div>
+      title="Steps"
+      parent={
+        <PageBreadcrumbLink
+          to="/settings/workflow-blueprints/$definitionId"
+          params={{ definitionId: definition.id }}
+        >
+          {definition.name}
+        </PageBreadcrumbLink>
+      }
+      actions={
+        <>
+          <span aria-live="polite" className="text-xs text-muted-foreground">
+            {dirty ? "Unsaved changes." : "All changes saved."}
+          </span>
+          <Button size="sm" disabled={disabled || !dirty} onClick={save}>
+            Save
+          </Button>
+        </>
       }
     >
       <p className="text-sm text-muted-foreground">

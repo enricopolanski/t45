@@ -1,31 +1,22 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import { PageContent } from "../PageContent";
+import { Section } from "../Section";
 
-/**
- * A titled card of settings rows, separated by rules. Muted section headings have no
- * descriptions; explanatory copy belongs to individual settings.
- */
+/** A section of settings rows, separated by rules inside a card. */
 export function SettingsSection({
-  title,
-  headerAction,
   children,
-}: {
-  title: string;
-  headerAction?: ReactNode;
-  children: ReactNode;
-}) {
+  ...props
+}: Omit<ComponentProps<typeof Section>, "card">) {
   return (
-    <section className="space-y-2.5">
-      <div className="flex min-h-7 items-start justify-between gap-4 px-3 sm:px-4">
-        <h2 className="flex min-h-7 min-w-0 items-center text-sm font-normal text-foreground/70">
-          {title}
-        </h2>
-        <div className="flex min-h-7 min-w-7 items-center justify-end">{headerAction}</div>
-      </div>
-      <div className="divide-y divide-border/50 rounded-xl border border-border/60 bg-card/40 shadow-xs/5">
-        {children}
-      </div>
-    </section>
+    <Section {...props}>
+      <div className="card divide-y divide-border">{children}</div>
+    </Section>
   );
+}
+
+/** A section's text when it has no rows, aligned with row titles. */
+export function SettingsEmpty({ children }: { children: ReactNode }) {
+  return <p className="px-3 py-3 text-sm text-muted-foreground sm:px-4">{children}</p>;
 }
 
 /**
@@ -33,8 +24,9 @@ export function SettingsSection({
  * for clarity or narrow screens instead of truncating or forcing no-wrap.
  *
  * Control sizing across settings follows two tiers so rows share a baseline:
- * - `control` slot: `size="sm"` (Button, Select, Input) or `icon-sm`.
- * - Section `headerAction`s and buttons inside list items, cards, toolbars: `xs` / `icon-xs`.
+ * - `control` slot and section `action`s: `size="sm"` (Button, Select, Input) or `icon-sm`;
+ *   section actions are `variant="outline"`.
+ * - Buttons inside list items, cards, toolbars: `xs` / `icon-xs`.
  */
 export function SettingsRow({
   title,
@@ -72,9 +64,7 @@ export function SettingsRow({
 export function SettingsPageContainer({ children }: { children: ReactNode }) {
   return (
     <div className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 pt-6 pb-12 sm:px-6">
-        {children}
-      </div>
+      <PageContent>{children}</PageContent>
     </div>
   );
 }

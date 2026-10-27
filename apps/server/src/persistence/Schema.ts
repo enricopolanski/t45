@@ -19,7 +19,6 @@ const statements = [
       email TEXT NOT NULL,
       display_name TEXT NOT NULL,
       avatar_color TEXT NOT NULL DEFAULT 'slate',
-      avatar_content_type TEXT,
       avatar_image BLOB,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -37,6 +36,8 @@ const statements = [
   `CREATE TABLE organizations (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT,
+      avatar_color TEXT NOT NULL DEFAULT 'slate',
+      avatar_image BLOB,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,
