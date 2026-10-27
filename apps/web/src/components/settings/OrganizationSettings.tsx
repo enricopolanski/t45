@@ -1,8 +1,11 @@
 import type { Role, User } from "@t45/contracts/models/User";
 import { useState, useTransition } from "react";
 
+import { updateOrganization, useOrganization } from "../../state/organization";
 import { useSession } from "../../state/session";
 import { ROLE_LABELS, userActions, useUsers } from "../../state/users";
+import { AvatarEditor } from "../people/AvatarEditor";
+import { Section } from "../Section";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import {
@@ -13,13 +16,14 @@ import {
 } from "./settingsLayout";
 
 /**
- * The members area, for admins: pending requests and the member roster with role and lifecycle
- * controls. Role changes and deactivation end the member's sessions.
+ * The organization area, for admins: its name and logo, pending requests, and the member roster
+ * with role and lifecycle controls. Role changes and deactivation end the member's sessions.
  */
-export function MembersSettings() {
+export function OrganizationSettings() {
   const users = useUsers();
   return (
     <SettingsPageContainer>
+      <OrganizationProfile />
       <SettingsSection
         title="Requests"
         description="Review requests to join your organization."
@@ -48,6 +52,28 @@ export function MembersSettings() {
         </SettingsSection>
       ) : null}
     </SettingsPageContainer>
+  );
+}
+
+/** The organization's name and logo, shown in the sidebar, the tab and the splash screen. */
+function OrganizationProfile() {
+  const organization = useOrganization();
+  return (
+    <Section
+      title="Organization"
+      description="Your organization's name and logo, shown across the app."
+      card
+    >
+      <AvatarEditor
+        name={organization.name ?? ""}
+        avatar={organization.avatar}
+        logo
+        nameLabel="Organization name"
+        pictureLabel="Change the logo"
+        colorLabel="Its initial on a color"
+        onSave={(name, avatar) => void updateOrganization({ name, avatar })}
+      />
+    </Section>
   );
 }
 

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { MembersSettings } from "../components/settings/MembersSettings";
+import { OrganizationSettings } from "../components/settings/OrganizationSettings";
 
 export const Route = createFileRoute("/settings/organization")({
-  component: MembersSettings,
+  component: OrganizationSettings,
 });

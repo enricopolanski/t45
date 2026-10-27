@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useLocation } from "@tanstack/react-router";
 
+import { useOrganizationFavicon } from "../hooks/useOrganizationFavicon";
 import { cn } from "../lib/utils";
 import { useIsAdmin } from "../state/session";
 import { AppNavSidebar } from "./sidebar/AppNav";
@@ -38,6 +39,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const pathname = useLocation({ select: (location) => location.pathname });
   const isAdmin = useIsAdmin();
   useTrackMainAppLocation();
+  useOrganizationFavicon();
   const showSettingsSidebar =
     /^\/settings(\/|$)/u.test(pathname) &&
     (isAdmin || !/^\/settings\/(workflows|workflow-blueprints)(\/|$)/u.test(pathname));

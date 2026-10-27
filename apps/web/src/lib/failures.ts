@@ -1,6 +1,7 @@
 import { Refused as AgentRefused } from "@t45/contracts/models/Agent";
 import { Refused as ChatRefused } from "@t45/contracts/models/Chat";
 import { Refused as AutomationRefused } from "@t45/contracts/models/Automation";
+import { InvalidAvatar } from "@t45/contracts/models/Avatar";
 import { Refused as SkillRefused } from "@t45/contracts/models/Skill";
 import { Refused as UserRefused } from "@t45/contracts/models/User";
 import { Refused as WorkflowRefused } from "@t45/contracts/models/Workflow";
@@ -15,6 +16,7 @@ const isRefusal = Schema.is(
     AgentRefused,
     ChatRefused,
     AutomationRefused,
+    InvalidAvatar,
     SkillRefused,
     UserRefused,
     WorkflowRefused,

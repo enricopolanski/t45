@@ -85,16 +85,17 @@ export function readFileAsDataUrl(file: Blob): Promise<string> {
   });
 }
 
-/** The image cropped to a centered square at most 256 pixels wide, as a PNG data URL. */
-export async function squareImageDataUrl(file: Blob): Promise<string> {
+/** The image cropped to a centered square at most `maxSide` pixels wide, as a PNG data URL. */
+export async function squareImageDataUrl(file: Blob, maxSide = 256): Promise<string> {
   const bitmap = await createImageBitmap(file);
   try {
     const side = Math.min(bitmap.width, bitmap.height);
     const canvas = document.createElement("canvas");
-    canvas.width = Math.min(side, 256);
+    canvas.width = Math.min(side, maxSide);
     canvas.height = canvas.width;
     const context = canvas.getContext("2d");
     if (context === null) throw new Error("This browser can't prepare the image.");
+    context.imageSmoothingQuality = "high";
     context.drawImage(
       bitmap,
       (bitmap.width - side) / 2,
@@ -105,6 +106,39 @@ export async function squareImageDataUrl(file: Blob): Promise<string> {
       0,
       canvas.width,
       canvas.height,
+    );
+    return canvas.toDataURL("image/png");
+  } finally {
+    bitmap.close();
+  }
+}
+
+/**
+ * The whole image scaled down to at most `maxSide` pixels on its longer side, as a PNG data URL.
+ * `padded` centers it on a transparent square, for an icon.
+ */
+export async function fittedImageDataUrl(
+  file: Blob,
+  maxSide: number,
+  padded = false,
+): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = padded ? Math.max(width, height) : width;
+    canvas.height = padded ? canvas.width : height;
+    const context = canvas.getContext("2d");
+    if (context === null) throw new Error("This browser can't prepare the image.");
+    context.imageSmoothingQuality = "high";
+    context.drawImage(
+      bitmap,
+      (canvas.width - width) / 2,
+      (canvas.height - height) / 2,
+      width,
+      height,
     );
     return canvas.toDataURL("image/png");
   } finally {

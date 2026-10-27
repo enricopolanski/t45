@@ -42,14 +42,17 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 96px;
-        height: 96px;
+        min-width: 96px;
+        min-height: 96px;
       }
 
       #boot-shell-logo {
+        width: 128px;
+        height: auto;
+      }
+
+      #boot-shell-logo.fallback {
         width: 64px;
-        height: 64px;
-        object-fit: contain;
       }
     </style>
     <title>T45</title>
@@ -58,7 +61,17 @@
     <div id="root">
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="T45 splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T45" />
+          <!-- The organization's logo, or T45's while it has none. -->
+          <img
+            id="boot-shell-logo"
+            src="/api/organization/avatar"
+            alt=""
+            onerror="
+              this.onerror = null;
+              this.className = 'fallback';
+              this.src = '/apple-touch-icon.png';
+            "
+          />
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 
+import { Avatar } from "./Avatar.ts";
 import { StringId, TrimmedNonEmptyString } from "./primitives.ts";
 
 /** Admins manage the organization and its users. */
@@ -13,29 +14,6 @@ export type State = typeof State.Type;
 /** A name chosen in the profile editor; Clerk's initial suggestion may be longer. */
 export const DisplayName = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
 
-export const AVATAR_COLORS = [
-  "slate",
-  "red",
-  "orange",
-  "amber",
-  "green",
-  "teal",
-  "sky",
-  "blue",
-  "violet",
-  "pink",
-] as const;
-export const AvatarColor = Schema.Literals(AVATAR_COLORS);
-export type AvatarColor = typeof AvatarColor.Type;
-
-export const Avatar = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("initial"), color: AvatarColor }),
-  Schema.Struct({ kind: Schema.Literal("image"), url: TrimmedNonEmptyString }),
-]);
-export type Avatar = typeof Avatar.Type;
-
-export const MAX_AVATAR_BYTES = 512 * 1024;
-
 /** One Clerk identity in this deployment, including its access and chosen profile. */
 export class User extends Schema.Opaque<User>()(
   Schema.Struct({
@@ -44,8 +22,7 @@ export class User extends Schema.Opaque<User>()(
     displayName: TrimmedNonEmptyString,
     role: Role,
     state: State,
-    avatarColor: AvatarColor,
-    avatarContentType: Schema.NullOr(Schema.String),
+    avatar: Avatar,
     createdAt: Schema.DateTimeUtcFromString,
     updatedAt: Schema.DateTimeUtcFromString,
   }),
@@ -71,19 +48,12 @@ export const lastAdminRefusal = (
     : null;
 
 export class Refused extends Schema.TaggedError<Refused>()("UserRefused", {
-  reason: Schema.Literals([
-    "invalid_member_state",
-    "invalid_avatar",
-    "last_admin_protected",
-    "last_workflow_admin",
-  ]),
+  reason: Schema.Literals(["invalid_member_state", "last_admin_protected", "last_workflow_admin"]),
 }) {
   override get message(): string {
     switch (this.reason) {
       case "invalid_member_state":
         return "This user's state does not allow this action.";
-      case "invalid_avatar":
-        return "Choose a PNG, JPEG, or WebP image no larger than 512 KiB.";
       case "last_admin_protected":
         return "An organization must keep at least one active admin.";
       case "last_workflow_admin":
