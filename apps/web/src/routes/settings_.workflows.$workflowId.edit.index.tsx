@@ -7,6 +7,6 @@ function EditorRouteView() {
   return <WorkflowEditor key={workflowId} workflowId={workflowId} />;
 }
 
-export const Route = createFileRoute("/workflows/$workflowId/edit/")({
+export const Route = createFileRoute("/settings_/workflows/$workflowId/edit/")({
   component: EditorRouteView,
 });

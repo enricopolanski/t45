@@ -36,7 +36,7 @@ export function WorkflowDefinitions() {
     <WorkFrame
       title="Workflow blueprints"
       actions={
-        <Button size="sm" render={<Link to="/workflow-blueprints/new" />}>
+        <Button size="sm" render={<Link to="/settings/workflow-blueprints/new" />}>
           New blueprint
         </Button>
       }
@@ -74,7 +74,9 @@ export function WorkflowDefinitions() {
               <Button
                 size="sm"
                 variant="outline"
-                render={<Link to="/workflows/new" search={{ definitionId: definition.id }} />}
+                render={
+                  <Link to="/settings/workflows/new" search={{ definitionId: definition.id }} />
+                }
               >
                 Create workflow
               </Button>
@@ -84,7 +86,7 @@ export function WorkflowDefinitions() {
               variant="ghost"
               render={
                 <Link
-                  to="/workflow-blueprints/$definitionId"
+                  to="/settings/workflow-blueprints/$definitionId"
                   params={{ definitionId: definition.id }}
                 />
               }
@@ -108,7 +110,7 @@ export function NewWorkflowDefinition() {
   return (
     <WorkFrame
       title="New workflow blueprint"
-      back={<BackLink to="/workflow-blueprints">Blueprints</BackLink>}
+      back={<BackLink to="/settings/workflow-blueprints">Blueprints</BackLink>}
     >
       <p className="text-sm text-muted-foreground">
         Define the process once. Each workflow using it will have its own people and assignments.
@@ -125,7 +127,7 @@ export function NewWorkflowDefinition() {
           void api("workflows.createDefinition", { name: name.trim() }).then(
             ({ definitionId }) =>
               void navigate({
-                to: "/workflow-blueprints/$definitionId/steps",
+                to: "/settings/workflow-blueprints/$definitionId/steps",
                 params: { definitionId },
               }),
             (cause: unknown) => {
@@ -173,7 +175,7 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
     return (
       <WorkFrame
         title="Workflow blueprint"
-        back={<BackLink to="/workflow-blueprints">Blueprints</BackLink>}
+        back={<BackLink to="/settings/workflow-blueprints">Blueprints</BackLink>}
       >
         <p role={error === null ? undefined : "alert"} className="text-sm text-muted-foreground">
           {error ?? "Loading…"}
@@ -184,10 +186,13 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
   return (
     <WorkFrame
       title={`${definition.name} · Blueprint`}
-      back={<BackLink to="/workflow-blueprints">Blueprints</BackLink>}
+      back={<BackLink to="/settings/workflow-blueprints">Blueprints</BackLink>}
       actions={
         definition.archivedAt === null ? (
-          <Button size="sm" render={<Link to="/workflows/new" search={{ definitionId }} />}>
+          <Button
+            size="sm"
+            render={<Link to="/settings/workflows/new" search={{ definitionId }} />}
+          >
             Create workflow
           </Button>
         ) : undefined
@@ -236,7 +241,10 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
               size="sm"
               variant="outline"
               render={
-                <Link to="/workflow-blueprints/$definitionId/steps" params={{ definitionId }} />
+                <Link
+                  to="/settings/workflow-blueprints/$definitionId/steps"
+                  params={{ definitionId }}
+                />
               }
             >
               {canManage ? "Edit steps" : "View steps"}

@@ -11,6 +11,6 @@ function NewAgentView() {
   );
 }
 
-export const Route = createFileRoute("/agents/new")({
+export const Route = createFileRoute("/settings_/agents/new")({
   component: NewAgentView,
 });

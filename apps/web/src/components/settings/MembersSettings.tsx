@@ -124,7 +124,7 @@ function UserRow({ user }: { readonly user: User }) {
               />
               <Button
                 size="sm"
-                variant="secondary"
+                variant="destructive-outline"
                 disabled={busy}
                 onClick={() => startTransition(() => userActions.deactivate(user.id))}
               >

@@ -24,6 +24,10 @@ Each entry names the file and what could change. Delete an entry once it is done
 - `apps/runner/src/ChatTable.ts` — the runner has no cap on VMs running at once (the env caps and `RunnerBusyError` were removed). When capacity matters, have the runner compute what it can take from its own resources and tell T45 when it can't start another VM, instead of hardcoded counts.
 - `apps/runner/src/MicrosandboxChats.ts` — agent files are written into `/work` beside what every boot writes itself (`AGENTS.md`, `opencode.json`, `attachments/`, `.opencode/skills/`), and `agents.create`/`agents.update` no longer refuse those paths. Have the runner place agent files where they can't collide.
 
+## apps/server/src/org
+
+- `apps/server/src/org/http.ts` — avatars are served `no-cache` without a validator, so every page load downloads them again. Version their URL by upload time instead of `updatedAt` and serve them `immutable`.
+
 ## apps/server/src/persistence
 
 - `apps/server/src/persistence/Schema.ts` — at the first release, freeze the schema as the baseline and add an append-only migration ledger applied on top of it, so released databases upgrade instead of being refused.

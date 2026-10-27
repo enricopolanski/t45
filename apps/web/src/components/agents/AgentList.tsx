@@ -16,7 +16,7 @@ function SkillsSection() {
       title="Skills"
       description="Reusable know-how with its scripts. Pick them per agent; its chats get them in their folder."
       action={
-        <Button size="sm" variant="outline" render={<Link to="/agents/skills/new" />}>
+        <Button size="sm" variant="outline" render={<Link to="/settings/agents/skills/new" />}>
           New skill
         </Button>
       }
@@ -28,7 +28,7 @@ function SkillsSection() {
         return (
           <Link
             key={skill.id}
-            to="/agents/skills/$skillId"
+            to="/settings/agents/skills/$skillId"
             params={{ skillId: skill.id }}
             className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 hover:bg-muted"
           >
@@ -70,7 +70,7 @@ function AgentsSection({ canManage }: { readonly canManage: boolean }) {
       description="Each agent has its own instructions and model, and works in a folder of its own in every chat."
       action={
         canManage ? (
-          <Button size="sm" variant="outline" render={<Link to="/agents/new" />}>
+          <Button size="sm" variant="outline" render={<Link to="/settings/agents/new" />}>
             New agent
           </Button>
         ) : null
@@ -92,7 +92,7 @@ function AgentRow({ agent, canManage }: { readonly agent: Agent; readonly canMan
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-4 py-3">
       {canManage && active ? (
         <Link
-          to="/agents/$agentId"
+          to="/settings/agents/$agentId"
           params={{ agentId: agent.id }}
           className="text-sm font-medium hover:underline"
         >

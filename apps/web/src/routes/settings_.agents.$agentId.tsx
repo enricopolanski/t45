@@ -12,6 +12,6 @@ function EditAgentView() {
   );
 }
 
-export const Route = createFileRoute("/agents/$agentId")({
+export const Route = createFileRoute("/settings_/agents/$agentId")({
   component: EditAgentView,
 });

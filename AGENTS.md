@@ -28,7 +28,7 @@ Commits use conventional, plain-language titles (`fix(web): new threads no longe
 
 `vp i` installs; `vp run dev` starts server and web. Details: `docs/operations/development.md`.
 
-- Dev state lives in the gitignored `.t3` of the checkout you launch from, even when `DATA_DIR` is set.
+- Dev state lives in the gitignored `.t45` of the checkout you launch from, even when `DATA_DIR` is set.
 - Read the real ports from the `[dev-runner]` line; occupied ports shift them.
 - Sign-in is Clerk (`AUTH_CLERK_PUBLISHABLE_KEY` in `.env`).
 

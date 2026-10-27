@@ -11,6 +11,6 @@ function NewSkillView() {
   );
 }
 
-export const Route = createFileRoute("/agents/skills/new")({
+export const Route = createFileRoute("/settings_/agents/skills/new")({
   component: NewSkillView,
 });

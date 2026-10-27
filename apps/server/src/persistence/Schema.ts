@@ -21,7 +21,6 @@ const statements = [
       avatar_color TEXT NOT NULL DEFAULT 'slate',
       avatar_content_type TEXT,
       avatar_image BLOB,
-      clerk_image_url TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,

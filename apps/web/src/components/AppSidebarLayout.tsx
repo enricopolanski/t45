@@ -39,8 +39,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const isAdmin = useIsAdmin();
   useTrackMainAppLocation();
   const showSettingsSidebar =
-    /^\/(settings|agents)(\/|$)/u.test(pathname) ||
-    (isAdmin && /^\/(workflows|workflow-blueprints)(\/|$)/u.test(pathname));
+    /^\/settings(\/|$)/u.test(pathname) &&
+    (isAdmin || !/^\/settings\/(workflows|workflow-blueprints)(\/|$)/u.test(pathname));
 
   return (
     <SidebarProvider>

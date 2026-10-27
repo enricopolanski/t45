@@ -4,6 +4,6 @@ function DefinitionRouteView() {
   const { definitionId } = Route.useParams();
   return <WorkflowDefinitionEditor key={definitionId} definitionId={definitionId} />;
 }
-export const Route = createFileRoute("/workflow-blueprints/$definitionId/")({
+export const Route = createFileRoute("/settings_/workflow-blueprints/$definitionId/")({
   component: DefinitionRouteView,
 });

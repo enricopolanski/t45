@@ -106,7 +106,7 @@ export function WorkflowSteps({
       back={
         <div className="flex items-center justify-between gap-2">
           <BackLink
-            to="/workflow-blueprints/$definitionId"
+            to="/settings/workflow-blueprints/$definitionId"
             params={{ definitionId: definition.id }}
           >
             {definition.name}

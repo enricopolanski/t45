@@ -5,16 +5,13 @@ import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
 import { Users } from "@t45/contracts/resources/Users";
 import type { NotFound } from "@t45/contracts/resources/errors";
 import * as DateTime from "effect/DateTime";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as PubSub from "effect/PubSub";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { FetchHttpClient, HttpRouter } from "effect/http";
+import { HttpRouter } from "effect/http";
 import * as RpcTest from "effect/rpc/RpcTest";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
@@ -36,6 +33,7 @@ import { UserService } from "./UserService.ts";
 import * as Authentication from "../auth/Authentication.ts";
 import type { VerifiedClerkIdentity } from "../auth/Authentication.ts";
 import * as UsersHandlers from "./Users.handlers.ts";
+import { WorkflowService } from "../workflows/WorkflowService.ts";
 
 describe("UserService", () => {
   describe("Clerk identity", () => {
@@ -95,10 +93,6 @@ describe("UserService", () => {
       };
     };
 
-    it("ClerkIdentityProvider derives the Clerk issuer from its publishable key", () => {
-      assert.strictEqual(Authentication.clerkFrontendApiUrl(publishableKey), issuer);
-    });
-
     it.effect("ClerkIdentityProvider verifies a session and extracts its identity", () =>
       Effect.gen(function* () {
         const { keyPair, provider } = yield* Effect.promise(makeProvider);
@@ -107,7 +101,6 @@ describe("UserService", () => {
         );
 
         assert.deepStrictEqual(yield* provider.verify({ token, authorizedParty }), {
-          imageUrl: null,
           subject: "user_123",
           email: "user@example.test",
           name: "Ada Lovelace",
@@ -123,7 +116,6 @@ describe("UserService", () => {
         );
 
         const expected = {
-          imageUrl: null,
           subject: "user_123",
           email: "user@example.test",
           name: null,
@@ -224,16 +216,13 @@ describe("UserService", () => {
       verify: ReturnType<typeof Authentication.makeIdentityProvider>["verify"] = ({ token }) =>
         Effect.succeed({ ...identity, subject: token }),
     ) =>
-      Layer.effect(
-        UserService,
-        UserService.make({
-          memberDeactivated: () => Effect.void,
-          identityProvider: {
+      Layer.effect(UserService, UserService.make).pipe(
+        Layer.provide(
+          Layer.succeed(Authentication.IdentityProvider, {
             publishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
             verify,
-          },
-        }),
-      ).pipe(
+          }),
+        ),
         Layer.provideMerge(UserRepository.layer),
         Layer.provideMerge(SqlitePersistence.layerTest),
         Layer.provide(ServerConfig.layerTest({ prefix: "t3-user-auth-" })),
@@ -247,7 +236,6 @@ describe("UserService", () => {
           id: identity.subject,
           email: "old@example.test",
           displayName: "Kept name",
-          clerkImageUrl: null,
           createdAt: at,
         });
         yield* users.update({ ...user, ...changes }, avatarImage);
@@ -340,8 +328,8 @@ describe("UserService", () => {
         assert.strictEqual((yield* sessions.authenticate(signedIn.token)).userId, identity.subject);
         const stored = yield* users.get(identity.subject);
         assert.deepStrictEqual(
-          [stored?.email, stored?.clerkImageUrl, stored?.displayName],
-          [identity.email, identity.imageUrl, scenario.expected],
+          [stored?.email, stored?.displayName],
+          [identity.email, scenario.expected],
         );
         if (scenario.edited) {
           assert.strictEqual(stored?.avatarColor, "green");
@@ -386,17 +374,14 @@ describe("UserService", () => {
       });
 
     const layerSessionStore = (stateDirPrefix = "t3-session-store-") =>
-      Layer.effect(
-        UserService,
-        UserService.make({
-          memberDeactivated: () => Effect.void,
-          identityProvider: {
+      Layer.effect(UserService, UserService.make).pipe(
+        Layer.provide(
+          Layer.succeed(Authentication.IdentityProvider, {
             publishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
             verify: ({ token }) =>
               Effect.succeed({ subject: token, email: `${token}@example.test`, name: token }),
-          },
-        }),
-      ).pipe(
+          }),
+        ),
         Layer.provideMerge(UserRepository.layer),
         Layer.provideMerge(SqlitePersistence.layerTest),
         Layer.provide(ServerConfig.layerTest({ prefix: stateDirPrefix })),
@@ -529,13 +514,9 @@ describe("UserService", () => {
     const otherId = "user_other";
 
     function makeHarness(input?: {
-      readonly failRevocation?: boolean;
-      readonly beforeIssue?: Effect.Effect<void>;
       /** Yields after every user read, so a change that isn't one transaction would interleave. */
       readonly yieldAfterReads?: boolean;
-      readonly memberDeactivated?: (userId: string) => Effect.Effect<void, Refused>;
     }) {
-      const revokedForUser: Array<string> = [];
       const layerUsers = input?.yieldAfterReads
         ? Layer.effect(
             UserRepository.UserRepository,
@@ -549,45 +530,18 @@ describe("UserService", () => {
             }),
           ).pipe(Layer.provide(UserRepository.layer))
         : UserRepository.layer;
-      const identityProvider: ReturnType<typeof Authentication.makeIdentityProvider> = {
+      const layerIdentityProvider = Layer.succeed(Authentication.IdentityProvider, {
         publishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
         verify: ({ token }) =>
           Effect.succeed({ subject: token, email: `${token}@example.test`, name: token }),
-      };
-      const layer = Layer.effect(
-        UserService,
-        Effect.gen(function* () {
-          const sessions = yield* Authentication.makeSessions;
-          return yield* UserService.make({
-            identityProvider,
-            memberDeactivated: input?.memberDeactivated ?? (() => Effect.void),
-            sessions: {
-              ...sessions,
-              issue: (session) =>
-                (input?.beforeIssue ?? Effect.void).pipe(Effect.andThen(sessions.issue(session))),
-              revokeAllForUser: (userId, except) => {
-                revokedForUser.push(userId);
-                return input?.failRevocation
-                  ? sessions.revokeAllForUser(userId, except).pipe(
-                      Effect.andThen(
-                        Effect.fail(
-                          new Authentication.SessionStoreError({
-                            cause: new Error("revocation failed"),
-                          }),
-                        ),
-                      ),
-                    )
-                  : sessions.revokeAllForUser(userId, except);
-              },
-            },
-          });
-        }),
-      ).pipe(
+      });
+      const layer = Layer.effect(UserService, UserService.make).pipe(
+        Layer.provide(layerIdentityProvider),
         Layer.provideMerge(layerUsers),
         Layer.provide(ServerConfig.layerTest({ prefix: "t3-members-test-" })),
         Layer.provideMerge(SqlitePersistence.layerTest),
       );
-      return { layer, revokedForUser };
+      return { layer };
     }
 
     /** Registers an identity and gives it a standing; the first to register is already the admin. */
@@ -598,7 +552,6 @@ describe("UserService", () => {
           id,
           email: `${id}@example.test`,
           displayName: id,
-          clerkImageUrl: null,
           createdAt,
         });
         const user = { ...registered, ...standing };
@@ -620,6 +573,19 @@ describe("UserService", () => {
 
     const refusalOf = <A>(change: Effect.Effect<A, Refused | NotFound>) =>
       Effect.flip(change).pipe(Effect.map(failureOf));
+
+    /** Signs a stored user in, returning the session token. */
+    const signIn = (userId: string) =>
+      UserService.use((users) => users.loginFromClerkSession({ token: userId })).pipe(
+        Effect.map((login) => login.token),
+      );
+
+    /** Whether the session behind `token` still authenticates. */
+    const signedIn = (token: string) =>
+      UserService.use((users) => users.authenticate(token)).pipe(
+        Effect.as(true),
+        Effect.catchTags({ SessionInvalidError: () => Effect.succeed(false) }),
+      );
 
     it.effect("approves pending requests as members or admins, who stay signed in", () =>
       Effect.gen(function* () {
@@ -668,7 +634,6 @@ describe("UserService", () => {
           assert.strictEqual((yield* sessions.authenticate(login.token)).state, "pending");
 
           yield* members.decline({ userId: memberId });
-          assert.deepStrictEqual(harness.revokedForUser, [memberId]);
           assert.isNull(yield* stored(memberId));
           const ended = yield* Effect.flip(sessions.authenticate(login.token));
           assert.strictEqual(ended._tag, "SessionInvalidError");
@@ -705,27 +670,31 @@ describe("UserService", () => {
           const admin = yield* seedAdmin;
           yield* seedSecondAdmin;
           const member = yield* seedMember(memberId);
+          const memberToken = yield* signIn(member.id);
+          const adminToken = yield* signIn(admin.id);
 
           const promoted = yield* members.changeRole({
             userId: member.id,
             role: "admin",
           });
           assert.strictEqual(promoted.role, "admin");
-          assert.deepStrictEqual(harness.revokedForUser, [member.id]);
+          assert.isFalse(yield* signedIn(memberToken));
+          assert.isTrue(yield* signedIn(adminToken));
 
+          const promotedToken = yield* signIn(member.id);
           const unchanged = yield* members.changeRole({
             userId: member.id,
             role: "admin",
           });
           assert.deepStrictEqual(unchanged, promoted);
-          assert.deepStrictEqual(harness.revokedForUser, [member.id]);
+          assert.isTrue(yield* signedIn(promotedToken));
 
           const demoted = yield* members.changeRole({
             userId: admin.id,
             role: "member",
           });
           assert.strictEqual(demoted.role, "member");
-          assert.deepStrictEqual(harness.revokedForUser, [member.id, admin.id]);
+          assert.isFalse(yield* signedIn(adminToken));
         }).pipe(Effect.provide(harness.layer));
       }),
     );
@@ -739,9 +708,10 @@ describe("UserService", () => {
           const second = yield* seedSecondAdmin;
           const member = yield* seedMember(memberId);
 
+          const memberToken = yield* signIn(member.id);
           const deactivated = yield* members.deactivate({ userId: member.id });
           assert.strictEqual(deactivated.state, "deactivated");
-          assert.deepStrictEqual(harness.revokedForUser, [member.id]);
+          assert.isFalse(yield* signedIn(memberToken));
 
           const reactivated = yield* members.reactivate({ userId: member.id });
           assert.deepStrictEqual([reactivated.state, reactivated.role], ["active", "member"]);
@@ -750,45 +720,14 @@ describe("UserService", () => {
             "invalid_member_state",
           );
 
+          const secondToken = yield* signIn(second.id);
           yield* members.deactivate({ userId: second.id });
-          assert.deepStrictEqual(harness.revokedForUser, [member.id, second.id]);
+          assert.isFalse(yield* signedIn(secondToken));
           const adminReactivated = yield* members.reactivate({ userId: second.id });
           assert.deepStrictEqual(
             [adminReactivated.state, adminReactivated.role],
             ["active", "admin"],
           );
-        }).pipe(Effect.provide(harness.layer));
-      }),
-    );
-
-    it.effect("runs the deactivation hook, and a refusing hook keeps the member active", () =>
-      Effect.gen(function* () {
-        const handedOn: Array<string> = [];
-        let refusing = true;
-        const harness = makeHarness({
-          memberDeactivated: (userId) =>
-            refusing
-              ? Effect.fail(new Refused({ reason: "last_workflow_admin" }))
-              : Effect.sync(() => {
-                  handedOn.push(userId);
-                }),
-        });
-        yield* Effect.gen(function* () {
-          const members = yield* UserService;
-          yield* seedAdmin;
-          const member = yield* seedMember(memberId);
-
-          assert.strictEqual(
-            yield* refusalOf(members.deactivate({ userId: member.id })),
-            "last_workflow_admin",
-          );
-          assert.strictEqual((yield* stored(member.id))?.state, "active");
-          assert.deepStrictEqual(harness.revokedForUser, []);
-
-          refusing = false;
-          yield* members.deactivate({ userId: member.id });
-          assert.deepStrictEqual(handedOn, [member.id]);
-          assert.strictEqual((yield* stored(member.id))?.state, "deactivated");
         }).pipe(Effect.provide(harness.layer));
       }),
     );
@@ -818,62 +757,6 @@ describe("UserService", () => {
               .length,
             1,
           );
-        }).pipe(Effect.provide(harness.layer));
-      }),
-    );
-
-    it.effect("rolls back a role change if ending its old sessions fails", () =>
-      Effect.gen(function* () {
-        const harness = makeHarness({ failRevocation: true });
-        yield* Effect.gen(function* () {
-          const members = yield* UserService;
-          yield* seedAdmin;
-          const second = yield* seedSecondAdmin;
-          const login = yield* members.loginFromClerkSession({ token: second.id });
-          const revoked = yield* members.subscribeRevocations;
-
-          const exit = yield* Effect.exit(
-            members.changeRole({ userId: second.id, role: "member" }),
-          );
-          assert.isTrue(Exit.hasDies(exit));
-          assert.strictEqual((yield* stored(second.id))?.role, "admin");
-          assert.strictEqual((yield* members.authenticate(login.token)).role, "admin");
-          assert.deepStrictEqual(yield* PubSub.takeUpTo(revoked, 1), []);
-        }).pipe(Effect.provide(harness.layer));
-      }),
-    );
-
-    it.effect("revokes an in-flight sign-in when deactivation follows its admission read", () =>
-      Effect.gen(function* () {
-        const admissionRead = yield* Deferred.make<void>();
-        const finishIssue = yield* Deferred.make<void>();
-        const harness = makeHarness({
-          beforeIssue: Effect.gen(function* () {
-            yield* Deferred.succeed(admissionRead, undefined);
-            yield* Deferred.await(finishIssue);
-          }),
-        });
-        yield* Effect.gen(function* () {
-          const members = yield* UserService;
-          const auth = yield* UserService;
-          const sessions = yield* UserService;
-          yield* seedAdmin;
-          const second = yield* seedSecondAdmin;
-          const signIn = yield* auth
-            .loginFromClerkSession({ token: secondAdminId })
-            .pipe(Effect.forkChild);
-          yield* Deferred.await(admissionRead);
-          const deactivation = yield* members
-            .deactivate({ userId: second.id })
-            .pipe(Effect.forkChild);
-          yield* Effect.yieldNow;
-          yield* Deferred.succeed(finishIssue, undefined);
-          const login = yield* Fiber.join(signIn);
-          yield* Fiber.join(deactivation);
-          const ended = yield* Effect.flip(sessions.authenticate(login.token));
-          assert.strictEqual(ended._tag, "SessionInvalidError");
-          const denied = yield* Effect.flip(auth.loginFromClerkSession({ token: secondAdminId }));
-          assert.strictEqual(denied._tag, "UserDeactivatedError");
         }).pipe(Effect.provide(harness.layer));
       }),
     );
@@ -951,7 +834,6 @@ describe("UserService", () => {
       id,
       email: `${id}@example.test`,
       displayName: id,
-      clerkImageUrl: null,
       createdAt,
     });
 
@@ -996,7 +878,6 @@ describe("UserService", () => {
           displayName: "Ada",
           avatarColor: "green",
           avatarContentType: "image/png",
-          clerkImageUrl: "https://img.clerk.com/ada.png",
           updatedAt,
         };
         const content = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
@@ -1022,7 +903,7 @@ describe("UserService", () => {
       "deactivated-token": { subject: "user_2", email: "user_2@example.test", name: "User Two" },
     };
     const verified: Array<{ readonly token: string; readonly authorizedParty?: string }> = [];
-    const identityProvider: ReturnType<typeof Authentication.makeIdentityProvider> = {
+    const identityProvider: Authentication.IdentityProvider["Service"] = {
       publishableKey: clerkPublishableKey,
       verify: (input) => {
         verified.push(input);
@@ -1042,10 +923,8 @@ describe("UserService", () => {
 
     const layerConfig = ServerConfig.layerTest({ prefix: "t3-auth-http-test-" });
 
-    const layerServices = Layer.effect(
-      UserService,
-      UserService.make({ identityProvider, memberDeactivated: () => Effect.void }),
-    ).pipe(
+    const layerServices = Layer.effect(UserService, UserService.make).pipe(
+      Layer.provide(Layer.succeed(Authentication.IdentityProvider, identityProvider)),
       Layer.provideMerge(UserRepository.layer),
       Layer.provideMerge(SqlitePersistence.layerTest),
       Layer.provideMerge(layerConfig),
@@ -1068,7 +947,6 @@ describe("UserService", () => {
         id: "user_2",
         email: "user_2@example.test",
         displayName: "User Two",
-        clerkImageUrl: null,
         createdAt: yield* DateTime.now,
       });
       yield* users.update({ ...user, state: "deactivated" });
@@ -1223,30 +1101,103 @@ describe("UserService", () => {
   });
 
   it.layer(NodeServices.layer)("User RPC", (it) => {
-    const layerSessions = Layer.effect(
-      UserService,
-      UserService.make({
-        memberDeactivated: () => Effect.void,
-        identityProvider: {
+    const layerSessions = Layer.effect(UserService, UserService.make).pipe(
+      Layer.provide(
+        Layer.succeed(Authentication.IdentityProvider, {
           publishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
           verify: ({ token }) =>
             Effect.succeed({ subject: token, email: `${token}@example.test`, name: token }),
-        },
-      }),
-    ).pipe(
+        }),
+      ),
       Layer.provideMerge(UserRepository.layer),
       Layer.provideMerge(SqlitePersistence.layerTest),
       Layer.provide(ServerConfig.layerTest({ prefix: "t3-users-handlers-" })),
     );
 
+    const insertUser = (id: string, role: "admin" | "member") =>
+      Effect.flatMap(
+        SqlClient.SqlClient,
+        (
+          sql,
+        ) => sql`INSERT INTO users (id, role, state, email, display_name, created_at, updated_at)
+          VALUES (${id}, ${role}, 'active', ${`${id}@example.test`}, ${id},
+            '2026-10-22T12:00:00Z', '2026-10-22T12:00:00Z')`,
+      );
+
+    /** A client calling the handlers as `currentUser`, with workflows answering deactivations. */
+    const makeClient = (
+      currentUser: CurrentUser["Service"],
+      memberDeactivated: WorkflowService["Service"]["memberDeactivated"] = () => Effect.undefined,
+    ) =>
+      RpcTest.makeClient(Users.middleware(Authorization)).pipe(
+        Effect.provide(
+          UsersHandlers.layer.pipe(
+            Layer.provideMerge(
+              Layer.merge(
+                Layer.succeed(
+                  Authorization,
+                  Authorization.of((effect) =>
+                    Effect.provideService(effect, CurrentUser, currentUser),
+                  ),
+                ),
+                AdminOnly.layer,
+              ),
+            ),
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(UserRepository.UserRepository)({}),
+                Layer.mock(WorkflowService)({
+                  memberDeactivated,
+                  // The mock needs every non-function member; the user handlers never run these.
+                  taskHooks: {
+                    canAccess: () => Effect.succeed(null),
+                    canRun: () => Effect.succeed(false),
+                    prepare: () => Effect.succeed(null),
+                    changed: () => Effect.void,
+                  },
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+
+    it.effect("deactivates through workflows, whose refusal keeps the member active", () =>
+      Effect.gen(function* () {
+        yield* insertUser("user-ada", "admin");
+        yield* insertUser("user-bob", "member");
+        const sessions = yield* UserService;
+        const admin = yield* sessions.authenticate(
+          (yield* sessions.issue({ userId: "user-ada" })).token,
+        );
+        const bobs = yield* sessions.issue({ userId: "user-bob" });
+        const handedOn: Array<string> = [];
+        let refusing = true;
+        const client = yield* makeClient(admin, (userId) =>
+          refusing
+            ? Effect.fail(new Refused({ reason: "last_workflow_admin" }))
+            : Effect.sync(() => {
+                handedOn.push(userId);
+                return undefined;
+              }),
+        );
+
+        const refused = yield* Effect.flip(client["users.deactivate"]({ userId: "user-bob" }));
+        assert.equal(refused._tag === "UserRefused" && refused.reason, "last_workflow_admin");
+        assert.equal((yield* sessions.authenticate(bobs.token)).state, "active");
+
+        refusing = false;
+        yield* client["users.deactivate"]({ userId: "user-bob" });
+        assert.deepStrictEqual(handedOn, ["user-bob"]);
+        const ended = yield* Effect.flip(sessions.authenticate(bobs.token));
+        assert.equal(ended._tag, "SessionInvalidError");
+      }).pipe(Effect.scoped, Effect.provide(layerSessions)),
+    );
+
     it.effect("signs out the caller's other sessions and keeps this one and everyone else's", () =>
       Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        for (const id of ["user-ada", "user-bob"]) {
-          yield* sql`INSERT INTO users (id, role, state, email, display_name, created_at, updated_at)
-            VALUES (${id}, 'member', 'active', ${`${id}@example.test`}, ${id},
-              '2026-10-22T12:00:00Z', '2026-10-22T12:00:00Z')`;
-        }
+        yield* insertUser("user-ada", "member");
+        yield* insertUser("user-bob", "member");
         const sessions = yield* UserService;
         const [current, other, another, bobs] = yield* Effect.all([
           sessions.issue({ userId: "user-ada" }),
@@ -1255,29 +1206,7 @@ describe("UserService", () => {
           sessions.issue({ userId: "user-bob" }),
         ]);
         const currentUser = yield* sessions.authenticate(current.token);
-        const client = yield* RpcTest.makeClient(Users.middleware(Authorization)).pipe(
-          Effect.provide(
-            UsersHandlers.layer.pipe(
-              Layer.provideMerge(
-                Layer.merge(
-                  Layer.succeed(
-                    Authorization,
-                    Authorization.of((effect) =>
-                      Effect.provideService(effect, CurrentUser, currentUser),
-                    ),
-                  ),
-                  AdminOnly.layer,
-                ),
-              ),
-              Layer.provide(
-                Layer.mergeAll(
-                  Layer.mock(UserRepository.UserRepository)({}),
-                  FetchHttpClient.layer,
-                ),
-              ),
-            ),
-          ),
-        );
+        const client = yield* makeClient(currentUser);
 
         assert.deepStrictEqual(yield* client["users.signOutElsewhere"](), { revokedCount: 2 });
         assert.equal(

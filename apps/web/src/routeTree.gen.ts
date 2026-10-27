@@ -16,27 +16,27 @@ import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AwaitingApprovalRouteImport } from './routes/awaiting-approval'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as WorkflowsIndexRouteImport } from './routes/workflows.index'
-import { Route as WorkflowBlueprintsIndexRouteImport } from './routes/workflow-blueprints.index'
 import { Route as MyWorkIndexRouteImport } from './routes/my-work.index'
 import { Route as ChatsIndexRouteImport } from './routes/chats.index'
 import { Route as BoardsIndexRouteImport } from './routes/boards.index'
-import { Route as AgentsIndexRouteImport } from './routes/agents.index'
-import { Route as WorkflowsNewRouteImport } from './routes/workflows.new'
-import { Route as WorkflowBlueprintsNewRouteImport } from './routes/workflow-blueprints.new'
 import { Route as SettingsRunnerRouteImport } from './routes/settings.runner'
 import { Route as SettingsMembersRouteImport } from './routes/settings.members'
 import { Route as SettingsAutomationsRouteImport } from './routes/settings.automations'
 import { Route as MyWorkStepIdRouteImport } from './routes/my-work.$stepId'
 import { Route as ChatsChatIdRouteImport } from './routes/chats.$chatId'
 import { Route as BoardsSlugRouteImport } from './routes/boards.$slug'
-import { Route as AgentsNewRouteImport } from './routes/agents.new'
-import { Route as AgentsAgentIdRouteImport } from './routes/agents.$agentId'
-import { Route as WorkflowBlueprintsDefinitionIdIndexRouteImport } from './routes/workflow-blueprints.$definitionId.index'
-import { Route as WorkflowBlueprintsDefinitionIdStepsRouteImport } from './routes/workflow-blueprints.$definitionId.steps'
-import { Route as AgentsSkillsNewRouteImport } from './routes/agents.skills.new'
-import { Route as AgentsSkillsSkillIdRouteImport } from './routes/agents.skills.$skillId'
-import { Route as WorkflowsWorkflowIdEditIndexRouteImport } from './routes/workflows.$workflowId.edit.index'
+import { Route as SettingsWorkflowsIndexRouteImport } from './routes/settings_.workflows.index'
+import { Route as SettingsWorkflowBlueprintsIndexRouteImport } from './routes/settings_.workflow-blueprints.index'
+import { Route as SettingsAgentsIndexRouteImport } from './routes/settings_.agents.index'
+import { Route as SettingsWorkflowsNewRouteImport } from './routes/settings_.workflows.new'
+import { Route as SettingsWorkflowBlueprintsNewRouteImport } from './routes/settings_.workflow-blueprints.new'
+import { Route as SettingsAgentsNewRouteImport } from './routes/settings_.agents.new'
+import { Route as SettingsAgentsAgentIdRouteImport } from './routes/settings_.agents.$agentId'
+import { Route as SettingsWorkflowBlueprintsDefinitionIdIndexRouteImport } from './routes/settings_.workflow-blueprints.$definitionId.index'
+import { Route as SettingsWorkflowBlueprintsDefinitionIdStepsRouteImport } from './routes/settings_.workflow-blueprints.$definitionId.steps'
+import { Route as SettingsAgentsSkillsNewRouteImport } from './routes/settings_.agents.skills.new'
+import { Route as SettingsAgentsSkillsSkillIdRouteImport } from './routes/settings_.agents.skills.$skillId'
+import { Route as SettingsWorkflowsWorkflowIdEditIndexRouteImport } from './routes/settings_.workflows.$workflowId.edit.index'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -73,16 +73,6 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkflowsIndexRoute = WorkflowsIndexRouteImport.update({
-  id: '/workflows/',
-  path: '/workflows/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkflowBlueprintsIndexRoute = WorkflowBlueprintsIndexRouteImport.update({
-  id: '/workflow-blueprints/',
-  path: '/workflow-blueprints/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const MyWorkIndexRoute = MyWorkIndexRouteImport.update({
   id: '/my-work/',
   path: '/my-work/',
@@ -96,21 +86,6 @@ const ChatsIndexRoute = ChatsIndexRouteImport.update({
 const BoardsIndexRoute = BoardsIndexRouteImport.update({
   id: '/boards/',
   path: '/boards/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentsIndexRoute = AgentsIndexRouteImport.update({
-  id: '/agents/',
-  path: '/agents/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkflowsNewRoute = WorkflowsNewRouteImport.update({
-  id: '/workflows/new',
-  path: '/workflows/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkflowBlueprintsNewRoute = WorkflowBlueprintsNewRouteImport.update({
-  id: '/workflow-blueprints/new',
-  path: '/workflow-blueprints/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRunnerRoute = SettingsRunnerRouteImport.update({
@@ -143,42 +118,70 @@ const BoardsSlugRoute = BoardsSlugRouteImport.update({
   path: '/boards/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsNewRoute = AgentsNewRouteImport.update({
-  id: '/agents/new',
-  path: '/agents/new',
+const SettingsWorkflowsIndexRoute = SettingsWorkflowsIndexRouteImport.update({
+  id: '/settings_/workflows/',
+  path: '/settings/workflows/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
-  id: '/agents/$agentId',
-  path: '/agents/$agentId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkflowBlueprintsDefinitionIdIndexRoute =
-  WorkflowBlueprintsDefinitionIdIndexRouteImport.update({
-    id: '/workflow-blueprints/$definitionId/',
-    path: '/workflow-blueprints/$definitionId/',
+const SettingsWorkflowBlueprintsIndexRoute =
+  SettingsWorkflowBlueprintsIndexRouteImport.update({
+    id: '/settings_/workflow-blueprints/',
+    path: '/settings/workflow-blueprints/',
     getParentRoute: () => rootRouteImport,
   } as any)
-const WorkflowBlueprintsDefinitionIdStepsRoute =
-  WorkflowBlueprintsDefinitionIdStepsRouteImport.update({
-    id: '/workflow-blueprints/$definitionId/steps',
-    path: '/workflow-blueprints/$definitionId/steps',
+const SettingsAgentsIndexRoute = SettingsAgentsIndexRouteImport.update({
+  id: '/settings_/agents/',
+  path: '/settings/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsWorkflowsNewRoute = SettingsWorkflowsNewRouteImport.update({
+  id: '/settings_/workflows/new',
+  path: '/settings/workflows/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsWorkflowBlueprintsNewRoute =
+  SettingsWorkflowBlueprintsNewRouteImport.update({
+    id: '/settings_/workflow-blueprints/new',
+    path: '/settings/workflow-blueprints/new',
     getParentRoute: () => rootRouteImport,
   } as any)
-const AgentsSkillsNewRoute = AgentsSkillsNewRouteImport.update({
-  id: '/agents/skills/new',
-  path: '/agents/skills/new',
+const SettingsAgentsNewRoute = SettingsAgentsNewRouteImport.update({
+  id: '/settings_/agents/new',
+  path: '/settings/agents/new',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsSkillsSkillIdRoute = AgentsSkillsSkillIdRouteImport.update({
-  id: '/agents/skills/$skillId',
-  path: '/agents/skills/$skillId',
+const SettingsAgentsAgentIdRoute = SettingsAgentsAgentIdRouteImport.update({
+  id: '/settings_/agents/$agentId',
+  path: '/settings/agents/$agentId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkflowsWorkflowIdEditIndexRoute =
-  WorkflowsWorkflowIdEditIndexRouteImport.update({
-    id: '/workflows/$workflowId/edit/',
-    path: '/workflows/$workflowId/edit/',
+const SettingsWorkflowBlueprintsDefinitionIdIndexRoute =
+  SettingsWorkflowBlueprintsDefinitionIdIndexRouteImport.update({
+    id: '/settings_/workflow-blueprints/$definitionId/',
+    path: '/settings/workflow-blueprints/$definitionId/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const SettingsWorkflowBlueprintsDefinitionIdStepsRoute =
+  SettingsWorkflowBlueprintsDefinitionIdStepsRouteImport.update({
+    id: '/settings_/workflow-blueprints/$definitionId/steps',
+    path: '/settings/workflow-blueprints/$definitionId/steps',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const SettingsAgentsSkillsNewRoute = SettingsAgentsSkillsNewRouteImport.update({
+  id: '/settings_/agents/skills/new',
+  path: '/settings/agents/skills/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsAgentsSkillsSkillIdRoute =
+  SettingsAgentsSkillsSkillIdRouteImport.update({
+    id: '/settings_/agents/skills/$skillId',
+    path: '/settings/agents/skills/$skillId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const SettingsWorkflowsWorkflowIdEditIndexRoute =
+  SettingsWorkflowsWorkflowIdEditIndexRouteImport.update({
+    id: '/settings_/workflows/$workflowId/edit/',
+    path: '/settings/workflows/$workflowId/edit/',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -190,27 +193,27 @@ export interface FileRoutesByFullPath {
   '/people': typeof PeopleRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRouteWithChildren
-  '/agents/$agentId': typeof AgentsAgentIdRoute
-  '/agents/new': typeof AgentsNewRoute
   '/boards/$slug': typeof BoardsSlugRoute
   '/chats/$chatId': typeof ChatsChatIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/members': typeof SettingsMembersRoute
   '/settings/runner': typeof SettingsRunnerRoute
-  '/workflow-blueprints/new': typeof WorkflowBlueprintsNewRoute
-  '/workflows/new': typeof WorkflowsNewRoute
-  '/agents/': typeof AgentsIndexRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
   '/my-work/': typeof MyWorkIndexRoute
-  '/workflow-blueprints/': typeof WorkflowBlueprintsIndexRoute
-  '/workflows/': typeof WorkflowsIndexRoute
-  '/agents/skills/$skillId': typeof AgentsSkillsSkillIdRoute
-  '/agents/skills/new': typeof AgentsSkillsNewRoute
-  '/workflow-blueprints/$definitionId/steps': typeof WorkflowBlueprintsDefinitionIdStepsRoute
-  '/workflow-blueprints/$definitionId/': typeof WorkflowBlueprintsDefinitionIdIndexRoute
-  '/workflows/$workflowId/edit/': typeof WorkflowsWorkflowIdEditIndexRoute
+  '/settings/agents/$agentId': typeof SettingsAgentsAgentIdRoute
+  '/settings/agents/new': typeof SettingsAgentsNewRoute
+  '/settings/workflow-blueprints/new': typeof SettingsWorkflowBlueprintsNewRoute
+  '/settings/workflows/new': typeof SettingsWorkflowsNewRoute
+  '/settings/agents/': typeof SettingsAgentsIndexRoute
+  '/settings/workflow-blueprints/': typeof SettingsWorkflowBlueprintsIndexRoute
+  '/settings/workflows/': typeof SettingsWorkflowsIndexRoute
+  '/settings/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
+  '/settings/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
+  '/settings/workflow-blueprints/$definitionId/steps': typeof SettingsWorkflowBlueprintsDefinitionIdStepsRoute
+  '/settings/workflow-blueprints/$definitionId/': typeof SettingsWorkflowBlueprintsDefinitionIdIndexRoute
+  '/settings/workflows/$workflowId/edit/': typeof SettingsWorkflowsWorkflowIdEditIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -220,27 +223,27 @@ export interface FileRoutesByTo {
   '/people': typeof PeopleRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRouteWithChildren
-  '/agents/$agentId': typeof AgentsAgentIdRoute
-  '/agents/new': typeof AgentsNewRoute
   '/boards/$slug': typeof BoardsSlugRoute
   '/chats/$chatId': typeof ChatsChatIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/members': typeof SettingsMembersRoute
   '/settings/runner': typeof SettingsRunnerRoute
-  '/workflow-blueprints/new': typeof WorkflowBlueprintsNewRoute
-  '/workflows/new': typeof WorkflowsNewRoute
-  '/agents': typeof AgentsIndexRoute
   '/boards': typeof BoardsIndexRoute
   '/chats': typeof ChatsIndexRoute
   '/my-work': typeof MyWorkIndexRoute
-  '/workflow-blueprints': typeof WorkflowBlueprintsIndexRoute
-  '/workflows': typeof WorkflowsIndexRoute
-  '/agents/skills/$skillId': typeof AgentsSkillsSkillIdRoute
-  '/agents/skills/new': typeof AgentsSkillsNewRoute
-  '/workflow-blueprints/$definitionId/steps': typeof WorkflowBlueprintsDefinitionIdStepsRoute
-  '/workflow-blueprints/$definitionId': typeof WorkflowBlueprintsDefinitionIdIndexRoute
-  '/workflows/$workflowId/edit': typeof WorkflowsWorkflowIdEditIndexRoute
+  '/settings/agents/$agentId': typeof SettingsAgentsAgentIdRoute
+  '/settings/agents/new': typeof SettingsAgentsNewRoute
+  '/settings/workflow-blueprints/new': typeof SettingsWorkflowBlueprintsNewRoute
+  '/settings/workflows/new': typeof SettingsWorkflowsNewRoute
+  '/settings/agents': typeof SettingsAgentsIndexRoute
+  '/settings/workflow-blueprints': typeof SettingsWorkflowBlueprintsIndexRoute
+  '/settings/workflows': typeof SettingsWorkflowsIndexRoute
+  '/settings/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
+  '/settings/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
+  '/settings/workflow-blueprints/$definitionId/steps': typeof SettingsWorkflowBlueprintsDefinitionIdStepsRoute
+  '/settings/workflow-blueprints/$definitionId': typeof SettingsWorkflowBlueprintsDefinitionIdIndexRoute
+  '/settings/workflows/$workflowId/edit': typeof SettingsWorkflowsWorkflowIdEditIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -251,27 +254,27 @@ export interface FileRoutesById {
   '/people': typeof PeopleRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRouteWithChildren
-  '/agents/$agentId': typeof AgentsAgentIdRoute
-  '/agents/new': typeof AgentsNewRoute
   '/boards/$slug': typeof BoardsSlugRoute
   '/chats/$chatId': typeof ChatsChatIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/members': typeof SettingsMembersRoute
   '/settings/runner': typeof SettingsRunnerRoute
-  '/workflow-blueprints/new': typeof WorkflowBlueprintsNewRoute
-  '/workflows/new': typeof WorkflowsNewRoute
-  '/agents/': typeof AgentsIndexRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
   '/my-work/': typeof MyWorkIndexRoute
-  '/workflow-blueprints/': typeof WorkflowBlueprintsIndexRoute
-  '/workflows/': typeof WorkflowsIndexRoute
-  '/agents/skills/$skillId': typeof AgentsSkillsSkillIdRoute
-  '/agents/skills/new': typeof AgentsSkillsNewRoute
-  '/workflow-blueprints/$definitionId/steps': typeof WorkflowBlueprintsDefinitionIdStepsRoute
-  '/workflow-blueprints/$definitionId/': typeof WorkflowBlueprintsDefinitionIdIndexRoute
-  '/workflows/$workflowId/edit/': typeof WorkflowsWorkflowIdEditIndexRoute
+  '/settings_/agents/$agentId': typeof SettingsAgentsAgentIdRoute
+  '/settings_/agents/new': typeof SettingsAgentsNewRoute
+  '/settings_/workflow-blueprints/new': typeof SettingsWorkflowBlueprintsNewRoute
+  '/settings_/workflows/new': typeof SettingsWorkflowsNewRoute
+  '/settings_/agents/': typeof SettingsAgentsIndexRoute
+  '/settings_/workflow-blueprints/': typeof SettingsWorkflowBlueprintsIndexRoute
+  '/settings_/workflows/': typeof SettingsWorkflowsIndexRoute
+  '/settings_/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
+  '/settings_/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
+  '/settings_/workflow-blueprints/$definitionId/steps': typeof SettingsWorkflowBlueprintsDefinitionIdStepsRoute
+  '/settings_/workflow-blueprints/$definitionId/': typeof SettingsWorkflowBlueprintsDefinitionIdIndexRoute
+  '/settings_/workflows/$workflowId/edit/': typeof SettingsWorkflowsWorkflowIdEditIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -283,27 +286,27 @@ export interface FileRouteTypes {
     | '/people'
     | '/profile'
     | '/settings'
-    | '/agents/$agentId'
-    | '/agents/new'
     | '/boards/$slug'
     | '/chats/$chatId'
     | '/my-work/$stepId'
     | '/settings/automations'
     | '/settings/members'
     | '/settings/runner'
-    | '/workflow-blueprints/new'
-    | '/workflows/new'
-    | '/agents/'
     | '/boards/'
     | '/chats/'
     | '/my-work/'
-    | '/workflow-blueprints/'
-    | '/workflows/'
-    | '/agents/skills/$skillId'
-    | '/agents/skills/new'
-    | '/workflow-blueprints/$definitionId/steps'
-    | '/workflow-blueprints/$definitionId/'
-    | '/workflows/$workflowId/edit/'
+    | '/settings/agents/$agentId'
+    | '/settings/agents/new'
+    | '/settings/workflow-blueprints/new'
+    | '/settings/workflows/new'
+    | '/settings/agents/'
+    | '/settings/workflow-blueprints/'
+    | '/settings/workflows/'
+    | '/settings/agents/skills/$skillId'
+    | '/settings/agents/skills/new'
+    | '/settings/workflow-blueprints/$definitionId/steps'
+    | '/settings/workflow-blueprints/$definitionId/'
+    | '/settings/workflows/$workflowId/edit/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -313,27 +316,27 @@ export interface FileRouteTypes {
     | '/people'
     | '/profile'
     | '/settings'
-    | '/agents/$agentId'
-    | '/agents/new'
     | '/boards/$slug'
     | '/chats/$chatId'
     | '/my-work/$stepId'
     | '/settings/automations'
     | '/settings/members'
     | '/settings/runner'
-    | '/workflow-blueprints/new'
-    | '/workflows/new'
-    | '/agents'
     | '/boards'
     | '/chats'
     | '/my-work'
-    | '/workflow-blueprints'
-    | '/workflows'
-    | '/agents/skills/$skillId'
-    | '/agents/skills/new'
-    | '/workflow-blueprints/$definitionId/steps'
-    | '/workflow-blueprints/$definitionId'
-    | '/workflows/$workflowId/edit'
+    | '/settings/agents/$agentId'
+    | '/settings/agents/new'
+    | '/settings/workflow-blueprints/new'
+    | '/settings/workflows/new'
+    | '/settings/agents'
+    | '/settings/workflow-blueprints'
+    | '/settings/workflows'
+    | '/settings/agents/skills/$skillId'
+    | '/settings/agents/skills/new'
+    | '/settings/workflow-blueprints/$definitionId/steps'
+    | '/settings/workflow-blueprints/$definitionId'
+    | '/settings/workflows/$workflowId/edit'
   id:
     | '__root__'
     | '/'
@@ -343,27 +346,27 @@ export interface FileRouteTypes {
     | '/people'
     | '/profile'
     | '/settings'
-    | '/agents/$agentId'
-    | '/agents/new'
     | '/boards/$slug'
     | '/chats/$chatId'
     | '/my-work/$stepId'
     | '/settings/automations'
     | '/settings/members'
     | '/settings/runner'
-    | '/workflow-blueprints/new'
-    | '/workflows/new'
-    | '/agents/'
     | '/boards/'
     | '/chats/'
     | '/my-work/'
-    | '/workflow-blueprints/'
-    | '/workflows/'
-    | '/agents/skills/$skillId'
-    | '/agents/skills/new'
-    | '/workflow-blueprints/$definitionId/steps'
-    | '/workflow-blueprints/$definitionId/'
-    | '/workflows/$workflowId/edit/'
+    | '/settings_/agents/$agentId'
+    | '/settings_/agents/new'
+    | '/settings_/workflow-blueprints/new'
+    | '/settings_/workflows/new'
+    | '/settings_/agents/'
+    | '/settings_/workflow-blueprints/'
+    | '/settings_/workflows/'
+    | '/settings_/agents/skills/$skillId'
+    | '/settings_/agents/skills/new'
+    | '/settings_/workflow-blueprints/$definitionId/steps'
+    | '/settings_/workflow-blueprints/$definitionId/'
+    | '/settings_/workflows/$workflowId/edit/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -374,24 +377,24 @@ export interface RootRouteChildren {
   PeopleRoute: typeof PeopleRoute
   ProfileRoute: typeof ProfileRoute
   SettingsRoute: typeof SettingsRouteWithChildren
-  AgentsAgentIdRoute: typeof AgentsAgentIdRoute
-  AgentsNewRoute: typeof AgentsNewRoute
   BoardsSlugRoute: typeof BoardsSlugRoute
   ChatsChatIdRoute: typeof ChatsChatIdRoute
   MyWorkStepIdRoute: typeof MyWorkStepIdRoute
-  WorkflowBlueprintsNewRoute: typeof WorkflowBlueprintsNewRoute
-  WorkflowsNewRoute: typeof WorkflowsNewRoute
-  AgentsIndexRoute: typeof AgentsIndexRoute
   BoardsIndexRoute: typeof BoardsIndexRoute
   ChatsIndexRoute: typeof ChatsIndexRoute
   MyWorkIndexRoute: typeof MyWorkIndexRoute
-  WorkflowBlueprintsIndexRoute: typeof WorkflowBlueprintsIndexRoute
-  WorkflowsIndexRoute: typeof WorkflowsIndexRoute
-  AgentsSkillsSkillIdRoute: typeof AgentsSkillsSkillIdRoute
-  AgentsSkillsNewRoute: typeof AgentsSkillsNewRoute
-  WorkflowBlueprintsDefinitionIdStepsRoute: typeof WorkflowBlueprintsDefinitionIdStepsRoute
-  WorkflowBlueprintsDefinitionIdIndexRoute: typeof WorkflowBlueprintsDefinitionIdIndexRoute
-  WorkflowsWorkflowIdEditIndexRoute: typeof WorkflowsWorkflowIdEditIndexRoute
+  SettingsAgentsAgentIdRoute: typeof SettingsAgentsAgentIdRoute
+  SettingsAgentsNewRoute: typeof SettingsAgentsNewRoute
+  SettingsWorkflowBlueprintsNewRoute: typeof SettingsWorkflowBlueprintsNewRoute
+  SettingsWorkflowsNewRoute: typeof SettingsWorkflowsNewRoute
+  SettingsAgentsIndexRoute: typeof SettingsAgentsIndexRoute
+  SettingsWorkflowBlueprintsIndexRoute: typeof SettingsWorkflowBlueprintsIndexRoute
+  SettingsWorkflowsIndexRoute: typeof SettingsWorkflowsIndexRoute
+  SettingsAgentsSkillsSkillIdRoute: typeof SettingsAgentsSkillsSkillIdRoute
+  SettingsAgentsSkillsNewRoute: typeof SettingsAgentsSkillsNewRoute
+  SettingsWorkflowBlueprintsDefinitionIdStepsRoute: typeof SettingsWorkflowBlueprintsDefinitionIdStepsRoute
+  SettingsWorkflowBlueprintsDefinitionIdIndexRoute: typeof SettingsWorkflowBlueprintsDefinitionIdIndexRoute
+  SettingsWorkflowsWorkflowIdEditIndexRoute: typeof SettingsWorkflowsWorkflowIdEditIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -445,20 +448,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workflows/': {
-      id: '/workflows/'
-      path: '/workflows'
-      fullPath: '/workflows/'
-      preLoaderRoute: typeof WorkflowsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/workflow-blueprints/': {
-      id: '/workflow-blueprints/'
-      path: '/workflow-blueprints'
-      fullPath: '/workflow-blueprints/'
-      preLoaderRoute: typeof WorkflowBlueprintsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/my-work/': {
       id: '/my-work/'
       path: '/my-work'
@@ -478,27 +467,6 @@ declare module '@tanstack/react-router' {
       path: '/boards'
       fullPath: '/boards/'
       preLoaderRoute: typeof BoardsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agents/': {
-      id: '/agents/'
-      path: '/agents'
-      fullPath: '/agents/'
-      preLoaderRoute: typeof AgentsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/workflows/new': {
-      id: '/workflows/new'
-      path: '/workflows/new'
-      fullPath: '/workflows/new'
-      preLoaderRoute: typeof WorkflowsNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/workflow-blueprints/new': {
-      id: '/workflow-blueprints/new'
-      path: '/workflow-blueprints/new'
-      fullPath: '/workflow-blueprints/new'
-      preLoaderRoute: typeof WorkflowBlueprintsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/runner': {
@@ -543,53 +511,88 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BoardsSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents/new': {
-      id: '/agents/new'
-      path: '/agents/new'
-      fullPath: '/agents/new'
-      preLoaderRoute: typeof AgentsNewRouteImport
+    '/settings_/workflows/': {
+      id: '/settings_/workflows/'
+      path: '/settings/workflows'
+      fullPath: '/settings/workflows/'
+      preLoaderRoute: typeof SettingsWorkflowsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents/$agentId': {
-      id: '/agents/$agentId'
-      path: '/agents/$agentId'
-      fullPath: '/agents/$agentId'
-      preLoaderRoute: typeof AgentsAgentIdRouteImport
+    '/settings_/workflow-blueprints/': {
+      id: '/settings_/workflow-blueprints/'
+      path: '/settings/workflow-blueprints'
+      fullPath: '/settings/workflow-blueprints/'
+      preLoaderRoute: typeof SettingsWorkflowBlueprintsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workflow-blueprints/$definitionId/': {
-      id: '/workflow-blueprints/$definitionId/'
-      path: '/workflow-blueprints/$definitionId'
-      fullPath: '/workflow-blueprints/$definitionId/'
-      preLoaderRoute: typeof WorkflowBlueprintsDefinitionIdIndexRouteImport
+    '/settings_/agents/': {
+      id: '/settings_/agents/'
+      path: '/settings/agents'
+      fullPath: '/settings/agents/'
+      preLoaderRoute: typeof SettingsAgentsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workflow-blueprints/$definitionId/steps': {
-      id: '/workflow-blueprints/$definitionId/steps'
-      path: '/workflow-blueprints/$definitionId/steps'
-      fullPath: '/workflow-blueprints/$definitionId/steps'
-      preLoaderRoute: typeof WorkflowBlueprintsDefinitionIdStepsRouteImport
+    '/settings_/workflows/new': {
+      id: '/settings_/workflows/new'
+      path: '/settings/workflows/new'
+      fullPath: '/settings/workflows/new'
+      preLoaderRoute: typeof SettingsWorkflowsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents/skills/new': {
-      id: '/agents/skills/new'
-      path: '/agents/skills/new'
-      fullPath: '/agents/skills/new'
-      preLoaderRoute: typeof AgentsSkillsNewRouteImport
+    '/settings_/workflow-blueprints/new': {
+      id: '/settings_/workflow-blueprints/new'
+      path: '/settings/workflow-blueprints/new'
+      fullPath: '/settings/workflow-blueprints/new'
+      preLoaderRoute: typeof SettingsWorkflowBlueprintsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents/skills/$skillId': {
-      id: '/agents/skills/$skillId'
-      path: '/agents/skills/$skillId'
-      fullPath: '/agents/skills/$skillId'
-      preLoaderRoute: typeof AgentsSkillsSkillIdRouteImport
+    '/settings_/agents/new': {
+      id: '/settings_/agents/new'
+      path: '/settings/agents/new'
+      fullPath: '/settings/agents/new'
+      preLoaderRoute: typeof SettingsAgentsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workflows/$workflowId/edit/': {
-      id: '/workflows/$workflowId/edit/'
-      path: '/workflows/$workflowId/edit'
-      fullPath: '/workflows/$workflowId/edit/'
-      preLoaderRoute: typeof WorkflowsWorkflowIdEditIndexRouteImport
+    '/settings_/agents/$agentId': {
+      id: '/settings_/agents/$agentId'
+      path: '/settings/agents/$agentId'
+      fullPath: '/settings/agents/$agentId'
+      preLoaderRoute: typeof SettingsAgentsAgentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings_/workflow-blueprints/$definitionId/': {
+      id: '/settings_/workflow-blueprints/$definitionId/'
+      path: '/settings/workflow-blueprints/$definitionId'
+      fullPath: '/settings/workflow-blueprints/$definitionId/'
+      preLoaderRoute: typeof SettingsWorkflowBlueprintsDefinitionIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings_/workflow-blueprints/$definitionId/steps': {
+      id: '/settings_/workflow-blueprints/$definitionId/steps'
+      path: '/settings/workflow-blueprints/$definitionId/steps'
+      fullPath: '/settings/workflow-blueprints/$definitionId/steps'
+      preLoaderRoute: typeof SettingsWorkflowBlueprintsDefinitionIdStepsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings_/agents/skills/new': {
+      id: '/settings_/agents/skills/new'
+      path: '/settings/agents/skills/new'
+      fullPath: '/settings/agents/skills/new'
+      preLoaderRoute: typeof SettingsAgentsSkillsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings_/agents/skills/$skillId': {
+      id: '/settings_/agents/skills/$skillId'
+      path: '/settings/agents/skills/$skillId'
+      fullPath: '/settings/agents/skills/$skillId'
+      preLoaderRoute: typeof SettingsAgentsSkillsSkillIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings_/workflows/$workflowId/edit/': {
+      id: '/settings_/workflows/$workflowId/edit/'
+      path: '/settings/workflows/$workflowId/edit'
+      fullPath: '/settings/workflows/$workflowId/edit/'
+      preLoaderRoute: typeof SettingsWorkflowsWorkflowIdEditIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -619,26 +622,27 @@ const rootRouteChildren: RootRouteChildren = {
   PeopleRoute: PeopleRoute,
   ProfileRoute: ProfileRoute,
   SettingsRoute: SettingsRouteWithChildren,
-  AgentsAgentIdRoute: AgentsAgentIdRoute,
-  AgentsNewRoute: AgentsNewRoute,
   BoardsSlugRoute: BoardsSlugRoute,
   ChatsChatIdRoute: ChatsChatIdRoute,
   MyWorkStepIdRoute: MyWorkStepIdRoute,
-  WorkflowBlueprintsNewRoute: WorkflowBlueprintsNewRoute,
-  WorkflowsNewRoute: WorkflowsNewRoute,
-  AgentsIndexRoute: AgentsIndexRoute,
   BoardsIndexRoute: BoardsIndexRoute,
   ChatsIndexRoute: ChatsIndexRoute,
   MyWorkIndexRoute: MyWorkIndexRoute,
-  WorkflowBlueprintsIndexRoute: WorkflowBlueprintsIndexRoute,
-  WorkflowsIndexRoute: WorkflowsIndexRoute,
-  AgentsSkillsSkillIdRoute: AgentsSkillsSkillIdRoute,
-  AgentsSkillsNewRoute: AgentsSkillsNewRoute,
-  WorkflowBlueprintsDefinitionIdStepsRoute:
-    WorkflowBlueprintsDefinitionIdStepsRoute,
-  WorkflowBlueprintsDefinitionIdIndexRoute:
-    WorkflowBlueprintsDefinitionIdIndexRoute,
-  WorkflowsWorkflowIdEditIndexRoute: WorkflowsWorkflowIdEditIndexRoute,
+  SettingsAgentsAgentIdRoute: SettingsAgentsAgentIdRoute,
+  SettingsAgentsNewRoute: SettingsAgentsNewRoute,
+  SettingsWorkflowBlueprintsNewRoute: SettingsWorkflowBlueprintsNewRoute,
+  SettingsWorkflowsNewRoute: SettingsWorkflowsNewRoute,
+  SettingsAgentsIndexRoute: SettingsAgentsIndexRoute,
+  SettingsWorkflowBlueprintsIndexRoute: SettingsWorkflowBlueprintsIndexRoute,
+  SettingsWorkflowsIndexRoute: SettingsWorkflowsIndexRoute,
+  SettingsAgentsSkillsSkillIdRoute: SettingsAgentsSkillsSkillIdRoute,
+  SettingsAgentsSkillsNewRoute: SettingsAgentsSkillsNewRoute,
+  SettingsWorkflowBlueprintsDefinitionIdStepsRoute:
+    SettingsWorkflowBlueprintsDefinitionIdStepsRoute,
+  SettingsWorkflowBlueprintsDefinitionIdIndexRoute:
+    SettingsWorkflowBlueprintsDefinitionIdIndexRoute,
+  SettingsWorkflowsWorkflowIdEditIndexRoute:
+    SettingsWorkflowsWorkflowIdEditIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

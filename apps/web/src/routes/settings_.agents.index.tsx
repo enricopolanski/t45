@@ -11,6 +11,6 @@ function AgentsIndexView() {
   );
 }
 
-export const Route = createFileRoute("/agents/")({
+export const Route = createFileRoute("/settings_/agents/")({
   component: AgentsIndexView,
 });

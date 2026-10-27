@@ -37,7 +37,7 @@ export function WorkflowList() {
     <WorkFrame
       title="Workflows"
       actions={
-        <Button size="sm" render={<Link to="/workflows/new" />}>
+        <Button size="sm" render={<Link to="/settings/workflows/new" />}>
           <PlusIcon />
           New workflow
         </Button>
@@ -86,7 +86,10 @@ export function WorkflowList() {
                 size="sm"
                 variant="ghost"
                 render={
-                  <Link to="/workflows/$workflowId/edit" params={{ workflowId: workflow.id }} />
+                  <Link
+                    to="/settings/workflows/$workflowId/edit"
+                    params={{ workflowId: workflow.id }}
+                  />
                 }
               >
                 Edit

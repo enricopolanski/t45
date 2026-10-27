@@ -68,7 +68,7 @@ export function WorkflowPeople({ detail, busy, run }: Editing) {
     setLeaving(true);
     setLeaveError(null);
     void request().then(
-      () => void navigate({ to: "/workflows" }),
+      () => void navigate({ to: "/settings/workflows" }),
       (cause: unknown) => {
         setLeaving(false);
         setLeaveError(describeFailure(cause));
@@ -263,7 +263,7 @@ export function WorkflowDangerZone({ detail, busy, run }: Editing) {
     setConfirmingDelete(false);
     setDeleting(true);
     void api("workflows.deleteInstance", { workflowId: workflow.id }).then(
-      () => void navigate({ to: "/workflows" }),
+      () => void navigate({ to: "/settings/workflows" }),
       (cause: unknown) => {
         setDeleting(false);
         toastFailure("Couldn't delete the workflow", cause);

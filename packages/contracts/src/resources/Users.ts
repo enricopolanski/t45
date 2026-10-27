@@ -12,7 +12,6 @@ export const UpdateProfileRequest = Schema.Struct({
   avatar: Schema.Union([
     Schema.Struct({ kind: Schema.Literal("keep") }),
     Schema.Struct({ kind: Schema.Literal("initial"), color: AvatarColor }),
-    Schema.Struct({ kind: Schema.Literal("clerk") }),
     Schema.Struct({
       kind: Schema.Literal("upload"),
       contentType: Schema.Literals(["image/png", "image/jpeg", "image/webp"]),

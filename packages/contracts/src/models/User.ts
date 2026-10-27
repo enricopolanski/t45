@@ -46,7 +46,6 @@ export class User extends Schema.Opaque<User>()(
     state: State,
     avatarColor: AvatarColor,
     avatarContentType: Schema.NullOr(Schema.String),
-    clerkImageUrl: Schema.NullOr(Schema.String),
     createdAt: Schema.DateTimeUtcFromString,
     updatedAt: Schema.DateTimeUtcFromString,
   }),

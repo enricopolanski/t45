@@ -23,7 +23,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
 
   if (detail === null) {
     return (
-      <WorkFrame title="Workflow" back={<BackLink to="/workflows">Workflows</BackLink>}>
+      <WorkFrame title="Workflow" back={<BackLink to="/settings/workflows">Workflows</BackLink>}>
         <p role={error !== null ? "alert" : undefined} className="text-sm text-muted-foreground">
           {error ?? "Loading…"}
         </p>
@@ -39,7 +39,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
   return (
     <WorkFrame
       title={`${workflow.name} · Workflow`}
-      back={<BackLink to="/workflows">Workflows</BackLink>}
+      back={<BackLink to="/settings/workflows">Workflows</BackLink>}
       actions={
         steps > 0 ? (
           <Button
@@ -101,7 +101,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
                   variant="outline"
                   render={
                     <Link
-                      to="/workflow-blueprints/$definitionId"
+                      to="/settings/workflow-blueprints/$definitionId"
                       params={{ definitionId: definition.id }}
                     />
                   }

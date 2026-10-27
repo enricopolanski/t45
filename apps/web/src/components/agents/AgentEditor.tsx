@@ -186,7 +186,7 @@ function SkillPicker({
     return (
       <p className="text-sm text-muted-foreground">
         No skills yet.{" "}
-        <Link to="/agents/skills/new" className="underline">
+        <Link to="/settings/agents/skills/new" className="underline">
           Create one
         </Link>
         .
@@ -294,7 +294,7 @@ function AgentForm({
                 // Members chat with an agent only once an admin makes it available.
                 isConversational: form.has("isConversational"),
               });
-              await navigate({ to: "/agents" });
+              await navigate({ to: "/settings/agents" });
             } catch (cause) {
               setError(describeFailure(cause));
             }
@@ -390,7 +390,7 @@ function AgentForm({
             type="button"
             size="sm"
             variant="ghost"
-            onClick={() => void navigate({ to: "/agents" })}
+            onClick={() => void navigate({ to: "/settings/agents" })}
           >
             Cancel
           </Button>

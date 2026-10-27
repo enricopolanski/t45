@@ -13,7 +13,7 @@ function StepsRouteView() {
     />
   );
 }
-export const Route = createFileRoute("/workflow-blueprints/$definitionId/steps")({
+export const Route = createFileRoute("/settings_/workflow-blueprints/$definitionId/steps")({
   validateSearch: (search: Record<string, unknown>): { step?: string } =>
     typeof search.step === "string" ? { step: search.step } : {},
   component: StepsRouteView,

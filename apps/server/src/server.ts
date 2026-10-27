@@ -19,6 +19,7 @@ import * as ChatRepository from "./chats/ChatRepository.ts";
 import * as AttachmentsHttp from "./attachments/http.ts";
 import { AppRpcLayer } from "./AppRpc.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
+import * as Authentication from "./auth/Authentication.ts";
 import * as AuthHttp from "./auth/http.ts";
 import * as WebhookRoute from "./automations/webhookRoute.ts";
 import * as OrgHttp from "./org/http.ts";
@@ -77,12 +78,8 @@ const layerOrg = OrganizationRepository.layer.pipe(
   Layer.provideMerge(layerChatServices),
 );
 
-const layerRuntimeDependencies = Layer.effect(
-  UserService,
-  Effect.flatMap(WorkflowService.WorkflowService, ({ memberDeactivated }) =>
-    UserService.make({ memberDeactivated }),
-  ),
-).pipe(
+const layerRuntimeDependencies = Layer.effect(UserService, UserService.make).pipe(
+  Layer.provide(Authentication.layer),
   Layer.provideMerge(WorkflowService.layer),
   Layer.provideMerge(AutomationService.layer),
   Layer.provideMerge(layerTasks),

@@ -139,7 +139,7 @@ export const runDev = Effect.fnUntraced(function* (
   const ports = yield* selectPorts({ ...config, localRunner });
   const path = yield* Path.Path;
   // Ignore ambient DATA_DIR so a parent application cannot redirect dev into its live data.
-  const homeDir = path.resolve(input.homeDir?.trim() || path.join(launch.cwd, ".t3"));
+  const homeDir = path.resolve(input.homeDir?.trim() || path.join(launch.cwd, ".t45"));
   const env: NodeJS.ProcessEnv = {
     ...baseEnv,
     DATA_DIR: homeDir,
@@ -186,7 +186,7 @@ export const runDev = Effect.fnUntraced(function* (
 
 const cli = Command.make("dev", {
   homeDir: Flag.String("home-dir").pipe(
-    Flag.withDescription("State directory; defaults to this checkout's .t3."),
+    Flag.withDescription("State directory; defaults to this checkout's .t45."),
     Flag.optional,
     Flag.map(Option.getOrUndefined),
   ),

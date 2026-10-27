@@ -85,18 +85,13 @@ export function readFileAsDataUrl(file: Blob): Promise<string> {
   });
 }
 
-/** The image cropped to a centered square at most `maxSide` pixels wide, as a data URL. */
-export async function squareImageDataUrl(
-  file: Blob,
-  maxSide: number,
-  type: string,
-  quality?: number,
-): Promise<string> {
+/** The image cropped to a centered square at most 256 pixels wide, as a PNG data URL. */
+export async function squareImageDataUrl(file: Blob): Promise<string> {
   const bitmap = await createImageBitmap(file);
   try {
     const side = Math.min(bitmap.width, bitmap.height);
     const canvas = document.createElement("canvas");
-    canvas.width = Math.min(side, maxSide);
+    canvas.width = Math.min(side, 256);
     canvas.height = canvas.width;
     const context = canvas.getContext("2d");
     if (context === null) throw new Error("This browser can't prepare the image.");
@@ -111,7 +106,7 @@ export async function squareImageDataUrl(
       canvas.width,
       canvas.height,
     );
-    return canvas.toDataURL(type, quality);
+    return canvas.toDataURL("image/png");
   } finally {
     bitmap.close();
   }
@@ -156,7 +151,7 @@ const composerThumbnails = new WeakMap<File, Promise<string | null>>();
 export function createComposerImageThumbnail(file: File): Promise<string | null> {
   const cached = composerThumbnails.get(file);
   if (cached) return cached;
-  const thumbnail = squareImageDataUrl(file, 256, "image/png").catch(() => null);
+  const thumbnail = squareImageDataUrl(file).catch(() => null);
   composerThumbnails.set(file, thumbnail);
   return thumbnail;
 }
