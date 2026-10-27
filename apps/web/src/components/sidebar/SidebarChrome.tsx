@@ -29,7 +29,7 @@ export function SidebarChromeHeader() {
           to="/my-work"
         >
           {organization?.avatar.kind === "image" ? (
-            <span className="flex px-1 py-2">
+            <span className="flex px-1 pt-4 pb-2">
               <OrganizationAvatar
                 name={organization.name ?? ""}
                 avatar={organization.avatar}
