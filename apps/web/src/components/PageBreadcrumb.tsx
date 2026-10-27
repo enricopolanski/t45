@@ -1,6 +1,54 @@
-import type { ReactNode } from "react";
+import { createLink, useLocation } from "@tanstack/react-router";
+import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "../lib/utils";
+
+/** The app's sections whose pages have pages below them, by path prefix. */
+const SECTIONS = [
+  { prefix: "/settings/agents/", label: "Agents", to: "/settings/agents" },
+  { prefix: "/settings/workflows/", label: "Workflows", to: "/settings/workflows" },
+  {
+    prefix: "/settings/workflow-blueprints/",
+    label: "Blueprints",
+    to: "/settings/workflow-blueprints",
+  },
+  { prefix: "/my-work/", label: "My work", to: "/my-work" },
+  { prefix: "/boards/", label: "Boards", to: "/boards" },
+] as const;
+
+/**
+ * The page's location in the app, ending with its title as the page heading. `parent` is a page
+ * between the section and this one, such as the blueprint above its steps. "Settings" isn't a
+ * link: members open workflows without access to it.
+ */
+export function PageLocation({
+  title,
+  parent,
+}: {
+  readonly title: string;
+  readonly parent?: ReactNode;
+}) {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const section = SECTIONS.find(({ prefix }) => pathname.startsWith(prefix));
+  return (
+    <PageBreadcrumb ariaLabel="Page breadcrumb">
+      {pathname.startsWith("/settings/") ? (
+        <PageBreadcrumbParent>Settings</PageBreadcrumbParent>
+      ) : null}
+      {section === undefined ? null : (
+        <PageBreadcrumbParent>
+          <PageBreadcrumbLink to={section.to}>{section.label}</PageBreadcrumbLink>
+        </PageBreadcrumbParent>
+      )}
+      {parent === undefined ? null : <PageBreadcrumbParent>{parent}</PageBreadcrumbParent>}
+      <PageBreadcrumbItem current>
+        <h1 className="min-w-0">
+          <PageBreadcrumbText>{title}</PageBreadcrumbText>
+        </h1>
+      </PageBreadcrumbItem>
+    </PageBreadcrumb>
+  );
+}
 
 export function PageBreadcrumb({
   ariaLabel,
@@ -53,10 +101,27 @@ export function PageBreadcrumbItem({
   );
 }
 
-export function PageBreadcrumbSeparator() {
+/** A page above the current one, followed by a separator. */
+export function PageBreadcrumbParent({ children }: { readonly children: ReactNode }) {
   return (
-    <li aria-hidden="true" className="flex shrink-0 items-center text-icon-muted">
-      /
-    </li>
+    <>
+      <PageBreadcrumbItem>{children}</PageBreadcrumbItem>
+      <li aria-hidden="true" className="flex shrink-0 items-center text-icon-muted">
+        /
+      </li>
+    </>
   );
 }
+
+/** A link to a page above the current one. The router counts it active; it isn't the current page. */
+export const PageBreadcrumbLink = createLink(function PageBreadcrumbAnchor(
+  props: ComponentProps<"a">,
+) {
+  return (
+    <a
+      {...props}
+      aria-current={undefined}
+      className="rounded-sm hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+    />
+  );
+});

@@ -1,11 +1,4 @@
-import {
-  CopyIcon,
-  MoreHorizontalIcon,
-  PencilIcon,
-  PlayIcon,
-  PlusIcon,
-  RefreshCwIcon,
-} from "lucide-react";
+import { CopyIcon, MoreHorizontalIcon, PencilIcon, PlayIcon, RefreshCwIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { type Schedule, type Automation } from "@t45/contracts/models/Automation";
@@ -47,7 +40,12 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsEmpty,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 
 const automationList = apiQuery("automations.list")(undefined);
 
@@ -94,9 +92,9 @@ export function AutomationsSettings() {
     <SettingsPageContainer>
       <SettingsSection
         title="Automations"
-        headerAction={
-          <Button size="xs" variant="ghost-muted" onClick={() => setEditor({ automation: null })}>
-            <PlusIcon className="size-3" />
+        description="Run agents on a schedule or when a webhook is received."
+        action={
+          <Button size="sm" variant="outline" onClick={() => setEditor({ automation: null })}>
             New automation
           </Button>
         }
@@ -106,7 +104,7 @@ export function AutomationsSettings() {
         ) : !automations ? (
           <SettingsRow title="Loading automations…" />
         ) : automations.length === 0 ? (
-          <SettingsRow title="No automations" description="Automations you configure show here." />
+          <SettingsEmpty>No automations yet.</SettingsEmpty>
         ) : (
           automations.map((automation) => (
             <AutomationRow

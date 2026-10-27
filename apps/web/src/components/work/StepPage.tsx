@@ -94,7 +94,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
 
   if (data.status !== "ready") {
     return (
-      <WorkFrame title="Item" back={<BackLink to="/my-work">My work</BackLink>}>
+      <WorkFrame title="Item">
         {data.status === "failed" ? (
           <p role="alert" className="text-sm text-muted-foreground">
             {data.message}
@@ -299,8 +299,8 @@ function MissingRecap({
 }
 
 /**
- * The way back (the workflow's board for those who can open it, else My work), the item's title,
- * and the step it is in when that isn't the step on the page.
+ * The way back to the workflow's board for those who can open it, the item's title, and the step
+ * it is in when that isn't the step on the page.
  */
 function ItemHeader({ view }: { readonly view: StepView }) {
   const currentStep =
@@ -310,15 +310,13 @@ function ItemHeader({ view }: { readonly view: StepView }) {
   const current = currentStep === undefined ? null : currentStep.name;
   return (
     <header className="flex flex-col gap-1">
-      <div className="mb-5">
-        {view.canOpenBoard ? (
+      {view.canOpenBoard ? (
+        <div className="mb-5">
           <BackLink to="/boards/$slug" params={{ slug: view.ticket.workflowId }}>
             {view.workflowName}
           </BackLink>
-        ) : (
-          <BackLink to="/my-work">My work</BackLink>
-        )}
-      </div>
+        </div>
+      ) : null}
       <h2 className="text-xl font-semibold tracking-tight">{view.ticket.title}</h2>
       {current !== null ? (
         <div className="flex flex-wrap items-center gap-1.5">

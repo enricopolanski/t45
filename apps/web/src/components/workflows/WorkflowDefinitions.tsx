@@ -9,7 +9,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { BackLink, WorkFrame } from "../work/WorkFrame";
+import { WorkFrame } from "../work/WorkFrame";
 import { plural } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
 import { useWorkflowDefinitionDetail } from "./useWorkflowDefinitionDetail";
@@ -36,12 +36,14 @@ export function WorkflowDefinitions() {
     <WorkFrame
       title="Workflow blueprints"
       actions={
-        <Button size="sm" render={<Link to="/settings/workflow-blueprints/new" />}>
-          New blueprint
-        </Button>
+        <>
+          <WorkflowNavigation />
+          <Button size="sm" render={<Link to="/settings/workflow-blueprints/new" />}>
+            New blueprint
+          </Button>
+        </>
       }
     >
-      <WorkflowNavigation />
       <p className="text-sm text-muted-foreground">
         Blueprints define the process: steps, fields and rules. Create workflows from them to assign
         people and run tickets.
@@ -108,10 +110,7 @@ export function NewWorkflowDefinition() {
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
   return (
-    <WorkFrame
-      title="New workflow blueprint"
-      back={<BackLink to="/settings/workflow-blueprints">Blueprints</BackLink>}
-    >
+    <WorkFrame title="New workflow blueprint">
       <p className="text-sm text-muted-foreground">
         Define the process once. Each workflow using it will have its own people and assignments.
       </p>
@@ -173,10 +172,7 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
   const { detail, busy, error, run } = useWorkflowDefinitionDetail(definitionId, adopt);
   if (detail === null)
     return (
-      <WorkFrame
-        title="Workflow blueprint"
-        back={<BackLink to="/settings/workflow-blueprints">Blueprints</BackLink>}
-      >
+      <WorkFrame title="Workflow blueprint">
         <p role={error === null ? undefined : "alert"} className="text-sm text-muted-foreground">
           {error ?? "Loading…"}
         </p>
@@ -185,8 +181,7 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
   const { definition, canManage } = detail;
   return (
     <WorkFrame
-      title={`${definition.name} · Blueprint`}
-      back={<BackLink to="/settings/workflow-blueprints">Blueprints</BackLink>}
+      title={definition.name}
       actions={
         definition.archivedAt === null ? (
           <Button
@@ -195,7 +190,7 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
           >
             Create workflow
           </Button>
-        ) : undefined
+        ) : null
       }
     >
       <p className="text-sm text-muted-foreground">

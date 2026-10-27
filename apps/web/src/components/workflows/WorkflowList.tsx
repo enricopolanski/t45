@@ -1,6 +1,5 @@
 import type { WorkflowInstanceListEntryView } from "@t45/contracts/resources/Workflows";
 import { Link } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { api } from "../../rpc/api";
@@ -37,13 +36,14 @@ export function WorkflowList() {
     <WorkFrame
       title="Workflows"
       actions={
-        <Button size="sm" render={<Link to="/settings/workflows/new" />}>
-          <PlusIcon />
-          New workflow
-        </Button>
+        <>
+          <WorkflowNavigation />
+          <Button size="sm" render={<Link to="/settings/workflows/new" />}>
+            New workflow
+          </Button>
+        </>
       }
     >
-      <WorkflowNavigation />
       <p className="text-sm text-muted-foreground">
         Workflows use a blueprint and configure who does the work. Each ticket is one run of that
         workflow.

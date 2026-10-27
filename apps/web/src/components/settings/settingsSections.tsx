@@ -26,6 +26,6 @@ export const SETTINGS_GROUPS: ReadonlyArray<{
   },
   {
     label: "Organization",
-    links: [{ to: "/settings/members", label: "Members", icon: <UsersIcon /> }],
+    links: [{ to: "/settings/organization", label: "Organization", icon: <UsersIcon /> }],
   },
 ];

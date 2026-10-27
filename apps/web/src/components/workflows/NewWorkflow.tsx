@@ -10,7 +10,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { PersonPicker } from "../work/ActorPicker";
-import { BackLink, WorkFrame } from "../work/WorkFrame";
+import { WorkFrame } from "../work/WorkFrame";
 
 /** Configures a workflow from an existing shared definition. */
 export function NewWorkflow({
@@ -62,7 +62,7 @@ export function NewWorkflow({
   };
 
   return (
-    <WorkFrame title="New workflow" back={<BackLink to="/settings/workflows">Workflows</BackLink>}>
+    <WorkFrame title="New workflow">
       <p className="text-sm text-muted-foreground">
         Choose a shared blueprint, then configure this workflow's people and assignments.
       </p>
