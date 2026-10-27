@@ -25,7 +25,7 @@ export function SidebarChromeHeader() {
           to="/my-work"
         >
           {/* Center the visible capitals, without the font's ascender/descender space. */}
-          <span className="truncate text-sm font-medium tracking-tight [text-box:trim-both_cap_alphabetic]">
+          <span className="truncate text-sm font-medium tracking-tight [text-box:trim-both_cap_alphabetic] px-2.5">
             T45
           </span>
         </Link>

@@ -43,7 +43,7 @@ export function NotificationBell() {
       );
     }
     void navigate({
-      to: "/workflows/$workflowId/edit",
+      to: "/settings/workflows/$workflowId/edit",
       params: { workflowId: notification.workflowId },
     });
   };

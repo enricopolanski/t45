@@ -1,13 +1,5 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import {
-  BotIcon,
-  ContactIcon,
-  InboxIcon,
-  KanbanSquareIcon,
-  MessagesSquareIcon,
-  ServerIcon,
-  WorkflowIcon,
-} from "lucide-react";
+import { ContactIcon, InboxIcon, KanbanSquareIcon, MessagesSquareIcon } from "lucide-react";
 import type { WorkflowInstanceListEntryView } from "@t45/contracts/resources/Workflows";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -31,8 +23,8 @@ export type NavLink = {
     | "/my-work"
     | "/chats"
     | "/people"
-    | "/workflows"
-    | "/agents"
+    | "/settings/workflows"
+    | "/settings/agents"
     | "/settings/runner"
     | "/settings/automations"
     | "/settings/members";
@@ -44,24 +36,6 @@ const MAIN_LINKS: ReadonlyArray<NavLink> = [
   { label: "Chat", icon: <MessagesSquareIcon />, to: "/chats" },
   { label: "People", icon: <ContactIcon />, to: "/people" },
   { label: "Boards", icon: <KanbanSquareIcon />, to: "/boards" },
-];
-
-const APP_NAV_GROUPS: ReadonlyArray<{
-  readonly label: string | null;
-  readonly links: ReadonlyArray<NavLink>;
-}> = [
-  { label: null, links: MAIN_LINKS },
-  {
-    label: "Work",
-    links: [{ label: "Workflows", icon: <WorkflowIcon />, to: "/workflows" }],
-  },
-  {
-    label: "AI Team",
-    links: [
-      { label: "Agents", icon: <BotIcon />, to: "/agents" },
-      { label: "Runner", icon: <ServerIcon />, to: "/settings/runner" },
-    ],
-  },
 ];
 
 /** The app's main sidebar, for everyone: My work, Chat, People, and Boards (or the one board). */
@@ -77,15 +51,6 @@ export function AppNavSidebar() {
       <SidebarChromeFooter />
     </>
   );
-}
-
-/** The main areas and the admin ones, rendered in the Settings sidebar above its own sections. */
-export function AppNavLinks() {
-  return APP_NAV_GROUPS.map((group) => (
-    <AppNavGroup key={group.label ?? "main"} label={group.label}>
-      <NavLinks links={group.links} />
-    </AppNavGroup>
-  ));
 }
 
 export function NavLinks({ links }: { readonly links: ReadonlyArray<NavLink> }) {
@@ -173,7 +138,7 @@ function useOpenBoards() {
   const [boards, setBoards] = useState<ReadonlyArray<WorkflowInstanceListEntryView>>([]);
   const workflowsPath = useLocation({
     select: (location) =>
-      location.pathname.startsWith("/workflows") || location.pathname.startsWith("/boards")
+      location.pathname.startsWith("/settings/workflows") || location.pathname.startsWith("/boards")
         ? location.pathname
         : null,
   });
@@ -198,7 +163,7 @@ function useOpenBoards() {
   return boards;
 }
 
-function AppNavGroup({
+export function AppNavGroup({
   label,
   children,
 }: {

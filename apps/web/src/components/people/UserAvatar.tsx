@@ -6,7 +6,7 @@ export const getAvatar = (user: User): Avatar =>
     ? { kind: "initial", color: user.avatarColor }
     : {
         kind: "image",
-        url: `/api/avatars/${encodeURIComponent(user.id)}`,
+        url: `/api/avatars/${encodeURIComponent(user.id)}?v=${user.updatedAt.epochMilliseconds}`,
       };
 
 /** The look of each letter-avatar color. */

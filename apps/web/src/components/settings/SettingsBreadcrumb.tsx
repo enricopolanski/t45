@@ -1,8 +1,10 @@
 import { PageBreadcrumb, PageBreadcrumbItem, PageBreadcrumbSeparator } from "../PageBreadcrumb";
-import { SETTINGS_SECTIONS } from "./settingsSections";
+import { SETTINGS_GROUPS } from "./settingsSections";
 
 export function SettingsBreadcrumb({ pathname }: { pathname: string }) {
-  const sectionLabel = SETTINGS_SECTIONS.find((section) => section.to === pathname)?.label;
+  const sectionLabel = SETTINGS_GROUPS.flatMap((group) => group.links).find(
+    (section) => section.to === pathname,
+  )?.label;
 
   return (
     <PageBreadcrumb ariaLabel="Settings breadcrumb">

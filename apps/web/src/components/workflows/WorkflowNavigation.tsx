@@ -6,10 +6,10 @@ const tabClassName =
 export function WorkflowNavigation() {
   return (
     <nav aria-label="Workflow navigation" className="flex flex-wrap gap-2">
-      <Link to="/workflows" className={tabClassName}>
+      <Link to="/settings/workflows" className={tabClassName}>
         Workflows
       </Link>
-      <Link to="/workflow-blueprints" className={tabClassName}>
+      <Link to="/settings/workflow-blueprints" className={tabClassName}>
         Blueprints
       </Link>
     </nav>

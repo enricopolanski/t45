@@ -2,14 +2,18 @@ import { StringId } from "@t45/contracts/models/primitives";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
 import { Role, State } from "@t45/contracts/models/User";
 import * as Config from "effect/Config";
+import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
+import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlSchema from "effect/sql/SqlSchema";
 import { createRemoteJWKSet, errors, jwtVerify, type JWTVerifyGetKey } from "jose";
@@ -26,12 +30,9 @@ export class SessionInvalidError extends Schema.TaggedError<SessionInvalidError>
   }
 }
 
-export class SessionStoreError extends Schema.TaggedError<SessionStoreError>()(
-  "SessionStoreError",
-  {
-    cause: Schema.Defect(),
-  },
-) {
+class SessionStoreError extends Schema.TaggedError<SessionStoreError>()("SessionStoreError", {
+  cause: Schema.Defect(),
+}) {
   override get message(): string {
     return "Session storage failed.";
   }
@@ -82,29 +83,33 @@ class UserAuthInternalError extends Data.TaggedError("UserAuthInternalError")<{
   readonly cause: unknown;
 }> {}
 
-interface IdentityProvider {
-  /** The Clerk tenant key; signed-out browsers load Clerk with it. */
-  readonly publishableKey: string;
-  /**
-   * When the token carries an `azp` claim it must equal the request origin;
-   * Clerk omits the claim when `Origin` was empty or null, and such tokens
-   * are accepted. Callers must pass a canonical origin because the
-   * comparison is exact string equality.
-   */
-  readonly verify: (input: {
-    readonly token: string;
-    readonly authorizedParty?: string;
-  }) => Effect.Effect<
-    VerifiedClerkIdentity,
-    InvalidClerkIdentityToken | ClerkIdentityProviderUnavailable
-  >;
-}
+/** Verifies Clerk session tokens; `layer` is the instance configured from env. */
+export class IdentityProvider extends Context.Service<
+  IdentityProvider,
+  {
+    /** The Clerk tenant key; signed-out browsers load Clerk with it. */
+    readonly publishableKey: string;
+    /**
+     * When the token carries an `azp` claim it must equal the request origin;
+     * Clerk omits the claim when `Origin` was empty or null, and such tokens
+     * are accepted. Callers must pass a canonical origin because the
+     * comparison is exact string equality.
+     */
+    readonly verify: (input: {
+      readonly token: string;
+      readonly authorizedParty?: string;
+    }) => Effect.Effect<
+      VerifiedClerkIdentity,
+      InvalidClerkIdentityToken | ClerkIdentityProviderUnavailable
+    >;
+  }
+>()("t45/auth/Authentication/IdentityProvider") {}
 
 export const makeIdentityProvider = (input: {
   readonly publishableKey: string;
   readonly issuer: string;
   readonly jwks: JWTVerifyGetKey;
-}): IdentityProvider => ({
+}): IdentityProvider["Service"] => ({
   publishableKey: input.publishableKey,
   verify: Effect.fnUntraced(function* ({ token, authorizedParty }) {
     const { payload } = yield* Effect.tryPromise({
@@ -139,67 +144,50 @@ export const makeIdentityProvider = (input: {
       email: payload.email,
       name:
         typeof payload.name === "string" && payload.name.trim().length > 0 ? payload.name : null,
-      imageUrl:
-        typeof payload.image_url === "string" && isClerkImageUrl(payload.image_url)
-          ? payload.image_url
-          : null,
     };
   }),
 });
 
-const PUBLISHABLE_KEY = /^pk_(?:test|live)_([A-Za-z0-9+/]+={0,2})$/u;
-
-/**
- * Returns the Frontend API URL a Clerk publishable key encodes
- * (`pk_<test|live>_` + base64 of `<host>$`); the server uses it as the token issuer.
- * Throws when the key does not decode to a bare host.
- */
-export function clerkFrontendApiUrl(publishableKey: string): string {
-  const encoded = PUBLISHABLE_KEY.exec(publishableKey)?.[1];
-  let host: string | undefined;
-  try {
-    host = encoded && globalThis.atob(encoded).replace(/\$$/u, "");
-  } catch {
-    host = undefined;
-  }
-  const url = `https://${host}`;
-  if (!host || host.includes("/") || !URL.canParse(url)) {
-    throw new Error("Invalid Clerk publishable key.");
-  }
-  return url;
-}
-
 const ClerkPublishableKey = Schema.String.pipe(
-  Schema.check(
-    Schema.makeFilter((publishableKey) => {
-      try {
-        clerkFrontendApiUrl(publishableKey);
-      } catch {
-        return "Invalid Clerk publishable key.";
-      }
+  Schema.decodeTo(
+    Schema.Struct({ publishableKey: Schema.String, issuer: Schema.String }),
+    SchemaTransformation.transformEffect({
+      decode: (publishableKey, options) => {
+        const PUBLISHABLE_KEY = /^pk_(?:test|live)_([A-Za-z0-9+/]+={0,2})$/u;
+        const encoded = PUBLISHABLE_KEY.exec(publishableKey)?.[1];
+        let host: string | undefined;
+        try {
+          host = encoded && globalThis.atob(encoded).replace(/\$$/u, "");
+        } catch {
+          host = undefined;
+        }
+        const issuer = `https://${host}`;
+        return host && !host.includes("/") && URL.canParse(issuer)
+          ? Effect.succeed({ publishableKey, issuer })
+          : Effect.fail(
+              new SchemaIssue.InvalidValue(
+                { message: "Invalid Clerk publishable key." },
+                publishableKey,
+                options,
+              ),
+            );
+      },
+      encode: ({ publishableKey }) => Effect.succeed(publishableKey),
     }),
   ),
 );
 
-const configuredIdentityProvider = Effect.gen(function* () {
-  const publishableKey = yield* Config.schema(ClerkPublishableKey, "AUTH_CLERK_PUBLISHABLE_KEY");
-  const issuer = clerkFrontendApiUrl(publishableKey);
-  const jwks = createRemoteJWKSet(new URL("/.well-known/jwks.json", issuer));
-  return makeIdentityProvider({ publishableKey, issuer, jwks });
-});
-
-/** Only Clerk's public image service is used for account-picture suggestions. */
-export const isClerkImageUrl = (value: string): boolean => {
-  if (!URL.canParse(value)) return false;
-  const url = new URL(value);
-  return (
-    url.protocol === "https:" &&
-    url.hostname === "img.clerk.com" &&
-    url.username === "" &&
-    url.password === "" &&
-    url.port === ""
-  );
-};
+export const layer = Layer.effect(
+  IdentityProvider,
+  Effect.gen(function* () {
+    const { publishableKey, issuer } = yield* Config.schema(
+      ClerkPublishableKey,
+      "AUTH_CLERK_PUBLISHABLE_KEY",
+    );
+    const jwks = createRemoteJWKSet(new URL("/.well-known/jwks.json", issuer));
+    return makeIdentityProvider({ publishableKey, issuer, jwks });
+  }),
+);
 
 const SESSION_TTL = Duration.days(30);
 
@@ -213,7 +201,7 @@ const SessionRow = Schema.Struct({
 
 const RevokedRow = Schema.Struct({ sessionId: AuthSessionId });
 
-export const makeSessions = Effect.gen(function* () {
+const makeSessions = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
   const { stateDir } = yield* ServerConfig.ServerConfig;
@@ -328,60 +316,49 @@ export const makeSessions = Effect.gen(function* () {
 
 const toInternalError = (cause: unknown) => new UserAuthInternalError({ cause });
 
-export interface Options {
-  readonly identityProvider?: IdentityProvider;
-  readonly sessions?: Effect.Success<typeof makeSessions>;
-}
+export const make = Effect.gen(function* () {
+  const identityProvider = yield* IdentityProvider;
+  const sessions = yield* makeSessions;
+  const users = yield* UserRepository;
+  const sql = yield* SqlClient.SqlClient;
 
-export const make = (options: Options = {}) =>
-  Effect.gen(function* () {
-    const identityProvider = options.identityProvider ?? (yield* configuredIdentityProvider);
-    const sessions = options.sessions ?? (yield* makeSessions);
-    const users = yield* UserRepository;
-    const sql = yield* SqlClient.SqlClient;
+  const loginFromClerkSession = Effect.fnUntraced(function* (
+    input: Parameters<IdentityProvider["Service"]["verify"]>[0],
+  ) {
+    const identity = yield* identityProvider.verify(input);
 
-    const loginFromClerkSession = Effect.fnUntraced(function* (
-      input: Parameters<IdentityProvider["verify"]>[0],
-    ) {
-      const identity = yield* identityProvider.verify(input);
+    // Keep admission and issuance atomic with organization membership changes.
+    // Token verification above may fetch JWKS, so it stays outside the lock.
+    return yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const now = yield* DateTime.now;
+          const user =
+            (yield* users.get(identity.subject)) ??
+            (yield* users.register({
+              id: identity.subject,
+              email: identity.email,
+              displayName: identity.name?.trim() || identity.email.trim() || identity.subject,
+              createdAt: now,
+            }));
 
-      // Keep admission and issuance atomic with organization membership changes.
-      // Token verification above may fetch JWKS, so it stays outside the lock.
-      return yield* sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const now = yield* DateTime.now;
-            const clerkImageUrl = identity.imageUrl ?? null;
-            const user =
-              (yield* users.get(identity.subject)) ??
-              (yield* users.register({
-                id: identity.subject,
-                email: identity.email,
-                displayName: identity.name?.trim() || identity.email.trim() || identity.subject,
-                clerkImageUrl,
-                createdAt: now,
-              }));
+          if (user.state === "deactivated") {
+            return yield* new UserDeactivatedError({ userId: user.id });
+          }
 
-            if (user.state === "deactivated") {
-              return yield* new UserDeactivatedError({ userId: user.id });
-            }
-
-            // Sign-in refreshes the email and Clerk's picture; the name and avatar stay the user's.
-            if (user.email !== identity.email || user.clerkImageUrl !== clerkImageUrl) {
-              yield* users.update({
-                ...user,
-                email: identity.email,
-                clerkImageUrl,
-                updatedAt: now,
-              });
-            }
-            return yield* sessions
-              .issue({ userId: user.id })
-              .pipe(Effect.mapError(toInternalError));
-          }),
-        )
-        .pipe(Effect.catchTags({ SqlError: toInternalError }));
-    });
-
-    return { ...sessions, loginFromClerkSession, publishableKey: identityProvider.publishableKey };
+          // Sign-in refreshes the email; the name and avatar stay the user's.
+          if (user.email !== identity.email) {
+            yield* users.update({
+              ...user,
+              email: identity.email,
+              updatedAt: now,
+            });
+          }
+          return yield* sessions.issue({ userId: user.id }).pipe(Effect.mapError(toInternalError));
+        }),
+      )
+      .pipe(Effect.catchTags({ SqlError: toInternalError }));
   });
+
+  return { ...sessions, loginFromClerkSession, publishableKey: identityProvider.publishableKey };
+});

@@ -1,20 +1,17 @@
-import { SidebarContent, SidebarGroup, SidebarMenu } from "../ui/sidebar";
-import { AppNavLinks, NavLinks } from "../sidebar/AppNav";
+import { SidebarContent } from "../ui/sidebar";
+import { AppNavGroup, NavLinks } from "../sidebar/AppNav";
 import { SidebarChromeFooter } from "../sidebar/SidebarChrome";
-import { SETTINGS_SECTIONS } from "./settingsSections";
+import { SETTINGS_GROUPS } from "./settingsSections";
 
 export function SettingsSidebarNav() {
   return (
     <>
       <SidebarContent className="overflow-x-hidden">
-        <AppNavLinks />
-        <SidebarGroup>
-          <SidebarMenu>
-            <NavLinks
-              links={SETTINGS_SECTIONS.filter((section) => section.to !== "/settings/runner")}
-            />
-          </SidebarMenu>
-        </SidebarGroup>
+        {SETTINGS_GROUPS.map((group) => (
+          <AppNavGroup key={group.label} label={group.label}>
+            <NavLinks links={group.links} />
+          </AppNavGroup>
+        ))}
       </SidebarContent>
       <SidebarChromeFooter />
     </>

@@ -17,7 +17,7 @@ export function AgentsFrame({
   readonly children: ReactNode;
 }) {
   return (
-    <WorkFrame title={title} back={back ? <BackLink to="/agents">Agents</BackLink> : null}>
+    <WorkFrame title={title} back={back ? <BackLink to="/settings/agents">Agents</BackLink> : null}>
       {children}
     </WorkFrame>
   );

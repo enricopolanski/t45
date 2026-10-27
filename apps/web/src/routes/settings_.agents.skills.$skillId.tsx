@@ -12,6 +12,6 @@ function EditSkillView() {
   );
 }
 
-export const Route = createFileRoute("/agents/skills/$skillId")({
+export const Route = createFileRoute("/settings_/agents/skills/$skillId")({
   component: EditSkillView,
 });

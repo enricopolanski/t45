@@ -24,7 +24,7 @@ function SkillForm({ skill }: { readonly skill: Skill | null }) {
       setError(null);
       try {
         await work();
-        await navigate({ to: "/agents" });
+        await navigate({ to: "/settings/agents" });
       } catch (cause) {
         setError(describeFailure(cause));
       }
@@ -103,7 +103,7 @@ function SkillForm({ skill }: { readonly skill: Skill | null }) {
             type="button"
             size="sm"
             variant="ghost"
-            onClick={() => void navigate({ to: "/agents" })}
+            onClick={() => void navigate({ to: "/settings/agents" })}
           >
             Cancel
           </Button>

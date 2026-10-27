@@ -100,7 +100,7 @@ it.layer(NodeServices.layer)("dev", (it) => {
         assert.equal(dev.commands[0]?.command, "vp");
         const env = dev.env();
         assert.equal(env.BUILD_SHA, "custom-build");
-        assert.equal(env.DATA_DIR, "/repo/.t3");
+        assert.equal(env.DATA_DIR, "/repo/.t45");
         assert.equal(env.PORT, "13773");
         assert.equal(env.WEB_PORT, "5733");
         assert.equal(env.T45_RUNNER_HOST, "127.0.0.1");
@@ -253,7 +253,7 @@ it.layer(NodeServices.layer)("dev", (it) => {
       Effect.gen(function* () {
         const dev = fixture({ env: { DATA_DIR: "/home/user/.t3" } });
         yield* dev.run({ homeDir });
-        assert.equal(dev.env().DATA_DIR, homeDir?.trim() || "/repo/.t3");
+        assert.equal(dev.env().DATA_DIR, homeDir?.trim() || "/repo/.t45");
       }),
   );
 

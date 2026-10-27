@@ -102,7 +102,9 @@ export function WorkflowDraftCard(props: {
           <Button
             size="sm"
             variant="outline"
-            render={<Link to="/workflow-blueprints/$definitionId" params={{ definitionId }} />}
+            render={
+              <Link to="/settings/workflow-blueprints/$definitionId" params={{ definitionId }} />
+            }
           >
             Open blueprint
           </Button>

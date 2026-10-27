@@ -53,7 +53,7 @@ export function NewWorkflow({
     setError(null);
     void api("workflows.createInstance", { definitionId, name: name.trim(), responsible }).then(
       ({ workflowId }) =>
-        void navigate({ to: "/workflows/$workflowId/edit", params: { workflowId } }),
+        void navigate({ to: "/settings/workflows/$workflowId/edit", params: { workflowId } }),
       (cause: unknown) => {
         setBusy(false);
         setError(describeFailure(cause));
@@ -62,7 +62,7 @@ export function NewWorkflow({
   };
 
   return (
-    <WorkFrame title="New workflow" back={<BackLink to="/workflows">Workflows</BackLink>}>
+    <WorkFrame title="New workflow" back={<BackLink to="/settings/workflows">Workflows</BackLink>}>
       <p className="text-sm text-muted-foreground">
         Choose a shared blueprint, then configure this workflow's people and assignments.
       </p>
@@ -110,7 +110,7 @@ export function NewWorkflow({
               Create a blueprint before configuring a workflow.
             </p>
           ) : null}
-          <Link to="/workflow-blueprints/new" className="text-xs text-primary underline">
+          <Link to="/settings/workflow-blueprints/new" className="text-xs text-primary underline">
             Create a new blueprint
           </Link>
         </div>

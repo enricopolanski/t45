@@ -1,6 +1,8 @@
 import type { Role, User } from "@t45/contracts/models/User";
+import type { UpdateProfileRequest } from "@t45/contracts/resources/Users";
 
 import { api } from "../rpc/api";
+import { appAtomRegistry } from "./atomRegistry";
 import { mutate, useLoaded } from "./query";
 import { apiQuery } from "./rpc";
 
@@ -20,6 +22,14 @@ export const ROLE_LABELS: Record<Role, string> = {
   admin: "Admin",
 };
 export const useProfile = () => useLoaded(profile);
+
+/** Saves the signed-in user's profile and reloads it everywhere it shows. */
+export const updateProfile = (request: UpdateProfileRequest) =>
+  mutate(
+    api("users.updateProfile", request).then(() => appAtomRegistry.refresh(usersList)),
+    profile,
+    "Couldn't update your profile",
+  );
 
 const act = (request: Promise<unknown>) => mutate(request, usersList, "Couldn't update the member");
 

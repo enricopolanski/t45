@@ -21,7 +21,7 @@ Flags go directly after the task name, for example `vp run dev --home-dir /tmp/t
 
 ### State and ports
 
-Dev state lives in the gitignored `.t3/userdata` of the checkout you launch from, even when `DATA_DIR` is set; an explicit `--home-dir` wins. Never run a development server against the live `~/.t3/userdata`.
+Dev state lives in the gitignored `.t45/userdata` of the checkout you launch from, even when `DATA_DIR` is set; an explicit `--home-dir` wins. Never run a development server against the live `~/.t3/userdata`.
 
 Read ports from the `[dev-runner]` output: occupied server, web, or local runner ports shift them together. `PORT_OFFSET` selects a preferred offset from the defaults: server 13773, web 5733, runner 8790. `--port` or `PORT` fixes the server port and fails if it is occupied; web and runner ports can still shift. `--host` or `HOST` accepts loopback and wildcard bind addresses. `LOG_REQUESTS` controls request logging. `--dry-run` prints the configuration without starting services.
 

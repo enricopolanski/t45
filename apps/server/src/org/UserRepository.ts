@@ -16,7 +16,7 @@ const encodeCreatedAt = Schema.encodeSync(User.fields.createdAt);
 
 const COLUMNS = `id, role, state, email, display_name AS "displayName",
   avatar_color AS "avatarColor", avatar_content_type AS "avatarContentType",
-  clerk_image_url AS "clerkImageUrl", created_at AS "createdAt", updated_at AS "updatedAt"`;
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 export class UserRepository extends Context.Service<
   UserRepository,
@@ -32,7 +32,6 @@ export class UserRepository extends Context.Service<
       readonly id: string;
       readonly email: string;
       readonly displayName: string;
-      readonly clerkImageUrl: string | null;
       readonly createdAt: User["createdAt"];
     }) => Effect.Effect<User>;
     /** Writes the user and optional image bytes; undefined keeps the image, null clears it. */
@@ -60,12 +59,12 @@ export const layer = Layer.effect(
       register: (identity) => {
         const at = encodeCreatedAt(identity.createdAt);
         return sql`
-          INSERT INTO users (id, role, state, email, display_name, clerk_image_url, created_at,
+          INSERT INTO users (id, role, state, email, display_name, created_at,
             updated_at)
           SELECT ${identity.id},
             CASE WHEN EXISTS (SELECT 1 FROM users) THEN 'member' ELSE 'admin' END,
             CASE WHEN EXISTS (SELECT 1 FROM users) THEN 'pending' ELSE 'active' END,
-            ${identity.email}, ${identity.displayName}, ${identity.clerkImageUrl}, ${at}, ${at}
+            ${identity.email}, ${identity.displayName}, ${at}, ${at}
           RETURNING ${sql.unsafe(COLUMNS)}
         `.pipe(
           Effect.flatMap(decodeUsers),
@@ -80,7 +79,6 @@ export const layer = Layer.effect(
             display_name = ${row.displayName}, avatar_color = ${row.avatarColor},
             avatar_content_type = ${row.avatarContentType},
             avatar_image = ${avatarImage === undefined ? sql`avatar_image` : avatarImage},
-            clerk_image_url = ${row.clerkImageUrl},
             updated_at = ${row.updatedAt} WHERE id = ${row.id}`;
         }).pipe(Effect.orDie),
       remove: (userId) =>
