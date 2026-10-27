@@ -1,0 +1,19 @@
+{
+  "name": "@t45/core",
+  "version": "0.0.45",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": {
+      "types": "./src/*.ts",
+      "import": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@t45/contracts": "workspace:*",
+    "effect": "catalog:"
+  }
+}

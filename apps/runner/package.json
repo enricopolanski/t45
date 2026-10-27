@@ -1,0 +1,28 @@
+{
+  "name": "@t45/runner",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/bin.ts",
+    "start": "node src/bin.ts",
+    "image": "sh image/build-local.sh",
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.base.config.ts --dir ."
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@opencode/client": "catalog:",
+    "@opencode/schema": "catalog:",
+    "@t45/contracts": "workspace:*",
+    "effect": "catalog:",
+    "microsandbox": "0.7.8"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": "^24.13.1"
+  }
+}

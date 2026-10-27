@@ -1,0 +1,20 @@
+import { PageBreadcrumb, PageBreadcrumbItem, PageBreadcrumbSeparator } from "../PageBreadcrumb";
+import { SETTINGS_SECTIONS } from "./settingsSections";
+
+export function SettingsBreadcrumb({ pathname }: { pathname: string }) {
+  const sectionLabel = SETTINGS_SECTIONS.find((section) => section.to === pathname)?.label;
+
+  return (
+    <PageBreadcrumb ariaLabel="Settings breadcrumb">
+      {sectionLabel ? (
+        <>
+          <PageBreadcrumbItem>Settings</PageBreadcrumbItem>
+          <PageBreadcrumbSeparator />
+        </>
+      ) : null}
+      <PageBreadcrumbItem current className="truncate">
+        {sectionLabel ?? "Settings"}
+      </PageBreadcrumbItem>
+    </PageBreadcrumb>
+  );
+}

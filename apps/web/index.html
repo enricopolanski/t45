@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" content="#fcfcfc" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <style>
+      html,
+      body,
+      #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        background: #ffffff;
+        color: #262626;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+
+      #boot-shell {
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        min-height: 100%;
+        align-items: center;
+        justify-content: center;
+        background: inherit;
+        color: inherit;
+      }
+
+      #boot-shell-card {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 96px;
+        height: 96px;
+      }
+
+      #boot-shell-logo {
+        width: 64px;
+        height: 64px;
+        object-fit: contain;
+      }
+    </style>
+    <title>T45</title>
+  </head>
+  <body>
+    <div id="root">
+      <div id="boot-shell">
+        <div id="boot-shell-card" aria-label="T45 splash screen">
+          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T45" />
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

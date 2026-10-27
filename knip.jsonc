@@ -1,0 +1,43 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Exported types are part of our contracts even before they have consumers.
+  "rules": {
+    "types": "off",
+    "nsTypes": "off",
+    // The overrides in pnpm-workspace.yaml use catalog entries, and knip doesn't read overrides.
+    "catalog": "off",
+  },
+  "workspaces": {
+    ".": {
+      // Keep vendored reference repositories outside the root project.
+      "project": ["*.{js,mjs,cjs,ts,mts,cts}"],
+      // The root has no tests of its own; the default test globs would reach into `.repos/`.
+      "vite": {
+        "entry": [],
+      },
+      "vitest": {
+        "entry": [],
+      },
+      // vite.base.config.ts loads it by name as an oxlint JS plugin. The tsconfig plugin name is
+      // read by the Effect diagnostics that `effect-tsgo patch` adds to tsgo.
+      "ignoreDependencies": ["@shadcn/lint", "@effect/language-service"],
+    },
+    "apps/runner": {
+      // The step and workflow tools, and the stdio loop they share, run inside the agent image.
+      "entry": ["image/mcp-stdio.mjs", "image/step-tools.mjs", "image/workflow-tools.mjs"],
+    },
+    "apps/server": {
+      // Keep the transitive Effect runtime pinned for standalone npm installs.
+      // The Vite+ web build prerequisite.
+      "ignoreDependencies": ["@effect/platform-node-shared", "@t45/web"],
+    },
+    "apps/web": {
+      // The tsconfig plugin name is read by the Effect diagnostics that `effect-tsgo patch` adds to tsgo.
+      "ignoreDependencies": ["@effect/language-service"],
+    },
+    "packages/*": {
+      // These workspace packages are private to this monorepo.
+      "includeEntryExports": true,
+    },
+  },
+}

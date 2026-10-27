@@ -1,0 +1,1114 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  --app-scrollbar-width: 6px;
+  --app-scrollbar-thumb: rgb(217 217 217);
+  --app-scrollbar-thumb-hover: rgb(191 191 191);
+  /* Compact UI geometry shared by the sidebar rows and controls. */
+  --control-radius: 0.5rem;
+  --sidebar-content-inset: 0.5rem;
+  --sidebar-control-gap: 0.5rem;
+  --sidebar-icon-color: color-mix(in srgb, var(--sidebar-muted-foreground) 60%, var(--sidebar));
+  --sidebar-row-content-inset: 0.625rem;
+  /* App layer order: docked sheets, then dialogs and popovers (50 and up). */
+  --z-sheet: 46;
+  --glass-blur: 12px;
+  --glass-opacity: 80%;
+  --glass-saturation: 1.14;
+  --page-header-height: 52px;
+  /* The sidebar keeps one width, narrowed only to keep the main content 40rem wide. */
+  --sidebar-width: clamp(13rem, 100vw - 40rem, 16rem);
+  --sidebar-toggle-top: 0px;
+  --sidebar-toggle-left: calc(env(safe-area-inset-left) + 0.75rem);
+  --sidebar-toggle-size: 1.75rem;
+  --sidebar-toggle-gap: 0.75rem;
+  --page-header-content-left: calc(
+    var(--sidebar-toggle-left) + var(--sidebar-toggle-size) + var(--sidebar-toggle-gap)
+  );
+  --chat-scroll-fade-height: 1.5rem;
+  /* Context chip accents: one lightness, so no kind reads heavier than another; hue is the identity. */
+  --context-chip-image: oklch(0.62 0.16 16);
+  --context-chip-file: oklch(0.62 0.136 237);
+  --chat-content-max-width: 46rem;
+  --chat-composer-drawer-inset: 1.375rem;
+  --chat-composer-attachment-overlap: calc(1rem + 1px);
+  --font-size-prompt: 14px;
+  --font-size-code: 13px;
+  /* The prompt on phones: iOS zooms into any input under 16px on focus. */
+  --font-size-prompt-touch: max(var(--font-size-prompt), 16px);
+  /* Horizontal gutter shared by the page header and the chat column, clear of
+     the device's safe area. */
+  --page-gutter: 0.75rem;
+  --page-gutter-start: calc(env(safe-area-inset-left) + var(--page-gutter));
+  --page-gutter-end: calc(env(safe-area-inset-right) + var(--page-gutter));
+  --radius: 0.625rem;
+  --background: var(--color-zinc-25);
+  --app-chrome-background: var(--background);
+  --foreground: var(--color-zinc-800);
+  --card: var(--color-white);
+  --card-foreground: var(--color-zinc-800);
+  --popover: var(--color-white);
+  --popover-foreground: var(--color-zinc-800);
+  --primary: oklch(0.488 0.217 264);
+  --primary-foreground: var(--color-white);
+  --secondary: var(--color-zinc-50);
+  --secondary-foreground: var(--color-zinc-800);
+  --muted: var(--color-zinc-50);
+  --muted-foreground: var(--color-zinc-500);
+  --placeholder: var(--muted-foreground);
+  --secondary-label: var(--muted-foreground);
+  --icon-muted: var(--muted-foreground);
+  --message-surface: var(--accent);
+  --message-foreground: var(--foreground);
+  --message-action: var(--primary);
+  --message-action-foreground: var(--primary-foreground);
+  --message-action-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
+  --accent: var(--color-zinc-100);
+  --accent-foreground: var(--color-zinc-900);
+  --destructive: var(--color-red-500);
+  --border: var(--color-zinc-200);
+  --input: var(--color-zinc-300);
+  --ring: var(--primary);
+  --destructive-foreground: var(--color-red-700);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-700);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-700);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-700);
+  /* Keep every sidebar primitive on the same light surface hierarchy, including
+     portaled mobile sheets and settings navigation outside the app sidebar. */
+  --sidebar: var(--color-zinc-50);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-muted-foreground: var(--muted-foreground);
+  --sidebar-row-hover: var(--color-zinc-25);
+  --sidebar-row-active: var(--color-white);
+  --sidebar-row-selected: var(--color-white);
+  --sidebar-border: var(--border);
+  /* App-chrome grain. Baked into each surface's own background (behind
+     content) rather than a fixed overlay on top: a full-viewport overlay
+     forces the compositor to re-blend every frame any animation produces,
+     which multiplied idle GPU cost. The overlay's 0.035 opacity lives in the
+     SVG rect instead. Surfaces that float over the body (e.g. the inset main
+     card) must opt in via the surface-grain utility, or they lose the
+     grain's subtle brightening and stand out against the body. */
+  --surface-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  --surface-grain-size: 256px 256px;
+
+  @variant sm {
+    --page-gutter: 1.25rem;
+  }
+  @variant max-sm {
+    --sidebar-toggle-size: 2rem;
+  }
+}
+
+html,
+body {
+  min-height: calc(100svh + env(safe-area-inset-top));
+  overscroll-behavior: none;
+}
+
+body {
+  @apply surface-grain h-full overflow-hidden font-sans;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: hidden;
+  overscroll-behavior-y: none;
+  padding-top: max(env(safe-area-inset-top), 0px);
+}
+
+/* The font tokens are declared outside the inline theme so utilities reference
+   the variables, which the body and composer code rules also read. */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@theme inline {
+  /* Two steps below Tailwind's text-xs (12px) for dense UI: metadata rows,
+     badges, counters and keyboard hints. 2xs is 11px, 3xs is 10px. Registered
+     with tailwind-merge in lib/utils.ts so cn() treats them as font sizes, not
+     colours. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: calc(1 / 0.6875);
+  --text-3xs: 0.625rem;
+  --text-3xs--line-height: calc(0.875 / 0.625);
+  --inset-shadow-control-highlight: inset 0 1px rgb(255 255 255 / 16%);
+  --inset-shadow-control-pressed: inset 0 1px rgb(0 0 0 / 8%);
+  /* The composer's elevation: a soft drop pulled in under the surface, shared
+     by the composer and its attached banners. */
+  --shadow-composer: 0 12px 28px -18px rgb(0 0 0 / 40%);
+  --color-zinc-25: oklch(99.2% 0 0);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning: var(--warning);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
+  --color-info-foreground: var(--info-foreground);
+  --color-info: var(--info);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-placeholder: var(--placeholder);
+  --color-secondary-label: var(--secondary-label);
+  --color-icon-muted: var(--icon-muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-message: var(--message-surface);
+  --color-message-foreground: var(--message-foreground);
+  --color-message-action: var(--message-action);
+  --color-message-action-foreground: var(--message-action-foreground);
+  --color-message-action-hover: var(--message-action-hover);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted-foreground: var(--sidebar-muted-foreground);
+  --color-sidebar-row-hover: var(--sidebar-row-hover);
+  --color-sidebar-row-active: var(--sidebar-row-active);
+  --color-sidebar-row-selected: var(--sidebar-row-selected);
+  --color-sidebar-border: var(--sidebar-border);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+}
+
+@utility glass {
+  --glass-bg: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+}
+
+@utility alert-glass {
+  @apply glass;
+  --alert-glass-tint: transparent;
+  --glass-bg:
+    linear-gradient(
+      color-mix(in srgb, var(--alert-glass-tint) 4%, transparent),
+      color-mix(in srgb, var(--alert-glass-tint) 4%, transparent)
+    ),
+    color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
+
+  &[data-variant="error"] {
+    --alert-glass-tint: var(--destructive);
+  }
+}
+
+@utility dialog-glass {
+  @apply glass;
+  border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
+}
+
+@utility dialog-backdrop {
+  background: color-mix(in srgb, var(--background) 60%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+@utility dropdown-glass {
+  @apply glass shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)];
+  --glass-bg: color-mix(
+    in srgb,
+    var(--popover) 18%,
+    color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+@utility focus-ring {
+  @apply focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background;
+}
+
+@utility edge-highlight {
+  @apply before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)];
+}
+
+@utility control-frame {
+  @apply edge-highlight relative inline-flex w-full rounded-lg border border-input bg-background bg-clip-padding text-base text-foreground shadow-xs/5 ring-ring/24 sm:text-sm;
+
+  &:is(:focus-visible, :has(:focus-visible)) {
+    @apply border-ring ring-[3px];
+  }
+  &:is([aria-invalid="true"], :has([aria-invalid="true"])) {
+    @apply border-destructive/36;
+
+    &:is(:focus-visible, :has(:focus-visible)) {
+      @apply border-destructive/64 ring-destructive/16;
+    }
+  }
+  &:is([data-disabled], :has(:disabled)) {
+    @apply opacity-64;
+  }
+  &:is(
+    [data-disabled],
+    [data-pressed],
+    :focus-visible,
+    [aria-invalid],
+    :has(:disabled, :focus-visible, [aria-invalid])
+  ) {
+    @apply shadow-none;
+  }
+  &:is(
+    [data-disabled],
+    [data-pressed],
+    :focus-visible,
+    [aria-invalid="true"],
+    :has(:disabled, :focus-visible, [aria-invalid="true"])
+  ) {
+    @apply before:shadow-none;
+  }
+}
+
+@utility popup-item {
+  @apply flex min-h-8 cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none sm:min-h-7 sm:text-sm;
+
+  &[data-highlighted] {
+    @apply bg-accent text-accent-foreground;
+  }
+  &[data-disabled] {
+    @apply pointer-events-none cursor-not-allowed opacity-64;
+  }
+}
+
+@utility popup-viewport {
+  @apply relative size-full overflow-clip px-(--viewport-inline-padding) data-instant:transition-none;
+
+  & :is([data-current], [data-previous]) {
+    @apply w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] opacity-100 transition-opacity;
+
+    &:is([data-starting-style], [data-ending-style]) {
+      @apply opacity-0;
+    }
+  }
+}
+
+@utility topbar-scroll-fade {
+  -webkit-mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgb(0 0 0 / 10%) 10%,
+      rgb(0 0 0 / 30%) 24%,
+      rgb(0 0 0 / 58%) 42%,
+      rgb(0 0 0 / 82%) 62%,
+      rgb(0 0 0 / 96%) 82%,
+      black 100%
+    ),
+    linear-gradient(black, black), linear-gradient(black, black);
+  -webkit-mask-position: top, bottom, right;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size:
+    100% calc(var(--chat-scroll-fade-height) + 1px),
+    100% calc(100% - var(--chat-scroll-fade-height)),
+    var(--app-scrollbar-width) 100%;
+  mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgb(0 0 0 / 10%) 10%,
+      rgb(0 0 0 / 30%) 24%,
+      rgb(0 0 0 / 58%) 42%,
+      rgb(0 0 0 / 82%) 62%,
+      rgb(0 0 0 / 96%) 82%,
+      black 100%
+    ),
+    linear-gradient(black, black), linear-gradient(black, black);
+  mask-position: top, bottom, right;
+  mask-repeat: no-repeat;
+  mask-size:
+    100% calc(var(--chat-scroll-fade-height) + 1px),
+    100% calc(100% - var(--chat-scroll-fade-height)),
+    var(--app-scrollbar-width) 100%;
+}
+
+@utility card {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-card);
+}
+
+@utility visible-animate-spin {
+  animation: var(--animate-spin);
+  animation-play-state: var(--visible-animation-state, paused);
+  will-change: var(--visible-animation-will-change, auto);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  :where([data-slot="menu-popup"], [data-slot="select-popup"], [data-slot="popover-popup"]):focus,
+  :where(
+    [data-slot="menu-popup"],
+    [data-slot="select-popup"],
+    [data-slot="popover-popup"]
+  ):focus-visible {
+    @apply outline-none ring-0;
+  }
+  html,
+  body {
+    background-color: var(--app-chrome-background);
+  }
+  body {
+    @apply text-foreground relative;
+  }
+}
+
+@layer components {
+  [data-slot="toast"] {
+    --toast-gap: --spacing(3);
+    --toast-scale: max(0, 1 - var(--toast-index) * 0.1);
+    --toast-offset: calc(
+      var(--toast-offset-y) + var(--toast-index) * var(--toast-gap) + var(--toast-swipe-movement-y)
+    );
+    --toast-outside: translateX(calc(100% + var(--toast-inset))) translateY(var(--toast-offset));
+    transform: translateX(var(--toast-swipe-movement-x))
+      translateY(
+        calc(
+          var(--toast-swipe-movement-y) + var(--toast-index) * var(--toast-gap) +
+            (1 - var(--toast-scale)) * var(--toast-frontmost-height)
+        )
+      )
+      scale(var(--toast-scale));
+    transition:
+      transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.5s,
+      height 0.15s;
+
+    /* Bridges the gap to the next toast so hovering across it keeps the stack expanded. */
+    &::after {
+      content: "";
+      position: absolute;
+      top: 100%;
+      left: 0;
+      width: 100%;
+      height: calc(var(--toast-gap) + 1px);
+    }
+    &[data-type="error"] {
+      transform: translateX(var(--toast-swipe-movement-x))
+        translateY(calc(var(--toast-swipe-movement-y) + var(--toast-index) * var(--toast-gap)));
+    }
+    &[data-expanded] {
+      transform: translateX(var(--toast-swipe-movement-x)) translateY(var(--toast-offset));
+    }
+    &[data-starting-style] {
+      transform: var(--toast-outside);
+    }
+    &[data-limited] {
+      opacity: 0;
+    }
+    &[data-ending-style] {
+      opacity: 0;
+
+      &:not([data-limited], [data-swipe-direction]) {
+        transform: var(--toast-outside);
+      }
+      &[data-swipe-direction="right"] {
+        transform: translateX(calc(var(--toast-swipe-movement-x) + 100% + var(--toast-inset)))
+          translateY(var(--toast-offset));
+      }
+      &[data-swipe-direction="up"] {
+        transform: translateY(calc(var(--toast-swipe-movement-y) - 100% - var(--toast-inset)));
+      }
+    }
+  }
+
+  .chat-content-lane {
+    margin-inline: auto;
+    width: 100%;
+    min-width: 0;
+    max-width: var(--chat-content-max-width);
+  }
+
+  [data-chat-canvas] .messages-timeline-scroll {
+    padding-inline: calc(var(--page-gutter) - var(--chat-timeline-gutter));
+  }
+
+  .message-actions {
+    display: flex;
+    align-items: center;
+    gap: --spacing(2);
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
+    font-variant-numeric: tabular-nums;
+    opacity: 0;
+    transition: opacity 200ms var(--default-transition-timing-function);
+
+    [data-message-row]:hover &,
+    &:focus-within,
+    &[data-lost="true"] {
+      opacity: 1;
+    }
+    @media (pointer: coarse) {
+      opacity: 1;
+    }
+  }
+
+  /* The composer's glass, outline and shadow. Once a drawer docks above it, the input below
+     the seam carries them instead, so drawer and input read as one surface. */
+  .chat-composer {
+    --chat-composer-glass-surface: var(--card);
+    --chat-composer-outline: rgb(0 0 0 / 8%);
+    position: relative;
+    isolation: isolate;
+    border-radius: var(--radius-3xl);
+
+    &::before,
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      border-radius: inherit;
+    }
+    &::before {
+      background-color: color-mix(
+        in oklab,
+        var(--chat-composer-glass-surface) var(--glass-opacity),
+        transparent
+      );
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+      backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    }
+    &::after {
+      border: 1px solid var(--chat-composer-outline);
+      box-shadow: var(--shadow-composer);
+    }
+    &:has([data-slot="composer-drawer"])::before,
+    &:has([data-slot="composer-drawer"])::after {
+      display: none;
+    }
+  }
+
+  .chat-composer-input {
+    position: relative;
+    z-index: 10;
+    border-radius: var(--radius-3xl);
+    padding: 1px;
+
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      display: none;
+      pointer-events: none;
+      border: 1px solid var(--chat-composer-outline);
+      border-radius: inherit;
+    }
+    .chat-composer:has([data-slot="composer-drawer"]) & {
+      background-color: color-mix(
+        in oklab,
+        var(--chat-composer-glass-surface) var(--glass-opacity),
+        transparent
+      );
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+      backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+      box-shadow: var(--shadow-composer);
+
+      &::after {
+        display: block;
+      }
+      [data-chat-composer-mobile-collapsed="true"] {
+        min-height: var(--chat-composer-attachment-overlap);
+      }
+    }
+  }
+
+  /* A glass drawer docked above the composer: the queue, a notice, a question, the command
+     menu. Its foot tucks under the next surface down; the glass stops 1rem short of the foot,
+     a pixel past the seam, since Chromium drops the last device-pixel row of a filtered
+     backdrop when the cut-off lands off the pixel grid. */
+  .composer-drawer {
+    --composer-drawer-outline: var(--chat-composer-outline);
+    --composer-drawer-tint: transparent;
+    position: relative;
+    isolation: isolate;
+
+    &[data-variant="error"] {
+      --composer-drawer-outline: color-mix(in srgb, var(--destructive) 32%, transparent);
+      --composer-drawer-tint: color-mix(in srgb, var(--destructive) 8%, transparent);
+    }
+    &[data-variant="warning"] {
+      --composer-drawer-outline: color-mix(in srgb, var(--warning) 28%, transparent);
+      --composer-drawer-tint: color-mix(in srgb, var(--warning) 8%, transparent);
+    }
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      border: 1px solid var(--composer-drawer-outline);
+      border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+      background-color: color-mix(
+        in oklab,
+        var(--chat-composer-glass-surface) var(--glass-opacity),
+        transparent
+      );
+      background-image: linear-gradient(var(--composer-drawer-tint), var(--composer-drawer-tint));
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+      backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+      box-shadow: var(--shadow-composer);
+      mask-image: linear-gradient(to top, transparent 1rem, black 1rem);
+    }
+    /* Stacked drawers share one outline. */
+    & + & {
+      margin-top: calc(-1 * var(--chat-composer-attachment-overlap));
+
+      &::before {
+        border-top-width: 0;
+        border-radius: 0;
+      }
+    }
+  }
+
+  /* Rich text composer (Tiptap). The stored prompt stays markdown; only the
+     surface renders styled text. Markers (** * ` ~~) appear as non-editable
+     widgets while the caret is on styled text. */
+  .composer-tiptap {
+    margin: --spacing(-1);
+    max-height: --spacing(52);
+    min-height: --spacing(19.5);
+    overflow-y: auto;
+    padding: --spacing(1);
+    color: var(--foreground);
+    line-height: var(--leading-relaxed);
+
+    &:focus {
+      outline: none;
+    }
+    & code {
+      font-family: var(--font-mono);
+      font-size: 0.92em;
+      background: color-mix(in oklab, var(--muted-foreground) 12%, transparent);
+      border-radius: 0.3em;
+      padding: 0.05em 0.25em;
+    }
+    /* Selected chips (node selection from arrowing into or clicking a chip). */
+    & .ProseMirror-selectednode {
+      outline: 2px solid var(--ring);
+      outline-offset: 1px;
+      border-radius: 6px;
+    }
+    & .composer-chip-range-selected {
+      position: relative;
+    }
+    &.ProseMirror-focused .composer-chip-range-selected::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 6px;
+      background: Highlight;
+      opacity: 0.3;
+      pointer-events: none;
+    }
+    /* Rich-text task lists render as real checkboxes. Tiptap's TaskItem NodeView
+       builds the <li> imperatively with only a data-checked attribute (no
+       data-type), so items are targeted that way. Indentation comes from list
+       nesting (two spaces per level from Tab), matching the stored Markdown. */
+    & ul[data-type="taskList"] ul[data-type="taskList"] {
+      padding-left: 1.375rem;
+    }
+    & li[data-checked] {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    & li[data-checked] > label {
+      display: flex;
+      align-items: center;
+      flex: none;
+      height: 1lh;
+      cursor: pointer;
+    }
+    & li[data-checked] > label input[type="checkbox"] {
+      display: block;
+      width: 0.95rem;
+      height: 0.95rem;
+      cursor: pointer;
+    }
+    & li[data-checked] > div {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+  }
+
+  /* The inline pill for one piece of chat context in running text (ContextChip.tsx). Metrics
+     are in em so it scales with the text around it (the composer honors the prompt font-size
+     preference). */
+  .context-chip {
+    --context-chip-gap: 0.33em;
+    display: inline-flex;
+    height: 1.41em;
+    max-width: 100%;
+    align-items: center;
+    gap: var(--context-chip-gap);
+    padding-inline: 0.5em;
+    border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+    border-radius: 0.5em;
+    background-color: color-mix(in oklab, var(--accent) 40%, transparent);
+    color: var(--foreground);
+    font-size: 0.86em;
+    font-weight: 500;
+    line-height: 1;
+    vertical-align: middle;
+
+    & svg {
+      display: block;
+      width: 1.17em;
+      height: 1.17em;
+      flex-shrink: 0;
+      align-self: center;
+    }
+    &:is(button, a, [data-popup-open]) {
+      cursor: pointer;
+    }
+    &:is(button, a) {
+      @apply transition-colors motion-reduce:transition-none;
+    }
+    &:focus-visible {
+      outline: 2px solid var(--foreground);
+      outline-offset: 2px;
+    }
+    &[data-kind="image"] {
+      --context-chip-accent: var(--context-chip-image);
+    }
+    &[data-kind="file"] {
+      --context-chip-accent: var(--context-chip-file);
+    }
+    &[data-kind] {
+      border-color: color-mix(in oklab, var(--context-chip-accent) 34%, var(--border));
+      background-color: color-mix(in oklab, var(--context-chip-accent) 11%, transparent);
+      color: color-mix(in oklab, var(--context-chip-accent) 22%, var(--foreground));
+
+      @media (hover: hover) {
+        &:is(button:enabled, a):hover {
+          border-color: color-mix(in oklab, var(--context-chip-accent) 48%, var(--border));
+          background-color: color-mix(in oklab, var(--context-chip-accent) 17%, transparent);
+        }
+      }
+    }
+    &[data-state="unresolved"] {
+      border-style: dashed;
+      color: var(--foreground);
+    }
+    &[data-state="invalid"] {
+      border-color: color-mix(in oklab, var(--destructive) 35%, transparent);
+      background-color: color-mix(in oklab, var(--destructive) 8%, transparent);
+      color: var(--destructive-foreground);
+    }
+  }
+
+  .chat-markdown {
+    @apply w-full min-w-0 text-sm leading-relaxed text-foreground/80 wrap-anywhere;
+  }
+
+  .chat-markdown-alert {
+    @apply my-1 border-l-2 pl-3;
+    border-color: color-mix(in oklab, var(--alert) 70%, transparent);
+
+    & > [data-md-ui] {
+      color: var(--alert-title);
+    }
+    &[data-alert="note"] {
+      --alert: var(--info);
+      --alert-title: var(--info-foreground);
+    }
+    &[data-alert="tip"] {
+      --alert: var(--success);
+      --alert-title: var(--success-foreground);
+    }
+    &[data-alert="important"] {
+      --alert: var(--color-purple-500);
+      --alert-title: var(--color-purple-700);
+    }
+    &[data-alert="warning"] {
+      --alert: var(--warning);
+      --alert-title: var(--warning-foreground);
+    }
+    &[data-alert="caution"] {
+      --alert: var(--destructive);
+      --alert-title: var(--destructive-foreground);
+    }
+  }
+
+  .composer-rich-marker {
+    color: var(--muted-foreground);
+    opacity: 0.75;
+    font-weight: 400;
+    font-style: normal;
+    text-decoration: none;
+    user-select: none;
+    pointer-events: none;
+  }
+}
+
+/* Safe-area inset utilities for surfaces that opt into edge-to-edge rendering.
+   Insets resolve to 0 when the browser already constrains the layout viewport
+   to the safe area. */
+@utility pt-safe {
+  padding-top: max(env(safe-area-inset-top), 0px);
+}
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+}
+@utility pl-safe {
+  padding-left: max(env(safe-area-inset-left), 0px);
+}
+
+/* Grain texture for chrome surfaces that float above the body (see the
+   --surface-grain note). Layered over the element's background-color, so it
+   composes with bg-* utilities. */
+@utility surface-grain {
+  background-image: var(--surface-grain);
+  background-repeat: repeat;
+  background-size: var(--surface-grain-size);
+}
+
+/* Code blocks in chat use the code font size. Scoped to chat markdown
+   rather than every pre: a global rule would beat text-size utilities and
+   inherited sizes on unrelated pre surfaces. Inline code stays relative to
+   its sentence so it never towers over prose. */
+.chat-markdown .chat-markdown-shiki .shiki,
+.chat-markdown pre code {
+  font-size: var(--font-size-code);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: var(--app-scrollbar-width);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--app-scrollbar-thumb);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--app-scrollbar-thumb-hover);
+}
+
+/* Chat markdown rendering */
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol,
+.chat-markdown blockquote,
+.chat-markdown pre,
+.chat-markdown .chat-markdown-table-container {
+  margin: 0.65rem 0;
+}
+
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  margin: 1.25rem 0 0.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--foreground);
+}
+
+.chat-markdown h1 {
+  font-size: 1.25rem;
+}
+
+.chat-markdown h2 {
+  font-size: 1.125rem;
+}
+
+.chat-markdown h3 {
+  font-size: 1rem;
+}
+
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  font-size: 0.875rem;
+}
+
+.chat-markdown h6 {
+  color: var(--muted-foreground);
+}
+
+.chat-markdown ul {
+  /* Reset for nested uls under a widened ol. --list-gutter is an inherited
+     custom property, so without this a task-list under a multi-digit ordered
+     list would inherit the outer gutter instead of its own default. */
+  --list-gutter: 1.25rem;
+  padding-left: 1.25rem;
+  list-style-type: disc;
+}
+
+/* --list-gutter defaults to the same 1.25rem as .chat-markdown ul, but
+   the Markdown `ol` renderer widens it (via inline style) for lists whose
+   widest marker has multiple characters so it isn't clipped by list-style-position:
+   outside painting the marker past the padding box. Reset it here too so a
+   nested ol without its own widened marker doesn't inherit the outer one. */
+.chat-markdown ol {
+  --list-gutter: 1.25rem;
+  padding-left: var(--list-gutter);
+  list-style-type: decimal;
+}
+
+.chat-markdown ol > li::marker {
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-markdown ul ul {
+  list-style-type: circle;
+}
+
+.chat-markdown ul ul ul {
+  list-style-type: square;
+}
+
+.chat-markdown ol ol {
+  list-style-type: lower-alpha;
+}
+
+.chat-markdown ol ol ol {
+  list-style-type: lower-roman;
+}
+
+.chat-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+/* GitHub-style task lists: the checkbox replaces the list marker. */
+.chat-markdown li.task-list-item {
+  list-style-type: none;
+}
+
+.chat-markdown li.task-list-item input[type="checkbox"] {
+  margin: 0 0.35em 0.15em calc(-1 * var(--list-gutter));
+  vertical-align: middle;
+}
+
+/* Markdown assumes inline images — GitHub comments lay button images out in a row — and the
+   Tailwind preflight's block-level img would stack them one per line. */
+.chat-markdown img {
+  display: inline-block;
+}
+
+.chat-markdown a {
+  text-decoration: none;
+  color: var(--info-foreground);
+}
+
+.chat-markdown a:hover,
+.chat-markdown a:focus-visible {
+  background-image: radial-gradient(circle, currentcolor 0.75px, transparent 1px);
+  background-position: left bottom;
+  background-repeat: repeat-x;
+  background-size: 4px 2px;
+}
+
+.chat-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.8rem;
+  color: var(--muted-foreground);
+}
+
+.chat-markdown section[data-footnotes] {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.chat-markdown section[data-footnotes] ol {
+  margin: 0;
+}
+
+.chat-markdown section[data-footnotes] li + li {
+  margin-top: 0.35rem;
+}
+
+.chat-markdown a[data-footnote-ref],
+.chat-markdown a[data-footnote-backref] {
+  display: inline-flex;
+  min-width: 1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  text-decoration: none;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.chat-markdown :not(pre) > code {
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--muted);
+  padding: 0.1rem 0.35rem;
+  color: var(--foreground);
+  font-size: 0.75rem;
+}
+
+.chat-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--muted);
+  padding: 0.8rem 0.9rem;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border) 78%, transparent) transparent;
+}
+
+.chat-markdown pre code {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.chat-markdown pre::-webkit-scrollbar {
+  height: 7px;
+}
+
+.chat-markdown pre::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 78%, transparent);
+}
+
+.chat-markdown .chat-markdown-codeblock-header {
+  color: color-mix(in srgb, var(--foreground) 72%, transparent);
+}
+
+.chat-markdown .chat-markdown-codeblock pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chat-markdown .chat-markdown-codeblock[data-wrap="true"] pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki {
+  background: transparent !important;
+}
+
+/* Paragraphs and code blocks arrive in chunks while a response streams. Fade
+   each new block in so the chunk does not pop. @starting-style only applies
+   when an element is first inserted, and the rule is gated on data-streaming,
+   so opening a finished chat never replays the fade. Opacity only, one
+   shot, no layout change. */
+@media (prefers-reduced-motion: no-preference) {
+  .chat-markdown[data-streaming] > *,
+  .chat-markdown[data-streaming] .chat-markdown-shiki {
+    transition: opacity 600ms ease-out;
+
+    @starting-style {
+      opacity: 0;
+    }
+  }
+}
+
+/* Diagnostics-style tables: row separators only, uppercase headers, and a
+   scroll-fade container for horizontal overflow. The root chat-markdown
+   wrapping rules (overflow-wrap: anywhere) would let columns shrink to single
+   characters and defeat the overflow — restore word-boundary wrapping so the
+   min column width is the longest word. */
+.chat-markdown table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  overflow-wrap: normal;
+  font-size: 0.75rem;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+}
+
+.chat-markdown thead th {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  padding-block: 0.55rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chat-markdown tbody td {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+/* Collapsed (default): single-line cells truncate so arbitrary chat content
+   cannot blow the column out; the footer toggle expands cells to wrap. */
+.chat-markdown .chat-markdown-table-container[data-expanded="false"] th,
+.chat-markdown .chat-markdown-table-container[data-expanded="false"] td {
+  overflow: hidden;
+  max-width: 24rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-markdown .chat-markdown-table-container[data-expanded="true"] td {
+  max-width: 24rem;
+  overflow-wrap: anywhere;
+}
+
+/* Honour the OS "reduce motion" setting. Looping decorations such as spinners
+   never settle, so the compositor keeps producing frames for as long as they
+   are mounted — a sustained GPU cost that phones pay in battery. Hold each
+   animation on a single frame and collapse transitions instead of removing
+   them, so painted state and layout are unchanged and only the motion stops.
+   Left unlayered so it wins over the layered utilities that set these
+   properties. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "t45",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/bin.ts",
+    "build:bundle": "vp pack",
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
+    "@effect/sql-sqlite-node": "catalog:",
+    "@opencode/client": "catalog:",
+    "@opencode/protocol": "catalog:",
+    "effect": "catalog:",
+    "jose": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@t45/contracts": "workspace:*",
+    "@t45/core": "workspace:*",
+    "@t45/web": "workspace:*",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": "^24.13.1"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@t45/contracts",
+  "version": "0.0.45",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    "./Authorization": {
+      "types": "./src/Authorization.ts",
+      "import": "./src/Authorization.ts"
+    },
+    "./models/*": {
+      "types": "./src/models/*.ts",
+      "import": "./src/models/*.ts"
+    },
+    "./resources/*": {
+      "types": "./src/resources/*.ts",
+      "import": "./src/resources/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.base.config.ts --dir ."
+  },
+  "dependencies": {
+    "@opencode/schema": "catalog:",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}
