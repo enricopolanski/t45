@@ -2,7 +2,7 @@ import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-
 
 import { requireAdmin } from "../http/auth";
 import { SETTINGS_GROUPS } from "../components/settings/settingsSections";
-import { PageLocation } from "../components/PageBreadcrumb";
+import { PageBreadcrumb } from "../components/PageBreadcrumb";
 import { SidebarInset } from "../components/ui/sidebar";
 import { useNavigateToMainApp } from "../components/sidebar/mainAppLocation";
 import { PageHeader } from "../components/PageHeader";
@@ -20,7 +20,7 @@ function SettingsContentLayout() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <PageHeader>
-          <PageLocation title={title} />
+          <PageBreadcrumb title={title} />
         </PageHeader>
 
         <div className="min-h-0 flex flex-1 flex-col">

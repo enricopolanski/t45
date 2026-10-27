@@ -68,9 +68,6 @@ function OrganizationProfile() {
         name={organization.name ?? ""}
         avatar={organization.avatar}
         logo
-        nameLabel="Organization name"
-        pictureLabel="Change the logo"
-        colorLabel="Its initial on a color"
         onSave={(name, avatar) => void updateOrganization({ name, avatar })}
       />
     </Section>

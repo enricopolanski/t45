@@ -85,56 +85,34 @@ export function readFileAsDataUrl(file: Blob): Promise<string> {
   });
 }
 
-/** The image cropped to a centered square at most `maxSide` pixels wide, as a PNG data URL. */
-export async function squareImageDataUrl(file: Blob, maxSide = 256): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  try {
-    const side = Math.min(bitmap.width, bitmap.height);
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.min(side, maxSide);
-    canvas.height = canvas.width;
-    const context = canvas.getContext("2d");
-    if (context === null) throw new Error("This browser can't prepare the image.");
-    context.imageSmoothingQuality = "high";
-    context.drawImage(
-      bitmap,
-      (bitmap.width - side) / 2,
-      (bitmap.height - side) / 2,
-      side,
-      side,
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    );
-    return canvas.toDataURL("image/png");
-  } finally {
-    bitmap.close();
-  }
-}
-
 /**
- * The whole image scaled down to at most `maxSide` pixels on its longer side, as a PNG data URL.
- * `padded` centers it on a transparent square, for an icon.
+ * A PNG at most `maxSide` pixels on its longer side: a centered square crop for pictures and
+ * thumbnails, the whole image for logos (`fit`), or a logo on a transparent square for icons (`pad`).
  */
-export async function fittedImageDataUrl(
+export async function imageDataUrl(
   file: Blob,
-  maxSide: number,
-  padded = false,
+  { maxSide = 256, mode = "crop" }: { maxSide?: number; mode?: "crop" | "fit" | "pad" } = {},
 ): Promise<string> {
   const bitmap = await createImageBitmap(file);
   try {
-    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const side = Math.min(bitmap.width, bitmap.height);
+    const sourceWidth = mode === "crop" ? side : bitmap.width;
+    const sourceHeight = mode === "crop" ? side : bitmap.height;
+    const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
     const canvas = document.createElement("canvas");
-    canvas.width = padded ? Math.max(width, height) : width;
-    canvas.height = padded ? canvas.width : height;
+    canvas.width = mode === "pad" ? Math.max(width, height) : width;
+    canvas.height = mode === "pad" ? canvas.width : height;
     const context = canvas.getContext("2d");
     if (context === null) throw new Error("This browser can't prepare the image.");
     context.imageSmoothingQuality = "high";
     context.drawImage(
       bitmap,
+      (bitmap.width - sourceWidth) / 2,
+      (bitmap.height - sourceHeight) / 2,
+      sourceWidth,
+      sourceHeight,
       (canvas.width - width) / 2,
       (canvas.height - height) / 2,
       width,
@@ -185,7 +163,7 @@ const composerThumbnails = new WeakMap<File, Promise<string | null>>();
 export function createComposerImageThumbnail(file: File): Promise<string | null> {
   const cached = composerThumbnails.get(file);
   if (cached) return cached;
-  const thumbnail = squareImageDataUrl(file).catch(() => null);
+  const thumbnail = imageDataUrl(file).catch(() => null);
   composerThumbnails.set(file, thumbnail);
   return thumbnail;
 }

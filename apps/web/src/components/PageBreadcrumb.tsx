@@ -5,64 +5,55 @@ import { cn } from "../lib/utils";
 
 /** The app's sections whose pages have pages below them, by path prefix. */
 const SECTIONS = [
-  { prefix: "/settings/agents/", label: "Agents", to: "/settings/agents" },
-  { prefix: "/settings/workflows/", label: "Workflows", to: "/settings/workflows" },
-  {
-    prefix: "/settings/workflow-blueprints/",
-    label: "Blueprints",
-    to: "/settings/workflow-blueprints",
-  },
-  { prefix: "/my-work/", label: "My work", to: "/my-work" },
-  { prefix: "/boards/", label: "Boards", to: "/boards" },
+  { label: "Agents", to: "/settings/agents" },
+  { label: "Workflows", to: "/settings/workflows" },
+  { label: "Blueprints", to: "/settings/workflow-blueprints" },
+  { label: "My work", to: "/my-work" },
+  { label: "Boards", to: "/boards" },
 ] as const;
 
 /**
  * The page's location in the app, ending with its title as the page heading. `parent` is a page
- * between the section and this one, such as the blueprint above its steps. "Settings" isn't a
- * link: members open workflows without access to it.
+ * between the section and this one, such as the blueprint above its steps. Chat supplies an
+ * editable title. "Settings" isn't a link: members open workflows without access to it.
  */
-export function PageLocation({
+export function PageBreadcrumb({
   title,
   parent,
+  className,
+  currentClassName,
 }: {
-  readonly title: string;
+  readonly title: ReactNode;
   readonly parent?: ReactNode;
+  readonly className?: string;
+  readonly currentClassName?: string;
 }) {
   const pathname = useLocation({ select: (location) => location.pathname });
-  const section = SECTIONS.find(({ prefix }) => pathname.startsWith(prefix));
+  const section = SECTIONS.find(({ to }) => pathname.startsWith(`${to}/`));
   return (
-    <PageBreadcrumb ariaLabel="Page breadcrumb">
-      {pathname.startsWith("/settings/") ? (
-        <PageBreadcrumbParent>Settings</PageBreadcrumbParent>
-      ) : null}
-      {section === undefined ? null : (
-        <PageBreadcrumbParent>
-          <PageBreadcrumbLink to={section.to}>{section.label}</PageBreadcrumbLink>
-        </PageBreadcrumbParent>
-      )}
-      {parent === undefined ? null : <PageBreadcrumbParent>{parent}</PageBreadcrumbParent>}
-      <PageBreadcrumbItem current>
-        <h1 className="min-w-0">
-          <PageBreadcrumbText>{title}</PageBreadcrumbText>
-        </h1>
-      </PageBreadcrumbItem>
-    </PageBreadcrumb>
-  );
-}
-
-export function PageBreadcrumb({
-  ariaLabel,
-  children,
-  className,
-}: {
-  readonly ariaLabel: string;
-  readonly children: ReactNode;
-  readonly className?: string;
-}) {
-  return (
-    <nav aria-label={ariaLabel} className={cn("min-w-0", className)}>
+    <nav aria-label="Page breadcrumb" className={cn("min-w-0", className)}>
       <ol className="m-0 flex min-w-0 list-none items-center gap-2 p-0 text-sm sm:gap-3">
-        {children}
+        {pathname.startsWith("/settings/") ? (
+          <PageBreadcrumbParent>Settings</PageBreadcrumbParent>
+        ) : null}
+        {section === undefined ? null : (
+          <PageBreadcrumbParent>
+            <PageBreadcrumbLink to={section.to}>{section.label}</PageBreadcrumbLink>
+          </PageBreadcrumbParent>
+        )}
+        {parent === undefined ? null : <PageBreadcrumbParent>{parent}</PageBreadcrumbParent>}
+        <li
+          aria-current="page"
+          className={cn("flex min-w-0 items-center font-medium text-foreground", currentClassName)}
+        >
+          {typeof title === "string" ? (
+            <h1 className="min-w-0">
+              <PageBreadcrumbText>{title}</PageBreadcrumbText>
+            </h1>
+          ) : (
+            title
+          )}
+        </li>
       </ol>
     </nav>
   );
@@ -78,34 +69,13 @@ export function PageBreadcrumbText({ children }: { readonly children: ReactNode 
   );
 }
 
-export function PageBreadcrumbItem({
-  children,
-  className,
-  current = false,
-}: {
-  readonly children: ReactNode;
-  readonly className?: string;
-  readonly current?: boolean;
-}) {
-  return (
-    <li
-      aria-current={current ? "page" : undefined}
-      className={cn(
-        "flex min-w-0 items-center font-medium",
-        current ? "text-foreground" : "shrink-0 text-muted-foreground",
-        className,
-      )}
-    >
-      {children}
-    </li>
-  );
-}
-
 /** A page above the current one, followed by a separator. */
-export function PageBreadcrumbParent({ children }: { readonly children: ReactNode }) {
+function PageBreadcrumbParent({ children }: { readonly children: ReactNode }) {
   return (
     <>
-      <PageBreadcrumbItem>{children}</PageBreadcrumbItem>
+      <li className="flex min-w-0 shrink-0 items-center font-medium text-muted-foreground">
+        {children}
+      </li>
       <li aria-hidden="true" className="flex shrink-0 items-center text-icon-muted">
         /
       </li>

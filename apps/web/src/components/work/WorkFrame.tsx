@@ -6,7 +6,7 @@ import { SidebarInset } from "../ui/sidebar";
 import { Loading } from "../Loading";
 import { PageHeader } from "../PageHeader";
 import { PageContent } from "../PageContent";
-import { PageLocation } from "../PageBreadcrumb";
+import { PageBreadcrumb } from "../PageBreadcrumb";
 
 /**
  * The page shell of the work, workflow and agent pages: a header with the page's location, then
@@ -31,7 +31,7 @@ export function WorkFrame({
   return (
     <SidebarInset className="h-dvh min-h-0 scroll-pt-(--page-header-height) overflow-y-auto overscroll-y-none">
       <PageHeader className="sticky top-0 z-10">
-        <PageLocation title={title} parent={parent} />
+        <PageBreadcrumb title={title} parent={parent} />
       </PageHeader>
       <PageContent width={width}>
         {actions ? (

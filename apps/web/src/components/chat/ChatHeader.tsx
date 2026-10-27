@@ -31,13 +31,7 @@ import { toastManager } from "../ui/toast";
 import { forgetChatDrafts } from "../../questionDrafts";
 import { api } from "../../rpc/api";
 import { describeFailure, isNotFound } from "../../lib/failures";
-import {
-  PageBreadcrumb,
-  PageBreadcrumbItem,
-  PageBreadcrumbLink,
-  PageBreadcrumbParent,
-  PageBreadcrumbText,
-} from "../PageBreadcrumb";
+import { PageBreadcrumb, PageBreadcrumbLink, PageBreadcrumbText } from "../PageBreadcrumb";
 
 interface ChatHeaderProps {
   activeChatId: ChatId;
@@ -151,14 +145,11 @@ export function ChatHeader({
         <ContextMenu disabled={renamingTitle !== null}>
           <ContextMenuTrigger className="flex min-w-0 flex-1">
             <PageBreadcrumb
-              ariaLabel="Page breadcrumb"
+              parent={<PageBreadcrumbLink to="/chats">Chat</PageBreadcrumbLink>}
               className="flex-1 overflow-clip [overflow-clip-margin:2px]"
-            >
-              <PageBreadcrumbParent>
-                <PageBreadcrumbLink to="/chats">Chat</PageBreadcrumbLink>
-              </PageBreadcrumbParent>
-              <PageBreadcrumbItem current className="min-w-10 flex-1">
-                {renamingTitle !== null ? (
+              currentClassName="min-w-10 flex-1"
+              title={
+                renamingTitle !== null ? (
                   <input
                     autoFocus
                     aria-label="Chat title"
@@ -201,9 +192,9 @@ export function ChatHeader({
                     </Tooltip>
                     {actions}
                   </Menu>
-                )}
-              </PageBreadcrumbItem>
-            </PageBreadcrumb>
+                )
+              }
+            />
           </ContextMenuTrigger>
           {actions}
         </ContextMenu>

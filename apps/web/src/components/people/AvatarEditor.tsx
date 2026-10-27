@@ -2,7 +2,7 @@ import { AVATAR_COLORS, type Avatar } from "@t45/contracts/models/Avatar";
 import { CameraIcon, Trash2Icon } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { fittedImageDataUrl, squareImageDataUrl } from "../../lib/imageCompression";
+import { imageDataUrl } from "../../lib/imageCompression";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Field } from "../ui/field";
@@ -20,9 +20,6 @@ export function AvatarEditor({
   name: savedName,
   avatar,
   logo = false,
-  nameLabel,
-  pictureLabel,
-  colorLabel,
   autoFocus,
   className,
   onSave,
@@ -31,15 +28,13 @@ export function AvatarEditor({
   readonly avatar: Avatar;
   /** The organization's: its image is a logo, kept whole, rather than a picture cropped square. */
   readonly logo?: boolean;
-  readonly nameLabel: string;
-  readonly pictureLabel: string;
-  readonly colorLabel: string;
   readonly autoFocus?: boolean;
   readonly className?: string;
   readonly onSave: (name: string, avatar: Avatar) => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(savedName);
+  const pictureLabel = logo ? "Change the logo" : "Change your picture";
 
   // Every save carries the typed name, so an avatar change can't undo a name still saving.
   const save = (next: Avatar) => onSave(name.trim() || savedName, next);
@@ -51,7 +46,7 @@ export function AvatarEditor({
 
   const pickFile = (file: File | undefined) => {
     if (file === undefined) return;
-    void (logo ? fittedImageDataUrl(file, 256) : squareImageDataUrl(file)).then(
+    void imageDataUrl(file, { mode: logo ? "fit" : "crop" }).then(
       (url) => save({ kind: "image", url }),
       (cause: unknown) =>
         toastManager.add({
@@ -113,7 +108,7 @@ export function AvatarEditor({
             event.currentTarget.value = "";
           }}
         />
-        <Field label={nameLabel} className="min-w-0 flex-1">
+        <Field label={logo ? "Organization name" : "Your name"} className="min-w-0 flex-1">
           <Input
             autoFocus={autoFocus}
             autoComplete="off"
@@ -141,7 +136,7 @@ export function AvatarEditor({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <Label>{colorLabel}</Label>
+          <Label>{logo ? "Its initial on a color" : "Your initial on a color"}</Label>
           <div className="flex flex-wrap gap-2">
             {AVATAR_COLORS.map((option) => (
               <button

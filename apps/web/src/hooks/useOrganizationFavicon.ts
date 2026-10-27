@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { fittedImageDataUrl } from "../lib/imageCompression";
+import { imageDataUrl } from "../lib/imageCompression";
 import { useOrganizationIfLoaded } from "../state/organization";
 
 /** The tab's icon: the organization's whole logo in 16 pixels, or T45's while it has none. */
@@ -15,7 +15,7 @@ export function useOrganizationFavicon() {
     let current = true;
     void fetch(logoUrl)
       .then((response) => (response.ok ? response.blob() : Promise.reject(response)))
-      .then((logo) => fittedImageDataUrl(logo, 16, true))
+      .then((logo) => imageDataUrl(logo, { maxSide: 16, mode: "pad" }))
       .then(
         (dataUrl) => {
           if (!current) return;

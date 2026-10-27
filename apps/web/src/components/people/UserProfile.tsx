@@ -18,9 +18,6 @@ export function UserProfile() {
         className="mt-6"
         name={profile.displayName}
         avatar={profile.avatar}
-        nameLabel="Your name"
-        pictureLabel="Change your picture"
-        colorLabel="Your initial on a color"
         autoFocus
         onSave={(displayName, avatar) => void updateProfile({ displayName, avatar })}
       />
