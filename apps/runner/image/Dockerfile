@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g @opencode/cli@2.1.4 && npm cache clean --force
 # uid 1000 is node's; the agent gets its own.
 RUN useradd -m -u 1001 agent && mkdir -p /work && chown agent:agent /work
-COPY image/mcp-stdio.mjs image/step-tools.mjs dist/image/workflow-tools.mjs /opt/t45/
+COPY image/mcp-stdio.mjs image/step-tools.mjs dist/image/*.mjs /opt/t45/
 USER agent
 ENV HOME=/home/agent
 WORKDIR /work

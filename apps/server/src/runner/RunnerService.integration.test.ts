@@ -102,12 +102,6 @@ const listing =
   (event: ChatEvent): event is Extract<ChatEvent, { _tag: "sessions" }> =>
     event._tag === "sessions" && event.sessions.some((session) => session.id === sessionId);
 
-const telling =
-  (text: string) =>
-  (event: ChatEvent): event is ChatEvent =>
-    (event._tag === "snapshot" || event._tag === "messages") &&
-    event.messages.some((each) => each.message.type === "user" && each.message.text === text);
-
 const midStep = (events: Events, chatId: ChatId) =>
   Effect.gen(function* () {
     const unfinished = FakeOpenCode.answerText(openCode, chatId, "Adding up", {
@@ -1108,18 +1102,38 @@ describe("a chat whose VM is lost", () => {
           input: { text: "Summarize the week.", attachments: [] },
         },
       );
-      const initial = (yield* (yield* ChatRepository.ChatRepository).latestInput(chatId))!;
-      const events = yield* Fixture.follow(chatId, admin);
-      yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, initial.inputId)));
+      const repository = yield* ChatRepository.ChatRepository;
+      const initial = (yield* repository.latestInput(chatId))!;
+      const events = yield* (yield* ChatEvents)
+        .subscribe((change) => change.chatId === chatId)
+        .pipe(Effect.flatMap(Stream.toQueue({ capacity: "unbounded" })));
+      const until = <A>(read: Effect.Effect<A>, matches: (value: A) => boolean) =>
+        Effect.gen(function* () {
+          while (!matches(yield* read)) yield* Queue.take(events);
+        });
+      const root = rootSessionId(chatId);
+      yield* until(
+        repository.message(chatId, root, inputMessageId(chatId, initial.inputId)),
+        (row) => row !== null,
+      );
+      const working = Effect.gen(function* () {
+        const message = FakeOpenCode.answerText(openCode, chatId, "Adding up", { streaming: true });
+        FakeOpenCode.emit(openCode, chatId, "session.inbox.delivered", {
+          sessionID: root,
+          inboxID: message,
+        });
+        yield* until(repository.message(chatId, root, message), (row) => row?.state === "live");
+        return message;
+      });
 
-      const unfinished = yield* midStep(events, chatId);
+      const unfinished = yield* working;
       crashVm(chatId);
-      yield* Fixture.next(events, Fixture.showing(unfinished, "lost"));
-      yield* Fixture.next(events, telling(resumePrompt));
-      const again = yield* midStep(events, chatId);
+      yield* until(repository.message(chatId, root, unfinished), (row) => row?.state === "lost");
+      yield* until(repository.latestInput(chatId), (input) => input?.payload.text === resumePrompt);
+      const again = yield* working;
       crashVm(chatId);
-      yield* Fixture.next(events, Fixture.showing(again, "lost"));
-      yield* Fixture.next(events, hasStatus("interrupted"));
+      yield* until(repository.message(chatId, root, again), (row) => row?.state === "lost");
+      yield* until(repository.get(chatId), (chat) => chat?.status === "interrupted");
       assert.deepStrictEqual(yield* inputTexts(chatId), ["Summarize the week.", resumePrompt]);
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );

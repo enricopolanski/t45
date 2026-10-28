@@ -387,6 +387,8 @@ const make = Effect.gen(function* () {
 
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "questions") =>
     changes.publish({ kind, chatId });
+  const setVm = (chatId: ChatId, vm: "awake" | "asleep") =>
+    repository.setVm(chatId, vm).pipe(Effect.tap(() => publish(chatId, "chat")));
 
   const recoverTask = (chatId: ChatId) =>
     Effect.gen(function* () {
@@ -526,9 +528,11 @@ const make = Effect.gen(function* () {
     }
     const root = rootSessionId(chatId);
     const skills = yield* skillRepository.listForAgent(agent.id);
+    const context = hooks.instructions === undefined ? "" : yield* hooks.instructions(chatId);
     const setup = {
       agent: {
         ...Struct.pick(agent, ["instructions", "files", "mcpServers", "permissions"]),
+        instructions: [agent.instructions, context].filter(Boolean).join("\n\n"),
         skills: Object.fromEntries(
           skills.map((skill) => [
             skill.name,
@@ -625,7 +629,15 @@ const make = Effect.gen(function* () {
                 report.received = true;
           }
         }
-        yield* hooks.saved(chatId, messages, readFile);
+        yield* hooks.saved(chatId, messages, readFile, (requestId, text) =>
+          runner
+            .putChatFile({
+              chatId,
+              path: `${OpenCode2Client.ATTACHMENTS_FOLDER}/${requestId}.json`,
+              content: new TextEncoder().encode(text),
+            })
+            .pipe(Effect.orDie),
+        );
       });
     let shellsRunning = false;
     // A turn ended since the workspace was saved; a new boot saves once before it sleeps.
@@ -1182,7 +1194,8 @@ const make = Effect.gen(function* () {
     /** Null once the chat can sleep; otherwise when to look again. */
     const trySleep = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
-      if (now - lastActivity < IDLE_MILLIS) return lastActivity + IDLE_MILLIS;
+      if ((yield* hooks.policy(chatId)).keepAlive && now - lastActivity < IDLE_MILLIS)
+        return lastActivity + IDLE_MILLIS;
       marks.current = noMarks(false);
       yield* reconcile(noMarks(true));
       // A question keeps its session active and what was sent behind it waiting, so it goes first.
@@ -1243,7 +1256,7 @@ const make = Effect.gen(function* () {
         const next = yield* trySleep;
         if (next === null) {
           // Asleep before its stream ends, so the end isn't taken for a lost VM.
-          yield* repository.setVm(chatId, "asleep");
+          yield* setVm(chatId, "asleep");
           return "asleep" as const;
         }
         nextCheck = next;
@@ -1288,6 +1301,7 @@ const make = Effect.gen(function* () {
         marked.messages.add(root);
       }
       yield* reconcile(marked);
+      if (!(yield* hooks.policy(chatId)).keepAlive) nextCheck = yield* Clock.currentTimeMillis;
     }
   });
 
@@ -1347,7 +1361,7 @@ const make = Effect.gen(function* () {
           if (next === "done") return;
           if (next === "recheck") continue;
         }
-        if (chat.vm !== "awake") yield* repository.setVm(chatId, "awake");
+        if (chat.vm !== "awake") yield* setVm(chatId, "awake");
         const outcome = yield* awake(
           chatId,
           mailbox,
@@ -1383,11 +1397,11 @@ const make = Effect.gen(function* () {
           ),
         );
         if (outcome === "gone") {
-          yield* repository.setVm(chatId, "asleep");
+          yield* setVm(chatId, "asleep");
           continue;
         }
         if (outcome === "failed") {
-          yield* repository.setVm(chatId, "asleep");
+          yield* setVm(chatId, "asleep");
           yield* setFailed(chatId);
           // What came in so far would fail the same way; a message sent from here on tries again.
           for (const each of yield* Queue.clear(mailbox)) if (each._tag === "job") yield* each.skip;

@@ -14,6 +14,7 @@ export const layer = Chats.middleware(Authorization).toLayer(
         Effect.flatMap(CurrentUser, (member) => call(input, member));
 
     return Chats.of({
+      "chats.listTargets": () => Effect.flatMap(CurrentUser, (member) => chats.targets(member)),
       "chats.watchList": () =>
         Stream.unwrap(Effect.map(CurrentUser, (member) => chats.subscribe(member))),
       "chats.watch": (input) =>

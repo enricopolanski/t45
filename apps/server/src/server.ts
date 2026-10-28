@@ -31,6 +31,7 @@ import * as TicketRepository from "./workflows/TicketRepository.ts";
 import * as WorkflowDefinitionRepository from "./workflows/WorkflowDefinitionRepository.ts";
 import * as WorkflowRepository from "./workflows/WorkflowRepository.ts";
 import * as WorkflowService from "./workflows/WorkflowService.ts";
+import * as WorkflowAssistant from "./workflows/WorkflowAssistant.ts";
 import * as UserRepository from "./org/UserRepository.ts";
 import * as AutomationService from "./automations/AutomationService.ts";
 import * as ServerActivation from "./serverActivation.ts";
@@ -103,7 +104,10 @@ const layerMakeServer = Layer.unwrap(
     const layerStartup = Layer.effectDiscard(
       Effect.gen(function* () {
         const chats = yield* ChatService;
-        yield* chats.start((yield* WorkflowService.WorkflowService).taskHooks);
+        yield* chats.start(
+          (yield* WorkflowService.WorkflowService).taskHooks,
+          yield* WorkflowAssistant.make,
+        );
       }),
     ).pipe(Layer.provideMerge(layerRuntimeDependencies));
 

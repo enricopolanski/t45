@@ -22,9 +22,9 @@ Chat and step files travel over [one upload and one download route](../../apps/s
 
 ## Access follows the chat's origin
 
-The first member input creates a private Conversation owned by that member, including against organization admins. A Task derives access from its trigger: admins for Automations, and the workflow's ticket visibility for step tasks. The chat list queries a member's Conversations and, for admins, Tasks. Members reach step chats from their workflow. Opening a step chat delegates to ticket visibility; mutations require involvement through the existing workflow rule. Attachment access uses the same origin check. A chat stream is authorized when opened; session revocation ends held streams. Chat execution knows none of these identities.
+The first member input creates a private Conversation owned by that member, including against organization admins. Background Tasks keep their execution history internally; no member or admin can open them through chat APIs, and chat lists contain only the viewer's Conversations. Workflow results and run status are exposed through the ticket's existing visibility rules. Attachment access uses the same origin check; files applied to a step follow step visibility. A chat stream is authorized when opened; session revocation ends held streams. Chat execution knows none of these identities.
 
-The origin, Chat and first input are created in one transaction. Clients cannot select a Conversation's owner or attach a new origin to an existing Chat. A different agent under an existing id is `id_taken`; a tombstone cannot be reused. Task chat commands enter TaskService so direct chat RPCs cannot reopen settled work or bypass workflow eligibility.
+The origin, Chat and first input are created in one transaction. Clients cannot select a Conversation's owner or attach a new origin to an existing Chat. A different agent under an existing id is `id_taken`; a tombstone cannot be reused. Only internal TaskService commands can continue background work; direct chat RPCs cannot reach a Task.
 
 ## Admin-only surfaces
 

@@ -13,11 +13,16 @@ const isStringId = Schema.is(StringId);
 
 function ChatRouteView() {
   const { chatId } = Route.useParams();
-  const { session, agent } = Route.useSearch();
+  const { session, agent, workflow } = Route.useSearch();
   if (!isChatId(chatId)) return <Navigate to="/chats" replace />;
   return (
     <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
-      <ChatView chatId={chatId} sessionId={session ?? null} newAgentId={agent ?? null} />
+      <ChatView
+        chatId={chatId}
+        sessionId={session ?? null}
+        newAgentId={agent ?? null}
+        newWorkflowId={workflow ?? null}
+      />
     </SidebarInset>
   );
 }
@@ -27,9 +32,10 @@ function ChatRouteView() {
 export const Route = createFileRoute("/chats/$chatId")({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { session?: Session.ID; agent?: StringId } => ({
+  ): { session?: Session.ID; agent?: StringId; workflow?: StringId } => ({
     ...(isSessionId(search.session) ? { session: search.session } : {}),
     ...(isStringId(search.agent) ? { agent: search.agent } : {}),
+    ...(isStringId(search.workflow) ? { workflow: search.workflow } : {}),
   }),
   component: ChatRouteView,
 });

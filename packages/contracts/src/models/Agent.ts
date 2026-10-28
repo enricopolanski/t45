@@ -35,6 +35,8 @@ export class Agent extends Schema.Opaque<Agent>()(
 /** Names identify the built-in capabilities an agent is configured to use. */
 export const WORKFLOW_DRAFTING_MCP_NAME = "workflows";
 export const STEP_TOOLS_MCP_NAME = "step";
+export const WORKFLOW_ASSISTANT_ID = "231bd9c5-6f19-44ae-88e7-fcd2b2fb5726";
+export const WORKFLOW_INSTANCE_MCP_NAME = "workflow";
 
 export const canChatWithMembers = (agent: Pick<Agent, "status" | "isConversational">) =>
   agent.status === "active" && agent.isConversational;

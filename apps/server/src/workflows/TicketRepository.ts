@@ -2,7 +2,9 @@ import { Comment, Ticket } from "@t45/contracts/models/Workflow";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 const Row = Schema.Struct({
@@ -22,6 +24,8 @@ const IS_OPEN = `json_extract(t.status, '$.type') = 'open'`;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const changes = yield* PubSub.unbounded<string>();
+  const changed = (ticketId: string) => sql.afterCommit(PubSub.publish(changes, ticketId));
   const read = (where: string, params: ReadonlyArray<string>) =>
     sql
       .unsafe(`SELECT ${COLUMNS} FROM tickets t WHERE ${where}`, [...params])
@@ -29,6 +33,24 @@ const make = Effect.gen(function* () {
   const first = Effect.map(([ticket]: ReadonlyArray<Ticket>) => ticket ?? null);
 
   return {
+    watch: <A, E, R>(
+      ticketId: string,
+      read: Effect.Effect<A, E, R>,
+      executionChanges: Stream.Stream<unknown>,
+    ) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const events = yield* PubSub.subscribe(changes);
+          return Stream.concat(
+            Stream.fromEffect(read),
+            Stream.merge(
+              Stream.fromSubscription(events).pipe(Stream.filter((id) => id === ticketId)),
+              executionChanges,
+            ).pipe(Stream.mapEffect(() => read)),
+          );
+        }),
+      ),
+    changed,
     transaction: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       sql.withTransaction(effect).pipe(Effect.catchTags({ SqlError: Effect.die })),
     get: (id: string) => read("t.id = ?", [id]).pipe(first),
@@ -38,6 +60,16 @@ const make = Effect.gen(function* () {
       ]).pipe(first),
     listOpen: (workflowId: string) =>
       read(`t.workflow_id = ? AND ${IS_OPEN} ORDER BY t.created_at, t.id`, [workflowId]),
+    listForWorkflow: (workflowId: string) =>
+      read("t.workflow_id = ? ORDER BY t.created_at DESC, t.id", [workflowId]),
+    hasTicketsInvolving: (workflowId: string, userId: string) =>
+      sql`SELECT 1 FROM tickets t WHERE t.workflow_id = ${workflowId}
+        AND EXISTS (SELECT 1 FROM json_each(t.steps) s
+          WHERE json_extract(s.value, '$.assignee') = ${userId}
+            OR json_extract(s.value, '$.responsible') = ${userId}) LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
     listOpenInvolving: (id: string) =>
       read(
         `${IS_OPEN} AND EXISTS (SELECT 1 FROM json_each(t.steps) s
@@ -58,6 +90,7 @@ const make = Effect.gen(function* () {
               steps, created_at)
             VALUES (${row.id}, ${row.workflowId}, ${row.title}, ${row.description},
               ${row.dueDate}, ${row.status}, ${row.steps}, ${row.createdAt})`;
+        yield* changed(ticket.id);
       }).pipe(Effect.orDie),
     update: (ticket: Ticket) =>
       Effect.gen(function* () {
@@ -65,6 +98,7 @@ const make = Effect.gen(function* () {
         yield* sql`UPDATE tickets SET title = ${row.title}, description = ${row.description},
               due_date = ${row.dueDate}, status = ${row.status}, steps = ${row.steps}
             WHERE id = ${row.id}`;
+        yield* changed(ticket.id);
       }).pipe(Effect.orDie),
     comments: (stepId: string) =>
       sql`SELECT id, author_id AS "author", body, created_at AS "createdAt",
@@ -80,6 +114,7 @@ const make = Effect.gen(function* () {
               created_at)
             VALUES (${row.id}, ${ticketId}, ${row.stepId}, ${row.author}, ${row.body},
               ${row.createdAt})`;
+        yield* changed(ticketId);
       }).pipe(Effect.orDie),
   };
 });

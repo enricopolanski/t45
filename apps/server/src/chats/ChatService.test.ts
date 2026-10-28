@@ -97,7 +97,11 @@ describe("chats", () => {
         );
         assert.deepEqual(yield* listed(chats, alice), [chatId]);
         assert.deepEqual(yield* listed(chats, bob), []);
-        assert.deepEqual(yield* listed(chats, admin), [automated]);
+        assert.deepEqual(yield* listed(chats, admin), []);
+        assert.equal(
+          yield* outcomeOf(chats.open({ chatId: automated }, admin).pipe(Stream.runDrain)),
+          "NotFound",
+        );
 
         yield* chats.delete({ chatId }, alice);
         assert.deepEqual(yield* listed(chats, alice), []);
@@ -112,7 +116,7 @@ describe("chats", () => {
   );
 
   it.effect(
-    "refuses a member's chat with an agent that can't chat or is archived, which an automation still takes and an admin steers",
+    "refuses conversations with unavailable agents and keeps background tasks private",
     () =>
       Effect.gen(function* () {
         const { chats, repository, tasks } = yield* setup;
@@ -138,10 +142,13 @@ describe("chats", () => {
         );
 
         const chatId = yield* startTask(quiet);
-        yield* chats.send({ chatId, inputId: "steer-1", ...typed("Read it.") }, admin);
+        assert.equal(
+          yield* outcomeOf(chats.send({ chatId, inputId: "steer-1", ...typed("Read it.") }, admin)),
+          "NotFound",
+        );
         assert.deepEqual(
           (yield* repository.openInputs(chatId)).map((input) => input.payload.text),
-          ["Read the report.", "Read it."],
+          ["Read the report."],
         );
       }).pipe(Effect.provide(Fixture.layer)),
   );

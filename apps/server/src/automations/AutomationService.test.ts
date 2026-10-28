@@ -13,6 +13,7 @@ import * as Queue from "effect/Queue";
 import * as RpcTest from "effect/rpc/RpcTest";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import { AdminOnly } from "../auth/Authorization.ts";
@@ -114,8 +115,9 @@ const runOf = (chatId: ChatId) =>
   });
 
 const tasksWithRuns = Effect.gen(function* () {
-  const chats = yield* ChatRepository;
-  const runs = yield* chats.list({ userId: ADMIN, role: "admin" });
+  const sql = yield* SqlClient.SqlClient;
+  const runs = yield* sql<{ readonly title: string }>`SELECT c.title FROM chats c
+    JOIN chat_origins o ON o.chat_id = c.id WHERE o.trigger IS NOT NULL`;
   return runs.map((chat) => chat.title).sort();
 });
 

@@ -87,6 +87,8 @@ export const InputPayload = Schema.Struct({
   text: Schema.String,
   attachments: Schema.Array(ChatAttachment),
   context: Schema.optional(ChatMessageContext),
+  /** Set by T45 on the first input; fixes this conversation to one workflow instance. */
+  workflowId: Schema.optional(StringId),
 });
 export type InputPayload = typeof InputPayload.Type;
 

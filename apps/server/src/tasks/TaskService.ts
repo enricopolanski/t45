@@ -1,18 +1,25 @@
 import type { SessionMessage } from "@opencode/client/effect";
 import { ChatId, InputId, Refused, type InputPayload } from "@t45/contracts/models/Chat";
-import type { Task, Trigger, Outcome, TaskState } from "@t45/contracts/models/Task";
+import {
+  taskExecution,
+  type Task,
+  type Trigger,
+  type Outcome,
+  type TaskState,
+} from "@t45/contracts/models/Task";
 import { NotFound } from "@t45/contracts/resources/errors";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
 
 import { ChatRepository } from "../chats/ChatRepository.ts";
+import { ChatEvents } from "../chats/ChatEvents.ts";
 import type { ChatHooks } from "../chats/ChatHooks.ts";
 import type { Post } from "../chats/ChatService.ts";
 
 export interface StepHooks {
-  readonly canAccess: (ticketId: string, userId: string) => Effect.Effect<"read" | "write" | null>;
   readonly canRun: (task: Task) => Effect.Effect<boolean>;
   readonly prepare: (
     task: Task,
@@ -32,6 +39,7 @@ export const make = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const repository = yield* ChatRepository;
+    const events = yield* ChatEvents;
     const origins = repository.origins;
     const crypto = yield* Crypto.Crypto;
     const uuid = crypto.randomUUIDv4().pipe(Effect.orDie);
@@ -52,7 +60,7 @@ export const make = (
         : Effect.succeed(true);
     const transition = Effect.fnUntraced(function* (task: Task, state: TaskState) {
       if (task.state.type === "settled") return;
-      if (state.type === "settled") yield* chats.requestStop(task.chatId);
+      if (state.type !== "active") yield* chats.requestStop(task.chatId);
       yield* origins.setState(task.chatId, state);
       if (task.trigger.type === "step") yield* (yield* steps).changed({ ...task, state });
     });
@@ -97,6 +105,47 @@ export const make = (
 
     return {
       listByTrigger: origins.listByTrigger,
+      runsByTrigger: (reference: { readonly ticketId: string; readonly stepId: string }) =>
+        Effect.flatMap(origins.listByTrigger(reference), (tasks) =>
+          Effect.forEach(tasks, (task) =>
+            Effect.gen(function* () {
+              const worker = yield* repository.workerRow(task.chatId);
+              const execution = taskExecution(
+                task.state,
+                worker === null
+                  ? null
+                  : {
+                      status: worker.status,
+                      awake: worker.vm === "awake",
+                      queued: yield* repository.hasOpenInputs(task.chatId),
+                      stopping: (yield* repository.stopRequest(task.chatId)) !== null,
+                    },
+              );
+              return { ...task, execution };
+            }),
+          ),
+        ),
+      changesForTicket: (ticketId: string) =>
+        Stream.unwrap(
+          Effect.map(
+            events.subscribe(
+              (change) =>
+                change.kind === "chat" || change.kind === "inputs" || change.kind === "posted",
+            ),
+            (changes) =>
+              changes.pipe(
+                Stream.filterEffect((change) =>
+                  change.kind === "missed"
+                    ? Effect.succeed(true)
+                    : Effect.map(
+                        get(change.chatId),
+                        (task) =>
+                          task?.trigger.type === "step" && task.trigger.ticketId === ticketId,
+                      ),
+                ),
+              ),
+          ),
+        ),
       start: Effect.fnUntraced(function* (
         trigger: Trigger,
         agentId: string,
@@ -118,23 +167,15 @@ export const make = (
           .pipe(Effect.catchTags({ NotFound: Effect.die }));
         return chatId;
       }, transaction),
-      continue: Effect.fnUntraced(function* (
-        id: ChatId,
-        input: InputPayload,
-        sender?: { readonly inputId: InputId; readonly from: string },
-      ) {
+      continue: Effect.fnUntraced(function* (id: ChatId, input: InputPayload) {
         const task = yield* requireTask(id);
-        const repeated =
-          sender !== undefined && (yield* repository.input(id, sender.inputId)) !== null;
-        if (!repeated) {
-          if (task.state.type === "settled") return yield* new Refused({ reason: "task_settled" });
-          if (!(yield* canRun(task))) return yield* new Refused({ reason: "unavailable" });
-          yield* origins.setState(id, { type: "active" });
-        }
+        if (task.state.type === "settled") return yield* new Refused({ reason: "task_settled" });
+        if (!(yield* canRun(task))) return yield* new Refused({ reason: "unavailable" });
+        yield* origins.setState(id, { type: "active" });
         yield* chats.post({
           chatId: id,
-          inputId: sender?.inputId ?? InputId.make(yield* uuid),
-          from: sender?.from ?? null,
+          inputId: InputId.make(yield* uuid),
+          from: null,
           input,
         });
       }, transaction),
@@ -149,6 +190,7 @@ export const make = (
             const origin = yield* origins.get(chatId);
             return {
               questions: origin?.kind === "conversation",
+              keepAlive: origin?.kind !== "task" || origin.state.type === "active",
               recover:
                 origin?.kind === "task" &&
                 origin.state.type === "active" &&

@@ -5,9 +5,13 @@ import type {
 } from "@t45/contracts/resources/Workflows";
 import { Link, Navigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { MessageSquareIcon } from "lucide-react";
 
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
+import { useNewChat } from "../../hooks/useNewChat";
+import { toastFailure } from "../../state/query";
+import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { DueBadge } from "../work/MyWork";
 import { NewItemDialog } from "../work/NewItemDialog";
@@ -46,6 +50,7 @@ function BoardCard({
  * id ends on the slug.
  */
 export function WorkflowBoardPage({ workflowId }: { readonly workflowId: string }) {
+  const newChat = useNewChat();
   const [board, setBoard] = useState<WorkflowInstanceBoardView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,7 +72,20 @@ export function WorkflowBoardPage({ workflowId }: { readonly workflowId: string 
       width="full"
       actions={
         board !== null && !board.workflow.isArchived ? (
-          <NewItemDialog workflow={board.workflow} />
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                void newChat(undefined, board.workflow.id).catch((cause: unknown) =>
+                  toastFailure("Couldn't start a chat", cause),
+                )
+              }
+            >
+              <MessageSquareIcon /> Chat
+            </Button>
+            <NewItemDialog workflow={board.workflow} />
+          </>
         ) : null
       }
     >

@@ -1,5 +1,4 @@
 import { CopyIcon, MoreHorizontalIcon, PencilIcon, PlayIcon, RefreshCwIcon } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { type Schedule, type Automation } from "@t45/contracts/models/Automation";
 
@@ -136,7 +135,6 @@ function AutomationRow({
   readonly onEdit: () => void;
   readonly onChanged: () => void;
 }) {
-  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<"rotate" | null>(null);
   const now = useNowMinute();
@@ -164,16 +162,10 @@ function AutomationRow({
     });
   const runNow = () =>
     act("Could not run automation", async () => {
-      const { chatId } = await api("automations.runNow", { id: automation.id });
+      await api("automations.runNow", { id: automation.id });
       toastManager.add({
         type: "success",
         title: "Run started",
-        actionProps: {
-          children: "Open",
-          onClick: () => {
-            void navigate({ to: "/chats/$chatId", params: { chatId } });
-          },
-        },
       });
     });
   const rotate = () =>

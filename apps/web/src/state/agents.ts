@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import { type Agent, canChatWithMembers } from "@t45/contracts/models/Agent";
 import { NotFound } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import { Atom } from "effect/reactivity";
@@ -8,7 +7,7 @@ import { describeFailure } from "../lib/failures";
 import { type ApiInput, api, atomRuntime, call } from "../rpc/api";
 import { appAtomRegistry } from "./atomRegistry";
 import { LoadFailed, mutate, useLoaded } from "./query";
-import { apiQuery, useApiQuery } from "./rpc";
+import { apiQuery } from "./rpc";
 
 export const agentsList = apiQuery("agents.list")(undefined);
 const skillsList = apiQuery("skills.list")(undefined);
@@ -39,9 +38,6 @@ export const useSkill = (skillId: string) => {
   return skill;
 };
 export const useAgentForm = (agentId: string | null) => useLoaded(agentForm(agentId));
-
-export const useChatAgents = (): ReadonlyArray<Agent> =>
-  useApiQuery(agentsList).data?.filter(canChatWithMembers) ?? [];
 
 export const agentActions = {
   archive: (agentId: string) =>

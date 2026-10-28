@@ -1,6 +1,7 @@
 import {
   WORKFLOW_DRAFTING_MCP_NAME,
   STEP_TOOLS_MCP_NAME,
+  WORKFLOW_INSTANCE_MCP_NAME,
   type Agent,
 } from "@t45/contracts/models/Agent";
 
@@ -17,4 +18,13 @@ export const WORKFLOW_DRAFTING_MCP = {
 export const STEP_TOOLS_MCP = {
   name: STEP_TOOLS_MCP_NAME,
   server: { type: "local", command: ["node", "/opt/t45/step-tools.mjs"], codemode: false },
+} as const satisfies { readonly name: string; readonly server: Agent["mcpServers"][string] };
+
+export const WORKFLOW_INSTANCE_MCP = {
+  name: WORKFLOW_INSTANCE_MCP_NAME,
+  server: {
+    type: "local",
+    command: ["node", "/opt/t45/workflow-instance-tools.mjs"],
+    codemode: false,
+  },
 } as const satisfies { readonly name: string; readonly server: Agent["mcpServers"][string] };

@@ -68,7 +68,6 @@ const layerPersistence = Layer.mergeAll(
 
 /** Chats over a fresh database. */
 export const stepHooks = {
-  canAccess: () => Effect.succeed(null),
   canRun: () => Effect.succeed(true),
   prepare: () => Effect.succeed(null),
   changed: () => Effect.void,
