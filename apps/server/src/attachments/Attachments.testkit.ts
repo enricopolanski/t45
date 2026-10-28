@@ -37,9 +37,7 @@ export const seedStep = (ticketId: string, assignee: string) =>
       id: definitionId,
       name: "Taxes",
       steps: [],
-      archivedAt: null,
-      createdAt: at,
-      updatedAt: at,
+      isArchived: false,
     });
     yield* (yield* WorkflowRepository.WorkflowRepository).insert({
       id: workflowId,
@@ -49,11 +47,8 @@ export const seedStep = (ticketId: string, assignee: string) =>
       adminUserIds: [assignee],
       defaultAssignments: {},
       slug: null,
-      isDefault: false,
       isPublic: false,
-      archivedAt: null,
-      createdAt: at,
-      updatedAt: at,
+      isArchived: false,
     });
     yield* (yield* TicketRepository.TicketRepository).insert({
       id: ticketId,
@@ -61,7 +56,7 @@ export const seedStep = (ticketId: string, assignee: string) =>
       title: "Return",
       description: "",
       dueDate: null,
-      status: { type: "open", at },
+      status: { type: "open" },
       steps: [
         {
           id: stepId,
@@ -74,9 +69,7 @@ export const seedStep = (ticketId: string, assignee: string) =>
           automations: [],
         },
       ],
-      currentStepId: stepId,
       createdAt: at,
-      updatedAt: at,
     });
     return { stepId };
   });

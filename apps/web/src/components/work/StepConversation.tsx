@@ -45,17 +45,15 @@ export function StepFiles({
           {view.files.map((attachment) => (
             <li key={attachment.id} className="flex items-center gap-2">
               <AttachmentLink attachment={attachment} />
-              {attachment.canRemove ? (
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label={`Remove ${attachment.name}`}
-                  disabled={busy}
-                  onClick={() => onRemove(attachment.id)}
-                >
-                  <XIcon />
-                </Button>
-              ) : null}
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label={`Remove ${attachment.name}`}
+                disabled={busy}
+                onClick={() => onRemove(attachment.id)}
+              >
+                <XIcon />
+              </Button>
             </li>
           ))}
         </ul>

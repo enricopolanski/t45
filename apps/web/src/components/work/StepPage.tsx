@@ -110,11 +110,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const actions = stepActions(view.ticket, view.step, viewerUserId);
   const step = { stepId: view.step.id };
   const writes = view.ticket.status.type === "open";
-  const unpassed = view.subSteps.filter(
-    (subStep) =>
-      view.ticket.steps.find((candidate) => candidate.id === subStep.id)?.status.type !==
-      "completed",
-  );
+  const unpassed = view.subSteps.filter((step) => step.status.type !== "completed");
   const empty = missingFields(view.fields);
   const missing = triedDone ? empty : [];
   const unapproved = triedDone ? unpassed : [];
@@ -303,11 +299,9 @@ function MissingRecap({
  * it is in when that isn't the step on the page.
  */
 function ItemHeader({ view }: { readonly view: StepView }) {
-  const currentStep =
-    view.ticket.currentStepId === view.step.id
-      ? undefined
-      : view.otherSteps.find((entry) => entry.step.id === view.ticket.currentStepId);
-  const current = currentStep === undefined ? null : currentStep.name;
+  const current =
+    view.otherSteps.find(({ step }) => step.id !== view.step.id && step.status.type !== "completed")
+      ?.name ?? null;
   return (
     <header className="flex flex-col gap-1">
       {view.canOpenBoard ? (

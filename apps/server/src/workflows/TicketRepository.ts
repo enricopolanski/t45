@@ -9,15 +9,14 @@ const Row = Schema.Struct({
   ...Ticket.fields,
   status: Schema.fromJsonString(Ticket.fields.status),
   steps: Schema.fromJsonString(Ticket.fields.steps),
-}).pipe(Schema.decodeTo(Schema.toType(Ticket)));
+});
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
 const encodeRow = Schema.encodeEffect(Row);
 const decodeComments = Schema.decodeUnknownEffect(Schema.Array(Comment));
 const encodeComment = Schema.encodeEffect(Comment);
 
 const COLUMNS = `t.id, t.workflow_id AS "workflowId", t.title, t.description, t.due_date AS "dueDate",
-  t.status, t.steps, t.current_step_id AS "currentStepId", t.created_at AS "createdAt",
-  t.updated_at AS "updatedAt"`;
+  t.status, t.steps, t.created_at AS "createdAt"`;
 
 const IS_OPEN = `json_extract(t.status, '$.type') = 'open'`;
 
@@ -56,17 +55,15 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const row = yield* encodeRow(ticket);
         yield* sql`INSERT INTO tickets (id, workflow_id, title, description, due_date, status,
-              steps, current_step_id, created_at, updated_at)
+              steps, created_at)
             VALUES (${row.id}, ${row.workflowId}, ${row.title}, ${row.description},
-              ${row.dueDate}, ${row.status}, ${row.steps}, ${row.currentStepId},
-              ${row.createdAt}, ${row.updatedAt})`;
+              ${row.dueDate}, ${row.status}, ${row.steps}, ${row.createdAt})`;
       }).pipe(Effect.orDie),
     update: (ticket: Ticket) =>
       Effect.gen(function* () {
         const row = yield* encodeRow(ticket);
         yield* sql`UPDATE tickets SET title = ${row.title}, description = ${row.description},
-              due_date = ${row.dueDate}, status = ${row.status}, steps = ${row.steps},
-              current_step_id = ${row.currentStepId}, updated_at = ${row.updatedAt}
+              due_date = ${row.dueDate}, status = ${row.status}, steps = ${row.steps}
             WHERE id = ${row.id}`;
       }).pipe(Effect.orDie),
     comments: (stepId: string) =>

@@ -22,7 +22,6 @@ import {
 import { NotFound } from "./errors.ts";
 
 export const WorkflowErrors = Schema.Union([WorkflowRefused, NotFound]);
-export type WorkflowErrors = typeof WorkflowErrors.Type;
 
 const WorkflowInstance = { workflow: Workflow, definition: WorkflowDefinition };
 
@@ -67,7 +66,6 @@ export type TicketSummaryView = typeof TicketSummaryView.Type;
 
 export const WorkflowInstanceBoardView = Schema.Struct({
   ...WorkflowInstance,
-  canManage: Schema.Boolean,
   tickets: Schema.Array(TicketSummaryView),
 });
 export type WorkflowInstanceBoardView = typeof WorkflowInstanceBoardView.Type;
@@ -76,66 +74,33 @@ const ticket = { ticketId: StringId };
 const step = { stepId: StringId };
 const reason = { ...step, reason: Schema.String };
 
-export const StepFileView = Schema.Struct({
-  ...Struct.pick(Attachment.fields, [
-    "id",
-    "name",
-    "mimeType",
-    "sizeBytes",
-    "uploader",
-    "createdAt",
-  ]),
-  /** Set when the file is a file field's value. */
-  fieldKey: Schema.NullOr(TrimmedNonEmptyString),
-  canRemove: Schema.Boolean,
-});
+export const StepFileView = Schema.Struct(Struct.pick(Attachment.fields, ["id", "name"]));
 export type StepFileView = typeof StepFileView.Type;
 
 /**
  * A field as a step shows it. `key` is the field's path, which sets its value: a field inside a
  * group is `group.field`, and inside a repeatable group's row `group.rowId.field`.
  */
-export interface FieldView {
-  readonly key: string;
-  readonly label: string;
-  readonly description: string;
-  readonly type: StepField["type"];
-  /** A select field's choices, else empty. */
-  readonly options: ReadonlyArray<string>;
-  readonly value: Schema.Json;
-  readonly file: StepFileView | null;
-  readonly repeatable: boolean;
-  /** A group's rows: one with a null id for a group that doesn't repeat. Empty for other fields. */
-  readonly rows: ReadonlyArray<FieldRow>;
-}
-interface FieldRow {
-  readonly id: string | null;
-  readonly fields: ReadonlyArray<FieldView>;
-}
-export interface FieldViewEncoded extends Omit<FieldView, "file" | "rows"> {
-  readonly file: typeof StepFileView.Encoded | null;
-  readonly rows: ReadonlyArray<{
-    readonly id: string | null;
-    readonly fields: ReadonlyArray<FieldViewEncoded>;
-  }>;
-}
-const FieldViewRef = Schema.suspend((): Schema.Codec<FieldView, FieldViewEncoded> => FieldView);
-export const FieldView = Schema.Struct({
-  key: TrimmedNonEmptyString,
-  label: TrimmedNonEmptyString,
-  description: Schema.String,
-  type: Schema.Literals(StepField.members.map((member) => member.fields.type.literal)),
-  options: Schema.Array(Schema.String),
-  value: Schema.Json,
-  repeatable: Schema.Boolean,
-  file: Schema.NullOr(StepFileView),
-  rows: Schema.Array(
-    Schema.Struct({
-      id: Schema.NullOr(FieldPathSegment),
-      fields: Schema.Array(FieldViewRef),
-    }),
-  ),
-});
+export class FieldView extends Schema.Opaque<FieldView>()(
+  Schema.Struct({
+    key: TrimmedNonEmptyString,
+    label: TrimmedNonEmptyString,
+    description: Schema.String,
+    type: Schema.Union(StepField.members.map((member) => member.fields.type)),
+    /** A select field's choices, else empty. */
+    options: Schema.Array(Schema.String),
+    value: Schema.Json,
+    repeatable: Schema.Boolean,
+    file: Schema.NullOr(StepFileView),
+    /** A group's rows: one with a null id for a group that doesn't repeat. Empty for other fields. */
+    rows: Schema.Array(
+      Schema.Struct({
+        id: Schema.NullOr(FieldPathSegment),
+        fields: Schema.Array(Schema.suspend((): Schema.Codec<FieldView> => FieldView)),
+      }),
+    ),
+  }),
+) {}
 
 /** A step another step's view names; it opens as a step of its own. */
 export const StepNameView = Schema.Struct({ id: StringId, name: TrimmedNonEmptyString });
@@ -143,20 +108,22 @@ export type StepNameView = typeof StepNameView.Type;
 
 /** One step, with the names of the steps it sits in and of its sub-steps. */
 export const StepView = Schema.Struct({
-  ticket: Ticket,
+  ticket: Schema.Struct(Struct.omit(Ticket.fields, ["steps"])),
   workflowName: TrimmedNonEmptyString,
   otherSteps: Schema.Array(
     Schema.Struct({ step: StepSummaryView, name: Schema.String, fields: Schema.Array(FieldView) }),
   ),
   step: Step,
   /** Null once the workflow no longer has the step. */
-  definition: Schema.NullOr(StepDefinition),
+  definition: Schema.NullOr(
+    Schema.Struct(Struct.pick(StepDefinition.fields, ["name", "instructions"])),
+  ),
   /** The steps a sub-step sits in, outermost first; empty for a step. */
   parents: Schema.Array(StepNameView),
   /** Whether the current user may open the workflow's board: its admins and its responsible. */
   canOpenBoard: Schema.Boolean,
   fields: Schema.Array(FieldView),
-  subSteps: Schema.Array(StepNameView),
+  subSteps: Schema.Array(Schema.Struct({ ...StepSummaryView.fields, name: TrimmedNonEmptyString })),
   comments: Schema.Array(Comment),
   files: Schema.Array(StepFileView),
   tasks: Schema.Array(Task),
@@ -175,7 +142,7 @@ export const Workflows = RpcGroup.make(
     error: WorkflowErrors,
   }),
   Rpc.make("listStartableInstances", {
-    success: Schema.Array(WorkflowInstanceView),
+    success: Schema.Array(Workflow),
     error: WorkflowErrors,
   }),
   Rpc.make("getInstance", {
@@ -197,13 +164,12 @@ export const Workflows = RpcGroup.make(
     success: Schema.Struct({ definitionId: StringId }),
     error: WorkflowErrors,
   }),
-  /** A null responsible is refused with `responsible_required`, so people are told. */
   Rpc.make("createInstance", {
     payload: {
       definitionId: StringId,
       /** Omitted, the definition's name. */
       name: Schema.optionalKey(TrimmedNonEmptyString),
-      responsible: Schema.NullOr(StringId),
+      responsible: Workflow.fields.responsible,
     },
     success: Schema.Struct(workflow),
     error: WorkflowErrors,
@@ -228,11 +194,10 @@ export const Workflows = RpcGroup.make(
     payload: {
       ...workflow,
       name: Schema.optionalKey(TrimmedNonEmptyString),
-      responsible: Schema.optionalKey(Schema.NullOr(StringId)),
+      responsible: Schema.optionalKey(Workflow.fields.responsible),
       /** Refused with `slug_taken` when another workflow has it; null clears it. */
       slug: Schema.optionalKey(Schema.NullOr(Slug)),
       isPublic: Schema.optionalKey(Workflow.fields.isPublic),
-      isDefault: Schema.optionalKey(Workflow.fields.isDefault),
       defaultAssignments: Schema.optionalKey(Workflow.fields.defaultAssignments),
       /** Refused with `last_admin` when it leaves no active admin. */
       adminUserIds: Schema.optionalKey(Workflow.fields.adminUserIds),
@@ -274,11 +239,6 @@ export const Workflows = RpcGroup.make(
   /** Sets one ticket's step assignee; null clears it. */
   Rpc.make("setStepAssignee", {
     payload: { ...step, assignee: Step.fields.assignee },
-    error: WorkflowErrors,
-  }),
-  /** Sets one ticket's step responsible; null clears it. */
-  Rpc.make("setStepResponsible", {
-    payload: { ...step, responsible: Step.fields.responsible },
     error: WorkflowErrors,
   }),
   Rpc.make("blockStep", { payload: reason, error: WorkflowErrors }),

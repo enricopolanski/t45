@@ -70,7 +70,7 @@ export function WorkflowDefinitions() {
                 {plural(definition.steps.length, "step", "steps")}
               </p>
             </div>
-            {definition.archivedAt !== null ? (
+            {definition.isArchived ? (
               <Badge variant="secondary">Archived</Badge>
             ) : (
               <Button
@@ -183,7 +183,7 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
     <WorkFrame
       title={definition.name}
       actions={
-        definition.archivedAt === null ? (
+        !definition.isArchived ? (
           <Button
             size="sm"
             render={<Link to="/settings/workflows/new" search={{ definitionId }} />}
@@ -252,7 +252,7 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
         className="rounded-xl border border-border bg-card"
       >
         <ActionRow
-          title={definition.archivedAt === null ? "Archive blueprint" : "Archived blueprint"}
+          title={!definition.isArchived ? "Archive blueprint" : "Archived blueprint"}
           description="Archived blueprints cannot be used to create new workflows. Existing workflows keep running."
           action={
             <Button
@@ -263,12 +263,12 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
                 void run(() =>
                   api("workflows.updateDefinition", {
                     definitionId,
-                    isArchived: definition.archivedAt === null,
+                    isArchived: !definition.isArchived,
                   }),
                 )
               }
             >
-              {definition.archivedAt === null ? "Archive blueprint" : "Restore blueprint"}
+              {!definition.isArchived ? "Archive blueprint" : "Restore blueprint"}
             </Button>
           }
         />

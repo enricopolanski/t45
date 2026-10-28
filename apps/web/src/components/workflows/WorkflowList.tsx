@@ -71,7 +71,7 @@ export function WorkflowList() {
                 <p className="text-xs text-muted-foreground">You're responsible</p>
               )}
             </div>
-            {workflow.archivedAt !== null ? <Badge variant="secondary">Archived</Badge> : null}
+            {workflow.isArchived ? <Badge variant="secondary">Archived</Badge> : null}
             {definition.steps.length > 0 ? (
               <Button
                 size="sm"

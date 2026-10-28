@@ -2,14 +2,9 @@ import * as Schema from "effect/Schema";
 import type { Task } from "./Task.ts";
 import type * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
+import * as Struct from "effect/Struct";
 
 import { AttachmentId, StringId, TrimmedNonEmptyString } from "./primitives.ts";
-
-/*
- * A WorkflowDefinition is a named, ordered set of `StepDefinition`s, each a unit of work.
- *
- * Workflows combine the flexibility of defining very different processes that fit the most diverse use cases and teams with proper accountability and automation.
- */
 
 const isFieldPathSegment = Schema.isPattern(/^[A-Za-z0-9_-]+$/);
 
@@ -18,119 +13,38 @@ export const FieldPathSegment = StringId.check(isFieldPathSegment);
 
 const hasDistinctIds = (ids: ReadonlyArray<string>) => new Set(ids).size === ids.length;
 
-const FieldValueSchemas = {
-  text: Schema.String,
-  number: Schema.Finite,
-  boolean: Schema.Boolean,
-  date: Schema.DateTimeUtcFromString,
-  file: AttachmentId,
-};
-
 const FieldBase = {
-  id: StringId.withConstructorDefault.check(isFieldPathSegment),
+  id: FieldPathSegment,
   label: TrimmedNonEmptyString,
   /** What to put in it, shown under the label. */
   description: Schema.optionalKey(Schema.String),
 };
 
-export class TextField extends Schema.Class<TextField>("TextField")({
+const ValueField = Schema.Struct({
   ...FieldBase,
-  type: Schema.Literal("text"),
-}) {
-  readonly schema = FieldValueSchemas.text;
-}
+  type: Schema.Literals(["text", "number", "boolean", "date", "file"]),
+});
 
-export class NumberField extends Schema.Class<NumberField>("NumberField")({
-  ...FieldBase,
-  type: Schema.Literal("number"),
-}) {
-  readonly schema = FieldValueSchemas.number;
-}
-
-export class BooleanField extends Schema.Class<BooleanField>("BooleanField")({
-  ...FieldBase,
-  type: Schema.Literal("boolean"),
-}) {
-  readonly schema = FieldValueSchemas.boolean;
-}
-
-export class DateField extends Schema.Class<DateField>("DateField")({
-  ...FieldBase,
-  type: Schema.Literal("date"),
-}) {
-  readonly schema = FieldValueSchemas.date;
-}
-
-export class FileField extends Schema.Class<FileField>("FileStepField")({
-  ...FieldBase,
-  type: Schema.Literal("file"),
-}) {
-  readonly schema = FieldValueSchemas.file;
-}
-
-export class SelectField extends Schema.Class<SelectField>("SelectField")({
+const SelectField = Schema.Struct({
   ...FieldBase,
   type: Schema.Literal("select"),
   options: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
-}) {
-  readonly schema = Schema.Literals(this.options);
-}
+});
 
-export class GroupField extends Schema.Class<GroupField>("GroupField")({
+class GroupField extends Schema.Class<GroupField>("GroupField")({
   ...FieldBase,
   type: Schema.Literal("group"),
   repeatable: Schema.Boolean,
-  fields: Schema.Array(Schema.suspend((): Schema.Codec<StepField, StepFieldEncoded> => StepField)),
+  fields: Schema.Array(Schema.suspend((): Schema.Codec<StepField> => StepField)),
 }) {}
 
-export const StepField = Schema.Union([
-  TextField,
-  NumberField,
-  BooleanField,
-  DateField,
-  FileField,
-  SelectField,
-  GroupField,
-]);
+export const StepField = Schema.Union([ValueField, SelectField, GroupField]);
 
-export type StepField =
-  | TextField
-  | NumberField
-  | BooleanField
-  | DateField
-  | FileField
-  | SelectField
-  | GroupField;
+export type StepField = typeof ValueField.Type | typeof SelectField.Type | GroupField;
 
 const fieldIdsAreDistinct = (fields: ReadonlyArray<StepField>): boolean =>
   hasDistinctIds(fields.map((field) => field.id)) &&
   fields.every((field) => field.type !== "group" || fieldIdsAreDistinct(field.fields));
-
-interface GroupFieldEncoded {
-  readonly id: string;
-  readonly label: string;
-  readonly description?: string;
-  readonly type: "group";
-  readonly repeatable: boolean;
-  readonly fields: ReadonlyArray<StepFieldEncoded>;
-}
-
-type StepFieldEncoded =
-  | typeof TextField.Encoded
-  | typeof NumberField.Encoded
-  | typeof BooleanField.Encoded
-  | typeof DateField.Encoded
-  | typeof FileField.Encoded
-  | typeof SelectField.Encoded
-  | GroupFieldEncoded;
-
-interface StepDefinitionEncoded {
-  readonly id: string;
-  readonly name: string;
-  readonly instructions: string;
-  readonly fields: ReadonlyArray<StepFieldEncoded>;
-  readonly subSteps: ReadonlyArray<StepDefinitionEncoded>;
-}
 
 export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition")({
   id: StringId,
@@ -140,13 +54,17 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
     Schema.makeFilter(fieldIdsAreDistinct, { expected: "distinct field ids among siblings" }),
   ),
   /** Start with their parent, which can't be done until every one is approved. */
-  subSteps: Schema.Array(
-    Schema.suspend((): Schema.Codec<StepDefinition, StepDefinitionEncoded> => StepDefinition),
-  ),
+  subSteps: Schema.Array(Schema.suspend((): Schema.Codec<StepDefinition> => StepDefinition)),
 }) {}
 
-const stepIds = (steps: ReadonlyArray<StepDefinition>): ReadonlyArray<string> =>
-  steps.flatMap((step) => [step.id, ...stepIds(step.subSteps)]);
+const stepNodes = (
+  steps: ReadonlyArray<StepDefinition>,
+  parentId: string | null = null,
+): ReadonlyArray<{ readonly step: StepDefinition; readonly parentId: string | null }> =>
+  steps.flatMap((step) => [{ step, parentId }, ...stepNodes(step.subSteps, step.id)]);
+
+export const findStep = (steps: ReadonlyArray<StepDefinition>, id: string) =>
+  stepNodes(steps).find((node) => node.step.id === id) ?? null;
 
 /** A workflow's name in URLs: lowercase letters and digits, joined by single hyphens. */
 export const Slug = TrimmedNonEmptyString.check(
@@ -173,13 +91,11 @@ export class WorkflowDefinition extends Schema.Opaque<WorkflowDefinition>()(
     id: StringId,
     name: TrimmedNonEmptyString,
     steps: Schema.Array(StepDefinition).check(
-      Schema.makeFilter((steps: ReadonlyArray<StepDefinition>) => hasDistinctIds(stepIds(steps)), {
+      Schema.makeFilter((steps) => hasDistinctIds(stepNodes(steps).map(({ step }) => step.id)), {
         expected: "distinct step ids, sub-steps included",
       }),
     ),
-    archivedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
-    createdAt: Schema.DateTimeUtcFromString,
-    updatedAt: Schema.DateTimeUtcFromString,
+    isArchived: Schema.Boolean,
   }),
 ) {}
 
@@ -224,65 +140,21 @@ export class Workflow extends Schema.Opaque<Workflow>()(
       }),
     ).check(Schema.isPropertyNames(StringId)),
     slug: Schema.NullOr(Slug),
-    isDefault: Schema.Boolean,
     isPublic: Schema.Boolean,
-    archivedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
-    createdAt: Schema.DateTimeUtcFromString,
-    updatedAt: Schema.DateTimeUtcFromString,
-  }),
-) {}
-
-class PendingStatus extends Schema.Opaque<PendingStatus>()(
-  Schema.Struct({
-    type: Schema.Literal("pending"),
-    at: Schema.DateTimeUtcFromString,
-  }),
-) {}
-
-class WorkingStatus extends Schema.Opaque<WorkingStatus>()(
-  Schema.Struct({
-    type: Schema.Literal("working"),
-    at: Schema.DateTimeUtcFromString,
-  }),
-) {}
-
-class WaitingApprovalStatus extends Schema.Opaque<WaitingApprovalStatus>()(
-  Schema.Struct({
-    type: Schema.Literal("waiting_approval"),
-    at: Schema.DateTimeUtcFromString,
-  }),
-) {}
-
-class BlockedStatus extends Schema.Opaque<BlockedStatus>()(
-  Schema.Struct({
-    type: Schema.Literal("blocked"),
-    at: Schema.DateTimeUtcFromString,
-    reason: TrimmedNonEmptyString,
-  }),
-) {}
-
-class RejectedStatus extends Schema.Opaque<RejectedStatus>()(
-  Schema.Struct({
-    type: Schema.Literal("rejected"),
-    at: Schema.DateTimeUtcFromString,
-    reason: TrimmedNonEmptyString,
-  }),
-) {}
-
-class CompletedStatus extends Schema.Opaque<CompletedStatus>()(
-  Schema.Struct({
-    type: Schema.Literal("completed"),
-    at: Schema.DateTimeUtcFromString,
+    isArchived: Schema.Boolean,
   }),
 ) {}
 
 const StepStatus = Schema.Union([
-  PendingStatus,
-  WorkingStatus,
-  WaitingApprovalStatus,
-  BlockedStatus,
-  RejectedStatus,
-  CompletedStatus,
+  Schema.Struct({
+    type: Schema.Literals(["working", "waiting_approval", "completed"]),
+    at: Schema.DateTimeUtcFromString,
+  }),
+  Schema.Struct({
+    type: Schema.Literals(["blocked", "rejected"]),
+    at: Schema.DateTimeUtcFromString,
+    reason: TrimmedNonEmptyString,
+  }),
 ]);
 
 /** One step or sub-step of one ticket, with the people resolved when the ticket entered it. */
@@ -295,7 +167,7 @@ export class Step extends Schema.Opaque<Step>()(
     status: StepStatus,
     automations: StepAutomations,
     assignee: Schema.NullOr(StringId),
-    responsible: Schema.NullOr(StringId),
+    responsible: StringId,
     /** The values assigned to the fields of the step */
     values: Schema.Record(Schema.String, Schema.Json).check(
       Schema.isPropertyNames(Schema.toType(TrimmedNonEmptyString)),
@@ -303,52 +175,28 @@ export class Step extends Schema.Opaque<Step>()(
   }),
 ) {}
 
-class OpenStatus extends Schema.Opaque<OpenStatus>()(
+const TicketStatus = Schema.Union([
   Schema.Struct({
-    type: Schema.Literal("open"),
-    at: Schema.DateTimeUtcFromString,
+    type: Schema.Literals(["open", "done"]),
   }),
-) {}
-
-class DoneStatus extends Schema.Opaque<DoneStatus>()(
-  Schema.Struct({
-    type: Schema.Literal("done"),
-    at: Schema.DateTimeUtcFromString,
-  }),
-) {}
-
-class CancelledStatus extends Schema.Opaque<CancelledStatus>()(
   Schema.Struct({
     type: Schema.Literal("cancelled"),
-    at: Schema.DateTimeUtcFromString,
     reason: TrimmedNonEmptyString,
   }),
-) {}
+]);
 
-const TicketStatus = Schema.Union([OpenStatus, DoneStatus, CancelledStatus]);
-
-/** A run of a workflow. Nobody owns a ticket: its steps are owned. */
-const hasValidStepReferences = (ticket: {
-  readonly steps: ReadonlyArray<Step>;
-  readonly currentStepId: string | null;
-}) => {
-  const byId = new Map(ticket.steps.map((step) => [step.id, step]));
-  if (byId.size !== ticket.steps.length) return false;
-  if (ticket.currentStepId !== null && !byId.has(ticket.currentStepId)) return false;
-  return ticket.steps.every((step) => {
-    const seen = new Set([step.id]);
-    let parentId = step.parentStepId;
-    while (parentId !== null) {
-      if (seen.has(parentId)) return false;
-      seen.add(parentId);
-      const parent = byId.get(parentId);
-      if (parent === undefined) return false;
-      parentId = parent.parentStepId;
-    }
+/** Steps are appended on entry, so every parent precedes its children. */
+const hasValidStepReferences = (steps: ReadonlyArray<Step>) => {
+  const seen = new Set<string>();
+  return steps.every((step) => {
+    if (seen.has(step.id) || (step.parentStepId !== null && !seen.has(step.parentStepId)))
+      return false;
+    seen.add(step.id);
     return true;
   });
 };
 
+/** A run of a workflow. Nobody owns a ticket: its steps are owned. */
 export class Ticket extends Schema.Opaque<Ticket>()(
   Schema.Struct({
     id: StringId,
@@ -357,18 +205,18 @@ export class Ticket extends Schema.Opaque<Ticket>()(
     description: Schema.String,
     dueDate: Schema.NullOr(Schema.DateTimeUtcFromString),
     status: TicketStatus,
-    steps: Schema.Array(Step),
-    /** The step the ticket is in; null once done. */
-    currentStepId: Schema.NullOr(StringId),
+    steps: Schema.Array(Step).check(
+      Schema.makeFilter(hasValidStepReferences, {
+        expected: "unique steps following their parents",
+      }),
+    ),
     createdAt: Schema.DateTimeUtcFromString,
-    updatedAt: Schema.DateTimeUtcFromString,
-  }).check(
-    Schema.makeFilter(hasValidStepReferences, {
-      expected:
-        "unique steps with existing, acyclic parent references and a current step belonging to the ticket",
-    }),
-  ),
+  }),
 ) {}
+
+export const currentStep = (ticket: Ticket) =>
+  ticket.steps.find((step) => step.parentStepId === null && step.status.type !== "completed") ??
+  null;
 
 export class Comment extends Schema.Opaque<Comment>()(
   Schema.Struct({
@@ -380,94 +228,36 @@ export class Comment extends Schema.Opaque<Comment>()(
   }),
 ) {}
 
-const REFUSALS = [
-  "not_org_admin",
-  "not_workflow_admin",
-  "slug_taken",
-  "responsible_required",
-  "invalid_people_ref",
-  "no_steps",
-  "tickets_cannot_move",
-  "archive_instead_of_delete",
-  "last_admin",
-  "not_overseer",
-  "cannot_start_ticket",
-  "first_step_unassigned",
-  "not_step_responsible",
-  "workflow_archived",
-  "ticket_not_open",
-  "step_not_actionable",
-  "step_incomplete",
-  "reason_required",
-  "invalid_field_value",
-  "invalid_attachment",
-  "invalid_automations",
-] as const;
+const REFUSALS = {
+  not_workflow_admin: "Only the workflow's admins can do that.",
+  slug_taken: "Another workflow already has that slug.",
+  invalid_people_ref: "That person or agent can no longer be given work.",
+  no_steps: "The workflow has no steps yet.",
+  tickets_cannot_move:
+    "Some open tickets are in, or have passed, a step you removed or moved. Restore it, or finish or cancel those tickets first.",
+  archive_instead_of_delete: "A workflow with tickets can't be deleted. Archive it instead.",
+  last_admin: "A workflow needs at least one active admin.",
+  not_overseer: "Only the workflow's responsible and admins can do that.",
+  cannot_start_ticket: "You can't start tickets in this workflow.",
+  first_step_unassigned: "Assign the first step before starting a ticket.",
+  not_step_responsible: "Only the step's responsible can do that.",
+  workflow_archived: "This workflow is archived.",
+  ticket_not_open: "This ticket is no longer open.",
+  step_not_actionable: "This step can't do that right now.",
+  step_incomplete: "Fill in every field and get every sub-step approved first.",
+  reason_required: "Give a reason.",
+  invalid_field_value: "That value doesn't fit the field.",
+  invalid_attachment: "That file can't be attached here.",
+  invalid_automations: "Choose available agents and distinct automation identities.",
+};
 
 export class Refused extends Schema.TaggedError<Refused>()("WorkflowRefused", {
-  reason: Schema.Literals(REFUSALS),
+  reason: Schema.Literals(Struct.keys(REFUSALS)),
 }) {
   override get message(): string {
-    switch (this.reason) {
-      case "not_org_admin":
-        return "Only organization admins can do that.";
-      case "not_workflow_admin":
-        return "Only the workflow's admins can do that.";
-      case "slug_taken":
-        return "Another workflow already has that slug.";
-      case "responsible_required":
-        return "Choose who is responsible: they approve steps without a responsible of their own.";
-      case "invalid_people_ref":
-        return "That person or agent can no longer be given work.";
-      case "no_steps":
-        return "The workflow has no steps yet.";
-      case "tickets_cannot_move":
-        return "Some open tickets are in, or have passed, a step you removed or moved. Restore it, or finish or cancel those tickets first.";
-      case "archive_instead_of_delete":
-        return "A workflow with tickets can't be deleted. Archive it instead.";
-      case "last_admin":
-        return "A workflow needs at least one active admin.";
-      case "not_overseer":
-        return "Only the workflow's responsible and admins can do that.";
-      case "cannot_start_ticket":
-        return "You can't start tickets in this workflow.";
-      case "first_step_unassigned":
-        return "Assign the first step before starting a ticket.";
-      case "not_step_responsible":
-        return "Only the step's responsible can do that.";
-      case "workflow_archived":
-        return "This workflow is archived.";
-      case "ticket_not_open":
-        return "This ticket is no longer open.";
-      case "step_not_actionable":
-        return "This step can't do that right now.";
-      case "step_incomplete":
-        return "Fill in every field and get every sub-step approved first.";
-      case "reason_required":
-        return "Give a reason.";
-      case "invalid_field_value":
-        return "That value doesn't fit the field.";
-      case "invalid_automations":
-        return "Choose available agents and distinct automation identities.";
-      case "invalid_attachment":
-        return "That file can't be attached here.";
-    }
+    return REFUSALS[this.reason];
   }
 }
-
-export interface StepNode {
-  readonly step: StepDefinition;
-  readonly parentId: string | null;
-}
-
-const stepNodes = (
-  steps: ReadonlyArray<StepDefinition>,
-  parentId: string | null = null,
-): ReadonlyArray<StepNode> =>
-  steps.flatMap((step) => [{ step, parentId }, ...stepNodes(step.subSteps, step.id)]);
-
-export const findStep = (steps: ReadonlyArray<StepDefinition>, id: string): StepNode | null =>
-  stepNodes(steps).find((node) => node.step.id === id) ?? null;
 
 type Values = Step["values"];
 
@@ -477,8 +267,7 @@ const holdsData = (value: Schema.Json | undefined): boolean =>
   (typeof value !== "string" || value.trim() !== "") &&
   (!Array.isArray(value) || value.length > 0);
 
-export const GroupRowIds = Schema.UniqueArray(FieldPathSegment);
-const isRowIds = Schema.is(GroupRowIds);
+const isRowIds = Schema.is(Schema.UniqueArray(FieldPathSegment));
 
 export const rowIds = (value: Schema.Json | undefined): ReadonlyArray<string> =>
   isRowIds(value) ? value : [];
@@ -486,7 +275,7 @@ export const rowIds = (value: Schema.Json | undefined): ReadonlyArray<string> =>
 export const groupRows = (field: StepField, value: Schema.Json | undefined) =>
   field.type === "group" && field.repeatable ? rowIds(value) : [null];
 
-export const withinField = (path: string, id: string) => path === id || path.startsWith(`${id}.`);
+const withinField = (path: string, id: string) => path === id || path.startsWith(`${id}.`);
 
 export const resolveFieldPath = (
   fields: ReadonlyArray<StepField>,
@@ -518,25 +307,16 @@ export const resolveFieldPath = (
   return null;
 };
 
-const missingFields = (
-  fields: ReadonlyArray<StepField>,
-  values: Values,
-  prefix = "",
-  namePrefix = "",
-): ReadonlyArray<{ readonly key: string; readonly name: string }> =>
-  fields.flatMap((field) => {
+const fieldsComplete = (fields: ReadonlyArray<StepField>, values: Values, prefix = ""): boolean =>
+  fields.every((field) => {
     const path = prefix ? `${prefix}.${field.id}` : field.id;
-    const name = `${namePrefix}${field.label}`;
-    if (field.type !== "group") return holdsData(values[path]) ? [] : [{ key: path, name }];
+    if (field.type !== "group") return holdsData(values[path]);
     const rows = groupRows(field, values[path]);
-    if (rows.length === 0) return [{ key: path, name }];
-    return rows.flatMap((rowId, at) =>
-      missingFields(
-        field.fields,
-        values,
-        rowId === null ? path : `${path}.${rowId}`,
-        field.repeatable ? `${name} › Entry ${at + 1} › ` : `${name} › `,
-      ),
+    return (
+      rows.length > 0 &&
+      rows.every((rowId) =>
+        fieldsComplete(field.fields, values, rowId === null ? path : `${path}.${rowId}`),
+      )
     );
   });
 
@@ -598,33 +378,17 @@ export const hasInitialWork = (workflow: Workflow, definition: WorkflowDefinitio
   );
 };
 
-export const canStart = (
-  actor: WorkflowActor,
-  {
-    workflow,
-    definition,
-  }: { readonly workflow: Workflow; readonly definition: WorkflowDefinition },
-) =>
-  hasInitialWork(workflow, definition) &&
-  (workflow.defaultAssignments[definition.steps[0]!.id]?.assignee === actor.id ||
-    oversees(actor, workflow));
-
 /** A workflow must retain an active admin when its administrators change. */
 export const lastAdminRefusal = (activeAdminIds: ReadonlyArray<string>) =>
   activeAdminIds.length === 0 ? ("last_admin" as const) : null;
 
 /** Approval is a decision by the responsible person over an open ticket awaiting approval. */
-export const stepApprovalRefusal = (
-  actorId: string,
-  workflow: Workflow,
-  ticket: Ticket,
-  step: Step,
-) =>
+export const stepApprovalRefusal = (actorId: string, ticket: Ticket, step: Step) =>
   ticket.status.type !== "open"
     ? "ticket_not_open"
     : step.status.type !== "waiting_approval"
       ? "step_not_actionable"
-      : stepApprover(workflow, step) !== actorId
+      : step.responsible !== actorId
         ? "not_step_responsible"
         : null;
 
@@ -634,18 +398,18 @@ export const stepCompletionRefusal = (
   ticket: Ticket,
   step: Step,
 ) =>
-  (definition !== null && missingFields(definition.fields, step.values).length > 0) ||
+  !fieldsComplete(definition?.fields ?? [], step.values) ||
   ticket.steps.some((child) => child.parentStepId === step.id && child.status.type !== "completed")
     ? ("step_incomplete" as const)
     : null;
 
-const decodeDateFieldValue = Schema.decodeUnknownOption(FieldValueSchemas.date);
+const decodeDateFieldValue = Schema.decodeUnknownOption(Schema.DateTimeUtcFromString);
 const fieldValueValidators = {
-  text: Schema.is(FieldValueSchemas.text),
-  number: Schema.is(FieldValueSchemas.number),
-  boolean: Schema.is(FieldValueSchemas.boolean),
+  text: Schema.is(Schema.String),
+  number: Schema.is(Schema.Finite),
+  boolean: Schema.is(Schema.Boolean),
   date: (value: unknown) => Option.isSome(decodeDateFieldValue(value)),
-  file: Schema.is(FieldValueSchemas.file),
+  file: Schema.is(AttachmentId),
 };
 
 /** Checks stored JSON against the field's meaning, before attachment access checks or writes. */
@@ -694,14 +458,6 @@ export const stepPeopleOnEntry = (
   return { responsible: defaults?.responsible ?? null, assignee: defaults?.assignee ?? inherited };
 };
 
-export const withStepPeople = (step: Step, responsible: string, assignee: string | null): Step =>
-  responsible === step.responsible && assignee === step.assignee
-    ? step
-    : { ...step, responsible, assignee };
-
-export const stepApprover = (workflow: Workflow, step: Step) =>
-  step.responsible ?? workflow.responsible;
-
 export const stepInTicket = (ticket: Ticket, stepId: string | null) =>
   ticket.steps.find((step) => step.id === stepId) ?? null;
 
@@ -730,26 +486,6 @@ export const putTicketStep = (ticket: Ticket, step: Step): Ticket => {
   return { ...ticket, steps: index < 0 ? [...ticket.steps, step] : ticket.steps.with(index, step) };
 };
 
-/** The server supplies identity, time, and people resolved from current membership. */
-export const createStep = (
-  definition: StepDefinition,
-  id: string,
-  at: DateTime.Utc,
-  parentStepId: string | null,
-  assignee: string | null,
-  responsible: string,
-  automations: ReadonlyArray<StepAutomation> = [],
-): Step => ({
-  id,
-  stepDefinitionId: definition.id,
-  parentStepId,
-  status: { type: "working", at },
-  assignee,
-  responsible,
-  values: {},
-  automations,
-});
-
 /** Completing a child leaves its parent active; completing a root advances or finishes the ticket. */
 export const completeTicketStep = (
   ticket: Ticket,
@@ -762,10 +498,7 @@ export const completeTicketStep = (
   const index = definitions.findIndex((definition) => definition.id === step.stepDefinitionId);
   const next = index < 0 ? null : (definitions[index + 1] ?? null);
   return {
-    ticket:
-      next === null
-        ? { ...completed, status: { type: "done" as const, at }, currentStepId: null }
-        : completed,
+    ticket: next === null ? { ...completed, status: { type: "done" as const } } : completed,
     next,
   };
 };
@@ -777,9 +510,11 @@ export const ticketStartRefusal = (
 ) => {
   const first = definition.steps[0];
   if (first === undefined) return "no_steps";
-  if (workflow.archivedAt !== null) return "workflow_archived";
+  if (workflow.isArchived) return "workflow_archived";
   if (!hasInitialWork(workflow, definition)) return "first_step_unassigned";
-  return canStart(actor, { workflow, definition }) ? null : "cannot_start_ticket";
+  return workflow.defaultAssignments[first.id]?.assignee === actor.id || oversees(actor, workflow)
+    ? null
+    : "cannot_start_ticket";
 };
 
 export const definitionChangeRefusal = (ticket: Ticket, steps: ReadonlyArray<StepDefinition>) =>
@@ -795,9 +530,7 @@ export const stepAfterDefinitionChange = (step: Step, definition: StepDefinition
   const values = Object.fromEntries(
     Object.entries(step.values).filter(([path]) => fieldPathSurvives(definition, path)),
   );
-  return Object.keys(values).length === Object.keys(step.values).length
-    ? step
-    : { ...step, values };
+  return { ...step, values };
 };
 
 /** Missing subtrees are entered together; completed parents retain their historical children. */
@@ -825,27 +558,3 @@ export const needsWorkAfterDefinitionChange = (
   step.status.type === "waiting_approval" &&
   definition !== null &&
   stepCompletionRefusal(definition, ticket, step) !== null;
-
-export const responsibleChangeRefusal = (
-  actor: WorkflowActor,
-  workflow: Workflow,
-  ticket: Ticket,
-  step: Step,
-) =>
-  ticket.status.type !== "open"
-    ? "ticket_not_open"
-    : !oversees(actor, workflow) && step.responsible !== actor.id
-      ? "not_overseer"
-      : step.status.type === "completed"
-        ? "step_not_actionable"
-        : null;
-
-export const workflowAdminDeactivationRefusal = (
-  workflow: Workflow,
-  userId: string,
-  activeAdmins: ReadonlyArray<string>,
-) =>
-  workflow.adminUserIds.includes(userId) &&
-  lastAdminRefusal(activeAdmins.filter((id) => id !== userId)) !== null
-    ? ("last_workflow_admin" as const)
-    : null;

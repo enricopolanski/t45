@@ -1,15 +1,17 @@
-import { StepField, StepDefinition, WorkflowDefinition } from "@t45/contracts/models/Workflow";
+import {
+  type StepField,
+  type StepDefinition,
+  WorkflowDefinition,
+} from "@t45/contracts/models/Workflow";
 import * as Schema from "effect/Schema";
 
 import { randomUUID } from "../../lib/utils";
 
 export type DraftField = typeof StepField.Encoded;
 export type FieldType = DraftField["type"];
-export type DraftStep = Omit<typeof StepDefinition.Encoded, "subSteps"> & {
-  readonly subSteps: ReadonlyArray<DraftStep>;
-};
+export type DraftStep = typeof StepDefinition.Encoded;
 
-const decodeSteps = Schema.decodeUnknownSync(WorkflowDefinition.fields.steps);
+export const cleanSteps = Schema.decodeSync(WorkflowDefinition.fields.steps);
 
 export const FIELD_TYPES: Record<FieldType, string> = {
   text: "Text",
@@ -52,22 +54,6 @@ export function retypeField(field: DraftField, type: FieldType): DraftField {
   return { ...base, type };
 }
 
-/** The field with its label and options trimmed, and its group's children cleaned. */
-function cleanField(field: DraftField): DraftField {
-  const label = field.label.trim();
-  if (field.type === "select") {
-    return {
-      ...field,
-      label,
-      options: field.options.map((option) => option.trim()),
-    };
-  }
-  if (field.type === "group") {
-    return { ...field, label, fields: field.fields.map(cleanField) };
-  }
-  return { ...field, label };
-}
-
 export function blankStep(): DraftStep {
   return {
     id: newKey("step"),
@@ -104,20 +90,17 @@ export function listEntries<A>(list: ReadonlyArray<A>, onChange: (list: Readonly
   }));
 }
 
-/**
- * The step or sub-step with `id`: the steps leading to it from the workflow's own, itself last;
- * null when it's gone.
- */
-export function stepPath(steps: ReadonlyArray<DraftStep>, id: string) {
-  const find = (entries: ReadonlyArray<DraftStep>): ReadonlyArray<DraftStep> | null => {
-    for (const step of entries) {
-      if (step.id === id) return [step];
-      const below = find(step.subSteps);
-      if (below !== null) return [step, ...below];
-    }
-    return null;
-  };
-  return find(steps);
+/** The steps leading to `id`, itself last; null when it's gone. */
+export function stepPath(
+  steps: ReadonlyArray<DraftStep>,
+  id: string,
+): ReadonlyArray<DraftStep> | null {
+  for (const step of steps) {
+    if (step.id === id) return [step];
+    const below = stepPath(step.subSteps, id);
+    if (below !== null) return [step, ...below];
+  }
+  return null;
 }
 
 /** The steps with the step or sub-step `id` replaced by `update` of it. */
@@ -129,15 +112,4 @@ export function updateStep(
   const visit = (step: DraftStep): DraftStep =>
     step.id === id ? update(step) : { ...step, subSteps: step.subSteps.map(visit) };
   return steps.map(visit);
-}
-
-/** The steps with names and options trimmed, options kept only on select fields, at every depth. */
-export function cleanSteps(steps: ReadonlyArray<DraftStep>) {
-  const trimmed = (step: DraftStep): DraftStep => ({
-    ...step,
-    name: step.name.trim(),
-    fields: step.fields.map(cleanField),
-    subSteps: step.subSteps.map(trimmed),
-  });
-  return decodeSteps(steps.map(trimmed));
 }

@@ -13,8 +13,7 @@ export const notifications = apiQuery("notifications.list")(undefined).pipe(
 const startable = apiQuery("workflows.listStartableInstances")(undefined);
 
 export const useMyWork = () => useLoaded(myWork).sections;
-export const useStartableWorkflows = () =>
-  useLoaded(startable).map((instance) => instance.workflow);
+export const useStartableWorkflows = () => useLoaded(startable);
 
 export function workChanged() {
   appAtomRegistry.refresh(myWork);

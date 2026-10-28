@@ -149,7 +149,7 @@ function useOpenBoards() {
         if (!current) return;
         setBoards(
           workflows.filter(
-            (entry) => entry.workflow.archivedAt === null && entry.definition.steps.length > 0,
+            (entry) => !entry.workflow.isArchived && entry.definition.steps.length > 0,
           ),
         );
       },

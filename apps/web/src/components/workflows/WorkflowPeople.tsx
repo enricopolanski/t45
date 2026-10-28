@@ -258,7 +258,7 @@ export function WorkflowDangerZone({ detail, busy, run }: Editing) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const { workflow } = detail;
-  const archived = workflow.archivedAt !== null;
+  const archived = workflow.isArchived;
   const remove = () => {
     setConfirmingDelete(false);
     setDeleting(true);
