@@ -3,7 +3,6 @@ import * as DateTime from "effect/DateTime";
 import type { Task } from "./Task.ts";
 
 import {
-  TextField,
   type Step,
   type StepDefinition,
   type Ticket,
@@ -12,7 +11,7 @@ import {
   automationsSubmitted,
   childSteps,
   completeTicketStep,
-  createStep,
+  currentStep,
   definitionChangeRefusal,
   needsWorkAfterDefinitionChange,
   putTicketStep,
@@ -33,11 +32,8 @@ const workflow: Workflow = {
   adminUserIds: ["admin01", "admin02"],
   defaultAssignments: {},
   slug: null,
-  isDefault: false,
   isPublic: false,
-  archivedAt: null,
-  createdAt: at,
-  updatedAt: at,
+  isArchived: false,
 };
 const definition = (id: string, subSteps: ReadonlyArray<StepDefinition> = []): StepDefinition => ({
   id,
@@ -66,18 +62,25 @@ it("requires every automation to submit before review", () => {
   assert.isTrue(automationsSubmitted(entries, tasks));
 });
 const root = definition("root001");
-const step = createStep(root, "step001", at, null, "worker01", "owner01");
+const step: Step = {
+  id: "step001",
+  stepDefinitionId: root.id,
+  parentStepId: null,
+  status: { type: "working", at },
+  assignee: "worker01",
+  responsible: "owner01",
+  values: {},
+  automations: [],
+};
 const ticket: Ticket = {
   id: "ticket01",
   workflowId: workflow.id,
   title: "Review",
   description: "",
   dueDate: null,
-  status: { type: "open", at },
+  status: { type: "open" },
   steps: [step],
-  currentStepId: step.id,
   createdAt: at,
-  updatedAt: at,
 };
 
 describe("step people", () => {
@@ -118,9 +121,7 @@ describe("step people", () => {
       id: workflow.definitionId,
       name: "Review",
       steps: [root],
-      archivedAt: null,
-      createdAt: at,
-      updatedAt: at,
+      isArchived: false,
     };
     assert.equal(
       ticketStartRefusal({ id: "admin01", isOrgAdmin: true }, workflow, blueprint),
@@ -146,15 +147,20 @@ describe("step people", () => {
 describe("ticket progression", () => {
   it("completing a child leaves its parent active; the last root finishes the ticket", () => {
     const childDefinition = definition("child01");
-    const child = createStep(childDefinition, "childstep01", at, step.id, "worker01", "owner01");
+    const child = {
+      ...step,
+      id: "childstep01",
+      stepDefinitionId: childDefinition.id,
+      parentStepId: step.id,
+    };
     const withChild = putTicketStep(ticket, child);
     const completedChild = completeTicketStep(withChild, [root], child, at);
-    assert.equal(completedChild.ticket.currentStepId, step.id);
+    assert.equal(currentStep(completedChild.ticket)?.id, step.id);
     assert.equal(completedChild.ticket.status.type, "open");
     assert.equal(completedChild.next, null);
     const completedRoot = completeTicketStep(completedChild.ticket, [root], step, at);
     assert.equal(completedRoot.ticket.status.type, "done");
-    assert.equal(completedRoot.ticket.currentStepId, null);
+    assert.equal(currentStep(completedRoot.ticket), null);
   });
 
   it("the next root inherits the completed step's assignee unless its own default overrides it", () => {
@@ -163,6 +169,8 @@ describe("ticket progression", () => {
     assert.equal(result.ticket.status.type, "open");
     assert.equal(result.ticket.steps[0]?.status.type, "completed");
     assert.equal(result.next?.id, next.id);
+    const entered = { ...step, id: "nextstep01", stepDefinitionId: next.id };
+    assert.equal(currentStep(putTicketStep(result.ticket, entered)), entered);
     assert.equal(stepPeopleOnEntry(workflow, next, step.assignee).assignee, step.assignee);
   });
 });
@@ -189,7 +197,12 @@ describe("changing a shared definition", () => {
       additions.map((entry) => entry.definition.id),
       [childDefinition.id],
     );
-    const child = createStep(childDefinition, "childstep01", at, step.id, "worker01", "owner01");
+    const child = {
+      ...step,
+      id: "childstep01",
+      stepDefinitionId: childDefinition.id,
+      parentStepId: step.id,
+    };
     const changedTicket = putTicketStep(waitingTicket, child);
     assert.equal(needsWorkAfterDefinitionChange(changedTicket, waiting, changedRoot), true);
     const complete = completeTicketStep(changedTicket, [changedRoot], child, at).ticket;
@@ -201,9 +214,11 @@ describe("changing a shared definition", () => {
   });
 
   it("removes values only for fields removed from the definition", () => {
-    const fields = [new TextField({ id: "kept001", label: "Kept", type: "text" })];
     const withValues = { ...step, values: { kept001: "retained", removed01: "obsolete" } };
-    const changed = { ...root, fields };
+    const changed: StepDefinition = {
+      ...root,
+      fields: [{ id: "kept001", label: "Kept", type: "text" }],
+    };
     assert.deepEqual(stepAfterDefinitionChange(withValues, changed).values, {
       kept001: "retained",
     });

@@ -66,7 +66,7 @@ export function WorkflowBoardPage({ workflowId }: { readonly workflowId: string 
       title={board?.workflow.name ?? "Board"}
       width="full"
       actions={
-        board !== null && board.workflow.archivedAt === null ? (
+        board !== null && !board.workflow.isArchived ? (
           <NewItemDialog workflow={board.workflow} />
         ) : null
       }

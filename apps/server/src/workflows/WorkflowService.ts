@@ -14,20 +14,17 @@ import {
 import { generateId } from "@t45/contracts/models/primitives";
 import { Refused as UserRefused } from "@t45/contracts/models/User";
 import {
-  GroupRowIds,
   type StepAutomation,
   automationsSubmitted,
   resolveResponsible,
   resolveAssignee,
   stepPeopleOnEntry,
-  withStepPeople,
-  stepApprover,
   stepInTicket,
   childSteps,
   ancestorSteps,
   putTicketStep,
-  createStep,
   completeTicketStep,
+  currentStep,
   ticketStartRefusal,
   definitionChangeRefusal,
   canUpdateDefinition,
@@ -35,14 +32,11 @@ import {
   stepAfterDefinitionChange,
   subStepsToEnter,
   needsWorkAfterDefinitionChange,
-  responsibleChangeRefusal,
-  workflowAdminDeactivationRefusal,
   fieldValueRefusal,
   type WorkflowActor,
   findStep,
   rowIds,
   groupRows,
-  withinField,
   resolveFieldPath,
   carriedFields,
   isActionable,
@@ -50,12 +44,11 @@ import {
   isAdmin,
   oversees,
   isInvolved,
-  canStart,
   canViewTicket,
   stepApprovalRefusal,
   stepCompletionRefusal,
   lastAdminRefusal,
-  type Step,
+  Step,
   type StepDefinition,
   type StepField,
   type Ticket,
@@ -63,16 +56,11 @@ import {
   type WorkflowDefinition,
   Refused as WorkflowRefused,
 } from "@t45/contracts/models/Workflow";
-import { AgentBrief, STEP_TOOL_NAMES, StepToolCall } from "@t45/contracts/resources/AgentTools";
+import { STEP_TOOL_NAMES, StepToolCall } from "@t45/contracts/resources/AgentTools";
 import type { AssignmentSection, AssignmentView } from "@t45/contracts/resources/Assignments";
 import { NotFound } from "@t45/contracts/resources/errors";
 import type { NotificationView } from "@t45/contracts/resources/Notifications";
-import type {
-  StepFileView,
-  StepSummaryView,
-  TicketSummaryView,
-  WorkflowErrors,
-} from "@t45/contracts/resources/Workflows";
+import type { FieldView, TicketSummaryView } from "@t45/contracts/resources/Workflows";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -92,76 +80,12 @@ import { WorkflowRepository } from "./WorkflowRepository.ts";
 type WorkflowRpc = RpcGroup.Rpcs<typeof Workflows>;
 type Payload<Tag extends string> = Rpc.Payload<Rpc.ExtractTag<WorkflowRpc, `workflows.${Tag}`>>;
 
-type Values = Step["values"];
-const decodeRowIds = Schema.decodeUnknownEffect(GroupRowIds);
+const toFile = ({ id, name }: Attachment) => ({ id, name });
 
-type FieldTree<X> = X & {
-  readonly key: string;
-  readonly label: string;
-  readonly description: string;
-  readonly type: StepField["type"];
-  readonly options: ReadonlyArray<string>;
-  readonly value: Schema.Json;
-  readonly repeatable: boolean;
-  readonly rows: ReadonlyArray<{
-    readonly id: string | null;
-    readonly fields: ReadonlyArray<FieldTree<X>>;
-  }>;
-};
-
-const fieldTrees = <X, E, R>(
-  fields: ReadonlyArray<StepField>,
-  prefix: string,
-  values: Values,
-  extra: (field: StepField, value: Schema.Json | undefined) => Effect.Effect<X, E, R>,
-): Effect.Effect<Array<FieldTree<X>>, E, R> =>
-  Effect.forEach(fields, (field) =>
-    Effect.gen(function* () {
-      const path = prefix ? `${prefix}.${field.id}` : field.id;
-      const value = values[path];
-      const rows =
-        field.type === "group"
-          ? yield* Effect.forEach(groupRows(field, value), (rowId) =>
-              Effect.map(
-                fieldTrees(field.fields, rowId === null ? path : `${path}.${rowId}`, values, extra),
-                (children) => ({ id: rowId, fields: children }),
-              ),
-            )
-          : [];
-      return {
-        ...(yield* extra(field, value)),
-        key: path,
-        label: field.label,
-        description: field.description ?? "",
-        type: field.type,
-        options: field.type === "select" ? field.options : [],
-        value: field.type === "group" ? null : (value ?? null),
-        repeatable: field.type === "group" && field.repeatable,
-        rows,
-      };
-    }),
-  );
-
-const stepSummaryOf = (step: Step): StepSummaryView => ({
-  id: step.id,
-  stepDefinitionId: step.stepDefinitionId,
-  parentStepId: step.parentStepId,
-  status: step.status,
-  assignee: step.assignee,
-  responsible: step.responsible,
+const summaryOf = (ticket: Ticket): TicketSummaryView => ({
+  ...ticket,
+  currentStep: currentStep(ticket),
 });
-
-const summaryOf = (ticket: Ticket): TicketSummaryView => {
-  const current = ticket.steps.find((step) => step.id === ticket.currentStepId);
-  return {
-    id: ticket.id,
-    workflowId: ticket.workflowId,
-    title: ticket.title,
-    dueDate: ticket.dueDate,
-    status: ticket.status,
-    currentStep: current === undefined ? null : stepSummaryOf(current),
-  };
-};
 
 const millis = (at: DateTime.Utc | null) => (at === null ? Infinity : DateTime.toEpochMillis(at));
 
@@ -178,33 +102,6 @@ const stepFileForChat = (file: Attachment) => ({
   mimeType: STEP_FILE_TYPE,
   sizeBytes: file.sizeBytes,
 });
-
-const encodeBrief = Schema.encodeSync(AgentBrief);
-
-const briefJson = (brief: AgentBrief) =>
-  ["```json", JSON.stringify(encodeBrief(brief), null, 2), "```"].join("\n");
-
-const target = (brief: AgentBrief) =>
-  brief.parents.length === 0
-    ? `the step "${brief.stepName}"`
-    : `the sub-step "${brief.stepName}" of ${brief.parents.map((parent) => `"${parent.name}"`).join(" › ")}`;
-
-const paragraphs = (...parts: ReadonlyArray<string>) => parts.filter(Boolean).join("\n\n");
-
-const assignedPrompt = (brief: AgentBrief) =>
-  paragraphs(
-    `You contribute to ${target(brief)} of "${brief.ticketTitle}" in the workflow "${brief.workflowName}". The step is below as JSON: its instructions, the fields of earlier steps it reads, its own fields, its comments and its files. That is all you can see of this ticket.`,
-    "Fill the step's fields with step_set_field, report progress or results with step_comment, and attach files with step_attach. When the work is complete, call step_done. If you cannot complete it, fill what you can, then call step_give_up with a note on what is missing and why: the responsible person can take over. Do not stop without calling one of them.",
-    "You work in a folder of your own. Follow AGENTS.md if it is there.",
-    brief.instructions.trim() ? `Instructions for this step:\n${brief.instructions.trim()}` : "",
-    briefJson(brief),
-  );
-
-const handBackPrompt = (brief: AgentBrief) =>
-  paragraphs(
-    `The step "${brief.stepName}" is back with you; its latest comments say why. Here it is as it stands now. Finish it and call step_done, or fill what you can and call step_give_up with a note on what is missing.`,
-    briefJson(brief),
-  );
 
 const refusalPrompt = (tool: string, reason: string) =>
   `Your ${tool} call was refused: ${reason.replace(/\.$/u, "")}.`;
@@ -253,6 +150,40 @@ const make = Effect.gen(function* () {
   const users = yield* UserRepository;
   const agents = yield* AgentRepository;
   const files = yield* AttachmentRepository;
+  const fieldTrees = (
+    fields: ReadonlyArray<StepField>,
+    prefix: string,
+    values: Step["values"],
+  ): Effect.Effect<Array<FieldView>> =>
+    Effect.forEach(fields, (field) =>
+      Effect.gen(function* () {
+        const path = prefix ? `${prefix}.${field.id}` : field.id;
+        const value = values[path];
+        const rows =
+          field.type === "group"
+            ? yield* Effect.forEach(groupRows(field, value), (rowId) =>
+                Effect.map(
+                  fieldTrees(field.fields, rowId === null ? path : `${path}.${rowId}`, values),
+                  (children) => ({ id: rowId, fields: children }),
+                ),
+              )
+            : [];
+        const file =
+          field.type === "file" && typeof value === "string" ? yield* files.get(value) : null;
+        return {
+          file: file === null ? null : toFile(file),
+          key: path,
+          label: field.label,
+          description: field.description ?? "",
+          type: field.type,
+          options: field.type === "select" ? field.options : [],
+          value: field.type === "group" ? null : (value ?? null),
+          repeatable: field.type === "group" && field.repeatable,
+          rows,
+        };
+      }),
+    );
+
   const tasks = yield* TaskService;
   const { transaction } = tickets;
 
@@ -321,13 +252,11 @@ const make = Effect.gen(function* () {
   });
 
   const stepResponsible = Effect.fnUntraced(function* (workflow: Workflow, userId: string | null) {
-    const candidates = [
-      ...new Set([
-        ...workflow.adminUserIds,
-        workflow.responsible,
-        ...(userId === null ? [] : [userId]),
-      ]),
-    ];
+    const candidates = new Set([
+      ...workflow.adminUserIds,
+      workflow.responsible,
+      userId ?? workflow.responsible,
+    ]);
     const active = new Set(yield* Effect.filter(candidates, isActivePerson));
     const resolved = resolveResponsible(workflow, userId, active);
     for (const notice of resolved.notices) yield* tellAdmins(workflow, notice);
@@ -355,7 +284,9 @@ const make = Effect.gen(function* () {
     const assignee = keepAssignee
       ? step.assignee
       : yield* liveAssignee(workflow, step.assignee, responsible);
-    return withStepPeople(step, responsible, assignee);
+    return responsible === step.responsible && assignee === step.assignee
+      ? step
+      : { ...step, responsible, assignee };
   });
 
   const definitionOf = (work: Work, step: Step) =>
@@ -364,22 +295,15 @@ const make = Effect.gen(function* () {
   const nameOf = (work: Work, step: Step) => definitionOf(work, step)?.name ?? work.workflow.name;
 
   const stepIn = (work: Work, stepId: string | null) => stepInTicket(work.ticket, stepId);
-  const childrenOf = (work: Work, step: Step) =>
-    childSteps(work.ticket, work.definition.steps, step);
-  const ancestorsOf = (work: Work, step: Step) => ancestorSteps(work.ticket, step);
   const putStep = (work: Work, step: Step) => {
     work.ticket = putTicketStep(work.ticket, step);
   };
 
-  const save = (work: Work) =>
-    Effect.gen(function* () {
-      yield* tickets.update({ ...work.ticket, updatedAt: yield* DateTime.now });
-    });
+  const save = (work: Work) => tickets.update(work.ticket);
   const workOf = Effect.fnUntraced(function* (ticket: Ticket) {
     const workflow = yield* found(workflows.get(ticket.workflowId));
     const definition = yield* found(definitions.get(workflow.definitionId));
-    const work: Work = { workflow, definition, ticket };
-    return work;
+    return { workflow, definition, ticket };
   });
 
   const loadTicket = (ticketId: string) =>
@@ -457,14 +381,9 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const fileName = (field: StepField, value: Schema.Json | undefined) =>
-    field.type === "file" && typeof value === "string"
-      ? files.get(value).pipe(Effect.map((file) => ({ fileName: file?.name ?? null })))
-      : Effect.succeed({ fileName: null });
-
   const brief = Effect.fnUntraced(function* (work: Work, step: Step) {
     const definition = definitionOf(work, step);
-    const containing = ancestorsOf(work, step);
+    const containing = ancestorSteps(work.ticket, step);
     const root = containing.at(-1) ?? step;
     const inputs = [];
     for (const { source, definition: from, field } of carriedFields(
@@ -472,7 +391,7 @@ const make = Effect.gen(function* () {
       root.stepDefinitionId,
       work.ticket.steps,
     )) {
-      const [view] = yield* fieldTrees([field], "", source.values, fileName);
+      const [view] = yield* fieldTrees([field], "", source.values);
       if (view !== undefined) inputs.push({ stepName: from.name, ...view });
     }
     return {
@@ -486,36 +405,49 @@ const make = Effect.gen(function* () {
         instructions: definitionOf(work, parent)?.instructions ?? "",
       })),
       inputs,
-      fields: yield* fieldTrees(definition?.fields ?? [], "", step.values, fileName),
+      fields: yield* fieldsOf(work, step),
       comments: (yield* tickets.comments(step.id)).map(({ author, body, createdAt }) => ({
         author,
         body,
-        createdAt,
+        createdAt: DateTime.formatIso(createdAt),
       })),
       attachments: (yield* files.forStep(step.id))
         .filter((file) => file.fieldKey === null)
-        .map((file) => ({ name: file.name })),
-    } satisfies AgentBrief;
+        .map(toFile),
+    };
   });
 
-  const chatFiles = Effect.fnUntraced(function* (work: Work, step: Step) {
-    const root = ancestorsOf(work, step).at(-1) ?? step;
-    const ids = new Set<string>();
-    for (const { source, definition, field } of carriedFields(
-      work.definition.steps,
-      root.stepDefinitionId,
-      work.ticket.steps,
-    )) {
-      for (const [path, value] of Object.entries(source.values)) {
-        if (!withinField(path, field.id) || typeof value !== "string") continue;
-        if (resolveFieldPath(definition.fields, path)?.field.type === "file") ids.add(value);
-      }
-    }
-    for (const file of yield* files.forStep(step.id)) {
-      if (file.fieldKey === null) ids.add(file.id);
-    }
-    return (yield* files.forIds([...ids])).map(stepFileForChat);
-  });
+  type AgentBrief = Effect.Success<ReturnType<typeof brief>>;
+
+  const briefJson = (brief: AgentBrief) =>
+    ["```json", JSON.stringify(brief, null, 2), "```"].join("\n");
+
+  const target = (brief: AgentBrief) =>
+    brief.parents.length === 0
+      ? `the step "${brief.stepName}"`
+      : `the sub-step "${brief.stepName}" of ${brief.parents.map((parent) => `"${parent.name}"`).join(" › ")}`;
+
+  const paragraphs = (...parts: ReadonlyArray<string>) => parts.filter(Boolean).join("\n\n");
+
+  const assignedPrompt = (brief: AgentBrief) =>
+    paragraphs(
+      `You contribute to ${target(brief)} of "${brief.ticketTitle}" in the workflow "${brief.workflowName}". The step is below as JSON: its instructions, the fields of earlier steps it reads, its own fields, its comments and its files. That is all you can see of this ticket.`,
+      "Fill the step's fields with step_set_field, report progress or results with step_comment, and attach files with step_attach. When the work is complete, call step_done. If you cannot complete it, fill what you can, then call step_give_up with a note on what is missing and why: the responsible person can take over. Do not stop without calling one of them.",
+      "You work in a folder of your own. Follow AGENTS.md if it is there.",
+      brief.instructions.trim() ? `Instructions for this step:\n${brief.instructions.trim()}` : "",
+      briefJson(brief),
+    );
+
+  const handBackPrompt = (brief: AgentBrief) =>
+    paragraphs(
+      `The step "${brief.stepName}" is back with you; its latest comments say why. Here it is as it stands now. Finish it and call step_done, or fill what you can and call step_give_up with a note on what is missing.`,
+      briefJson(brief),
+    );
+
+  const fieldFiles = (fields: ReadonlyArray<FieldView>): ReadonlyArray<string> =>
+    fields.flatMap((field) =>
+      field.file === null ? field.rows.flatMap((row) => fieldFiles(row.fields)) : [field.file.id],
+    );
 
   const taskInput = Effect.fnUntraced(function* (
     work: Work,
@@ -529,7 +461,9 @@ const make = Effect.gen(function* () {
         again ? handBackPrompt(full) : assignedPrompt(full),
         `Your automation: ${entry.instructions}. Other automations may work on this step at the same time. step_done submits your work for review only once every required field and sub-step of the shared step is complete.`,
       ),
-      attachments: yield* chatFiles(work, step),
+      attachments: (yield* files.forIds([
+        ...new Set([...fieldFiles(full.inputs), ...full.attachments.map((file) => file.id)]),
+      ])).map(stepFileForChat),
     };
   });
   const taskFailed = Effect.fnUntraced(function* (
@@ -547,7 +481,7 @@ const make = Effect.gen(function* () {
     });
     yield* notify({
       kind: "agent_failed",
-      to: stepApprover(work.workflow, step),
+      to: step.responsible,
       workflow: work.workflow,
       step,
       actorId: null,
@@ -621,15 +555,15 @@ const make = Effect.gen(function* () {
     const requested = stepPeopleOnEntry(work.workflow, definition, inherited);
     const responsible = yield* stepResponsible(work.workflow, requested.responsible);
     const assignee = yield* liveAssignee(work.workflow, requested.assignee, responsible);
-    const step = createStep(
-      definition,
-      generateId(),
-      yield* DateTime.now,
-      parent?.id ?? null,
+    const step = Step.make({
+      stepDefinitionId: definition.id,
+      status: { type: "working", at: yield* DateTime.now },
+      parentStepId: parent?.id ?? null,
       assignee,
       responsible,
-      work.workflow.defaultAssignments[definition.id]?.automations ?? [],
-    );
+      automations: work.workflow.defaultAssignments[definition.id]?.automations ?? [],
+      values: {},
+    });
     putStep(work, step);
     yield* startWork(work, step, actorId);
     for (const child of definition.subSteps) {
@@ -651,8 +585,7 @@ const make = Effect.gen(function* () {
     );
     work.ticket = completed.ticket;
     if (completed.next === null) return;
-    const entered = yield* enterStep(work, completed.next, null, step.assignee, actorId);
-    work.ticket = { ...work.ticket, currentStepId: entered.id };
+    yield* enterStep(work, completed.next, null, step.assignee, actorId);
   });
 
   const requireComplete = (work: Work, step: Step) => {
@@ -686,23 +619,18 @@ const make = Effect.gen(function* () {
     return Object.fromEntries(Object.entries(step.values).filter(([key]) => !removed(key)));
   });
 
-  const requireFits = (ticket: Ticket, steps: ReadonlyArray<StepDefinition>) => {
-    const refusal = definitionChangeRefusal(ticket, steps);
-    return refusal === null ? Effect.void : Effect.fail(new WorkflowRefused({ reason: refusal }));
-  };
-
   const moveOntoSteps = Effect.fnUntraced(function* (work: Work, actorId: string) {
-    yield* requireFits(work.ticket, work.definition.steps);
+    const refusal = definitionChangeRefusal(work.ticket, work.definition.steps);
+    if (refusal !== null) return yield* new WorkflowRefused({ reason: refusal });
     for (const step of work.ticket.steps) {
       const definition = definitionOf(work, step);
-      const changed = stepAfterDefinitionChange(step, definition);
-      if (changed !== step) putStep(work, changed);
+      putStep(work, stepAfterDefinitionChange(step, definition));
       for (const file of yield* files.forStep(step.id)) {
         if (file.fieldKey !== null && !fieldPathSurvives(definition, file.fieldKey))
           yield* files.detach(file.id);
       }
     }
-    const current = stepIn(work, work.ticket.currentStepId);
+    const current = currentStep(work.ticket);
     const definition = current === null ? null : definitionOf(work, current);
     if (current !== null && definition !== null) {
       for (const missing of subStepsToEnter(work.ticket, current, definition)) {
@@ -726,29 +654,10 @@ const make = Effect.gen(function* () {
     }
     yield* save(work);
     for (const step of reworked) yield* startWork(work, step, actorId, true);
-    return reworked;
   });
 
-  const toFile = (step: Step, file: Attachment): StepFileView => ({
-    id: file.id,
-    name: file.name,
-    mimeType: file.mimeType,
-    sizeBytes: file.sizeBytes,
-    uploader: file.uploader,
-    createdAt: file.createdAt,
-    fieldKey: file.fieldKey,
-    canRemove: file.stepId === step.id && (file.fieldKey === null || isActionable(step)),
-  });
-
-  const fieldsOf = (work: Work, step: Step) => {
-    const withFile = (field: StepField, value: Schema.Json | undefined) =>
-      field.type === "file" && typeof value === "string"
-        ? files
-            .get(value)
-            .pipe(Effect.map((file) => ({ file: file === null ? null : toFile(step, file) })))
-        : Effect.succeed({ file: null });
-    return fieldTrees(definitionOf(work, step)?.fields ?? [], "", step.values, withFile);
-  };
+  const fieldsOf = (work: Work, step: Step) =>
+    fieldTrees(definitionOf(work, step)?.fields ?? [], "", step.values);
 
   const listInstances = Effect.fnUntraced(function* (actorId: string) {
     const actor = yield* actorOf(actorId);
@@ -761,8 +670,11 @@ const make = Effect.gen(function* () {
 
   const listStartableInstances = Effect.fnUntraced(function* (actorId: string) {
     const actor = yield* actorOf(actorId);
-    const running = (yield* workflows.list).filter((workflow) => workflow.archivedAt === null);
-    return (yield* instancesOf(running)).filter((instance) => canStart(actor, instance));
+    return (yield* instancesOf(yield* workflows.list))
+      .filter(
+        ({ workflow, definition }) => ticketStartRefusal(actor, workflow, definition) === null,
+      )
+      .map(({ workflow }) => workflow);
   });
 
   const getInstance = Effect.fnUntraced(function* (actorId: string, idOrSlug: string) {
@@ -782,20 +694,16 @@ const make = Effect.gen(function* () {
     return {
       workflow,
       definition: yield* found(definitions.get(workflow.definitionId)),
-      canManage: isAdmin(actor, workflow),
       tickets: (yield* tickets.listOpen(workflow.id)).map(summaryOf),
     };
   });
 
   const createDefinition = Effect.fnUntraced(function* (input: Payload<"createDefinition">) {
-    const at = yield* DateTime.now;
     const definition: WorkflowDefinition = {
       id: generateId(),
       name: input.name,
       steps: input.steps ?? [],
-      archivedAt: null,
-      createdAt: at,
-      updatedAt: at,
+      isArchived: false,
     };
     yield* definitions.insert(definition);
     return { definitionId: definition.id };
@@ -803,39 +711,25 @@ const make = Effect.gen(function* () {
 
   const updateDefinition = Effect.fnUntraced(function* (
     actorId: string,
-    input: Payload<"updateDefinition">,
+    { definitionId, ...changes }: Payload<"updateDefinition">,
   ) {
-    const definition = yield* found(definitions.get(input.definitionId));
+    const definition = yield* found(definitions.get(definitionId));
     const actor = yield* actorOf(actorId);
     const running = yield* workflows.listForDefinition(definition.id);
     if (!canUpdateDefinition(actor, running)) {
       return yield* new WorkflowRefused({ reason: "not_workflow_admin" });
     }
-    const at = yield* DateTime.now;
     const next: WorkflowDefinition = {
       ...definition,
-      name: input.name ?? definition.name,
-      steps: input.steps ?? definition.steps,
-      archivedAt:
-        input.isArchived === undefined
-          ? definition.archivedAt
-          : input.isArchived
-            ? (definition.archivedAt ?? at)
-            : null,
-      updatedAt: at,
+      ...changes,
     };
-    const moving: Array<Work> = [];
-    if (input.steps !== undefined) {
+    yield* definitions.update(next);
+    if (changes.steps !== undefined) {
       for (const workflow of running) {
         for (const ticket of yield* tickets.listOpen(workflow.id)) {
-          yield* requireFits(ticket, next.steps);
-          moving.push({ workflow, definition: next, ticket });
+          yield* moveOntoSteps({ workflow, definition: next, ticket }, actorId);
         }
       }
-    }
-    yield* definitions.update(next);
-    for (const work of moving) {
-      yield* moveOntoSteps(work, actorId);
     }
   }, transaction);
 
@@ -843,15 +737,11 @@ const make = Effect.gen(function* () {
     actorId: string,
     input: Payload<"createInstance">,
   ) {
-    if (input.responsible === null) {
-      return yield* new WorkflowRefused({ reason: "responsible_required" });
-    }
     yield* requireValidPerson(input.responsible);
     const definition = yield* found(definitions.get(input.definitionId));
-    if (definition.archivedAt !== null) {
+    if (definition.isArchived) {
       return yield* new WorkflowRefused({ reason: "workflow_archived" });
     }
-    const at = yield* DateTime.now;
     const workflow: Workflow = {
       id: generateId(),
       definitionId: definition.id,
@@ -860,11 +750,8 @@ const make = Effect.gen(function* () {
       adminUserIds: [actorId],
       defaultAssignments: {},
       slug: null,
-      isDefault: false,
       isPublic: false,
-      archivedAt: null,
-      createdAt: at,
-      updatedAt: at,
+      isArchived: false,
     };
     yield* workflows.insert(workflow);
     return { workflowId: workflow.id };
@@ -872,27 +759,17 @@ const make = Effect.gen(function* () {
 
   const updateInstance = Effect.fnUntraced(function* (
     actorId: string,
-    input: Payload<"updateInstance">,
+    { workflowId, ...changes }: Payload<"updateInstance">,
   ) {
     const actor = yield* actorOf(actorId);
-    const workflow = yield* requireAdmin(actor, yield* found(workflows.get(input.workflowId)));
-    if (input.responsible === null) {
-      return yield* new WorkflowRefused({ reason: "responsible_required" });
-    }
-    if (input.responsible !== undefined) yield* requireValidPerson(input.responsible);
-    if (
-      input.isDefault !== undefined &&
-      input.isDefault !== workflow.isDefault &&
-      !actor.isOrgAdmin
-    ) {
-      return yield* new WorkflowRefused({ reason: "not_org_admin" });
-    }
-    for (const assignment of Object.values(input.defaultAssignments ?? {})) {
+    const workflow = yield* requireAdmin(actor, yield* found(workflows.get(workflowId)));
+    if (changes.responsible !== undefined) yield* requireValidPerson(changes.responsible);
+    for (const assignment of Object.values(changes.defaultAssignments ?? {})) {
       yield* validateEntries(assignment.automations);
       if (assignment.assignee !== null) yield* requireValidPerson(assignment.assignee);
       if (assignment.responsible !== null) yield* requireValidPerson(assignment.responsible);
     }
-    const listed = input.adminUserIds ?? workflow.adminUserIds;
+    const listed = changes.adminUserIds ?? workflow.adminUserIds;
     const adminUserIds = [
       ...new Set([...workflow.adminUserIds.filter((id) => listed.includes(id)), ...listed]),
     ];
@@ -902,23 +779,10 @@ const make = Effect.gen(function* () {
     if (lastAdminRefusal(yield* Effect.filter(adminUserIds, isActivePerson)) !== null) {
       return yield* new WorkflowRefused({ reason: "last_admin" });
     }
-    const at = yield* DateTime.now;
     yield* workflows.update({
       ...workflow,
-      name: input.name ?? workflow.name,
-      responsible: input.responsible ?? workflow.responsible,
-      slug: input.slug === undefined ? workflow.slug : input.slug,
-      isPublic: input.isPublic ?? workflow.isPublic,
-      isDefault: input.isDefault ?? workflow.isDefault,
-      defaultAssignments: input.defaultAssignments ?? workflow.defaultAssignments,
+      ...changes,
       adminUserIds,
-      archivedAt:
-        input.isArchived === undefined
-          ? workflow.archivedAt
-          : input.isArchived
-            ? (workflow.archivedAt ?? at)
-            : null,
-      updatedAt: at,
     });
   }, transaction);
 
@@ -949,16 +813,13 @@ const make = Effect.gen(function* () {
         title: input.title,
         description: (input.description ?? "").trim(),
         dueDate: null,
-        status: { type: "open", at },
+        status: { type: "open" },
         steps: [],
-        currentStepId: null,
         createdAt: at,
-        updatedAt: at,
       },
     };
     yield* tickets.insert(work.ticket);
     const step = yield* enterStep(work, first, null, null, actorId);
-    work.ticket = { ...work.ticket, currentStepId: step.id };
     yield* save(work);
     return { stepId: step.id };
   }, transaction);
@@ -976,7 +837,7 @@ const make = Effect.gen(function* () {
     for (const step of work.ticket.steps) yield* takeFromAgent(work, step);
     work.ticket = {
       ...work.ticket,
-      status: { type: "cancelled", at: yield* DateTime.now, reason },
+      status: { type: "cancelled", reason },
     };
     yield* save(work);
   }, transaction);
@@ -987,19 +848,17 @@ const make = Effect.gen(function* () {
     if (work.ticket.status.type !== "cancelled") {
       return yield* new WorkflowRefused({ reason: "step_not_actionable" });
     }
-    yield* requireFits(work.ticket, work.definition.steps);
-    work.ticket = { ...work.ticket, status: { type: "open", at: yield* DateTime.now } };
+    work.ticket = { ...work.ticket, status: { type: "open" } };
     for (const step of work.ticket.steps) {
       const live = isLive(step);
       if (!live && step.status.type !== "waiting_approval") continue;
       const revived = yield* revive(work.workflow, step, !live);
       if (revived !== step) putStep(work, revived);
     }
-    const existing = new Set(work.ticket.steps.map((step) => step.id));
-    const reworked = new Set((yield* moveOntoSteps(work, actorId)).map((step) => step.id));
+    const restarting = new Set(work.ticket.steps.filter(isActionable).map((step) => step.id));
+    yield* moveOntoSteps(work, actorId);
     for (const step of work.ticket.steps) {
-      if (isActionable(step) && existing.has(step.id) && !reworked.has(step.id))
-        yield* startWork(work, step, actorId, true);
+      if (restarting.has(step.id)) yield* startWork(work, step, actorId, true);
     }
   }, transaction);
 
@@ -1018,6 +877,7 @@ const make = Effect.gen(function* () {
     const actor = yield* actorOf(actorId);
     if (!canViewTicket(actor, work.workflow, work.ticket)) return yield* new NotFound();
     yield* notifications.markReadForStep({ userId: actorId, stepId, at: yield* DateTime.now });
+    const parents = ancestorSteps(work.ticket, step).toReversed();
     return {
       ticket: work.ticket,
       workflowName: work.workflow.name,
@@ -1026,30 +886,23 @@ const make = Effect.gen(function* () {
         (other) =>
           Effect.gen(function* () {
             return {
-              step: stepSummaryOf(other),
+              step: other,
               name: nameOf(work, other),
-              fields:
-                other.id === (ancestorsOf(work, step).at(-1)?.id ?? step.id)
-                  ? []
-                  : yield* fieldsOf(work, other),
+              fields: other.id === (parents[0]?.id ?? step.id) ? [] : yield* fieldsOf(work, other),
             };
           }),
       ),
       step,
       definition: definitionOf(work, step),
-      parents: ancestorsOf(work, step)
-        .toReversed()
-        .map((parent) => ({ id: parent.id, name: nameOf(work, parent) })),
+      parents: parents.map((parent) => ({ id: parent.id, name: nameOf(work, parent) })),
       canOpenBoard: work.workflow.isPublic || oversees(actor, work.workflow),
       fields: yield* fieldsOf(work, step),
-      subSteps: childrenOf(work, step).map((child) => ({
-        id: child.id,
+      subSteps: childSteps(work.ticket, work.definition.steps, step).map((child) => ({
+        ...child,
         name: nameOf(work, child),
       })),
       comments: yield* tickets.comments(step.id),
-      files: (yield* files.forStep(step.id))
-        .filter((file) => file.fieldKey === null)
-        .map((file) => toFile(step, file)),
+      files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
       tasks: yield* stepTasks(work, step),
     };
   });
@@ -1071,13 +924,13 @@ const make = Effect.gen(function* () {
     const invalid = () => new WorkflowRefused({ reason: "invalid_field_value" });
     let values = step.values;
     if (field.type === "file") return yield* invalid();
-    if (field.type === "group") {
-      if (!field.repeatable) return yield* invalid();
-      const rows = yield* decodeRowIds(value ?? []).pipe(Effect.mapError(invalid));
-      values = yield* withoutRemovedRows(step, input.fieldKey, rows);
-    } else if (value !== null) {
-      if (fieldValueRefusal(field, value) !== null) return yield* invalid();
-    }
+    if (
+      (value !== null || field.type === "group") &&
+      fieldValueRefusal(field, value ?? []) !== null
+    )
+      return yield* invalid();
+    if (field.type === "group")
+      values = yield* withoutRemovedRows(step, input.fieldKey, rowIds(value));
     const others = Object.fromEntries(
       Object.entries(values).filter(([key]) => key !== input.fieldKey),
     );
@@ -1095,7 +948,7 @@ const make = Effect.gen(function* () {
     for (const task of yield* stepTasks(work, step)) {
       if (task.state.type === "active") yield* cancelTask(task);
     }
-    const approver = stepApprover(work.workflow, step);
+    const approver = step.responsible;
     if (approver === actorId) {
       yield* complete(work, step, actorId);
     } else {
@@ -1113,12 +966,7 @@ const make = Effect.gen(function* () {
 
   const loadForApproval = Effect.fnUntraced(function* (actorId: string, stepId: string) {
     const loaded = yield* loadStep(stepId);
-    const refusal = stepApprovalRefusal(
-      actorId,
-      loaded.work.workflow,
-      loaded.work.ticket,
-      loaded.step,
-    );
+    const refusal = stepApprovalRefusal(actorId, loaded.work.ticket, loaded.step);
     if (refusal !== null) return yield* new WorkflowRefused({ reason: refusal });
     return loaded;
   });
@@ -1176,40 +1024,6 @@ const make = Effect.gen(function* () {
       step: reassigned,
       actorId,
     });
-    yield* save(work);
-  }, transaction);
-
-  const setStepResponsible = Effect.fnUntraced(function* (
-    actorId: string,
-    input: Payload<"setStepResponsible">,
-  ) {
-    const { work, step } = yield* loadStep(input.stepId);
-    const refusal = responsibleChangeRefusal(
-      yield* actorOf(actorId),
-      work.workflow,
-      work.ticket,
-      step,
-    );
-    if (refusal !== null) return yield* new WorkflowRefused({ reason: refusal });
-    if (input.responsible !== null) yield* requireValidPerson(input.responsible);
-    const responsible =
-      input.responsible ??
-      (yield* stepResponsible(
-        work.workflow,
-        work.workflow.defaultAssignments[step.stepDefinitionId]?.responsible ?? null,
-      ));
-    if (responsible === step.responsible) return;
-    const changed: Step = { ...step, responsible };
-    putStep(work, changed);
-    if (step.status.type === "waiting_approval") {
-      yield* notify({
-        kind: "to_approve",
-        to: responsible,
-        workflow: work.workflow,
-        step: changed,
-        actorId,
-      });
-    }
     yield* save(work);
   }, transaction);
 
@@ -1302,14 +1116,12 @@ const make = Effect.gen(function* () {
   const listAssignments = Effect.fnUntraced(function* (actorId: string) {
     const rows: Array<{
       readonly section: AssignmentSection;
-      readonly dueDate: DateTime.Utc | null;
-      readonly at: DateTime.Utc;
       readonly assignment: AssignmentView;
     }> = [];
     for (const ticket of yield* tickets.listOpenInvolving(actorId)) {
       const work = yield* workOf(ticket);
       for (const step of ticket.steps) {
-        const approves = stepApprover(work.workflow, step) === actorId;
+        const approves = step.responsible === actorId;
         const section =
           step.status.type === "waiting_approval"
             ? approves
@@ -1325,14 +1137,12 @@ const make = Effect.gen(function* () {
         if (section === null) continue;
         rows.push({
           section,
-          dueDate: ticket.dueDate,
-          at: step.status.at,
           assignment: {
             ticket: summaryOf(ticket),
-            step: stepSummaryOf(step),
+            step,
             workflowName: work.workflow.name,
             stepName: nameOf(work, step),
-            parentNames: ancestorsOf(work, step)
+            parentNames: ancestorSteps(work.ticket, step)
               .toReversed()
               .map((parent) => nameOf(work, parent)),
           },
@@ -1341,8 +1151,8 @@ const make = Effect.gen(function* () {
     }
     const sorted = rows.toSorted(
       (left, right) =>
-        millis(left.dueDate) - millis(right.dueDate) ||
-        DateTime.toEpochMillis(left.at) - DateTime.toEpochMillis(right.at),
+        millis(left.assignment.ticket.dueDate) - millis(right.assignment.ticket.dueDate) ||
+        millis(left.assignment.step.status.at) - millis(right.assignment.step.status.at),
     );
     return {
       sections: SECTIONS.flatMap((section) => {
@@ -1395,12 +1205,8 @@ const make = Effect.gen(function* () {
     const all = yield* workflows.list;
     for (const workflow of all) {
       if (!workflow.adminUserIds.includes(userId)) continue;
-      const refusal = workflowAdminDeactivationRefusal(
-        workflow,
-        userId,
-        yield* activeAdminIds(workflow),
-      );
-      if (refusal !== null) return yield* new UserRefused({ reason: refusal });
+      if (lastAdminRefusal(yield* activeAdminIds(workflow)) !== null)
+        return yield* new UserRefused({ reason: "last_workflow_admin" });
     }
     for (const ticket of yield* tickets.listOpenInvolving(userId)) {
       const work = yield* workOf(ticket).pipe(Effect.orDie);
@@ -1431,7 +1237,7 @@ const make = Effect.gen(function* () {
       yield* save(work);
     }
     for (const workflow of all) {
-      if (workflow.archivedAt !== null) continue;
+      if (workflow.isArchived) continue;
       if (workflow.responsible === userId) yield* tellAdmins(workflow, "needs_responsible");
       const named = Object.values(workflow.defaultAssignments).some(
         (assignment) => assignment.assignee === userId || assignment.responsible === userId,
@@ -1490,7 +1296,7 @@ const make = Effect.gen(function* () {
     putStep(work, { ...step, status: { type: "waiting_approval", at: yield* DateTime.now } });
     yield* notify({
       kind: "to_approve",
-      to: stepApprover(work.workflow, step),
+      to: step.responsible,
       workflow: work.workflow,
       step,
       actorId: null,
@@ -1503,9 +1309,7 @@ const make = Effect.gen(function* () {
         if (Option.isNone(work)) return null;
         const actor = yield* actorOf(userId);
         if (isInvolved(actor, work.value.workflow, work.value.ticket)) return "write" as const;
-        return canViewTicket(actor, work.value.workflow, work.value.ticket)
-          ? ("read" as const)
-          : null;
+        return work.value.workflow.isPublic ? ("read" as const) : null;
       }),
     canRun: (task) =>
       loadTaskStep(task).pipe(
@@ -1546,28 +1350,23 @@ const make = Effect.gen(function* () {
                 type: "settled",
                 outcome: { type: "failed", reason: call.input.note },
               } as const;
-            const execute: Effect.Effect<string | null, WorkflowErrors> =
-              call === null
-                ? Effect.succeed(INPUT_REFUSED)
-                : call.tool === "step_done"
-                  ? requireComplete(work, step).pipe(Effect.as(null))
-                  : call.tool === "step_set_field"
-                    ? setField(work, step, entry.agentId, { stepId: step.id, ...call.input }).pipe(
-                        Effect.as(null),
-                      )
-                    : call.tool === "step_comment"
-                      ? comment(work, step, entry.agentId, { stepId: step.id, ...call.input }).pipe(
-                          Effect.as(null),
-                        )
-                      : attachmentId === null
-                        ? Effect.succeed(ATTACH_UNREAD)
-                        : attachFile(work, step, entry.agentId, {
-                            stepId: step.id,
-                            attachmentId,
-                            ...(call.input.fieldKey === undefined
-                              ? {}
-                              : { fieldKey: call.input.fieldKey }),
-                          }).pipe(Effect.as(null));
+            const execute = Effect.gen(function* () {
+              if (call === null) return INPUT_REFUSED;
+              if (call.tool === "step_done") yield* requireComplete(work, step);
+              else if (call.tool === "step_set_field")
+                yield* setField(work, step, entry.agentId, { stepId: step.id, ...call.input });
+              else if (call.tool === "step_comment")
+                yield* comment(work, step, entry.agentId, { stepId: step.id, ...call.input });
+              else {
+                if (attachmentId === null) return ATTACH_UNREAD;
+                yield* attachFile(work, step, entry.agentId, {
+                  stepId: step.id,
+                  attachmentId,
+                  ...call.input,
+                });
+              }
+              return null;
+            });
             const refusal = yield* execute.pipe(
               transaction,
               Effect.catchTags({
@@ -1642,7 +1441,6 @@ const make = Effect.gen(function* () {
     approveStep,
     rejectStep,
     setStepAssignee,
-    setStepResponsible,
     blockStep,
     unblockStep,
     commentOnStep: memberCommand(comment),

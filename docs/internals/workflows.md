@@ -12,9 +12,9 @@ A ticket's step snapshots its automation entries and takes its human assignee an
 
 ## Organization admins are admins of every workflow
 
-A workflow's listed admins are equal, and the last active one can't be removed. The organization's admins pass every admin check without being listed; there is no transfer. Only organization admins choose the default workflow. A definition is changed only by the admins of every workflow that runs it, since its steps move all of their tickets.
+A workflow's listed admins are equal, and the last active one can't be removed. The organization's admins pass every admin check without being listed; there is no transfer. A definition is changed only by the admins of every workflow that runs it, since its steps move all of their tickets.
 
-Whoever is involved in a ticket may do anything with it: those who hold one of its steps, and those who oversee the workflow (its admins and its responsible, `oversees`). Only a step's responsible approves or rejects it. A public workflow's board and tickets are readable by every member, who can't change them. Boards are otherwise for those who oversee the workflow, and changing it stays with its admins. The Workflows list and the board carry `canManage` so the responsible gets the board without Edit.
+Whoever is involved in a ticket may do anything with it: those who hold one of its steps, and those who oversee the workflow (its admins and its responsible, `oversees`). Only a step's responsible approves or rejects it. A public workflow's board and tickets are readable by every member, who can't change them. Boards are otherwise for those who oversee the workflow, and changing it stays with its admins. The Workflows list carries `canManage` so the responsible gets the board without Edit.
 
 ## Deactivation hands work on in the same transaction
 
@@ -32,7 +32,7 @@ A step's files live in the [one attachment store](./providers.md#attachments), h
 
 Every workflow RPC fails with `Workflow.Refused` or `NotFound` ([`resources/Workflows.ts`](../../packages/contracts/src/resources/Workflows.ts)), and each refusal carries its own message, which the web shows as it is. A ticket the current user can't read answers `NotFound`, not a refusal, to every read and command on it and its steps, so these never tell anyone that it exists; the other checks (an open ticket, the step's status) refuse. Storage failures are defects and fail only the call that hit them. Commands answer nothing but what the web opens next (`workflows.createDefinition`'s `definitionId`, `workflows.createInstance`'s `workflowId`, `workflows.startTicket`'s `stepId`), and the web reads the view again after each.
 
-Rules about one value are schema checks on the models (distinct field and step ids, a select's options), so a malformed definition never decodes. The verdicts a page shows travel in the views, such as a file's `canRemove`; the command guards stay the authority.
+Rules about one value are schema checks on the models (distinct field and step ids, a select's options), so a malformed definition never decodes. The verdicts a page shows travel in the views, such as `canOpenBoard`; the command guards stay the authority.
 
 ## Changing a definition moves open work atomically
 
@@ -42,11 +42,11 @@ Done and cancelled tickets keep their steps as they were. Step names aren't stor
 
 ## Sub-steps are steps with a parent
 
-A sub-step is a step with a `parentStepId`, so it reuses everything a step has: reassign, approval, agents, notifications, and My work. Every step comes from the definition; ticket-only sub-steps are not supported. Only top-level steps move the ticket: completing a sub-step stops there, and `currentStepId` and the board name top-level steps. Step ids are unique across a definition at every depth, which the schema checks.
+A sub-step is a step with a `parentStepId`, so it reuses everything a step has: reassign, approval, agents, notifications, and My work. Every step comes from the definition; ticket-only sub-steps are not supported. Steps are appended on entry, so parents precede their children. The current step is the first incomplete top-level step; completing a sub-step stops there. Step ids are unique across a definition at every depth, which the schema checks.
 
 ## A ticket opens on one step
 
-There is one page per ticket, and its URL is a step (`/my-work/$stepId`): every way in (My work, the board, notifications, sub-steps) already has a step, and the step view is where visibility is decided. The page frames that step in its ticket; it also reads the ticket view to list every step.
+There is one page per ticket, and its URL is a step (`/my-work/$stepId`): every way in (My work, the board, notifications, sub-steps) already has a step, and the step view is where visibility is decided. The view carries the ticket's details, the other top-level steps and the open step's children.
 
 An agent's brief carries the filled fields of the steps before its step (for a sub-step, before the step it sits in); which ones is not configurable, `carriedFields` decides it.
 

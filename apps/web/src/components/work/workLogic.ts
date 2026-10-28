@@ -25,7 +25,11 @@ export const plural = (count: number, one: string, many: string) =>
   `${count} ${count === 1 ? one : many}`;
 
 /** What the viewer may do on the step now, mirroring the commands' checks. */
-export const stepActions = (ticket: Ticket, step: Step, viewerUserId: string | undefined) => {
+export const stepActions = (
+  ticket: Pick<Ticket, "status">,
+  step: Step,
+  viewerUserId: string | undefined,
+) => {
   const open = ticket.status.type === "open";
   const actionable = open && (step.status.type === "working" || step.status.type === "rejected");
   const blocked = open && step.status.type === "blocked";
@@ -71,7 +75,6 @@ export const missingFields = (
 export type StepAct = (run: () => Promise<unknown>, quiet?: boolean) => Promise<string | null>;
 
 export const STEP_STATE_LABELS: Record<Step["status"]["type"], string> = {
-  pending: "Not reached",
   working: "To do",
   waiting_approval: "Waiting for approval",
   blocked: "Blocked",

@@ -103,9 +103,7 @@ const statements = [
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       steps TEXT NOT NULL,
-      archived_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      is_archived INTEGER NOT NULL
     )`,
   `CREATE TABLE workflows (
       id TEXT PRIMARY KEY NOT NULL,
@@ -115,11 +113,8 @@ const statements = [
       admin_user_ids TEXT NOT NULL,
       default_assignments TEXT NOT NULL,
       slug TEXT UNIQUE,
-      is_default INTEGER NOT NULL,
       is_public INTEGER NOT NULL,
-      archived_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      is_archived INTEGER NOT NULL
     )`,
   `CREATE INDEX workflows_definition ON workflows(definition_id)`,
   `CREATE TABLE tickets (
@@ -130,9 +125,7 @@ const statements = [
       due_date TEXT,
       status TEXT NOT NULL,
       steps TEXT NOT NULL,
-      current_step_id TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      created_at TEXT NOT NULL
     )`,
   `CREATE INDEX tickets_workflow ON tickets(workflow_id, created_at)`,
   `CREATE TABLE workflow_comments (

@@ -43,8 +43,6 @@ export const layer = Workflows.middleware(Authorization).toLayer(
         asViewer((id) => workflows.setStepAutomations(id, input)),
       "workflows.setStepAssignee": (input) =>
         asViewer((id) => workflows.setStepAssignee(id, input)),
-      "workflows.setStepResponsible": (input) =>
-        asViewer((id) => workflows.setStepResponsible(id, input)),
       "workflows.blockStep": (input) => asViewer((id) => workflows.blockStep(id, input)),
       "workflows.unblockStep": ({ stepId }) => asViewer((id) => workflows.unblockStep(id, stepId)),
       "workflows.commentOnStep": (input) => asViewer((id) => workflows.commentOnStep(id, input)),

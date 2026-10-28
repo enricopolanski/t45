@@ -32,7 +32,7 @@ export function NewWorkflow({
     void api("workflows.listDefinitions", undefined).then(
       (loaded) => {
         if (!current) return;
-        const active = loaded.filter((definition) => definition.archivedAt === null);
+        const active = loaded.filter((definition) => !definition.isArchived);
         setDefinitions(active);
         const selected = active.find((definition) => definition.id === selectedDefinitionId);
         if (selected) setName(selected.name);
