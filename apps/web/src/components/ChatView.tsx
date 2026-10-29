@@ -114,17 +114,17 @@ export default function ChatView({
   const agentName = chatInfo?.agentName ?? newAgent?.name ?? null;
   const title = chatInfo !== null ? titleOf(chatInfo) : isNew ? titleOf({ title: null }) : "";
 
-  // A failed open, or an agent that couldn't start, shows until dismissed, or until it changes;
-  // a failure the conversation shows already needs no banner.
-  const banner =
+  // A failure already shown in the conversation needs no banner.
+  const bannerError =
     view.status === "failed" && !missing
       ? describeFailure(view.error, "Could not open the chat.")
       : status === "failed" && ready?.endsWithError === false
         ? START_FAILED
         : null;
-  const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
-  if (dismissedBanner !== null && dismissedBanner !== banner) setDismissedBanner(null);
-  const shownBanner = banner === dismissedBanner ? null : banner;
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  // Dismissal lasts only while the same error remains active.
+  if (dismissedError && dismissedError !== bannerError) setDismissedError(null);
+  const visibleError = bannerError === dismissedError ? null : bannerError;
 
   const promptRef = useRef("");
   const composerRef = useRef<ChatComposerHandle | null>(null);
@@ -191,7 +191,7 @@ export default function ChatView({
     setLiveFollowEnabled(true);
     setExpandedImage(null);
     setFileDragActive(false);
-    setDismissedBanner(null);
+    setDismissedError(null);
     setTimelineInset(0);
   }
   useLayoutEffect(() => {
@@ -382,9 +382,9 @@ export default function ChatView({
               </div>
             ) : null}
             {/* Banners overlay the timeline without changing its content height. */}
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col">
-              <ChatBanner error={shownBanner} onDismiss={() => setDismissedBanner(banner)} />
-            </div>
+            {visibleError && (
+              <ChatBanner error={visibleError} onDismiss={() => setDismissedError(visibleError)} />
+            )}
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               <ChatTimeline
                 key={openedSession}
@@ -402,7 +402,7 @@ export default function ChatView({
                 onIsAtEndChange={onIsAtEndChange}
                 onContentOverflowChange={setTimelineOverflows}
                 emptyPlaceholder={isEmptyChat || loading ? "blank" : "prompt"}
-                topFadeEnabled={shownBanner === null}
+                topFadeEnabled={!visibleError}
               />
             </div>
 

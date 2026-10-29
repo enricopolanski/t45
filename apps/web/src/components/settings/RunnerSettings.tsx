@@ -5,6 +5,7 @@ import { Atom } from "effect/reactivity";
 import { apiQuery, useApiQuery } from "../../state/rpc";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Badge } from "../ui/badge";
+import { ErrorText } from "../ui/error-text";
 import {
   SettingsEmpty,
   SettingsPageContainer,
@@ -39,7 +40,7 @@ export function RunnerSettings() {
 
   return (
     <SettingsPageContainer>
-      {error ? <p className="text-sm text-destructive-foreground">{error}</p> : null}
+      {error && <ErrorText text={error} />}
       <SettingsSection title="Runner" description="The machine that runs agents' chats.">
         <SettingsRow
           title="Status"

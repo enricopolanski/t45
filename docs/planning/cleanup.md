@@ -39,6 +39,8 @@ Each entry names the file and what could change. Delete an entry once it is done
 
 ## apps/web/src/components (ChatView)
 
+- `apps/web/src/**/*.tsx` — "render this or nothing" is written two ways: `x ? <X /> : null` at most sites, and `x && <X />` at the error-text sites. Adopt `&&` as the one form and convert the ternaries in a mechanical commit of their own. Keep `&&` to guards that are booleans, strings or objects: a number leaks into the DOM, since `0 && <X />` renders a literal 0.
+- `apps/web/src/components/chat/ChatTimeline.tsx` — split the timeline into focused component files, with `TimelineCtx` and its shared type in a separate module.
 - `apps/web/src/components/markdown/Markdown.tsx` — consider showing site favicons next to links again (now a globe or the GitHub mark). The removed version fetched them from Google's favicon service, which disclosed every linked domain and needed a private-host filter; prefer a source that leaks nothing, such as the server fetching and caching them.
 - `apps/web/src/components/markdown/CodeBlock.tsx` — consider tinting code blocks and file chips by language again, in CSS only: code blocks would need a `data-language` attribute again, so `.chat-markdown-codeblock:is([data-language="ts" i], [data-language="typescript" i])` can set a `--code-tint` the header reads; file chips would need a `data-file-name` attribute to match with `[data-file-name$=".py" i]`. Decide where the color goes (label text, a dot or a border; label text needs a contrast check in both themes) and keep it to the common languages, since models write several aliases for each.
 

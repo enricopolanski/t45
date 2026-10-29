@@ -1701,11 +1701,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </div>
             </div>
 
-            {composerSubmissionError ? (
-              <ErrorText size="xs" className="mx-3 mb-2 sm:mx-4">
-                {composerSubmissionError}
-              </ErrorText>
-            ) : null}
+            {composerSubmissionError && (
+              <ErrorText className="mx-3 mb-2 sm:mx-4" text={composerSubmissionError} />
+            )}
 
             {isComposerCollapsedMobile ? null : (
               <div

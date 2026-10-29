@@ -8,6 +8,7 @@ import { attachmentUploadUrl, attachmentUrl, decodeUploadResult } from "../../li
 import { api } from "../../rpc/api";
 import { SavedInput } from "../SavedInput";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
@@ -135,15 +136,6 @@ function FieldValue({ field }: { readonly field: FieldView }) {
   );
 }
 
-/** Why a field stops the step from being marked done. */
-function MissingNote({ id, children }: { readonly id?: string; readonly children: string }) {
-  return (
-    <p id={id} className="text-xs text-destructive">
-      {children}
-    </p>
-  );
-}
-
 /**
  * A group's fields, in a box per row. A repeatable group adds and removes rows by saving its row
  * ids; a removed row's values go with it.
@@ -168,7 +160,7 @@ function GroupEditor({
           <p className="text-xs text-muted-foreground">{field.description}</p>
         ) : null}
       </div>
-      {missing.has(field.key) ? <MissingNote>Add at least one entry</MissingNote> : null}
+      {missing.has(field.key) && <ErrorText text="Add at least one entry" />}
       {field.rows.map((row, at) => (
         <div
           key={row.id ?? "row"}
@@ -340,7 +332,7 @@ function FieldEditor({
           {input}
         </>
       )}
-      {invalid ? <MissingNote id={`${id}-missing`}>Required</MissingNote> : null}
+      {invalid && <ErrorText id={`${id}-missing`} text="Required" />}
     </div>
   );
 }

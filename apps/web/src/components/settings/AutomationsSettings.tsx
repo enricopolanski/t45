@@ -19,6 +19,7 @@ import {
   webhookPath,
   type DraftState,
 } from "./automationsSettings.logic";
+import { ErrorText } from "../ui/error-text";
 import { Field, Fieldset, SwitchField } from "../ui/field";
 import { Label } from "../ui/label";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
@@ -203,7 +204,7 @@ function AutomationRow({
                   ? `Next run ${formatScheduledLabel(automation.nextRunAt, now)}`
                   : "Not scheduled"}
           </p>
-          {automation.lastError ? <p className="text-destructive">{automation.lastError}</p> : null}
+          {automation.lastError && <ErrorText text={automation.lastError} />}
         </div>
       }
       control={

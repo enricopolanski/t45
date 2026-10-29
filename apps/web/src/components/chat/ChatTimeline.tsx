@@ -10,7 +10,6 @@ import * as DateTime from "effect/DateTime";
 import {
   BotIcon,
   BrainIcon,
-  CircleAlertIcon,
   CircleStopIcon,
   DownloadIcon,
   FileIcon,
@@ -49,6 +48,7 @@ import { FileChip, ImageChipButton, UnresolvedChip } from "../ContextChip";
 import { CopyButton } from "../CopyButton";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { Tooltip, TooltipPopup, TooltipScrollDismissArea, TooltipTrigger } from "../ui/tooltip";
 import {
   assistantText,
@@ -86,8 +86,6 @@ export interface ChatTimelineHistory {
   readonly onLoadEarlier: () => void;
 }
 
-const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
-const TIMELINE_LIST_FADE_HEADER = <div className="h-(--chat-scroll-fade-height)" />;
 const TIMELINE_MAINTAIN_SCROLL_AT_END = {
   animated: false,
   // Composer inset changes must not move visible messages; new rows and row growth still follow.
@@ -202,7 +200,7 @@ export const ChatTimeline = memo(function ChatTimeline(props: {
   );
   const header = (
     <>
-      {props.topFadeEnabled ? TIMELINE_LIST_FADE_HEADER : TIMELINE_LIST_HEADER}
+      <div className={props.topFadeEnabled ? "h-(--chat-scroll-fade-height)" : "h-3 sm:h-4"} />
       {history ? <TimelineHistoryControl {...history} /> : null}
     </>
   );
@@ -281,11 +279,7 @@ function TimelineHistoryControl(props: ChatTimelineHistory) {
           {props.loading ? "Loading earlier messages…" : "Load earlier messages"}
         </Button>
       ) : null}
-      {props.error !== null ? (
-        <p role="status" className="text-center text-muted-foreground text-xs">
-          {props.error}
-        </p>
-      ) : null}
+      {props.error && <ErrorText text={props.error} />}
     </div>
   );
 }
@@ -355,21 +349,21 @@ function MessageBody({ message }: { message: ChatMessage }) {
     case "shell":
       return <ShellMessageRow message={message} />;
     case "compaction":
+      if (native.status === "failed")
+        return (
+          <ErrorText className="mx-1 my-0.5" text={`Compacting failed: ${native.error.message}`} />
+        );
       return (
         <TimelineDivider
           icon={Minimize2Icon}
           label={
-            native.status === "running"
-              ? "Compacting the conversation…"
-              : native.status === "failed"
-                ? `Compacting failed: ${native.error.message}`
-                : "Conversation compacted"
+            native.status === "running" ? "Compacting the conversation…" : "Conversation compacted"
           }
         />
       );
     case "idle":
       return native.outcome === "failed" ? (
-        <TimelineDivider icon={CircleAlertIcon} label="The agent stopped on an error" />
+        <ErrorText className="mx-1 my-0.5" text="The agent stopped on an error" />
       ) : (
         <TimelineDivider icon={CircleStopIcon} label="Interrupted" />
       );
@@ -515,7 +509,7 @@ function LoadWholeButton({
       >
         {label}
       </Button>
-      {whole.error ? <span className="text-muted-foreground text-xs">{whole.error}</span> : null}
+      {whole.error && <ErrorText text={whole.error} />}
     </div>
   );
 }
@@ -717,15 +711,7 @@ function AssistantMessageRow({ message }: { message: ChatMessage }) {
     <div className="relative min-w-0 px-1 py-0.5">
       <MessageAuthorHeading>Agent</MessageAuthorHeading>
       {parts}
-      {native.error ? (
-        <div
-          role="alert"
-          className="mt-1 flex items-start gap-1.5 text-destructive-foreground text-sm"
-        >
-          <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0 break-words">{native.error.message}</span>
-        </div>
-      ) : null}
+      {native.error && <ErrorText className="mt-1" text={native.error.message} />}
       {!live ? (
         <div className="message-actions mt-1.5" data-lost={message.state === "lost"}>
           {message.state === "lost" ? <InterruptedBadge /> : null}
@@ -817,7 +803,7 @@ function ToolRow({ part, message, whole }: ToolPartProps) {
 
 /**
  * A workflow the agent drafted, as a card made from the draft whole: a read cuts long strings,
- * which would cut the workflow's instructions short. A draft that doesn't decode stays a tool row.
+ * which would cut the workflow's instructions short. An unreadable draft explains why no card shows.
  */
 function WorkflowDraftPart({ part, message, whole }: ToolPartProps) {
   const ctx = use(TimelineCtx);
@@ -826,10 +812,11 @@ function WorkflowDraftPart({ part, message, whole }: ToolPartProps) {
     if (cut && !waiting) loadWhole();
   }, [cut, loadWhole, waiting]);
   if (cut) {
+    if (whole.error) return <ErrorText text={whole.error} />;
     return (
       <WorkLogRow
         icon={<WrenchIcon className="size-3.5 text-icon-muted" aria-hidden />}
-        label={whole.error ?? "Loading the workflow draft…"}
+        label="Loading the workflow draft…"
       />
     );
   }
@@ -839,7 +826,9 @@ function WorkflowDraftPart({ part, message, whole }: ToolPartProps) {
       ? native.content.find((each) => each.type === "tool" && each.id === part.id)
       : undefined;
   const draft = workflowDraftOf(drafted?.type === "tool" ? drafted : part);
-  if (draft === null) return <ToolRow part={part} message={message} whole={whole} />;
+  if (draft === null) {
+    return <ErrorText text="T45 can't read this workflow draft, so it can't show or save it." />;
+  }
   return (
     <WorkflowDraftCard itemId={`${ctx.chatId}:${message.sessionId}:${part.id}`} draft={draft} />
   );

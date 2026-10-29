@@ -7,6 +7,7 @@ import { useState } from "react";
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { plural } from "../work/workLogic";
 
 /** Which drafts this browser saved as definitions, so a reload opens the same blueprint. */
@@ -83,11 +84,7 @@ export function WorkflowDraftCard(props: {
         </div>
       </div>
       <DraftSteps steps={draft.steps} />
-      {error !== null ? (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      ) : null}
+      {error && <ErrorText text={error} />}
       <div className="flex min-w-0 items-center justify-between gap-2">
         <p className="min-w-0 text-xs text-muted-foreground">
           {definitionId === null

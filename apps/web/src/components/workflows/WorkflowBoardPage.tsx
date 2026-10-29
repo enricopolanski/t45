@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
+import { ErrorText } from "../ui/error-text";
 import { DueBadge } from "../work/MyWork";
 import { NewItemDialog } from "../work/NewItemDialog";
 import { useWorkDirectory } from "../work/useWorkDirectory";
@@ -72,11 +73,7 @@ export function WorkflowBoardPage({ workflowId }: { readonly workflowId: string 
       }
     >
       <div className="flex flex-col gap-4">
-        {error !== null ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error && <ErrorText text={error} />}
         <div className="flex gap-3 overflow-x-auto pb-2">
           {board?.definition.steps.map((column) => {
             const cards = board.tickets.flatMap((ticket) =>

@@ -27,6 +27,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { ErrorText } from "../ui/error-text";
 import { Label } from "../ui/label";
 import { PersonPicker } from "../work/ActorPicker";
 import { useWorkDirectory } from "../work/useWorkDirectory";
@@ -94,12 +95,11 @@ export function WorkflowPeople({ detail, busy, run }: Editing) {
             placeholder="Choose a person"
             disabled={busy}
           />
-          {left(workflow.responsible) ? (
-            <p role="alert" className="text-sm text-destructive">
-              {actorName(directory, workflow.responsible)} has left. Steps that would go to them go
-              to the longest-serving admin until you choose who is responsible now.
-            </p>
-          ) : null}
+          {left(workflow.responsible) && (
+            <ErrorText
+              text={`${actorName(directory, workflow.responsible)} has left. Steps that would go to them go to the longest-serving admin until you choose who is responsible now.`}
+            />
+          )}
         </div>
         <div role="group" aria-label="Admins" className="flex flex-col gap-1.5">
           <span className="text-sm font-medium">Admins</span>
@@ -127,11 +127,7 @@ export function WorkflowPeople({ detail, busy, run }: Editing) {
               );
             })}
           </ul>
-          {leaveError !== null ? (
-            <p role="alert" className="text-sm text-destructive">
-              {leaveError}
-            </p>
-          ) : null}
+          {leaveError && <ErrorText text={leaveError} />}
           <div className="flex flex-wrap items-center gap-2">
             <PersonPicker
               aria-label="New admin"
@@ -198,11 +194,9 @@ export function WorkflowStepPeople({ detail, busy, run }: Editing) {
           return (
             <div key={step.id} className="flex flex-col gap-3 px-4 py-3">
               <p className="truncate text-sm font-medium">{name}</p>
-              {isFirst && !hasInitialWork(workflow, definition) ? (
-                <p className="text-xs text-destructive">
-                  Tickets can start once the first step has an assignee or automation.
-                </p>
-              ) : null}
+              {isFirst && !hasInitialWork(workflow, definition) && (
+                <ErrorText text="Tickets can start once the first step has an assignee or automation." />
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
                   <span className="text-xs font-medium text-muted-foreground">Assignee</span>

@@ -32,11 +32,12 @@ export function AgentChatsPage() {
       <div className="flex flex-col gap-2">
         {chats.length > 0 ? (
           chats.map((item) => <AgentChatRow key={item.id} item={item} />)
-        ) : chatsQuery.error !== null ? (
+        ) : chatsQuery.error ? (
           // A failed load must not read as "no chats".
-          <ErrorText className="my-10 text-center">
-            Could not load chats: {chatsQuery.error}
-          </ErrorText>
+          <ErrorText
+            className="my-10 text-center"
+            text={`Could not load chats: ${chatsQuery.error}`}
+          />
         ) : chatsQuery.data === null ? null : (
           <p className="py-10 text-center text-sm text-muted-foreground">
             {agents.length === 0
