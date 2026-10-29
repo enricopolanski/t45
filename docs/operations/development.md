@@ -2,9 +2,11 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24; Bun is optional. Copy `.env.example` to `.env` and set `AUTH_CLERK_PUBLISHABLE_KEY` to your Clerk development instance's publishable key. From the repository root:
+Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24.21.0 or newer in the 24.x line, with the development version pinned in `.node-version`; Bun is optional. Copy `.env.example` to `.env` and set `AUTH_CLERK_PUBLISHABLE_KEY` to your Clerk development instance's publishable key. From the repository root:
 
 ```sh
+vp env on node
+vp env install
 vp i
 vp run dev
 ```

@@ -6,7 +6,7 @@ The T45 server serves the web app and keeps the chats, workflows and agents. Age
 
 ## Running it
 
-T45 needs Node.js 24 and [`vp`](#install-vp). For development, run `vp i` and `vp run dev` in a checkout ([docs/operations/development.md](./docs/operations/development.md)).
+T45 needs Node.js 24.21.0 or newer in the 24.x line and [`vp`](#install-vp). For development, run `vp i` and `vp run dev` in a checkout ([docs/operations/development.md](./docs/operations/development.md)).
 
 ## Documentation
 
