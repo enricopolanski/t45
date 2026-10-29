@@ -11,6 +11,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
+import { ErrorText } from "../ui/error-text";
 import { SavedInput } from "../SavedInput";
 import { ActorName } from "./ActorAvatar";
 import { AssigneePicker } from "./AssigneePicker";
@@ -96,9 +97,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     return (
       <WorkFrame title="Item">
         {data.status === "failed" ? (
-          <p role="alert" className="text-sm text-muted-foreground">
-            {data.message}
-          </p>
+          <ErrorText text={data.message} />
         ) : (
           <p className="text-sm text-muted-foreground">Loading…</p>
         )}
@@ -136,11 +135,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           ) : null}
         </div>
       </div>
-      {error !== null ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+      {error && <ErrorText text={error} />}
       {missing.length > 0 || unapproved.length > 0 ? (
         <MissingRecap missing={missing} unapproved={unapproved} />
       ) : null}

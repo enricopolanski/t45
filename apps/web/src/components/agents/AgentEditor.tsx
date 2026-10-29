@@ -226,7 +226,7 @@ function ModelPicker({
   readonly value: string | null;
 }) {
   if (models.reason !== null) {
-    return <ErrorText>The runner can't list its models: {models.reason}</ErrorText>;
+    return <ErrorText text={`The runner can't list its models: ${models.reason}`} />;
   }
   return (
     <Select name="model" required defaultValue={value}>
@@ -381,7 +381,7 @@ function AgentForm({
         >
           <FilesEditor files={files} onChange={setFiles} />
         </Section>
-        {error ? <ErrorText>{error}</ErrorText> : null}
+        {error && <ErrorText text={error} />}
         <div className="flex gap-2">
           <Button type="submit" size="sm">
             {agent ? "Save agent" : "Create agent"}

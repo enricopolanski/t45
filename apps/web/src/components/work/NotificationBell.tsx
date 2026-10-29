@@ -8,6 +8,7 @@ import { api } from "../../rpc/api";
 import { useApiQuery } from "../../state/rpc";
 import { notifications } from "../../state/work";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 
 const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
@@ -74,11 +75,7 @@ export function NotificationBell() {
       </PopoverTrigger>
       <PopoverPopup align="end" aria-label="Notifications" width="md">
         <PopoverTitle>Notifications</PopoverTitle>
-        {error !== null ? (
-          <p role="alert" className="mt-2 text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error && <ErrorText className="mt-2" text={error} />}
         {inbox !== null && inbox.notifications.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">Nothing new.</p>
         ) : null}

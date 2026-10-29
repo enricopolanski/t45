@@ -1,21 +1,19 @@
 import { cn } from "~/lib/utils";
 
-function ErrorText({
-  className,
-  size = "sm",
-  ...props
-}: React.ComponentProps<"p"> & { size?: "sm" | "xs" }) {
+/** A `span`, since inside markdown a `p` would take the paragraph margins. */
+function ErrorText({ text, className, id }: { text: string; className?: string; id?: string }) {
   return (
-    <p
+    <span
       role="alert"
+      id={id}
       className={cn(
-        "text-destructive-foreground",
-        size === "sm" ? "text-sm" : "text-xs",
+        "block min-w-0 whitespace-pre-wrap text-sm text-destructive-foreground wrap-anywhere",
         className,
       )}
       data-slot="error-text"
-      {...props}
-    />
+    >
+      {text}
+    </span>
   );
 }
 

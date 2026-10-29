@@ -16,7 +16,7 @@ export function UseAnotherAccountButton() {
       >
         Use another account
       </Button>
-      {error === null ? null : <ErrorText>{error}</ErrorText>}
+      {error && <ErrorText text={error} />}
     </div>
   );
 }

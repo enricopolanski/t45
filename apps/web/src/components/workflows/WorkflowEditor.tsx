@@ -5,6 +5,7 @@ import { useId } from "react";
 import { api, type ApiInput } from "../../rpc/api";
 import { SavedInput } from "../SavedInput";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { Label } from "../ui/label";
 import { WorkFrame } from "../work/WorkFrame";
 import { plural } from "../work/workLogic";
@@ -56,11 +57,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
         to this workflow.
       </p>
       <div className="flex flex-col gap-6">
-        {error !== null ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error && <ErrorText text={error} />}
         <section aria-label="General" className="flex flex-col gap-2.5">
           <h2 className="text-sm font-semibold">General</h2>
           <div className="divide-y divide-border rounded-xl border border-border bg-card">

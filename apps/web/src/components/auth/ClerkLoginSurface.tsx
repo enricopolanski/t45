@@ -10,7 +10,7 @@ import {
 } from "../../http/auth";
 import { describeFailure } from "../../lib/failures";
 import { clerkAppearance } from "./clerkAppearance";
-import { Alert } from "../ui/alert";
+import { ErrorText } from "../ui/error-text";
 import { Button } from "../ui/button";
 import { StandalonePage, StandalonePageHeader } from "../StandalonePage";
 
@@ -223,11 +223,7 @@ function ClerkLoginFlow({
             ) : null}
           </>
         )}
-        {errorMessage ? (
-          <Alert variant="error" className="w-full">
-            {errorMessage}
-          </Alert>
-        ) : null}
+        {errorMessage && <ErrorText text={errorMessage} />}
         {showAccountActions ? (
           <div className="flex flex-wrap items-center justify-center gap-2">
             {canRetry || signOutFailed ? (
