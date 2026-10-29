@@ -10,6 +10,8 @@ import * as Hex from "effect/encoding/Hex";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { seedStatements } from "./seed.ts";
+
 // The organization's users and sessions, agents and automations, workflows, chats, and files.
 const statements = [
   `CREATE TABLE users (
@@ -268,6 +270,7 @@ const statements = [
       PRIMARY KEY (chat_id, attachment_id)
     ) WITHOUT ROWID`,
   `CREATE INDEX chat_attachments_attachment ON chat_attachments(attachment_id)`,
+  ...seedStatements,
 ];
 
 class SchemaMismatchError extends Schema.TaggedError<SchemaMismatchError>()(

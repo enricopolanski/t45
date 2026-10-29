@@ -123,14 +123,13 @@ it.effect("answers NotFound for a deleted chat, even to its owner", () =>
   }).pipe(Effect.scoped, Effect.provide(Fixture.layerStore)),
 );
 
-it.effect("lets admins reach automation's chats, which members don't find", () =>
+it.effect("keeps background task chats inaccessible to members and admins", () =>
   Effect.gen(function* () {
     yield* seed;
     const member = yield* clientFor("user-alice", "member");
     assert.deepStrictEqual(yield* refusalsFor(member, automation), allNotFound);
 
     const admin = yield* clientFor("admin01", "admin");
-    yield* admin["chats.rename"]({ chatId: automation, title: "Nightly" });
-    assert.equal((yield* (yield* ChatRepository).get(automation))?.title, "Nightly");
+    assert.deepStrictEqual(yield* refusalsFor(admin, automation), allNotFound);
   }).pipe(Effect.scoped, Effect.provide(Fixture.layerStore)),
 );

@@ -77,7 +77,7 @@ const makeOrigins = Effect.gen(function* () {
     sql<{ readonly origin: string }>`SELECT json_object('chatId', chat_id,
       'kind', CASE WHEN owner_user_id IS NULL THEN 'task' ELSE 'conversation' END,
       'ownerUserId', owner_user_id, 'trigger', json(trigger), 'state', json(state)) AS origin
-      FROM chat_origins WHERE ${where}`.pipe(
+      FROM chat_origins WHERE ${where} ORDER BY rowid`.pipe(
       Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeOrigin(row.origin))),
       Effect.orDie,
     );
@@ -272,6 +272,14 @@ const make = Effect.gen(function* () {
   return {
     get,
     origins,
+    workflowId: (chatId: ChatId) =>
+      sql<{
+        readonly workflowId: string | null;
+      }>`SELECT json_extract(payload_json, '$.workflowId') AS "workflowId"
+        FROM chat_inputs WHERE chat_id = ${chatId} ORDER BY ordinal LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]?.workflowId ?? null),
+        Effect.orDie,
+      ),
     workerRow: (chatId: ChatId) =>
       sql`SELECT ${chatColumns}, vm, boot_id AS "bootId" FROM chats WHERE id = ${chatId} AND deleted_at IS NULL`.pipe(
         Effect.flatMap(([row]) => (row === undefined ? Effect.succeed(null) : decodeWorker(row))),
@@ -289,7 +297,7 @@ const make = Effect.gen(function* () {
         ON CONFLICT (id) DO NOTHING`.pipe(Effect.asVoid, Effect.orDie),
     list: (member: Member) =>
       sql`SELECT ${chatColumns} FROM chats WHERE deleted_at IS NULL AND id IN (SELECT chat_id FROM chat_origins
-        WHERE owner_user_id = ${member.userId} OR (trigger IS NOT NULL AND ${member.role === "admin"})) ORDER BY updated_at DESC, id DESC`.pipe(
+        WHERE owner_user_id = ${member.userId}) ORDER BY updated_at DESC, id DESC`.pipe(
         Effect.flatMap(decodeChats),
         Effect.orDie,
       ),

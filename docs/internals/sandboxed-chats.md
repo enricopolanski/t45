@@ -6,9 +6,9 @@ A VM's `RunConfig` contains the agent's instructions, files, skills, MCP servers
 
 ## Workflow effects cross the boundary as native tool calls
 
-The step tools (`STEP_TOOLS_MCP`, `step-tools.mjs`) return receipts without mutating T45. The worker passes saved native messages to TaskService, which finds the task by chat id and invokes WorkflowService for step calls. A receipt saying `ok: true` means the VM accepted the call; workflow refusals return as input to the same task.
+The step tools (`STEP_TOOLS_MCP`, `step-tools.mjs`) return receipts without mutating T45. The worker passes saved native messages to TaskService, which finds the task by chat id and invokes WorkflowService for step calls. A receipt saying `ok: true` means the VM accepted the call. An invalid write fails its task and reports the refusal on the step; it does not enqueue another agent turn.
 
-Each native message/part key is checked before attachment preparation and recorded in `task_calls` in the transaction applying its effect. Receipts ignored after submission are consumed too. `step_done` requires every required field and substep to be complete before submitting its task. Approval readiness is checked only when a task submits or the automation configuration changes. Rejection continues those tasks and chats, approval settles them, and `step_give_up` fails only its task.
+Each native message/part key is checked before attachment preparation and recorded in `task_calls` in the transaction applying its effect. Receipts ignored after submission are consumed too. `step_done` submits the automation's contribution even when shared fields or substeps remain incomplete. Submission and failure request a stop; after capture and workspace persistence, an inactive task releases its VM without the conversation idle grace period. Approval readiness still requires complete fields, completed substeps and submissions from every automation. Rejection continues those tasks internally, approval settles them, and `step_give_up` fails only its task.
 
 The hook uses the worker's file reader directly for attachment snapshots. It must never call `runner.run`: waiting for a queued job from inside the worker would deadlock. Task and workflow commands only persist inputs and stop requests, waking the worker after commit.
 

@@ -1,10 +1,3 @@
-import { StepAutomationsEditor } from "../work/StepAutomationsEditor";
-import {
-  hasInitialWork,
-  type StepAutomation,
-  type StepDefinition,
-  type Workflow,
-} from "@t45/contracts/models/Workflow";
 import { StringId } from "@t45/contracts/models/primitives";
 
 import type { WorkflowInstanceView } from "@t45/contracts/resources/Workflows";
@@ -154,101 +147,6 @@ export function WorkflowPeople({ detail, busy, run }: Editing) {
   );
 }
 
-const stepRows = (
-  steps: ReadonlyArray<StepDefinition>,
-  parentName: string | null = null,
-): ReadonlyArray<{
-  readonly step: StepDefinition;
-  readonly name: string;
-  readonly parentName: string | null;
-}> =>
-  steps.flatMap((step) => {
-    const name = parentName === null ? step.name : `${parentName} › ${step.name}`;
-    return [{ step, name, parentName }, ...stepRows(step.subSteps, name)];
-  });
-
-export function WorkflowStepPeople({ detail, busy, run }: Editing) {
-  const { workflow, definition } = detail;
-  const rows = stepRows(definition.steps);
-  const firstId = definition.steps[0]?.id;
-  const save = (stepId: string, change: Partial<Workflow["defaultAssignments"][string]>) => {
-    const current = workflow.defaultAssignments[stepId] ?? EMPTY_ASSIGNMENT;
-    const next = { ...current, ...change };
-    const others = Object.fromEntries(
-      Object.entries(workflow.defaultAssignments).filter(([id]) => id !== stepId),
-    );
-    const defaultAssignments =
-      next.assignee === null && next.responsible === null && next.automations.length === 0
-        ? others
-        : { ...others, [stepId]: next };
-    void run(() =>
-      api("workflows.updateInstance", { workflowId: workflow.id, defaultAssignments }),
-    );
-  };
-  return (
-    <section aria-label="Who does each step" className="flex flex-col gap-2.5">
-      <h2 className="text-sm font-semibold">Who does each step</h2>
-      <div className="divide-y divide-border rounded-xl border border-border bg-card">
-        {rows.length === 0 ? (
-          <p className="px-4 py-3 text-sm text-muted-foreground">No steps yet.</p>
-        ) : null}
-        {rows.map(({ step, name, parentName }) => {
-          const assignment = workflow.defaultAssignments[step.id];
-          const isFirst = step.id === firstId;
-          return (
-            <div key={step.id} className="flex flex-col gap-3 px-4 py-3">
-              <p className="truncate text-sm font-medium">{name}</p>
-              {isFirst && !hasInitialWork(workflow, definition) ? (
-                <p className="text-xs text-destructive">
-                  Tickets can start once the first step has an assignee or automation.
-                </p>
-              ) : null}
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">Assignee</span>
-                  <PersonPicker
-                    aria-label={`${name} assignee`}
-                    value={assignment?.assignee ?? null}
-                    onChange={(assignee) => save(step.id, { assignee })}
-                    {...(isFirst
-                      ? {}
-                      : {
-                          noneLabel:
-                            parentName === null
-                              ? "Whoever did the step before"
-                              : "Whoever has the step it sits in",
-                          onClear: () => save(step.id, { assignee: null }),
-                        })}
-                    placeholder="Choose an assignee"
-                    disabled={busy}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">Responsible</span>
-                  <PersonPicker
-                    aria-label={`${name} responsible`}
-                    value={assignment?.responsible ?? null}
-                    onChange={(responsible) => save(step.id, { responsible })}
-                    noneLabel="The workflow's responsible"
-                    onClear={() => save(step.id, { responsible: null })}
-                    placeholder="Choose who approves"
-                    disabled={busy}
-                  />
-                </div>
-              </div>
-              <StepAutomationsEditor
-                entries={assignment?.automations ?? EMPTY_AUTOMATIONS}
-                busy={busy}
-                onSave={(automations) => save(step.id, { automations })}
-              />
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 /**
  * Archiving and deleting the workflow, last on the page; deleting goes back to the list. A
  * workflow with items can't be deleted, which the server's refusal says.
@@ -329,6 +227,3 @@ export function WorkflowDangerZone({ detail, busy, run }: Editing) {
     </section>
   );
 }
-
-const EMPTY_AUTOMATIONS: ReadonlyArray<StepAutomation> = [];
-const EMPTY_ASSIGNMENT = { assignee: null, responsible: null, automations: EMPTY_AUTOMATIONS };

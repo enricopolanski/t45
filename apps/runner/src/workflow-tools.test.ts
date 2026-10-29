@@ -38,9 +38,8 @@ const session = (drafts: ReadonlyArray<unknown>) => {
   return { tools, answers };
 };
 
-const step = (key: string, extra: Record<string, unknown> = {}) => ({
-  key,
-  name: `Step ${key}`,
+const step = (name: string, extra: Record<string, unknown> = {}) => ({
+  name,
   instructions: "",
   fields: [],
   subSteps: [],
@@ -52,21 +51,21 @@ it("drafts a workflow whose steps and fields T45 would save", () => {
     {
       name: "Onboarding",
       steps: [
-        step("collect", {
+        step("GDI", {
           fields: [
-            { key: "contract", label: "Contract", type: "file" },
-            { key: "role", label: "Role", type: "select", options: ["Sales", "Support"] },
+            { label: "VE", type: "text" },
+            { label: "Role", type: "select", options: ["Sales", "Support"] },
+            { label: "Contract signed", type: "boolean" },
             {
-              key: "devices",
               label: "Devices",
               type: "group",
               repeatable: true,
-              fields: [{ key: "model", label: "Model", type: "text" }],
+              fields: [{ label: "Model", type: "text" }],
             },
           ],
           subSteps: [
-            step("badge", {
-              fields: [{ key: "photo", label: "Photo", type: "file" }],
+            step("PIM", {
+              fields: [{ label: "Photo", type: "file" }],
             }),
           ],
         }),
@@ -81,52 +80,32 @@ it("drafts a workflow whose steps and fields T45 would save", () => {
 
 it("refuses a draft T45 would refuse, saying what to fix", () => {
   const { answers } = session([
-    { name: " ", steps: [step("a")] },
+    { name: " ", steps: [step("step-a")] },
     { name: "Empty", steps: [] },
-    { name: "Twice", steps: [step("a"), step("b", { subSteps: [step("a")] })] },
-    { name: "Bad key", steps: [step("has space")] },
     {
       name: "Select",
-      steps: [step("a", { fields: [{ key: "s", label: "S", type: "select", options: [] }] })],
+      steps: [
+        step("step-a", {
+          fields: [{ label: "S", type: "select", options: [] }],
+        }),
+      ],
     },
     {
-      name: "Deep",
+      name: "Invalid boolean",
       steps: [
-        step("a", {
+        step("step-a", {
           fields: [
             {
-              key: "g",
-              label: "G",
-              type: "group",
-              fields: [
-                {
-                  key: "h",
-                  label: "H",
-                  type: "group",
-                  fields: [
-                    {
-                      key: "i",
-                      label: "I",
-                      type: "group",
-                      fields: [{ key: "j", label: "J", type: "text" }],
-                      repeatable: false,
-                    },
-                  ],
-                  repeatable: false,
-                },
-              ],
-              repeatable: false,
+              label: "Signed off",
+              type: "yes_no",
             },
           ],
         }),
       ],
     },
   ]);
-  expect(answers.map((answer) => answer.error)).toEqual([true, true, true, true, true, true]);
-  expect(answers[0]?.text).toBe("The workflow needs a name.");
-  expect(answers[1]?.text).toBe("Draft at least one step.");
-  expect(answers[2]?.text).toContain('The key "a" is used twice');
-  expect(answers[3]?.text).toContain("a key is 1 to 64 letters");
-  expect(answers[4]?.text).toContain("a select needs options");
-  expect(answers[5]?.text).toContain("a group inside a group holds no group");
+  expect(answers.map((answer) => answer.error)).toEqual([true, true, true, true]);
+  expect(answers.every((answer) => answer.text.includes("Fix the draft and try again."))).toBe(
+    true,
+  );
 });

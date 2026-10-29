@@ -1,14 +1,14 @@
 import { StepAutomationsEditor } from "./StepAutomationsEditor";
 import { StringId } from "@t45/contracts/models/primitives";
-import { NotFound } from "@t45/contracts/resources/errors";
 import type { StepNameView, StepView } from "@t45/contracts/resources/Workflows";
 import { Link } from "@tanstack/react-router";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { InfoIcon } from "lucide-react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { api } from "../../rpc/api";
+import { apiWatch, useApiQuery } from "../../state/rpc";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { SavedInput } from "../SavedInput";
@@ -21,6 +21,7 @@ import { StepComments, StepFiles } from "./StepConversation";
 import { attachStepFile, StepFields } from "./StepFields";
 import { StepStatus } from "./StepStatus";
 import { StepSubSteps } from "./StepSubSteps";
+import { StepRuns } from "./StepRuns";
 import { BackLink, WorkFrame } from "./WorkFrame";
 import { useSession } from "../../state/session";
 import {
@@ -32,15 +33,8 @@ import {
 } from "./workLogic";
 import { workChanged } from "../../state/work";
 
-type StepData =
-  | { readonly status: "loading" }
-  | {
-      readonly status: "ready";
-      readonly view: StepView;
-    }
-  | { readonly status: "failed"; readonly message: string };
-
 const isStepId = Schema.is(StringId);
+const stepViews = apiWatch("workflows.watchStep", { idleTtlMs: 0 });
 
 /**
  * An item, opened on one of its steps, like an issue: the item's title and details, what
@@ -49,39 +43,27 @@ const isStepId = Schema.is(StringId);
  * starts fresh.
  */
 export function StepPage({ stepId }: { readonly stepId: string }) {
-  const [data, setData] = useState<StepData>({ status: "loading" });
+  const {
+    data: view,
+    error: loadError,
+    refresh,
+  } = useApiQuery(isStepId(stepId) ? stepViews({ stepId }) : null);
   const viewerUserId = useSession()?.userId;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Set once Mark done is tried; from then on, what's missing shows and clears as it's filled.
   const [triedDone, setTriedDone] = useState(false);
 
-  const load = useCallback(() => {
-    const step = { stepId };
-    return (
-      isStepId(stepId) ? api("workflows.getStep", step) : Promise.reject(new NotFound())
-    ).then(
-      (view) => {
-        setData({ status: "ready", view });
-        // Opening the step read its notifications.
-        workChanged();
-      },
-      (cause: unknown) => {
-        setData({ status: "failed", message: describeFailure(cause) });
-      },
-    );
-  }, [stepId]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (view !== null) workChanged();
+  }, [view]);
 
   const act: StepAct = async (run, quiet = false) => {
     setBusy(true);
     if (!quiet) setError(null);
     try {
       await run();
-      await load();
+      refresh();
       return null;
     } catch (cause) {
       const message = describeFailure(cause);
@@ -92,12 +74,12 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     }
   };
 
-  if (data.status !== "ready") {
+  if (view === null) {
     return (
       <WorkFrame title="Item">
-        {data.status === "failed" ? (
+        {loadError !== null || !isStepId(stepId) ? (
           <p role="alert" className="text-sm text-muted-foreground">
-            {data.message}
+            {loadError ?? "This step could not be found."}
           </p>
         ) : (
           <p className="text-sm text-muted-foreground">Loading…</p>
@@ -106,7 +88,6 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     );
   }
 
-  const { view } = data;
   const actions = stepActions(view.ticket, view.step, viewerUserId);
   const step = { stepId: view.step.id };
   const writes = view.ticket.status.type === "open";
@@ -191,6 +172,16 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           <StepStatus view={view} actions={actions} busy={busy} act={act} onMarkDone={markDone} />
           <ItemDetails view={view} actions={actions} busy={busy} act={act} />
           <AgentCard view={view} actions={actions} busy={busy} act={act} />
+          <StepRuns
+            view={view}
+            busy={busy}
+            onRun={(automationId) =>
+              void act(() => api("workflows.runStepAutomation", { ...step, automationId }))
+            }
+            onStop={(automationId) =>
+              void act(() => api("workflows.stopStepAutomation", { ...step, automationId }))
+            }
+          />
         </div>
       </div>
     </WorkFrame>
@@ -210,42 +201,28 @@ function AgentCard({
 }) {
   return (
     <CardFold as="aside" title="Automations">
-      {view.tasks.map((task) => (
-        <div key={task.chatId} className="flex flex-col gap-1 text-sm">
-          <Link
-            to="/chats/$chatId"
-            params={{ chatId: task.chatId }}
-            className="text-primary hover:underline"
-          >
-            Open chat
-          </Link>
-          <span>
-            {task.state.type === "active"
-              ? "Working"
-              : task.state.type === "submitted"
-                ? "Submitted"
-                : {
-                    succeeded: "Approved",
-                    failed: "Failed",
-                    cancelled: "Cancelled",
-                  }[task.state.outcome.type]}
-            {task.state.type === "settled" && task.state.outcome.type !== "succeeded"
-              ? `: ${task.state.outcome.reason}`
-              : ""}
-          </span>
-        </div>
-      ))}
-      {actions.canEditFields ? (
-        <StepAutomationsEditor
-          entries={view.step.automations}
-          busy={busy}
-          onSave={(automations) =>
-            void act(() =>
-              api("workflows.setStepAutomations", { stepId: view.step.id, automations }),
-            )
-          }
-        />
-      ) : null}
+      <StepAutomationsEditor
+        entries={view.step.automations}
+        busy={busy}
+        readOnly={!actions.canEditFields}
+        canRun={(automationId) => {
+          const task = view.tasks.findLast((task) => task.trigger.automationId === automationId);
+          return task === undefined || ["finished", "failed", "stopped"].includes(task.execution);
+        }}
+        onRun={
+          view.canRunAutomations
+            ? (automationId) =>
+                void act(() =>
+                  api("workflows.runStepAutomation", { stepId: view.step.id, automationId }),
+                )
+            : undefined
+        }
+        onSave={async (automations) =>
+          (await act(() =>
+            api("workflows.setStepAutomations", { stepId: view.step.id, automations }),
+          )) === null
+        }
+      />
     </CardFold>
   );
 }

@@ -1,5 +1,4 @@
-import type { StepDefinition } from "@t45/contracts/models/Workflow";
-import type { WorkflowDraft } from "@t45/contracts/resources/AgentTools";
+import { definitionFromDraft, type WorkflowDraft } from "@t45/contracts/models/WorkflowDraft";
 import { Link } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
 import { useState } from "react";
@@ -24,11 +23,12 @@ const rememberCreated = (itemId: string, definitionId: string) => {
   } catch {}
 };
 
-function DraftSteps({ steps }: { readonly steps: ReadonlyArray<StepDefinition> }) {
+function DraftSteps({ steps }: { readonly steps: WorkflowDraft["steps"] }) {
   return (
     <ol className="flex flex-col gap-1.5 list-decimal ps-4">
-      {steps.map((step) => (
-        <li key={step.id} className="text-sm text-foreground">
+      {steps.map((step, index) => (
+        // oxlint-disable-next-line react/no-array-index-key -- a draft card keeps its order; ids are assigned on save
+        <li key={index} className="text-sm text-foreground">
           <span className="font-medium">{step.name}</span>
           <span className="text-muted-foreground">
             {` · ${plural(step.fields.length, "field", "fields")}`}
@@ -59,7 +59,7 @@ export function WorkflowDraftCard(props: {
   const create = () => {
     setCreating(true);
     setError(null);
-    void api("workflows.createDefinition", { name: draft.name, steps: draft.steps })
+    void api("workflows.createDefinition", definitionFromDraft(draft))
       .then(
         (created) => {
           rememberCreated(itemId, created.definitionId);

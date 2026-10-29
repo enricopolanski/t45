@@ -19,7 +19,7 @@ import { stripInlineContextReferences } from "../lib/composerContextReferences";
 import { describeFailure, isNotFound } from "../lib/failures";
 import { forgetChatDrafts } from "../questionDrafts";
 import { api, reachableAtom } from "../rpc/api";
-import { agentsList } from "../state/agents";
+import { chatTargets } from "../state/chatTargets";
 import { chatSessionKey, chats } from "../state/chats";
 import { toastFailure } from "../state/query";
 import { useApiQuery } from "../state/rpc";
@@ -52,11 +52,13 @@ export default function ChatView({
   chatId,
   sessionId,
   newAgentId,
+  newWorkflowId,
 }: {
   readonly chatId: ChatId;
   /** A subagent session of the chat to show, read only; null for the chat itself. */
   readonly sessionId: Session.ID | null;
   readonly newAgentId: Agent["id"] | null;
+  readonly newWorkflowId: string | null;
 }) {
   const readOnly = sessionId !== null;
   const newChat = useNewChat();
@@ -108,8 +110,8 @@ export default function ChatView({
     !readOnly && running && ready?.betweenTurns === true ? (pendingInputs[0] ?? null) : null;
   const queuedInputs = sendingInput === null ? pendingInputs : pendingInputs.slice(1);
 
-  const newAgent = useApiQuery(isNew ? agentsList : null).data?.find(
-    (agent) => agent.id === newAgentId,
+  const newAgent = useApiQuery(isNew ? chatTargets : null).data?.find(
+    (target) => target.agentId === newAgentId && (target.workflowId ?? null) === newWorkflowId,
   );
   const agentName = chatInfo?.agentName ?? newAgent?.name ?? null;
   const title = chatInfo !== null ? titleOf(chatInfo) : isNew ? titleOf({ title: null }) : "";
@@ -306,6 +308,7 @@ export default function ChatView({
     void sendChatMessage({
       chatId,
       agentId: isNew ? newAgentId : null,
+      workflowId: isNew ? newWorkflowId : null,
       prompt,
       attachments,
       setBusy: setSendBusy,

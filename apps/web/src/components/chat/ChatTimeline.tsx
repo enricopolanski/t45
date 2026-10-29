@@ -817,7 +817,7 @@ function ToolRow({ part, message, whole }: ToolPartProps) {
 
 /**
  * A workflow the agent drafted, as a card made from the draft whole: a read cuts long strings,
- * which would cut the workflow's instructions short. A draft that doesn't decode stays a tool row.
+ * which would cut the workflow's instructions short. An unreadable draft explains why no card shows.
  */
 function WorkflowDraftPart({ part, message, whole }: ToolPartProps) {
   const ctx = use(TimelineCtx);
@@ -839,7 +839,16 @@ function WorkflowDraftPart({ part, message, whole }: ToolPartProps) {
       ? native.content.find((each) => each.type === "tool" && each.id === part.id)
       : undefined;
   const draft = workflowDraftOf(drafted?.type === "tool" ? drafted : part);
-  if (draft === null) return <ToolRow part={part} message={message} whole={whole} />;
+  if (draft === null) {
+    return (
+      <div role="alert" className="flex items-start gap-2 text-sm text-destructive">
+        <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+        <span>
+          This workflow draft could not be displayed or saved. Ask the agent to draft it again.
+        </span>
+      </div>
+    );
+  }
   return (
     <WorkflowDraftCard itemId={`${ctx.chatId}:${message.sessionId}:${part.id}`} draft={draft} />
   );

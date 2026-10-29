@@ -24,7 +24,12 @@
     },
     "apps/runner": {
       // The step and workflow tools, and the stdio loop they share, run inside the agent image.
-      "entry": ["image/mcp-stdio.mjs", "image/step-tools.mjs", "image/workflow-tools.mjs"],
+      "entry": [
+        "image/mcp-stdio.mjs",
+        "image/step-tools.mjs",
+        "image/workflow-tools.mjs",
+        "image/workflow-instance-tools.mjs",
+      ],
     },
     "apps/server": {
       // Keep the transitive Effect runtime pinned for standalone npm installs.

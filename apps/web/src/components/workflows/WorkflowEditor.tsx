@@ -10,7 +10,8 @@ import { WorkFrame } from "../work/WorkFrame";
 import { plural } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
 import { useWorkflowDetail } from "./useWorkflowDetail";
-import { WorkflowDangerZone, WorkflowPeople, WorkflowStepPeople } from "./WorkflowPeople";
+import { WorkflowDangerZone, WorkflowPeople } from "./WorkflowPeople";
+import { WorkflowStepPeople } from "./WorkflowStepPeople";
 
 /**
  * A workflow as its admins shape it, in cards: its name first, a link to the step editor, its

@@ -19,6 +19,8 @@ import {
   resolveResponsible,
   stepAfterDefinitionChange,
   stepPeopleOnEntry,
+  stepReadyForApproval,
+  stepAutomationRefusal,
   subStepsToEnter,
   ticketStartRefusal,
 } from "./Workflow.ts";
@@ -83,6 +85,47 @@ const ticket: Ticket = {
   createdAt: at,
 };
 
+it("keeps finished automations separate from shared step readiness", () => {
+  const entries = [
+    { id: "extract01", agentId: "agent01", instructions: "Extract the data" },
+    { id: "review01", agentId: "agent02", instructions: "Review the data" },
+  ];
+  const definition: StepDefinition = {
+    ...root,
+    fields: [{ id: "result01", label: "Result", type: "text" }],
+  };
+  const shared = { ...step, values: {}, automations: entries };
+  const submitted = entries.map((entry): Pick<Task, "trigger" | "state"> => ({
+    trigger: { type: "step", ticketId: ticket.id, stepId: step.id, automationId: entry.id },
+    state: { type: "submitted" },
+  }));
+  assert.isFalse(stepReadyForApproval(definition, ticket, shared, submitted));
+  const filled = { ...shared, values: { result01: "Collected" } };
+  assert.isFalse(stepReadyForApproval(definition, ticket, filled, submitted.slice(0, 1)));
+  assert.isTrue(stepReadyForApproval(definition, ticket, filled, submitted));
+  const withChild = {
+    ...ticket,
+    steps: [filled, { ...step, id: "child01", parentStepId: step.id }],
+  };
+  assert.isFalse(stepReadyForApproval(definition, withChild, filled, submitted));
+});
+
+it("allows another automation run while working or awaiting approval, but not after completion", () => {
+  assert.equal(stepAutomationRefusal(ticket, step), null);
+  assert.equal(
+    stepAutomationRefusal(ticket, { ...step, status: { type: "waiting_approval", at } }),
+    null,
+  );
+  assert.equal(
+    stepAutomationRefusal(ticket, { ...step, status: { type: "completed", at } }),
+    "step_not_actionable",
+  );
+  assert.equal(
+    stepAutomationRefusal({ ...ticket, status: { type: "done" } }, step),
+    "ticket_not_open",
+  );
+});
+
 describe("step people", () => {
   it("uses a team's defaults before inherited people, without inventing an assignee", () => {
     const configured = {
@@ -116,17 +159,37 @@ describe("step people", () => {
     );
   });
 
-  it("refuses an unassigned first step even for an organization admin", () => {
+  it("allows authorized people to start unassigned tickets", () => {
     const blueprint = {
       id: workflow.definitionId,
       name: "Review",
       steps: [root],
       isArchived: false,
     };
+    for (const actor of [
+      { id: "orgadmin01", isOrgAdmin: true },
+      { id: "admin01", isOrgAdmin: false },
+      { id: "owner01", isOrgAdmin: false },
+    ]) {
+      assert.equal(ticketStartRefusal(actor, workflow, blueprint), null);
+    }
+    assert.deepEqual(stepPeopleOnEntry(workflow, root, null), {
+      assignee: null,
+      responsible: null,
+    });
     assert.equal(
-      ticketStartRefusal({ id: "admin01", isOrgAdmin: true }, workflow, blueprint),
-      "first_step_unassigned",
+      ticketStartRefusal({ id: "outsider01", isOrgAdmin: false }, workflow, blueprint),
+      "cannot_start_ticket",
     );
+  });
+
+  it("lets the first step's assignee start tickets and preserves workflow restrictions", () => {
+    const blueprint = {
+      id: workflow.definitionId,
+      name: "Review",
+      steps: [root],
+      isArchived: false,
+    };
     const configured = {
       ...workflow,
       defaultAssignments: {
@@ -141,6 +204,12 @@ describe("step people", () => {
       ticketStartRefusal({ id: "outsider01", isOrgAdmin: false }, configured, blueprint),
       "cannot_start_ticket",
     );
+    const admin = { id: "admin01", isOrgAdmin: false };
+    assert.equal(
+      ticketStartRefusal(admin, { ...workflow, isArchived: true }, blueprint),
+      "workflow_archived",
+    );
+    assert.equal(ticketStartRefusal(admin, workflow, { ...blueprint, steps: [] }), "no_steps");
   });
 });
 

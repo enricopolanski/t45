@@ -1,0 +1,8 @@
+*
+!image/
+!image/Dockerfile
+!image/mcp-stdio.mjs
+!image/step-tools.mjs
+!dist/
+!dist/image/
+!dist/image/workflow-tools.mjs

@@ -1,7 +1,8 @@
 import { type ChatAttachment } from "@t45/contracts/models/Attachment";
 import { type ChatMessage, InputMetadata, NoteMetadata } from "@t45/contracts/resources/Chats";
 import { type ChatMessageContext } from "@t45/contracts/models/Chat";
-import { WORKFLOW_DRAFT_TOOL_NAME, WorkflowDraft } from "@t45/contracts/resources/AgentTools";
+import { WORKFLOW_DRAFT_TOOL_NAME } from "@t45/contracts/resources/AgentTools";
+import { WorkflowDraft } from "@t45/contracts/models/WorkflowDraft";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 

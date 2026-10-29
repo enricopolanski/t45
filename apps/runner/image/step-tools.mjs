@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The step tools inside a chat's VM: a stdio MCP server, `step` to OpenCode, that admins give the
-// agents that work steps. It knows nothing of the step and takes every call: T45 reads each call
-// and its reply back from the chat, checks it as it applies it, and answers a refused one with a
-// message in the chat. An attach is a snapshot of the file under .t45/attached in the working
+// agents that work steps. T45 reads each receipt, validates it and applies it to the step.
+// An invalid write ends the task and reports the error on the step. An attach is a snapshot
+// of the file under .t45/attached in the working
 // folder, which T45 reads by the name the reply gives.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -14,7 +14,7 @@ const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const WORK = process.env.T45_WORK_DIR ?? "/work";
 
 const APPLIED =
-  "T45 applies the call to the step and answers one it refuses with a message in this chat.";
+  "T45 validates and applies the call. An invalid write ends your run and reports the error to the responsible person.";
 
 const TOOLS = {
   set_field: {
@@ -42,7 +42,7 @@ const TOOLS = {
   },
   done: {
     description:
-      "Submit this task only once every required field of the step is filled and every sub-step is complete. The step waits for all its automations to submit before approval. When you cannot finish, call give_up instead. Stop after calling it.",
+      "Signal that your contribution is finished, even if the shared step still has missing fields or unfinished sub-steps. Explain any gaps with comment first. This ends your run and releases your sandbox; T45 checks step completion separately. Stop after calling it.",
     inputSchema: { type: "object", properties: {} },
   },
   give_up: {

@@ -1,6 +1,7 @@
 import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
 import { Workflows } from "@t45/contracts/resources/Workflows";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 
 import { WorkflowService } from "./WorkflowService.ts";
 
@@ -34,6 +35,8 @@ export const layer = Workflows.middleware(Authorization).toLayer(
       "workflows.setTicketDueDate": (input) =>
         asViewer((id) => workflows.setTicketDueDate(id, input)),
       "workflows.getStep": ({ stepId }) => asViewer((id) => workflows.getStep(id, stepId)),
+      "workflows.watchStep": ({ stepId }) =>
+        Stream.unwrap(Effect.map(CurrentUser, (user) => workflows.watchStep(user.userId, stepId))),
       "workflows.setStepField": (input) => asViewer((id) => workflows.setStepField(id, input)),
       "workflows.markStepDone": ({ stepId }) =>
         asViewer((id) => workflows.markStepDone(id, stepId)),
@@ -41,6 +44,10 @@ export const layer = Workflows.middleware(Authorization).toLayer(
       "workflows.rejectStep": (input) => asViewer((id) => workflows.rejectStep(id, input)),
       "workflows.setStepAutomations": (input) =>
         asViewer((id) => workflows.setStepAutomations(id, input)),
+      "workflows.runStepAutomation": (input) =>
+        asViewer((id) => workflows.runStepAutomation(id, input)),
+      "workflows.stopStepAutomation": (input) =>
+        asViewer((id) => workflows.stopStepAutomation(id, input)),
       "workflows.setStepAssignee": (input) =>
         asViewer((id) => workflows.setStepAssignee(id, input)),
       "workflows.blockStep": (input) => asViewer((id) => workflows.blockStep(id, input)),
