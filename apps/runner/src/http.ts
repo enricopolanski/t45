@@ -55,15 +55,15 @@ export const layer = HttpApiBuilder.group(
         }),
       )
       .handle(
-        "ensureChat",
-        Effect.fn("runner.ensureChat")(function* (args) {
+        "startChat",
+        Effect.fn("runner.startChat")(function* (args) {
           const health = yield* sandboxes.health;
           if (!health.isAvailable) {
             return yield* new RunnerRefusedError({
               reason: health.reason ?? "The runner can't run sandboxes.",
             });
           }
-          return yield* chats.ensure({ chatId: args.params.vmId, chat: args.payload });
+          yield* chats.start({ chatId: args.params.vmId, chat: args.payload });
         }),
       )
       .handle(

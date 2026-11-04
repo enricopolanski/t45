@@ -40,13 +40,11 @@ import { useChatQuestions } from "./chat/useChatQuestions";
 import { useComposerFocus } from "./chat/useComposerFocus";
 import { PageHeader } from "./PageHeader";
 import { Button } from "./ui/button";
-import { toastManager } from "./ui/toast";
 
 const NO_PROMPT_HISTORY: ReadonlyArray<ComposerPromptHistoryMessage> = [];
 const NO_INPUTS: ReadonlyArray<PendingInput> = [];
 
-const START_FAILED =
-  "The agent's sandbox couldn't start. T45 keeps trying, and your message waits.";
+const EXECUTION_FAILED = "The agent's sandbox failed. Send a message to try again.";
 
 export default function ChatView({
   chatId,
@@ -119,7 +117,7 @@ export default function ChatView({
     view.status === "failed" && !missing
       ? describeFailure(view.error, "Could not open the chat.")
       : status === "failed" && ready?.endsWithError === false
-        ? START_FAILED
+        ? EXECUTION_FAILED
         : null;
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   // Dismissal lasts only while the same error remains active.
@@ -261,20 +259,6 @@ export default function ChatView({
   const startNewChat = () =>
     void newChat().catch((error: unknown) => toastFailure("Couldn't start a new chat", error));
 
-  const compactDisabled =
-    readOnly ||
-    loading ||
-    running ||
-    sendBusy ||
-    !isReachable ||
-    question !== null ||
-    !ready?.hasUserMessages;
-  const onCompactContext = () => {
-    if (compactDisabled) return;
-    void api("chats.compact", { chatId }).catch((error: unknown) =>
-      toastFailure("Couldn't compact the conversation", error),
-    );
-  };
   const onSend = (event?: { preventDefault: () => void }) => {
     event?.preventDefault();
     if (readOnly || sendsInFlight.has(chatId) || loading) return false;
@@ -286,18 +270,11 @@ export default function ChatView({
     const attachments = draft ? [...draft.images, ...draft.files] : [];
     const prompt = promptRef.current;
     const trimmedPrompt = stripInlineContextReferences(prompt).trim();
-    const command =
-      attachments.length === 0 ? parseStandaloneComposerSlashCommand(trimmedPrompt) : null;
-    if (command === "compact" && compactDisabled) {
-      toastManager.add({ type: "error", title: "Compacting is unavailable right now." });
-      return false;
-    }
-    if (command !== null) {
+    if (attachments.length === 0 && parseStandaloneComposerSlashCommand(trimmedPrompt) === "new") {
       promptRef.current = "";
       clearComposerDraftContent(chatId);
       composerRef.current?.resetCursorState();
-      if (command === "new") startNewChat();
-      else onCompactContext();
+      startNewChat();
       return true;
     }
     if (trimmedPrompt.length === 0 && attachments.length === 0) return false;
@@ -351,12 +328,7 @@ export default function ChatView({
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
         <PageHeader className="relative">
-          <ChatHeader
-            activeChatId={chatId}
-            activeChatTitle={title}
-            compactDisabled={compactDisabled}
-            onCompactContext={onCompactContext}
-          />
+          <ChatHeader activeChatId={chatId} activeChatTitle={title} />
         </PageHeader>
 
         <div className="relative flex min-h-0 min-w-0 flex-1">
@@ -466,14 +438,12 @@ export default function ChatView({
                           }
                           question={question}
                           loadingMessages={loading && isReachable}
-                          compactDisabled={compactDisabled}
                           getTimelineScrollableNode={getTimelineScrollableNode}
                           isTimelineAtLogicalEnd={isTimelineAtLogicalEnd}
                           timelineOverflows={timelineOverflows}
                           onLayoutChange={setComposerLayout}
                           promptRef={promptRef}
                           onPageScrollKeyDown={onComposerPageScroll}
-                          onCompactContext={onCompactContext}
                           onSend={onSend}
                           onStartNewChat={startNewChat}
                           onInterrupt={onInterrupt}

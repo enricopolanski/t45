@@ -1,17 +1,17 @@
 /**
- * Scripted HTTP responses for T45's chat delivery and recovery tests. The real OpenCode client
- * talks to these responses; no OpenCode server or agent runs. Imports and prompts are recorded
- * as sent, without filtering history or suppressing duplicate messages, so the fixture cannot
- * repair a mistake made by T45. This does not verify integration with a real OpenCode server.
+ * Scripted HTTP responses for the OpenCode servers in T45's chat VMs. The real OpenCode client
+ * talks to these responses; no OpenCode server or agent runs. Imports and prompts are recorded as
+ * sent, so the fixture cannot repair a mistake made by T45. This does not verify integration with a
+ * real OpenCode server.
  *
- * Each VM follows its boots on the fake runner: a VM the runner doesn't run doesn't answer, and a
- * new boot starts empty, as the runner's VMs keep nothing.
+ * Each VM lives as long as the fake runner runs it: one the runner doesn't run doesn't answer, and
+ * starting or removing it wipes what it held, as the runner's VMs keep nothing.
  */
 import { Session } from "@opencode/client/effect";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as Schema from "effect/Schema";
 
 import { type FakeRunner, respond as runnerResponse } from "./FakeRunner.testkit.ts";
 
@@ -26,7 +26,7 @@ interface FakeSession {
   readonly chatId: string;
   /** The session whose subagent runs in it. */
   readonly parentID?: string;
-  title?: string;
+  readonly title?: string;
   readonly model?: unknown;
   outcome?: Session.Info["outcome"];
   /** Its history, encoded as OpenCode sends it, in OpenCode's order. */
@@ -46,38 +46,31 @@ export interface FakeOpenCode {
   readonly sessions: Map<string, FakeSession>;
   /** Subagents' sessions, by session id. */
   readonly subagents: Map<string, FakeSession>;
-  /** Prompt texts OpenCode refuses as invalid requests, with why. */
-  readonly invalidPrompts: Map<string, string>;
   /** Prompt texts whose next send finds the VM's server not answering. */
   readonly unansweredPrompts: Set<string>;
-  /** The messages T45 prompted with, in order, an id it sent again included. */
+  /** The messages T45 prompted with, in order, across every VM. */
   readonly prompts: Array<{
     readonly chatId: string;
     readonly id: string;
     readonly text: string;
     readonly metadata?: unknown;
   }>;
+  /** Told of each prompt's id, for `prompted`. */
+  readonly promptListeners: Set<(id: string) => void>;
+  /** The latest import of each session, by `<chatId>:<session id>`: the ids of its messages. */
+  readonly imports: Map<string, ReadonlyArray<string>>;
   /** Files in VMs, by `<chatId>:<path relative to /work>`. */
   readonly files: Map<string, Uint8Array>;
-  /** Forms T45 cancelled, by `<chatId>:<form id>`. */
-  readonly cancelledForms: Array<string>;
   /** Answers T45 gave forms, by `<chatId>:<form id>`. */
   readonly formReplies: Map<string, Json>;
-  /** Sessions T45 imported, by `<chatId>:<session id>`, with the ids of the messages it sent. */
-  readonly imports: Map<string, ReadonlyArray<string>>;
-  /** Sessions T45 interrupted, by `<chatId>:<session id>`. */
-  readonly interrupts: Array<string>;
-  /** Shell responses scripted by tests, by chat id. */
+  /** Shells each VM lists, by chat id. */
   readonly shells: Map<string, Array<Json>>;
-  readonly removedShells: Array<string>;
-  holdPrompt: Effect.Effect<void> | null;
-  holdInboxCancel: Effect.Effect<void> | null;
+  /** VMs that don't answer until the runner starts them again. */
+  readonly dead: Set<string>;
   /** Open event streams, by chat id. */
   readonly streams: Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>;
-  /** The runner whose boots the VMs follow. */
+  /** The runner that runs the VMs. */
   readonly runner: FakeRunner;
-  /** The boot of each VM the fake last answered for. */
-  readonly boots: Map<string, string>;
   /** Numbers the ids of the items tests add. */
   next: number;
 }
@@ -85,21 +78,16 @@ export interface FakeOpenCode {
 export const makeFakeOpenCode = (runner: FakeRunner): FakeOpenCode => ({
   sessions: new Map(),
   subagents: new Map(),
-  invalidPrompts: new Map(),
   unansweredPrompts: new Set(),
   prompts: [],
-  files: new Map(),
-  cancelledForms: [],
-  formReplies: new Map(),
+  promptListeners: new Set(),
   imports: new Map(),
-  interrupts: [],
+  files: new Map(),
+  formReplies: new Map(),
   shells: new Map(),
-  removedShells: [],
-  holdPrompt: null,
-  holdInboxCancel: null,
+  dead: new Set(),
   streams: new Map(),
   runner,
-  boots: new Map(),
   next: 1,
 });
 
@@ -134,6 +122,17 @@ const newSession = (chatId: string, id: string, parentID?: string): FakeSession 
   hold: false,
 });
 
+/** Adds a message to a session and announces it, as OpenCode does once it starts writing one. */
+const write = (fake: FakeOpenCode, session: FakeSession, item: Json) => {
+  session.items.push(item);
+  emit(fake, session.chatId, "session.text.started", {
+    sessionID: session.id,
+    assistantMessageID: item.id,
+    ordinal: 0,
+  });
+  return String(item.id);
+};
+
 /**
  * A chat's agent asks a question in its root session, or the subagent's `sessionId`, and
  * OpenCode announces it. Returns the form's id.
@@ -154,14 +153,51 @@ const formInfo = (sessionID: string, id: string) => ({
 });
 
 /**
- * A chat's agent starts a subagent in a session of its own under its root. Returns its id, which
- * is `id` when given, as a VM's OpenCode takes any id it is asked for.
+ * A chat's agent started a subagent in the background, which already finished its own turn but
+ * whose report hasn't reached the root yet. Returns the subagent's session id.
  */
-export const chatSubagent = (fake: FakeOpenCode, chatId: string, id?: string) => {
-  const parent = chatSession(fake, chatId);
-  const sessionId = Session.ID.make(id ?? nextId(fake, "ses_sub"));
-  fake.subagents.set(sessionId, { ...newSession(chatId, sessionId, parent.id), active: true });
-  return sessionId;
+export const backgroundSubagent = (fake: FakeOpenCode, chatId: string) => {
+  const root = chatSession(fake, chatId);
+  const child = Session.ID.make(nextId(fake, "ses_sub"));
+  fake.subagents.set(child, newSession(chatId, child, root.id));
+  const at = NOW + fake.next * 1000;
+  write(fake, root, {
+    id: nextId(fake, "msg_a"),
+    type: "assistant",
+    agent: "build",
+    model: { providerID: "opencode-go", id: "test-model" },
+    content: [
+      {
+        type: "tool",
+        id: nextId(fake, "call_"),
+        name: "subagent",
+        state: {
+          status: "completed",
+          input: {},
+          content: [{ type: "text", text: "Started in the background." }],
+          metadata: { status: "running", sessionID: child },
+        },
+        time: { created: at, completed: at },
+      },
+    ],
+    time: { created: at, completed: at + 1 },
+  });
+  return child;
+};
+
+/** The background subagent's report reaches the root, which runs a turn on it. Returns its id. */
+export const reportSubagent = (fake: FakeOpenCode, chatId: string, child: string) => {
+  const root = chatSession(fake, chatId);
+  const id = nextId(fake, "msg_s");
+  root.items.push({
+    id,
+    type: "synthetic",
+    text: "The research is done.",
+    metadata: { source: "subagent", childID: child },
+    time: { created: NOW + fake.next * 1000 },
+  });
+  emit(fake, chatId, "session.execution.succeeded", { sessionID: root.id });
+  return id;
 };
 
 /**
@@ -180,19 +216,17 @@ export const answerText = (
   } = {},
 ) => {
   const at = NOW + fake.next * 1000;
-  const id = nextId(fake, "msg_a");
-  chatSession(fake, chatId, options.sessionId).items.push({
-    id,
+  return write(fake, chatSession(fake, chatId, options.sessionId), {
+    id: nextId(fake, "msg_a"),
     type: "assistant",
     agent: "build",
     model: { providerID: "opencode-go", id: "test-model" },
     content: Array.from({ length: options.parts ?? 1 }, () => ({ type: "text", text })),
     time: options.streaming === true ? { created: at } : { created: at, completed: at + 1 },
   });
-  return id;
 };
 
-/** A shell listed as running until T45 removes it; no command actually runs. */
+/** A shell the VM lists as running until `exitShell`; no command actually runs. */
 export const runningShell = (fake: FakeOpenCode, chatId: string) => {
   const id = nextId(fake, "sh_");
   const shells = fake.shells.get(chatId) ?? [];
@@ -210,12 +244,20 @@ export const runningShell = (fake: FakeOpenCode, chatId: string) => {
   return id;
 };
 
+/** The shell `id` exits, and OpenCode announces it. */
+export const exitShell = (fake: FakeOpenCode, chatId: string, id: string) => {
+  for (const shell of fake.shells.get(chatId) ?? []) {
+    if (shell.id === id) shell.status = "exited";
+  }
+  emit(fake, chatId, "shell.exited", { id, status: "exited", exit: 0 });
+};
+
 /**
- * The chat's agent finishes its turn in its root session, or the subagent's `sessionId`. Returns
- * the id of the idle message that ends it.
+ * The agent finishes its turn in the root, and OpenCode announces it. Returns the id of the idle
+ * message that ends it.
  */
-export const endTurn = (fake: FakeOpenCode, chatId: string, sessionId?: string) => {
-  const session = chatSession(fake, chatId, sessionId);
+export const finishTurn = (fake: FakeOpenCode, chatId: string) => {
+  const session = chatSession(fake, chatId);
   const id = nextId(fake, "msg_i");
   session.items.push({
     id,
@@ -224,15 +266,11 @@ export const endTurn = (fake: FakeOpenCode, chatId: string, sessionId?: string) 
     time: { created: NOW + fake.next * 1000 },
   });
   session.active = false;
+  emit(fake, chatId, "session.execution.succeeded", { sessionID: session.id });
   return id;
 };
 
-export const finishTurn = (fake: FakeOpenCode, chatId: string) => {
-  const idle = endTurn(fake, chatId);
-  emit(fake, chatId, "session.execution.succeeded", { sessionID: chatSession(fake, chatId).id });
-  return idle;
-};
-
+/** The agent's turn in the root fails, and OpenCode announces it. */
 export const failTurn = (fake: FakeOpenCode, chatId: string, message: string) => {
   const session = chatSession(fake, chatId);
   session.active = false;
@@ -243,37 +281,46 @@ export const failTurn = (fake: FakeOpenCode, chatId: string, message: string) =>
   });
 };
 
-export const interruptTurn = (fake: FakeOpenCode, chatId: string) => {
-  const session = chatSession(fake, chatId);
-  session.active = false;
-  session.outcome = "interrupted";
-  emit(fake, chatId, "session.execution.interrupted", { sessionID: session.id, reason: "user" });
-};
-
-export const emptyInbox = (fake: FakeOpenCode, chatId: string) => {
-  chatSession(fake, chatId).inbox.splice(0);
-};
-
 /** Whether inputs to the chat's root wait in its inbox, as while the agent is busy. */
 export const hold = (fake: FakeOpenCode, chatId: string, held: boolean) => {
   const session = chatSession(fake, chatId);
   session.hold = held;
   if (held) return;
-  for (const entry of session.inbox.splice(0)) deliver(session, entry);
+  for (const entry of session.inbox.splice(0)) deliver(fake, session, entry);
 };
 
-const deliver = (session: FakeSession, entry: Json) => {
+/** OpenCode makes an inbox entry the session's message, which starts a turn. */
+const deliver = (fake: FakeOpenCode, session: FakeSession, entry: Json) => {
   const payload = entry.payload as Json;
   session.items.push({
     id: entry.id,
     type: entry.type,
     text: payload.text,
-    ...(typeof payload.description === "string" ? { description: payload.description } : {}),
     ...(payload.metadata === undefined ? {} : { metadata: payload.metadata }),
     time: { created: NOW },
   });
   session.active = true;
+  emit(fake, session.chatId, "session.inbox.delivered", {
+    sessionID: session.id,
+    inboxID: entry.id,
+  });
 };
+
+/** Waits until T45 prompted the message `id`, in any VM. */
+export const prompted = (fake: FakeOpenCode, id: string) =>
+  Effect.suspend(() =>
+    fake.prompts.some((prompt) => prompt.id === id)
+      ? Effect.void
+      : Effect.callback<void>((resume) => {
+          const told = (sent: string) => {
+            if (sent !== id) return;
+            fake.promptListeners.delete(told);
+            resume(Effect.void);
+          };
+          fake.promptListeners.add(told);
+          return Effect.sync(() => fake.promptListeners.delete(told));
+        }),
+  );
 
 /**
  * OpenCode sends the event to the VM's open streams: `type` with `data`, durable unless it is a
@@ -310,11 +357,8 @@ const closeStreams = (fake: FakeOpenCode, chatId: string) => {
   fake.streams.delete(chatId);
 };
 
-/** The VM's event streams end, as when the connection to it breaks; the VM keeps the rest. */
-export const dropStreams = (fake: FakeOpenCode, chatId: string) => closeStreams(fake, chatId);
-
-/** The VM loses everything it held, as when it dies: its sessions, its files, its streams. */
-export const crash = (fake: FakeOpenCode, chatId: string) => {
+/** Everything the VM held goes: its streams, sessions, shells and files. */
+const wipe = (fake: FakeOpenCode, chatId: string) => {
   closeStreams(fake, chatId);
   fake.sessions.delete(chatId);
   fake.shells.delete(chatId);
@@ -324,6 +368,20 @@ export const crash = (fake: FakeOpenCode, chatId: string) => {
   for (const key of fake.files.keys()) {
     if (key.startsWith(`${chatId}:`)) fake.files.delete(key);
   }
+};
+
+/** The VM dies: it loses everything it held and answers nothing until the runner starts it. */
+export const crash = (fake: FakeOpenCode, chatId: string) => {
+  wipe(fake, chatId);
+  fake.dead.add(chatId);
+};
+
+/**
+ * The VM's server stops answering requests until the runner starts it again; its event streams
+ * stay open and it keeps what it held.
+ */
+export const hang = (fake: FakeOpenCode, chatId: string) => {
+  fake.dead.add(chatId);
 };
 
 const json = (body: unknown, status = 200) =>
@@ -368,6 +426,30 @@ const listMessages = (session: FakeSession, query: URLSearchParams) => {
   });
 };
 
+/** Opens an event stream to the VM, which says it is connected first. */
+const openStream = (fake: FakeOpenCode, chatId: string) => {
+  const connected = frameOf({
+    id: nextId(fake, "evt_"),
+    created: NOW,
+    type: "server.connected",
+    data: {},
+  });
+  const streams = fake.streams.get(chatId) ?? new Set();
+  fake.streams.set(chatId, streams);
+  let opened: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const stream = new ReadableStream<Uint8Array>({
+    start: (controller) => {
+      opened = controller;
+      streams.add(controller);
+      controller.enqueue(connected);
+    },
+    cancel: () => {
+      if (opened !== undefined) streams.delete(opened);
+    },
+  });
+  return new Response(stream, { headers: { "content-type": "text/event-stream" } });
+};
+
 /** Answers one request to the VM `chatId`'s OpenCode at `path`. */
 const answer = (
   fake: FakeOpenCode,
@@ -377,48 +459,16 @@ const answer = (
   query: URLSearchParams,
   body: Json,
 ) => {
-  if (method === "GET" && path === "/api/event") {
-    const connected = frameOf({
-      id: nextId(fake, "evt_"),
-      created: NOW,
-      type: "server.connected",
-      data: {},
-    });
-    const streams = fake.streams.get(chatId) ?? new Set();
-    fake.streams.set(chatId, streams);
-    let opened: ReadableStreamDefaultController<Uint8Array> | undefined;
-    const stream = new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        opened = controller;
-        streams.add(controller);
-        controller.enqueue(connected);
-      },
-      cancel: () => {
-        if (opened !== undefined) streams.delete(opened);
-      },
-    });
-    return new Response(stream, { headers: { "content-type": "text/event-stream" } });
-  }
+  if (method === "GET" && path === "/api/event") return openStream(fake, chatId);
   const read = /^\/api\/fs\/read\/(.+)$/u.exec(path);
   if (method === "GET" && read !== null) {
-    const key = `${chatId}:${decodeURIComponent(read[1] ?? "")}`;
-    const content = fake.files.get(key);
+    const content = fake.files.get(`${chatId}:${decodeURIComponent(read[1] ?? "")}`);
     return content === undefined
       ? json({ _tag: "FileNotFoundError", path: read[1], message: "No such file." }, 404)
       : new Response(content, { headers: { "content-type": "application/octet-stream" } });
   }
   if (method === "GET" && path === "/api/shell") {
     return json({ location: { directory: "/work" }, data: fake.shells.get(chatId) ?? [] });
-  }
-  const shell = /^\/api\/shell\/([^/]+)$/u.exec(path);
-  if (method === "DELETE" && shell !== null) {
-    const id = decodeURIComponent(shell[1] ?? "");
-    fake.shells.set(
-      chatId,
-      (fake.shells.get(chatId) ?? []).filter((entry) => entry.id !== id),
-    );
-    fake.removedShells.push(`${chatId}:${id}`);
-    return noContent();
   }
   const root = fake.sessions.get(chatId);
   const sessions = [
@@ -477,10 +527,6 @@ const answer = (
   const session = sessions.find((each) => each.id === sessionID);
   if (session === undefined) return notFound(sessionID);
   if (method === "GET" && rest === "") return json({ data: sessionInfo(session) });
-  if (method === "PATCH" && rest === "") {
-    if (typeof body.title === "string") session.title = body.title;
-    return noContent();
-  }
   if (method === "POST" && rest === "/prompt") {
     const id = String(body.id);
     const text = String(body.text);
@@ -490,11 +536,10 @@ const answer = (
       text,
       ...(body.metadata === undefined ? {} : { metadata: body.metadata }),
     });
+    for (const told of fake.promptListeners) told(id);
     if (fake.unansweredPrompts.delete(text)) {
       return json({ error: "The chat's OpenCode did not answer." }, 502);
     }
-    const invalid = fake.invalidPrompts.get(text);
-    if (invalid !== undefined) return json({ _tag: "InvalidRequestError", message: invalid }, 400);
     const entry = {
       id,
       sessionID,
@@ -504,44 +549,8 @@ const answer = (
       time: { created: NOW },
     };
     if (session.hold) session.inbox.push(entry);
-    else deliver(session, entry);
+    else deliver(fake, session, entry);
     return json({ data: entry });
-  }
-  if (method === "POST" && rest === "/synthetic") {
-    const entry = {
-      id: typeof body.id === "string" ? body.id : nextId(fake, "msg_s"),
-      sessionID,
-      type: "synthetic",
-      payload: {
-        text: body.text,
-        ...(typeof body.description === "string" ? { description: body.description } : {}),
-        ...(body.metadata === undefined ? {} : { metadata: body.metadata }),
-      },
-      delivery: typeof body.delivery === "string" ? body.delivery : "steer",
-      time: { created: NOW },
-    };
-    // Without `resume`, it waits in the inbox for the session's next turn.
-    if (body.resume === false || session.hold) session.inbox.push(entry);
-    else deliver(session, entry);
-    return json({ data: entry });
-  }
-  if (method === "POST" && rest === "/compact") {
-    const id = nextId(fake, "msg_c");
-    session.inbox.push({
-      id,
-      sessionID,
-      type: "compaction",
-      payload: {},
-      delivery: "steer",
-      time: { created: NOW },
-    });
-    return json({ data: session.inbox.at(-1) });
-  }
-  if (method === "POST" && rest === "/interrupt") {
-    const interrupted = session.active;
-    session.active = false;
-    fake.interrupts.push(`${chatId}:${sessionID}`);
-    return json({ interrupted });
   }
   if (method === "GET" && rest === "/inbox") return json({ data: session.inbox });
   const cancelledInput = /^\/inbox\/([^/]+)$/u.exec(rest);
@@ -566,79 +575,53 @@ const answer = (
   if (method === "GET" && rest === "/form") {
     return json({ data: session.forms.map((id) => formInfo(sessionID, id)) });
   }
-  const replied = /^\/form\/([^/]+)\/reply$/u.exec(rest);
-  if (method === "POST" && replied !== null) {
-    const formId = replied[1] ?? "";
+  const form = /^\/form\/([^/]+)(\/reply)?$/u.exec(rest);
+  if (form !== null && (method === "POST" ? form[2] !== undefined : method === "DELETE")) {
+    const formId = form[1] ?? "";
     const at = session.forms.indexOf(formId);
     if (at < 0) return json({ _tag: "FormNotFoundError", id: formId, message: "No form." }, 404);
     session.forms.splice(at, 1);
-    fake.formReplies.set(`${chatId}:${formId}`, body.answer as Json);
-    return noContent();
-  }
-  const cancelled = /^\/form\/([^/]+)$/u.exec(rest);
-  if (method === "DELETE" && cancelled !== null) {
-    const formId = cancelled[1] ?? "";
-    const at = session.forms.indexOf(formId);
-    if (at >= 0) session.forms.splice(at, 1);
-    fake.cancelledForms.push(`${chatId}:${formId}`);
+    if (method === "POST") {
+      fake.formReplies.set(`${chatId}:${formId}`, body.answer as Json);
+      emit(fake, chatId, "form.replied", { id: formId, sessionID, answer: body.answer });
+    } else {
+      emit(fake, chatId, "form.cancelled", { id: formId, sessionID });
+    }
     return noContent();
   }
   throw new Error(`Unscripted OpenCode request: ${method} ${path}`);
 };
 
-/**
- * Whether the VM runs, following the fake runner's boots: a VM it doesn't run doesn't answer, and
- * a new boot starts empty.
- */
-const running = (fake: FakeOpenCode, chatId: string) => {
-  const boot = fake.runner.boots.get(chatId);
-  if (boot === undefined) {
-    crash(fake, chatId);
-    fake.boots.delete(chatId);
-    return false;
-  }
-  if (fake.boots.get(chatId) !== boot) {
-    crash(fake, chatId);
-    fake.boots.set(chatId, boot);
-  }
-  return true;
-};
-
-const takeHold = (fake: FakeOpenCode, method: string, path: string) => {
-  if (method === "POST" && path.endsWith("/prompt")) {
-    const held = fake.holdPrompt;
-    fake.holdPrompt = null;
-    return held;
-  }
-  if (method === "DELETE" && path.includes("/inbox/")) {
-    const held = fake.holdInboxCancel;
-    fake.holdInboxCancel = null;
-    return held;
-  }
-  return null;
-};
-
-/** An `HttpClient` that answers as `fake`'s VMs' OpenCode servers. */
+/** An `HttpClient` that answers as the fake runner and its VMs' OpenCode servers. */
 export const httpClient = (fake: FakeOpenCode) =>
   HttpClient.make((request, url) =>
-    !url.pathname.includes("/opencode/")
-      ? runnerResponse(fake.runner, request, url).pipe(
-          Effect.map((response) => HttpClientResponse.fromWeb(request, response)),
-        )
-      : Effect.gen(function* () {
-          const routed = /^\/chats\/([^/]+)\/opencode(\/.*)$/u.exec(url.pathname);
-          const held = takeHold(fake, request.method, routed?.[2] ?? "");
-          if (held !== null) yield* held;
-          const raw =
-            request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
-          const body = (raw === "" ? {} : decodeJson(raw)) as Json;
-          const chatId = decodeURIComponent(routed?.[1] ?? "");
-          const response =
-            routed === null
-              ? json({ error: `unexpected ${url.pathname}` }, 500)
-              : !running(fake, chatId)
-                ? json({ error: "This VM isn't running." }, 503)
-                : answer(fake, chatId, request.method, routed[2] ?? "", url.searchParams, body);
-          return HttpClientResponse.fromWeb(request, response);
-        }),
+    Effect.sync(() => {
+      const routed = /^\/chats\/([^/]+)\/opencode(\/.*)$/u.exec(url.pathname);
+      if (routed === null) {
+        const response = runnerResponse(fake.runner, request, url);
+        // A VM the runner starts or removes keeps nothing of what it held.
+        const vm = /^\/chats\/([^/]+)$/u.exec(url.pathname);
+        if (vm !== null && response.status === 204) {
+          const chatId = decodeURIComponent(vm[1] ?? "");
+          wipe(fake, chatId);
+          fake.dead.delete(chatId);
+        }
+        return HttpClientResponse.fromWeb(request, response);
+      }
+      const chatId = decodeURIComponent(routed[1] ?? "");
+      const raw =
+        request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
+      const response =
+        fake.runner.down || fake.dead.has(chatId) || !fake.runner.chats.has(chatId)
+          ? json({ error: "The chat's VM isn't running." }, 502)
+          : answer(
+              fake,
+              chatId,
+              request.method,
+              routed[2] ?? "",
+              url.searchParams,
+              (raw === "" ? {} : decodeJson(raw)) as Json,
+            );
+      return HttpClientResponse.fromWeb(request, response);
+    }),
   );

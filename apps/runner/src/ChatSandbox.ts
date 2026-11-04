@@ -18,10 +18,8 @@ export class SandboxError extends Schema.TaggedError<SandboxError>()("SandboxErr
   }
 }
 
-/** One boot of a VM: its OpenCode server as the runner reaches it on the host. */
+/** A VM's OpenCode server as the runner reaches it on the host. */
 export interface ChatServer {
-  /** Which boot this is; every start makes a new one. */
-  readonly bootId: string;
   readonly url: string;
   readonly password: Redacted.Redacted;
 }
@@ -52,16 +50,9 @@ export class ChatSandbox extends Context.Service<
       readonly chatId: string;
       readonly content: Uint8Array;
     }) => Effect.Effect<void, SandboxError>;
-    /**
-     * Whether a boot's OpenCode still answers: its VM can stop on its own, as by crashing, and
-     * OpenCode can die or hang in a VM that runs.
-     */
-    readonly serving: (server: ChatServer) => Effect.Effect<boolean>;
     /** Stops the VM and deletes it with its disk. */
     readonly remove: (chatId: string) => Effect.Effect<void, SandboxError>;
-    /**
-     * Clears what an earlier process of this runner left: its VMs are removed.
-     */
+    /** Clears what an earlier process of this runner left: its VMs are removed. */
     readonly sweep: Effect.Effect<void, SandboxError>;
   }
 >()("@t45/runner/ChatSandbox") {}

@@ -10,7 +10,7 @@ A tab holds at most two streams, the chat list and the open chat, plus the chat 
 
 ## Reachability
 
-`reachableAtom` is the one transport flag. A transport failure of any call or watch sets it false; any answer, a refusal or a defect included, sets it true; a session read proves nothing about `/api/rpc` and leaves it alone. It is written only when it changes, because each turn from false to true re-runs the queries that failed for the transport, retries failed uploads and re-reads the session. A page holding no watch recovers at its next call, or when the tab is shown again and its failed queries run again, so sends are never blocked while the flag is false: the send is what finds the server again. The chat's "Reconnecting…" banner shows after a 2-second grace, and compacting waits for reachability. A failed stream or query on a reachable server is not reconnecting, and its error shows as the failure it is.
+`reachableAtom` is the one transport flag. A transport failure of any call or watch sets it false; any answer, a refusal or a defect included, sets it true; a session read proves nothing about `/api/rpc` and leaves it alone. It is written only when it changes, because each turn from false to true re-runs the queries that failed for the transport, retries failed uploads and re-reads the session. A page holding no watch recovers at its next call, or when the tab is shown again and its failed queries run again, so sends are never blocked while the flag is false: the send is what finds the server again. The chat's "Reconnecting…" banner shows after a 2-second grace. A failed stream or query on a reachable server is not reconnecting, and its error shows as the failure it is.
 
 ## Snapshots replace state
 

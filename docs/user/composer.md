@@ -30,11 +30,11 @@ When the composer has text, the arrow keys move the caret as usual. Recall takes
 
 The composer shows **Interrupt** while the agent is working and the draft is empty. Adding text or attachments replaces it with a queue icon. Click it or press `Enter` to queue the message; it starts after the active turn ends. Queued messages are saved on the server, so they survive a restart.
 
-Queued messages appear above the composer, with a thumbnail of any attached image. Cancel one with its row's remove control until the agent takes it up. **Interrupt** stops the turn and cancels every queued message with it.
+Queued messages appear above the composer, with a thumbnail of any attached image. Cancel one with its row's remove control until the agent takes it up. **Interrupt** stops the agent and drops what it wrote since it last finished: the messages it was working on go back to the queue and run again, with any still queued, when you send the next one. A failed sandbox drops unfinished work the same way.
 
 ## Commands
 
-Type `/` for commands: `/new` starts a chat with the same agent and `/compact` summarizes the conversation to free up context. A command runs when it is the whole message.
+Type `/` for commands: `/new` starts a chat with the same agent. A command runs when it is the whole message.
 
 ## Context in your message
 

@@ -14,6 +14,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
 import * as FakeOpenCode from "../runner/FakeOpenCode.testkit.ts";
+import * as FakeRunner from "../runner/FakeRunner.testkit.ts";
 import { ChatEvents } from "./ChatEvents.ts";
 import { inputMessageId, rootSessionId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
@@ -140,7 +141,7 @@ describe("chats", () => {
         const chatId = yield* startTask(quiet);
         yield* chats.send({ chatId, inputId: "steer-1", ...typed("Read it.") }, admin);
         assert.deepEqual(
-          (yield* repository.openInputs(chatId)).map((input) => input.payload.text),
+          (yield* repository.inputs(chatId)).map((input) => input.payload.text),
           ["Read the report.", "Read it."],
         );
       }).pipe(Effect.provide(Fixture.layer)),
@@ -171,10 +172,9 @@ describe("chats", () => {
         );
         assert.equal(snapshot.chat.status, "running");
 
-        // A cancelled input stays cancelled, however often its send is repeated.
+        // Cancelling an input the agent hasn't taken withdraws it.
         yield* chats.cancel({ chatId, inputId: "input-1" }, alice);
-        yield* chats.send(input, alice);
-        assert.equal((yield* repository.input(chatId, "input-1"))?.state, "cancelled");
+        assert.isNull(yield* repository.input(chatId, "input-1"));
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
@@ -250,7 +250,7 @@ describe("chats", () => {
   );
 
   it.effect(
-    "deletes a chat for everyone at once, then its VM, files and copy, even after the runner was down",
+    "deletes a chat for everyone at once, then its files and copy, with the runner down",
     () =>
       Effect.gen(function* () {
         const { chats, agentId } = yield* setup;
@@ -264,16 +264,12 @@ describe("chats", () => {
         );
         yield* chats.delete({ chatId }, alice);
         assert.deepEqual(yield* listed(chats, alice), []);
-        const path = files.path(sent.id) ?? "";
-        const fileSystem = yield* FileSystem.FileSystem;
-        assert.isTrue(yield* fileSystem.exists(path));
 
-        // Back up, the next start finishes the delete.
-        Fixture.runner.down = false;
+        // The next start finishes the delete at the latest.
         yield* chats.start(Fixture.stepHooks);
         const sql = yield* SqlClient.SqlClient;
-        assert.include(Fixture.runner.removedChats, chatId);
-        assert.isFalse(yield* fileSystem.exists(path));
+        const fileSystem = yield* FileSystem.FileSystem;
+        assert.isFalse(yield* fileSystem.exists(files.path(sent.id) ?? ""));
         assert.deepEqual(yield* sql`SELECT input_id FROM chat_inputs`, []);
         assert.deepEqual(yield* sql`SELECT cleanup_pending FROM chats`, [{ cleanup_pending: 0 }]);
       }).pipe(Effect.provide(Fixture.layer)),
@@ -469,24 +465,22 @@ describe("chats", () => {
   );
 
   it.effect(
-    "delivers an input once a user message under its id is captured, and not a message typed in the VM",
+    "takes an input once a user message under its id is saved, and not for a message typed in the VM",
     () =>
       Effect.gen(function* () {
-        const { repository, agentId, chats } = yield* setup;
-        const chatId = testChatId(1);
+        const { repository, agentId } = yield* setup;
+        // Inputs saved without a post, so no execution takes them meanwhile.
+        const chatId = yield* Fixture.seedChat({
+          id: testChatId(1),
+          ownerUserId: alice.userId,
+          agentId,
+        });
+        const at = "2026-10-24T09:00:00.000Z";
         for (const inputId of ["brief", "plain"]) {
-          yield* chats.send(
-            {
-              chatId,
-              inputId,
-              ...typed(inputId),
-              agentId,
-            },
-            alice,
-          );
+          yield* repository.addInput(chatId, { inputId, payload: typed(inputId), at });
         }
-        const created = DateTime.makeUnsafe("2026-10-24T09:00:00.000Z");
-        const captured = yield* repository.capture(chatId, rootSessionId(chatId), [
+        const created = DateTime.makeUnsafe(at);
+        const saved = yield* repository.saveMessages(chatId, rootSessionId(chatId), [
           { id: inputMessageId(chatId, "brief"), type: "user", text: "brief", time: { created } },
           {
             id: SessionMessage.ID.make("msg_typed_in_the_vm"),
@@ -495,13 +489,10 @@ describe("chats", () => {
             time: { created },
           },
         ]);
-        assert.isTrue(captured.inputsChanged);
+        assert.isTrue(saved.inputsTaken);
         assert.deepEqual(
-          [
-            (yield* repository.input(chatId, "brief"))?.state,
-            (yield* repository.input(chatId, "plain"))?.state,
-          ],
-          ["materialized", "waiting"],
+          (yield* repository.pendingInputs(chatId)).map((input) => input.inputId),
+          ["plain"],
         );
       }).pipe(Effect.provide(Fixture.layerStore)),
   );
@@ -537,7 +528,8 @@ describe("chats", () => {
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
-  it.effect("reads a chat from T45's copy alone: in pages, long text cut, a message whole", () =>
+  // An execution batches OpenCode's events over real time, so tests that run one use the live clock.
+  it.live("reads a chat from T45's copy alone: in pages, long text cut, a message whole", () =>
     Effect.gen(function* () {
       const { chats, agentId } = yield* setup;
       const chatId = yield* Fixture.seedChat({
@@ -549,17 +541,14 @@ describe("chats", () => {
       const events = yield* Fixture.follow(chatId, alice);
       yield* Fixture.deliver(events, { chatId, inputId: "input-1", text: "Write a lot." }, alice);
       const long = FakeOpenCode.answerText(Fixture.openCode, chatId, "x".repeat(20_000));
-      let last = long;
       // More than OpenCode capture's 200-message page, as well as T45's 50-message read page.
       for (let at = 0; at < 220; at++) {
-        last = FakeOpenCode.answerText(Fixture.openCode, chatId, `Line ${String(at)}`);
+        FakeOpenCode.answerText(Fixture.openCode, chatId, `Line ${String(at)}`);
       }
       const idle = FakeOpenCode.finishTurn(Fixture.openCode, chatId);
-      yield* Fixture.next(events, Fixture.showing(last, "settled"));
 
-      // With every VM gone, the chat still reads.
-      Fixture.runner.down = true;
-      FakeOpenCode.crash(Fixture.openCode, chatId);
+      // Once the execution is done and its VM gone, the chat still reads.
+      yield* FakeRunner.removed(Fixture.runner, chatId);
       const snapshot = yield* Fixture.next(yield* Fixture.follow(chatId, alice), isSnapshot);
       assert.equal(snapshot.messages.length, 50);
       assert.isTrue(snapshot.hasEarlier);
@@ -586,7 +575,7 @@ describe("chats", () => {
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
-  it.effect("fills a page by the size of its messages as reads send them", () =>
+  it.live("fills a page by the size of its messages as reads send them", () =>
     Effect.gen(function* () {
       const { chats, agentId } = yield* setup;
       const chatId = yield* Fixture.seedChat({

@@ -85,7 +85,7 @@ const decodeAccepted = Schema.decodeUnknownSync(Schema.Struct({ chatId: ChatId }
 const runOf = (response: Response) =>
   Effect.gen(function* () {
     const { chatId } = decodeAccepted(yield* json(response));
-    const inputs = yield* (yield* ChatRepository).openInputs(chatId);
+    const inputs = yield* (yield* ChatRepository).inputs(chatId);
     return inputs.map((input) => input.payload.text);
   });
 

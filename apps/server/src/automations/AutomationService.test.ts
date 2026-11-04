@@ -104,7 +104,7 @@ const runOf = (chatId: ChatId) =>
   Effect.gen(function* () {
     const chats = yield* ChatRepository;
     const chat = yield* chats.get(chatId).pipe(Effect.flatMap(Effect.fromNullishOr), Effect.orDie);
-    const inputs = yield* chats.openInputs(chatId);
+    const inputs = yield* chats.inputs(chatId);
     return {
       origin: (yield* chats.origins.get(chatId))?.kind,
       agentId: chat.agentId,

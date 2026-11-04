@@ -17,6 +17,8 @@ Each entry names the file and what could change. Delete an entry once it is done
 - `apps/server/src/runner/RunnerService.ts` — capture commits a page of messages before `hooks.saved` applies their step calls in a second transaction, and nothing replays stored messages after a restart (`recoverTask` only calls `ended`, and a re-capture passes on only the rows that changed), so a T45 that stops between the two loses those calls: a lost `step_done` fails its task as "ended without submitting". Replay the stored messages of active step tasks through `saved` at startup; the `task_calls` ledger already skips the applied ones.
 - `apps/server/src/opencode/OpenCode2Client.ts` — every session gets `sessionRules` (allow everything but questions for working agents), and OpenCode merges session rules after the agent's and takes the last match (`.repos/opencode/packages/core/src/permission.ts`), so they override the `webfetch`/`websearch` deny the runner writes into `opencode.json` on the provider-only network; only the network policy still stops them. Send the deny with the session rules for those chats, or drop the session rules.
 - `apps/server/src/opencode/OpenCode2Client.ts` — a message over the 64 MiB per-answer cap (`RESPONSE_MAX_BYTES`) gets no placeholder: capture fails on it and the chat's worker keeps retrying. Nor is there a per-chat storage quota: only the workspace is capped, not the messages and attachments T45 keeps.
+- `apps/server/src/runner/RunnerService.ts` — an input re-sent after a lost VM makes the agent repeat its side effects, such as submitting a step twice.
+- `apps/server/src/runner/RunnerService.ts` — a VM whose removal fails is never retried, so it runs until that chat's next execution or the next server start.
 
 ## apps/runner
 

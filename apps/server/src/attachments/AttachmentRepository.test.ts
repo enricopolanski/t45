@@ -243,7 +243,7 @@ describe("AttachmentRepository", () => {
         yield* reasonOf(files.bindToChat(aliceOtherChat, [sent(mine)], alice)),
         "file_unavailable",
       );
-      assert.deepEqual(yield* files.boundTo(aliceChat), [mine.id]);
+      assert.deepEqual(yield* files.chatsHolding(mine.id), [aliceChat]);
     }).pipe(Effect.provide(Attachments.layer)),
   );
 

@@ -51,8 +51,6 @@ export class RunnerInventory extends Schema.Opaque<RunnerInventory>()(
       Schema.Struct({
         vmId: VmId,
         state: RunnerVmState,
-        connections: Schema.Int,
-        lastActiveAt: Schema.DateTimeUtcFromString,
       }),
     ),
   }),
@@ -93,11 +91,10 @@ class RunnerApiGroup extends HttpApiGroup.make("runner")
     }),
   )
   .add(
-    HttpApiEndpoint.put("ensureChat", "/chats/:vmId", {
+    /** Starts a new VM for the chat from `RunConfig`, removing any VM left of it. */
+    HttpApiEndpoint.put("startChat", "/chats/:vmId", {
       params: { vmId: VmId },
       payload: RunConfig,
-      /** Which boot of the VM runs; T45 decides what a new boot needs restored. */
-      success: Schema.Struct({ bootId: TrimmedNonEmptyString }),
       error: RunnerRefusedError,
     }),
   )

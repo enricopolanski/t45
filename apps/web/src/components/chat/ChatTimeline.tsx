@@ -369,24 +369,16 @@ function MessageBody({ message }: { message: ChatMessage }) {
       );
     case "synthetic":
     case "system":
-      return <NoteRow message={message} text={native.description ?? native.text} />;
+      return <NoteRow text={native.description ?? native.text} />;
     case "skill":
-      return <NoteRow message={message} text={`Loaded the ${native.name} skill`} />;
+      return <NoteRow text={`Loaded the ${native.name} skill`} />;
     case "agent-switched":
-      return <NoteRow message={message} text={`Switched to the ${native.agent} agent`} />;
+      return <NoteRow text={`Switched to the ${native.agent} agent`} />;
     case "model-switched":
-      return <NoteRow message={message} text={`Switched to ${native.model.id}`} />;
+      return <NoteRow text={`Switched to ${native.model.id}`} />;
     case "location-switched":
       return null;
   }
-}
-
-function InterruptedBadge() {
-  return (
-    <Badge variant="warning" size="sm">
-      Interrupted
-    </Badge>
-  );
 }
 
 function TimelineDivider({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
@@ -406,20 +398,15 @@ function TimelineDivider({ icon: Icon, label }: { icon: LucideIcon; label: strin
   );
 }
 
-/** A line T45 or OpenCode added to the conversation: a restore note, a skill, a switch. */
-function NoteRow({ message, text }: { message: ChatMessage; text: string }) {
+/** A line T45 or OpenCode added to the conversation: a refused message, a skill, a switch. */
+function NoteRow({ text }: { text: string }) {
   const ctx = use(TimelineCtx);
   const first = firstLine(text);
   return (
     <div className="pb-2">
       <WorkLogRow
         icon={<SparklesIcon className="size-3.5 text-icon-muted" aria-hidden />}
-        label={
-          <span className="text-muted-foreground">
-            {first}
-            {message.state === "lost" ? " (interrupted)" : null}
-          </span>
-        }
+        label={<span className="text-muted-foreground">{first}</span>}
         details={
           first.length < text.trim().length ? (
             <Markdown
@@ -481,7 +468,6 @@ function ShellMessageRow({ message }: { message: ChatMessage }) {
       <WorkLogRow
         icon={<TerminalIcon className="size-3.5 text-icon-muted" aria-hidden />}
         label={<span className="font-mono">{native.command}</span>}
-        trailing={message.state === "lost" ? <InterruptedBadge /> : null}
         details={
           <ToolOutput command={native.command} output={native.output?.output ?? ""} whole={whole} />
         }
@@ -713,8 +699,7 @@ function AssistantMessageRow({ message }: { message: ChatMessage }) {
       {parts}
       {native.error && <ErrorText className="mt-1" text={native.error.message} />}
       {!live ? (
-        <div className="message-actions mt-1.5" data-lost={message.state === "lost"}>
-          {message.state === "lost" ? <InterruptedBadge /> : null}
+        <div className="message-actions mt-1.5">
           {copyText ? <CopyButton text={copyText} label="Copy message" /> : null}
           <MessageTime at={native.time.created} />
         </div>
@@ -777,7 +762,6 @@ function ToolRow({ part, message, whole }: ToolPartProps) {
       }
       trailing={
         <span className="flex shrink-0 items-center gap-1">
-          {unfinished && message.state === "lost" ? <InterruptedBadge /> : null}
           {failed ? (
             <Badge variant="error" size="sm">
               Failed

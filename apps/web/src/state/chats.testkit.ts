@@ -50,7 +50,7 @@ export function assistantMessage(
   id: string,
   content: ReadonlyArray<unknown>,
   options: {
-    readonly state?: "live" | "settled" | "lost";
+    readonly state?: "live" | "settled";
     readonly completed?: boolean;
     readonly error?: unknown;
     readonly sessionId?: string;

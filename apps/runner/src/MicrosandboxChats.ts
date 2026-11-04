@@ -4,7 +4,8 @@
  * key as a secret. Inputs go in as bytes over the control channel; nothing of the host is mounted.
  * Its OpenCode server listens on a port published to the host's loopback, behind a password made
  * fresh at every start. The runner starts VMs attached, so they stop with it. A VM keeps nothing:
- * every start makes a new one from its config, and letting it go removes it.
+ * every execution of a chat starts a new one from its config, and letting it go removes it. T45
+ * saves /work when an execution finishes and puts it back at the next execution's start.
  */
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { OpenCode } from "@opencode/client/effect";
@@ -31,7 +32,7 @@ import {
   SandboxNotFoundError,
 } from "microsandbox";
 
-import { ChatSandbox, type ChatServer, SandboxError } from "./ChatSandbox.ts";
+import { ChatSandbox, SandboxError } from "./ChatSandbox.ts";
 import { RunnerConfig } from "./RunnerConfig.ts";
 import type { SkillSnapshot } from "@t45/contracts/resources/RunnerVms";
 
@@ -249,15 +250,6 @@ const make = Effect.gen(function* () {
   /** The VMs this process started; held so it can stop them, and so they live as long as it. */
   const started = new Map<string, Sandbox>();
 
-  /** OpenCode's client for a VM's server, signed in with its password. */
-  const openCode = (server: Pick<ChatServer, "url" | "password">) =>
-    OpenCode.make({ baseUrl: server.url }).pipe(
-      Effect.provideService(
-        HttpClient.HttpClient,
-        HttpClient.mapRequest(httpClient, HttpClientRequest.basicAuth("opencode", server.password)),
-      ),
-    );
-
   /**
    * The VM as the database holds it, or null when there is none; a failed lookup fails, so it is
    * never taken for a missing VM.
@@ -303,9 +295,7 @@ const make = Effect.gen(function* () {
     return { sandbox, hostPort };
   });
 
-  /**
-   * Starts OpenCode with a fresh password and waits for its API and the agent's MCP servers.
-   */
+  /** Starts OpenCode with a fresh password and waits for its API and the agent's MCP servers. */
   const serve = Effect.fn("MicrosandboxChats.serve")(function* (
     sandbox: Sandbox,
     hostPort: number,
@@ -325,7 +315,12 @@ const make = Effect.gen(function* () {
       ),
     );
     const url = `http://127.0.0.1:${hostPort}`;
-    const client = yield* openCode({ url, password });
+    const client = yield* OpenCode.make({ baseUrl: url }).pipe(
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.mapRequest(httpClient, HttpClientRequest.basicAuth("opencode", password)),
+      ),
+    );
     yield* client.server.info().pipe(
       Effect.retry({ schedule: Schedule.spaced("250 millis"), times: 240 }),
       Effect.mapError(
@@ -354,8 +349,7 @@ const make = Effect.gen(function* () {
         ),
       );
     }
-    const bootId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
-    return { bootId, url, password };
+    return { url, password };
   });
 
   /** Stops the named VM and deletes it with its disk. */
@@ -434,13 +428,6 @@ const make = Effect.gen(function* () {
           });
         }
       }),
-    serving: (server) =>
-      openCode(server).pipe(
-        Effect.flatMap((client) => client.server.info().pipe(Effect.timeout("5 seconds"))),
-        Effect.retry({ schedule: Schedule.spaced("1 second"), times: 2 }),
-        Effect.as(true),
-        Effect.orElseSucceed(() => false),
-      ),
     remove: (chatId) => Effect.flatMap(sandboxName(chatId), removeNamed),
     sweep: Effect.gen(function* () {
       const handles: Array<SandboxHandle> = [];

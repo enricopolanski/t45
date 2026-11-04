@@ -159,16 +159,12 @@ const statements = [
     )`,
   `CREATE INDEX workflow_notifications_user ON workflow_notifications(user_id, read_at, created_at)`,
 
-  // Chats with agents. T45 keeps each chat: its OpenCode sessions and messages as OpenCode returned
-  // them, the inputs it is sent, its open questions and the agent's workspace. The agent runs in
-  // a VM that keeps nothing; T45 boots one when the chat has work and restores the chat into it.
-  // `updated_at` is the
-  // chat's latest activity: its latest message, or its creation. A deleted chat stays as a
-  // tombstone so its id never comes back, `cleanup_pending` until its VM, files and mirror are
-  // gone. `boot_id` is the VM boot T45 last restored the chat into, and `vm` whether T45 keeps a
-  // VM for it now. The agent's saved /work is a tarball named after the chat in the server's chat
-  // workspace folder; `workspace_unsaved` while T45 gave up on saving it, as too large or refused
-  // again and again, which keeps the last good one and tells the chat once.
+  // Chats with agents. T45 keeps a chat's inputs, the OpenCode sessions and messages its
+  // executions wrote, and the agent's /work as of the last finished execution, a tarball named after
+  // the chat in the server's chat workspace folder. `status` is `running` or `waiting` while an
+  // execution is owed, which a server start runs again. `updated_at` is the chat's latest activity.
+  // A deleted chat stays as a tombstone so its id never comes back, `cleanup_pending` until its
+  // files and copy are gone.
   `CREATE TABLE chats (
       id TEXT PRIMARY KEY NOT NULL,
       agent_id TEXT NOT NULL REFERENCES agents(id),
@@ -177,11 +173,7 @@ const statements = [
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT,
-      cleanup_pending INTEGER NOT NULL DEFAULT 0,
-      boot_id TEXT,
-      vm TEXT NOT NULL DEFAULT 'asleep' CHECK (vm IN ('awake', 'asleep')),
-      stop_through INTEGER,
-      workspace_unsaved INTEGER NOT NULL DEFAULT 0
+      cleanup_pending INTEGER NOT NULL DEFAULT 0
     )`,
   `CREATE TABLE chat_origins (
       chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(id),
@@ -193,54 +185,45 @@ const statements = [
     )`,
   `CREATE INDEX origins_owner ON chat_origins(owner_user_id) WHERE owner_user_id IS NOT NULL`,
   `CREATE INDEX origins_step ON chat_origins(json_extract(trigger, '$.ticketId'), json_extract(trigger, '$.stepId')) WHERE trigger IS NOT NULL`,
-  `CREATE INDEX chats_stop ON chats(id) WHERE stop_through IS NOT NULL`,
-  // A chat's OpenCode sessions: its root and the subagents' sessions under it. A chat's VM names
-  // its sessions, so everything of a session is keyed by its chat too: one VM can't reach another
-  // chat's copy. `info_json` is the session as OpenCode last returned it; `tail_cursor` pages its
-  // messages after the newest one captured from the running VM, and `next_ordinal` numbers the
-  // next message captured.
+  // A chat's OpenCode sessions: its root and the subagents' sessions under it, keyed by chat so one
+  // VM can't reach another chat's copy. `info_json` is the session as OpenCode last returned it.
+  // `committed` once an execution that wrote it finished; the next execution drops what isn't.
   `CREATE TABLE chat_sessions (
       chat_id TEXT NOT NULL REFERENCES chats(id),
       session_id TEXT NOT NULL,
       parent_session_id TEXT,
       info_json TEXT NOT NULL,
-      tail_cursor TEXT,
-      next_ordinal INTEGER NOT NULL DEFAULT 0,
+      committed INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (chat_id, session_id)
     )`,
-  // Every message of a session, encoded as OpenCode returned it and never cut: restoring imports
-  // it. `ordinal` is the session's order, which native ids don't give. `live` while OpenCode still
-  // writes it, `settled` once finished, `lost` when its VM went away first.
+  // Every message of a session, encoded as OpenCode returned it. `ordinal` is the session's order,
+  // which native ids don't give. `live` while OpenCode still writes it, `settled` once finished;
+  // `committed` once its execution finished, and imported into every later execution.
   `CREATE TABLE chat_messages (
       chat_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
       message_id TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
       type TEXT NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('live', 'settled', 'lost')),
+      state TEXT NOT NULL CHECK (state IN ('live', 'settled')),
       json TEXT NOT NULL,
+      committed INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (chat_id, session_id, message_id),
       UNIQUE (chat_id, session_id, ordinal)
     )`,
-  `CREATE INDEX chat_messages_live ON chat_messages(chat_id, session_id) WHERE state = 'live'`,
-  // The inputs sent to a chat, in order: `waiting` until OpenCode admitted it under the message id
-  // T45 derives from its id, `materialized` once that message is in the chat, or `cancelled`.
-  // OpenCode forgets a cancel, so this is what keeps a cancelled input from coming back.
-  // `payload_json` is the input as sent: its text, attachments and context.
+  // The inputs sent to a chat, in order. An input is pending until its user message is stored, and
+  // an execution sends the pending ones. `payload_json` is the input as sent: its text, attachments
+  // and context.
   `CREATE TABLE chat_inputs (
       chat_id TEXT NOT NULL REFERENCES chats(id),
       input_id TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('waiting', 'admitted', 'materialized', 'cancelled')),
       payload_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
       PRIMARY KEY (chat_id, input_id),
       UNIQUE (chat_id, ordinal)
     )`,
-  `CREATE INDEX chat_inputs_open ON chat_inputs(chat_id, ordinal)
-    WHERE state IN ('waiting', 'admitted')`,
   // The questions the chat's agents asked and nobody answered yet, as the running VM lists them.
-  // A question lost with its VM leaves here at the restore that tells the agent about it.
   `CREATE TABLE chat_questions (
       chat_id TEXT NOT NULL REFERENCES chats(id),
       session_id TEXT NOT NULL,

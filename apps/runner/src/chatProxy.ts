@@ -2,16 +2,12 @@
  * T45's OpenCode client reaches a chat's server through the runner: everything under
  * `/chats/<chatId>/opencode/` goes on to the VM's OpenCode with the VM's own password, and the
  * answer streams back, the event stream included. T45 sends the runner's token as the password,
- * since OpenCode clients only speak Basic auth. The route counts as the chat being in use for as
- * long as the request is open.
+ * since OpenCode clients only speak Basic auth.
  */
 import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
-import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
-import * as Scope from "effect/Scope";
-import * as Stream from "effect/Stream";
 import {
   HttpClient,
   HttpClientRequest,
@@ -79,16 +75,9 @@ const forward = (services: {
     const rest = request.url.slice(at + marker.length);
     const path = rest === "" || rest.startsWith("?") ? `/${rest}` : rest;
 
-    // The stream outlives this handler, so the chat counts as in use until it ends; a request that
-    // ends sooner, or is dropped, releases it at once.
-    const scope = yield* Scope.make();
-    const release = Scope.close(scope, Exit.void);
+    const server = yield* table.server(chatId);
+    if (Option.isNone(server)) return json(503, "The chat isn't running.");
     return yield* Effect.gen(function* () {
-      const server = yield* table.connect(chatId).pipe(Scope.provide(scope));
-      if (Option.isNone(server)) {
-        yield* release;
-        return json(503, "The chat isn't running.");
-      }
       const hasBody = request.method !== "GET" && request.method !== "HEAD";
       const body = hasBody
         ? new Uint8Array(
@@ -109,19 +98,12 @@ const forward = (services: {
         );
       }
       const response = yield* httpClient.execute(outgoing).pipe(Effect.option);
-      if (Option.isNone(response)) {
-        yield* release;
-        return json(502, "The chat's OpenCode did not answer.");
-      }
+      if (Option.isNone(response)) return json(502, "The chat's OpenCode did not answer.");
       const status = response.value.status;
       const headers = forwardable(response.value.headers);
       if (request.method === "HEAD" || BODYLESS.has(status)) {
-        yield* release;
         return HttpServerResponse.empty({ status, headers });
       }
-      return HttpServerResponse.stream(response.value.stream.pipe(Stream.ensuring(release)), {
-        status,
-        headers,
-      });
-    }).pipe(Effect.onError(() => release));
+      return HttpServerResponse.stream(response.value.stream, { status, headers });
+    });
   });

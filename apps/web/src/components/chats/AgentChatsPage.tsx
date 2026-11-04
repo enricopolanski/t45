@@ -20,7 +20,7 @@ import { WorkFrame } from "../work/WorkFrame";
 /**
  * Chat: the chats with agents the signed-in member can open (an admin's include the automation
  * runs), most recent activity first as the server orders them, and a way to start one with any
- * agent the organization set up for chat. Each chat runs on its own VM on the runner.
+ * agent the organization set up for chat. Each chat's agent works in its own VM on the runner.
  */
 export function AgentChatsPage() {
   const chatsQuery = useApiQuery(chatAtoms.list);

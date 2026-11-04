@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router";
 import { Atom } from "effect/reactivity";
 
 import { apiQuery, useApiQuery } from "../../state/rpc";
-import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Badge } from "../ui/badge";
 import { ErrorText } from "../ui/error-text";
 import {
@@ -24,11 +23,7 @@ const VM_STATES = {
 } as const satisfies Record<RunnerVm["state"], object>;
 
 function vmDetails(vm: RunnerVm) {
-  const usage =
-    vm.connections > 0 ? "in use" : `last used ${formatRelativeTimeLabel(vm.lastActiveAt)}`;
-  return vm.chat === null
-    ? usage
-    : [vm.chat.agentName ?? "An agent no longer set up for chat", usage].join(" · ");
+  return vm.chat === null ? undefined : (vm.chat.agentName ?? "An agent no longer set up for chat");
 }
 
 /**

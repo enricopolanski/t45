@@ -1,10 +1,10 @@
 # Architecture
 
-T45 keeps chats, workflows and agents on the server. The web client it serves controls it over authenticated RPC and never substitutes its own filesystem, provider credentials, or machine state for the server's. Agents run on the runner (`apps/runner`), one sandboxed microVM per chat, a step's agent included; the server never checks out, edits, or diffs code and runs no git. See [sandboxed chats](./sandboxed-chats.md).
+T45 keeps chats, workflows and agents on the server. The web client it serves controls it over authenticated RPC and never substitutes its own filesystem, provider credentials, or machine state for the server's. Agents run on the runner (`apps/runner`), one sandboxed microVM per chat execution, a step's agent included; the server never checks out, edits, or diffs code and runs no git. See [sandboxed chats](./sandboxed-chats.md).
 
 ## Ownership boundaries
 
-OpenCode executes; T45 keeps what must outlive a VM. A chat's sessions, messages, inputs, questions and workspace live in T45's database and state directory, and its VM keeps nothing, so a chat survives every VM it runs in. A step's agent works in such a chat: the step keeps which chat it is, and T45 the keys of the tool calls it applied from it. The browser reads only from T45, never from a VM. See [chats](./chats.md) and [workflows](./workflows.md).
+OpenCode executes; T45 keeps what must outlive a VM. A chat's inputs, the sessions and messages its finished executions wrote, and its `/work` as the last one left it live in T45's database and state directory; every execution puts them back in a new VM that is removed when it ends, so a chat survives every VM it runs in. A step's agent works in such a chat: the step keeps which chat it is, and T45 the keys of the tool calls it applied from it. The browser reads only from T45, never from a VM. See [chats](./chats.md) and [workflows](./workflows.md).
 
 OpenCode is the only agent runtime. Chats store and send its shapes as they are, imported from `@opencode/*`, rather than translating them into a model of T45's own. See [provider constraints](./providers.md).
 
@@ -14,7 +14,7 @@ The [`RpcApi` RPC group](../../packages/contracts/src/resources/RpcApi.ts), serv
 
 ## Durable state and side effects
 
-There is no event log. Each service writes its own tables, and what must change together commits in one transaction: an input with its attachments' binding, a captured page of messages with the inputs it materializes, an applied step tool call with its key, a workflow change with its posts to agents' chats, a scheduled slot's advance with its run's post, and a webhook's or Run now's post with the task's last error. Every post goes through one primitive that writes rows only, inside the caller's transaction, and wakes the chat's worker after commit. Work on a VM happens after the intent is saved: a chat's worker, the only fiber that talks to its VM, delivers what a member sent, so an answer to a send means the input is saved, not that the agent has it.
+There is no event log. Each service writes its own tables, and what must change together commits in one transaction: an input with its attachments' binding, a finished execution's output with the status it ended with, an applied step tool call with its key, a workflow change with its posts to agents' chats, a scheduled slot's advance with its run's post, and a webhook's or Run now's post with the task's last error. Every post goes through one primitive that writes rows only, inside the caller's transaction, and wakes the chat's execution after commit. Work on a VM happens after the intent is saved: the chat's execution, which owns its VM, delivers what a member sent, so an answer to a send means the input is saved, not that the agent has it.
 
 A chat's changes reach open streams through an in-process feed, published after they commit. A stream subscribes to the feed before it reads its snapshot, so a change during the read is read again after rather than lost.
 

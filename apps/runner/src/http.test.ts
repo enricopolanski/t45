@@ -76,7 +76,7 @@ const api = (chatUrl = "http://127.0.0.1:9") => {
       ),
       Layer.provide(FetchHttpClient.layer),
       Layer.provide(Fixture.layerModels),
-      Layer.provide(Fixture.layerConfig()),
+      Layer.provide(Fixture.layerConfig),
       Layer.provide(
         HttpPlatform.layer.pipe(
           Layer.provideMerge(NodeServices.layer),
@@ -151,7 +151,7 @@ it.effect("A 150-character VM id starts its VM instead of a 404", () =>
       method: "PUT",
       body: encodeChat(Fixture.chat()),
     });
-    assert.strictEqual(response.status, 200);
+    assert.strictEqual(response.status, 204);
     assert.deepStrictEqual(runner.chats.started, [vmId]);
     yield* runner.dispose;
   }),

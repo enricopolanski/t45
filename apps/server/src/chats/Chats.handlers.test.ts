@@ -81,7 +81,6 @@ const refusalsFor = (client: RpcClient.FromGroup<typeof group>, chatId: ChatId) 
     ),
     dismiss: failed(client["chats.dismiss"]({ chatId, sessionId, formId })),
     stop: failed(client["chats.stop"]({ chatId })),
-    compact: failed(client["chats.compact"]({ chatId })),
     rename: failed(client["chats.rename"]({ chatId, title: "Mine now" })),
     delete: failed(client["chats.delete"]({ chatId })),
   });
@@ -96,7 +95,6 @@ const allNotFound = {
   answer: "NotFound",
   dismiss: "NotFound",
   stop: "NotFound",
-  compact: "NotFound",
   rename: "NotFound",
   delete: "NotFound",
 };

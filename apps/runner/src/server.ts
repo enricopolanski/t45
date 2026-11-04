@@ -1,6 +1,6 @@
 /*
  * The runner process: its HTTP API and chat proxy over the chat table and microsandbox. On start
- * it clears the VMs an earlier process left, and it lets go of idle ones as it goes.
+ * it clears the VMs an earlier process left.
  */
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeHttp from "node:http";
@@ -10,7 +10,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { RunnerHttpApi } from "@t45/contracts/resources/RunnerVms";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Schedule from "effect/Schedule";
 import { FetchHttpClient, HttpRouter } from "effect/http";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
@@ -40,17 +39,15 @@ const layerHttpServer = Layer.unwrap(
   }),
 );
 
-/** Clears leftover VMs at start, then lets go of idle ones every half minute. */
+/** Clears the VMs an earlier process of this runner left. */
 const layerHousekeeping = Layer.effectDiscard(
   Effect.gen(function* () {
     const sandboxes = yield* ChatSandbox;
-    const chats = yield* ChatTable.ChatTable;
     yield* sandboxes.sweep.pipe(
       Effect.catchTags({
         SandboxError: (error) => Effect.logWarning("Clearing old VMs failed", error),
       }),
     );
-    yield* chats.stopIdle.pipe(Effect.repeat(Schedule.spaced("30 seconds")), Effect.forkScoped);
   }),
 );
 

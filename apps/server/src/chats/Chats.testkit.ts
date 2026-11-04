@@ -27,7 +27,6 @@ import * as OpenCode2Client from "../opencode/OpenCode2Client.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as FakeOpenCode from "../runner/FakeOpenCode.testkit.ts";
 import * as FakeRunner from "../runner/FakeRunner.testkit.ts";
-import { RunnerService } from "../runner/RunnerService.ts";
 import { inputMessageId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
 import { ChatService, layerTasks, type Member } from "./ChatService.ts";
@@ -41,7 +40,7 @@ export const testChatId = (n: number) =>
 
 /** The runner chats' VMs start on; tests script it and read what it got. */
 export const runner = FakeRunner.makeFakeRunner();
-/** The OpenCode servers in those VMs, which follow the runner's boots. */
+/** The OpenCode servers in those VMs, which the runner's starts and removals wipe. */
 export const openCode = FakeOpenCode.makeFakeOpenCode(runner);
 
 /** Back to a healthy runner with no VMs. */
@@ -90,12 +89,6 @@ export const layer = layerBase.pipe(
 
 /** Chat commands over the same fixture, with background execution parked. */
 export const layerStore = layer.pipe(Layer.provide(Layer.succeed(ServerActivation, Effect.never)));
-
-/** A worker receipt after earlier delivery/stop work; starts no VM and changes no chat. */
-export const caughtUp = (chatId: ChatId) =>
-  Effect.flatMap(RunnerService, (runner) => runner.run(chatId, () => Effect.void)).pipe(
-    Effect.asVoid,
-  );
 
 const AT = "2026-10-23T09:00:00.000Z";
 

@@ -25,7 +25,6 @@ export const layer = Chats.middleware(Authorization).toLayer(
       "chats.answer": asMember(chats.answer),
       "chats.dismiss": asMember(chats.dismiss),
       "chats.stop": asMember(chats.stop),
-      "chats.compact": asMember(chats.compact),
       "chats.rename": asMember(chats.rename),
       "chats.delete": asMember(chats.delete),
     });

@@ -455,8 +455,7 @@ body {
     transition: opacity 200ms var(--default-transition-timing-function);
 
     [data-message-row]:hover &,
-    &:focus-within,
-    &[data-lost="true"] {
+    &:focus-within {
       opacity: 1;
     }
     @media (pointer: coarse) {

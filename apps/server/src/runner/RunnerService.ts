@@ -1,23 +1,22 @@
-import * as SqlClient from "effect/sql/SqlClient";
-import type { ChatHooks } from "../chats/ChatHooks.ts";
+/**
+ * Runs chats' executions. An execution starts a new VM from the chat's agent, puts back /work and
+ * imports the conversation as the last finished execution left them, sends the inputs the agent
+ * hasn't taken, and streams and stores what OpenCode writes. Once OpenCode is done, including
+ * background work, it saves /work, commits what it wrote and removes the VM. An execution that
+ * doesn't finish (stopped, failed, or its VM lost) has what it wrote discarded, so the next one
+ * sends its inputs again; a lost VM starts the next one at once.
+ *
+ * Nothing waits on a VM but its execution: sends save inputs and wake it, and a running one
+ * delivers what it didn't send yet. Answers, dismissals and cancels use the running VM directly.
+ */
 import { AbsolutePath, Form, Location, Session, SessionMessage } from "@opencode/client/effect";
 import type { OpenCodeEvent } from "@opencode/protocol/groups/event";
 import { hasT45Tools } from "@t45/core/agentTools";
-import {
-  type ChatId,
-  type Refused,
-  type Input,
-  InputId,
-  titleOf,
-} from "@t45/contracts/models/Chat";
+import { type ChatId, type InputId, titleOf } from "@t45/contracts/models/Chat";
 import { InputMetadata } from "@t45/contracts/resources/Chats";
 import { type RunConfig, RunnerHttpApi } from "@t45/contracts/resources/RunnerVms";
-import * as Config from "effect/Config";
-import * as Redacted from "effect/Redacted";
-import { HttpClientRequest } from "effect/http";
-import * as HttpApiClient from "effect/http-api/HttpApiClient";
 import * as Cause from "effect/Cause";
-import * as Clock from "effect/Clock";
+import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -25,28 +24,31 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
+import { HttpClientRequest } from "effect/http";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpApiClient from "effect/http-api/HttpApiClient";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Predicate from "effect/Predicate";
 import * as Queue from "effect/Queue";
 import * as RcMap from "effect/RcMap";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as Struct from "effect/Struct";
-import * as SynchronizedRef from "effect/SynchronizedRef";
-import * as HttpClient from "effect/http/HttpClient";
-import * as HttpClientError from "effect/http/HttpClientError";
 
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as SkillRepository from "../agents/SkillRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
-import { inputMessageId, isNoteOf, noteMessageId, rootSessionId } from "../chats/ChatIds.ts";
+import type { ChatHooks } from "../chats/ChatHooks.ts";
+import { inputMessageId, rootSessionId } from "../chats/ChatIds.ts";
 import { ChatEvents } from "../chats/ChatEvents.ts";
 import * as ChatRepository from "../chats/ChatRepository.ts";
 import * as OpenCode2Client from "../opencode/OpenCode2Client.ts";
-import { forkParked } from "../serverActivation.ts";
 import * as PromptService from "./PromptService.ts";
 
 class RunnerUnavailableError extends Schema.TaggedError<RunnerUnavailableError>()(
@@ -95,10 +97,10 @@ const makeConnection = Effect.gen(function* () {
     ),
     // Making a VM pulls the image the first time, and a VM waits for its agent's MCP servers, so
     // starting one may take a while.
-    ensureChat: (input: { readonly chatId: string; readonly chat: RunConfig }) =>
+    startChat: (input: { readonly chatId: string; readonly chat: RunConfig }) =>
       client
-        .ensureChat({ params: { vmId: input.chatId }, payload: input.chat })
-        .pipe(Effect.timeout("3 minutes"), Effect.catchTags(unavailable("ensureChat"))),
+        .startChat({ params: { vmId: input.chatId }, payload: input.chat })
+        .pipe(Effect.timeout("3 minutes"), Effect.catchTags(unavailable("startChat"))),
     getChatWorkspace: (chatId: string) =>
       client
         .getChatWorkspace({ params: { vmId: chatId } })
@@ -142,112 +144,75 @@ const makeConnection = Effect.gen(function* () {
   };
 });
 
-/**
- * The worker of each awake chat, the one fiber that talks to the chat's VM. It starts a VM from the
- * agent's current setup, restores the chat into every new boot, delivers the inputs members sent,
- * captures what OpenCode writes into T45's copy of the chat, saves the agent's workspace after each
- * turn, and removes the VM once the chat has been idle and saved for a while. Sends, scheduled
- * tasks, webhooks and workflow steps only save inputs and wake it; work on the VM itself, such as
- * answering a question, runs on it as a job, in order with its own.
- *
- * Capture reads only what changed: OpenCode's events mark what to read again, and a pass every
- * 150 ms (at once when a step or execution ends) pages each marked session forward from where
- * capture stood and re-reads its unfinished messages. Nothing OpenCode settled is ever dropped
- * from T45's copy; only unfinished messages of a VM that went away become `lost`.
- */
-
 type OpenCodeClient = OpenCode2Client.OpenCode2Api["client"];
 
-/** What a job gets: the chat's running VM. */
+/** The VM of a chat's running execution, for answers and dismissals. */
 export interface ChatVm {
-  readonly api: OpenCode2Client.OpenCode2Api;
+  readonly client: OpenCodeClient;
   /** The chat's root session. */
   readonly root: Session.ID;
-  /** The chat's sessions in the VM, its root first. */
-  readonly sessions: ReadonlyArray<Session.ID>;
   /** Puts files sent to the chat under the VM's `attachments/`. */
   readonly putFiles: (
     attachmentIds: ReadonlyArray<string>,
   ) => Effect.Effect<void, RunnerUnavailableError>;
-  readonly withdraw: (
-    input: Input,
-  ) => Effect.Effect<void, Effect.Error<ReturnType<OpenCodeClient["session"]["inbox"]["cancel"]>>>;
 }
 
-/** A job waited longer for the chat's VM than its caller does. */
-class JobTimeoutError extends Schema.TaggedError<JobTimeoutError>()("JobTimeoutError", {}) {
+/** The event stream ended, or never said it was connected: the VM is out of reach. */
+class StreamEndedError extends Schema.TaggedError<StreamEndedError>()("StreamEndedError", {}) {}
+
+class AgentGoneError extends Schema.TaggedError<AgentGoneError>()("AgentGoneError", {}) {
   override get message(): string {
-    return "The chat's sandbox did not answer in time.";
+    return "The chat's agent is gone, so its VM can't start.";
   }
 }
 
-/** The chat's VM no longer holds its root session, so the chat is restored into it again. */
-class RootMissingError extends Schema.TaggedError<RootMissingError>()("RootMissingError", {}) {}
-
-/** The event stream ended, or never said it was connected. */
-class StreamEndedError extends Schema.TaggedError<StreamEndedError>()("StreamEndedError", {}) {}
-
 /** Batches events this long before reading what they changed. */
 const CAPTURE_BATCH = "150 millis";
-/** A chat with nothing to do keeps its VM this long. */
-const IDLE_MILLIS = 5 * 60_000;
-/** An unanswered question keeps a chat's VM this long, then it is cancelled. */
-const QUESTION_MILLIS = 30 * 60_000;
-/** How long a busy chat waits before it looks at sleeping again. */
-const RECHECK_MILLIS = 60_000;
 const CONNECT_TIMEOUT = "60 seconds";
-const JOB_TIMEOUT = "3 minutes";
+/** How long an answer, dismissal or cancel waits for the VM. */
+const VM_TIMEOUT = "1 minute";
 /** Messages per page when capture reads a session. */
 const CAPTURE_PAGE = 200;
-/** Saves the runner refuses in a row before the chat gives up on them, as on one too large. */
-const SAVE_REFUSALS = 3;
 
-type Reports = Map<string, { readonly parent: string; readonly child: string; received: boolean }>;
+/** What wakes an execution: an input saved, OpenCode events, or the event stream ending. */
+type Signal = "wake" | "events" | "ended";
 
-type Message =
-  | { readonly _tag: "wake" }
-  | {
-      readonly _tag: "job";
-      readonly boot: boolean;
-      readonly run: (vm: ChatVm) => Effect.Effect<void>;
-      /** Answers the job's caller that no VM runs. */
-      readonly skip: Effect.Effect<void>;
-    }
-  | { readonly _tag: "events"; readonly cycle: number; urgent: boolean }
-  | { readonly _tag: "ended"; readonly cycle: number };
+interface Execution {
+  readonly signal: Queue.Queue<Signal>;
+  fiber: Fiber.Fiber<void> | null;
+  /** The attempt's VM, once its root session exists. */
+  vm: ChatVm | null;
+  /** The inputs the attempt sent its VM, by id. */
+  readonly sent: Set<string>;
+}
 
-/** What events marked to read again. */
+/** What events marked to read again: sessions to capture, with the messages events named. */
 interface Marks {
-  full: boolean;
   tree: boolean;
   forms: boolean;
   activity: boolean;
-  turnEnded: boolean;
-  readonly messages: Set<string>;
-  readonly touched: Map<string, Set<string>>;
-  readonly info: Set<string>;
+  readonly sessions: Map<string, Set<string>>;
 }
 
-const noMarks = (full: boolean): Marks => ({
-  full,
-  tree: full,
-  forms: full,
-  activity: full,
-  turnEnded: false,
-  messages: new Set(),
-  touched: new Map(),
-  info: new Set(),
-});
+const noMarks = (): Marks => ({ tree: false, forms: false, activity: false, sessions: new Map() });
 
-const encodeInputMetadata = Schema.encodeSync(InputMetadata);
-
-/** Events that end a step or a turn, or ask a question, which capture reads at once. */
-const isUrgent = (type: string) =>
-  type === "session.step.ended" ||
-  type === "session.step.failed" ||
-  type === "session.inbox.delivered" ||
-  type === "form.created" ||
-  type.startsWith("session.execution.");
+/** Session events that change nothing T45 keeps. */
+const IGNORED = new Set([
+  "session.inbox.enqueued",
+  "session.inbox.cancelled",
+  "session.inbox.delivery.changed",
+  "session.tool.input.started",
+  "session.tool.input.delta",
+  "session.tool.input.ended",
+  "session.tool.progress",
+  "session.compaction.delta",
+  "session.step.streamed",
+  "session.viewed",
+  "session.metadata.updated",
+  "session.permissions",
+  "session.usage.updated",
+  "session.moved",
+]);
 
 /** Marks what an event may have changed; false for events that change nothing T45 keeps. */
 const mark = (marks: Marks, event: OpenCodeEvent): boolean => {
@@ -260,59 +225,30 @@ const mark = (marks: Marks, event: OpenCodeEvent): boolean => {
     marks.activity = true;
     return true;
   }
-  if (!type.startsWith("session.")) return false;
+  if (!type.startsWith("session.") || IGNORED.has(type)) return false;
   if (!("sessionID" in event.data) || typeof event.data.sessionID !== "string") return false;
-  const sessionId = event.data.sessionID;
-  switch (type) {
-    case "session.created":
-    case "session.deleted":
-      marks.tree = true;
-      return true;
-    case "session.inbox.enqueued":
-    case "session.inbox.cancelled":
-    case "session.inbox.delivery.changed":
-    case "session.tool.input.started":
-    case "session.tool.input.delta":
-    case "session.tool.input.ended":
-    case "session.tool.progress":
-    case "session.compaction.delta":
-    case "session.step.streamed":
-    case "session.viewed":
-      return false;
-    case "session.renamed":
-    case "session.metadata.updated":
-    case "session.permissions":
-    case "session.usage.updated":
-    case "session.moved":
-      marks.info.add(sessionId);
-      return true;
+  if (type === "session.created" || type === "session.deleted" || type === "session.renamed") {
+    marks.tree = true;
+    return true;
   }
-  marks.messages.add(sessionId);
-  const touched =
+  const touched = marks.sessions.get(event.data.sessionID) ?? new Set<string>();
+  const id =
     ("assistantMessageID" in event.data ? event.data.assistantMessageID : undefined) ??
     ("inboxID" in event.data ? event.data.inboxID : undefined);
-  if (typeof touched === "string") {
-    const ids = marks.touched.get(sessionId) ?? new Set();
-    ids.add(touched);
-    marks.touched.set(sessionId, ids);
-  }
-  if (type.startsWith("session.execution.")) {
-    marks.info.add(sessionId);
-    marks.activity = true;
-    if (type !== "session.execution.started") marks.turnEnded = true;
-  }
-  if (type === "session.agent.selected" || type === "session.model.selected") {
-    marks.info.add(sessionId);
-  }
+  if (typeof id === "string") touched.add(id);
+  marks.sessions.set(event.data.sessionID, touched);
+  if (type.startsWith("session.execution.")) marks.activity = true;
   return true;
 };
 
 /**
- * Whether a request found the VM's server out of reach: no connection, or a 502 to 504 from the
- * runner saying the VM doesn't answer. OpenCode's client wraps such a failure in a `ClientError`,
- * and reports such a status as a body it couldn't decode.
+ * Whether a failure means the VM is out of reach, which a new attempt gets past: the runner didn't
+ * answer, the event stream ended, or a request found no connection or a 502 to 504 from the
+ * runner's proxy. OpenCode's client wraps such a failure in a `ClientError`.
  */
-const outOfReach = (error: unknown): boolean => {
+const isConnectionLost = (error: unknown): boolean => {
+  if (Predicate.isTagged(error, "RunnerUnavailableError")) return true;
+  if (Predicate.isTagged(error, "StreamEndedError")) return true;
   const failure =
     Predicate.isTagged(error, "ClientError") && "cause" in error ? error.cause : error;
   if (!HttpClientError.isHttpClientError(failure)) return false;
@@ -322,10 +258,15 @@ const outOfReach = (error: unknown): boolean => {
   return status >= 502 && status <= 504;
 };
 
+const encodeInputMetadata = Schema.encodeSync(InputMetadata);
+
+const location = Location.PublicRef.make({
+  directory: AbsolutePath.make(OpenCode2Client.WORK_DIRECTORY),
+});
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repository = yield* ChatRepository.ChatRepository;
-  const hooksReady = yield* Deferred.make<ChatHooks>();
   const changes = yield* ChatEvents;
   const runner = yield* makeConnection;
   const agents = yield* AgentRepository.AgentRepository;
@@ -353,31 +294,22 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const layerScope = yield* Effect.scope;
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+  /** Set once the server started and removed the VMs an earlier process left. */
+  const started = yield* Deferred.make<ChatHooks>();
 
-  interface Entry {
-    readonly mailbox: Queue.Queue<Message>;
-    readonly fiber: Fiber.Fiber<void, unknown>;
-  }
-  const registry = yield* SynchronizedRef.make<ReadonlyMap<string, Entry>>(new Map());
-  /** The registry without the worker reading `mailbox`; a newer worker of the chat stays. */
-  const without = (
-    entries: ReadonlyMap<string, Entry>,
-    chatId: ChatId,
-    mailbox: Queue.Queue<Message>,
-  ) => {
-    if (entries.get(chatId)?.mailbox !== mailbox) return entries;
-    const next = new Map(entries);
-    next.delete(chatId);
-    return next;
-  };
-  // Held while an input goes to a chat's VM, from reading it until the ledger says so.
-  const deliveries = yield* RcMap.make({ lookup: () => Semaphore.make(1) });
-  const whileNotDelivering = <A, E, R>(chatId: string, effect: Effect.Effect<A, E, R>) =>
-    RcMap.get(deliveries, chatId).pipe(
+  /** The running execution of each chat; the registry lock keeps it to one, and runs no SQL. */
+  const executions = new Map<ChatId, Execution>();
+  const registry = yield* Semaphore.make(1);
+  // Held while an execution reads inputs and sends them, and while one is cancelled.
+  const inputLocks = yield* RcMap.make({ lookup: () => Semaphore.make(1) });
+  const withInputs = <A, E, R>(chatId: ChatId, effect: Effect.Effect<A, E, R>) =>
+    RcMap.get(inputLocks, chatId).pipe(
       Effect.flatMap((lock) => lock.withPermit(effect)),
       Effect.scoped,
     );
-  let cycles = 0;
+
+  const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "questions") =>
+    changes.publish({ kind, chatId });
 
   /** Puts a sent file under the VM's `attachments/`; one the server or VM can't take is skipped. */
   const putFile = (chatId: ChatId, attachmentId: string) =>
@@ -405,146 +337,43 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "questions") =>
-    changes.publish({ kind, chatId });
-
-  const recoverTask = (chatId: ChatId) =>
+  /** Drops what an execution that didn't finish wrote; the next one sends its inputs again. */
+  const discard = (chatId: ChatId) =>
     Effect.gen(function* () {
-      const chat = yield* repository.get(chatId);
-      if (chat === null) return;
-      const hooks = yield* Deferred.await(hooksReady);
-      if (chat.status !== "running" && chat.status !== "waiting")
-        yield* hooks.ended(chatId, chat.status);
+      if (yield* repository.discardUncommitted(chatId)) {
+        yield* changes.publish({ chatId, kind: "replaced" });
+      }
     });
 
-  const setFailed = (chatId: ChatId) =>
+  /**
+   * Records how the chat's execution ended and tells its origin, unless a stop ended it first; a
+   * finished execution commits what it wrote in the same transaction.
+   */
+  const end = (chatId: ChatId, status: "failed" | "interrupted" | null, finished: boolean) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
-          const chat = yield* repository.get(chatId);
-          if (chat === null) return;
-          const changed = yield* repository.setSummary(chatId, {
-            status: "failed",
-            lastActivityAt: DateTime.formatIso(chat.lastActivityAt),
-          });
-          if (changed) {
-            yield* sql.afterCommit(publish(chatId, "chat"));
-            yield* (yield* Deferred.await(hooksReady)).ended(chatId, "failed");
-          }
+          if (!(yield* repository.setStatus(chatId, status, yield* nowIso))) return;
+          if (finished) yield* repository.commit(chatId);
+          yield* sql.afterCommit(publish(chatId, "chat"));
+          yield* (yield* Deferred.await(started)).ended(chatId, status);
         }),
       )
       .pipe(Effect.orDie);
 
-  const clearRunning = (chatId: ChatId) =>
-    Effect.gen(function* () {
-      const chat = yield* repository.get(chatId);
-      if (chat === null || chat.status !== "running") return;
-      if (yield* repository.hasOpenInputs(chatId)) return;
-      const changed = yield* repository.setSummary(chatId, {
-        status: null,
-        lastActivityAt: DateTime.formatIso(chat.lastActivityAt),
-      });
-      if (changed) yield* publish(chatId, "chat");
-    });
-
   /**
-   * Takes an input back from the chat's VM: out of OpenCode's inbox, then cancelled in the
-   * ledger. Cancelling one OpenCode already delivered does nothing, so that one stays the
-   * agent's: it is materialized, and capture brings its message in order.
+   * One attempt at the chat's execution, from a new VM until OpenCode is done. Fails when the VM
+   * is out of reach, which starts the execution again.
    */
-  const withdraw = (client: OpenCodeClient, chatId: ChatId, input: Input) =>
-    Effect.gen(function* () {
-      const root = rootSessionId(chatId);
-      const id = inputMessageId(chatId, input.inputId);
-      yield* client.session.inbox.cancel({ sessionID: root, inboxID: id });
-      const delivered = yield* client.session.message
-        .get({ sessionID: root, messageID: id })
-        .pipe(
-          Effect.as(true),
-          Effect.catchTags({ MessageNotFoundError: () => Effect.succeed(false) }),
-        );
-      yield* repository.moveInput(
-        chatId,
-        input.inputId,
-        ["waiting", "admitted"],
-        delivered ? "materialized" : "cancelled",
-      );
-    });
-
-  const interruptAll = (vm: ChatVm) =>
-    Effect.gen(function* () {
-      const running = yield* vm.api.client.session.active();
-      for (const sessionID of vm.sessions) {
-        if (!(sessionID in running)) continue;
-        yield* vm.api.client.session
-          .interrupt({ sessionID })
-          .pipe(Effect.catchTags({ SessionNotFoundError: () => Effect.void }));
-      }
-      const shells = yield* vm.api.client.shell.list({
-        location: { directory: OpenCode2Client.WORK_DIRECTORY },
-      });
-      for (const shell of shells.data) {
-        if (shell.status !== "running") continue;
-        yield* vm.api.client.shell.remove({
-          id: shell.id,
-          location: { directory: OpenCode2Client.WORK_DIRECTORY },
-        });
-      }
-    });
-
-  const consumeStop = (chatId: ChatId, vm: ChatVm | "absent" | "unreachable") =>
-    Effect.gen(function* () {
-      let stop = yield* repository.stopRequest(chatId);
-      if (stop === null) return;
-      while (stop !== null) {
-        yield* whileNotDelivering(
-          chatId,
-          repository.cancelInputs(chatId, stop.through, ["waiting"]),
-        );
-        if (typeof vm !== "string") {
-          // Queued inputs leave OpenCode first, so the end of what runs can't start one.
-          for (const input of yield* repository.openInputs(chatId)) {
-            if (input.ordinal > stop.through) continue;
-            yield* vm
-              .withdraw(input)
-              .pipe(Effect.catchTags({ SessionNotFoundError: () => new RootMissingError() }));
-          }
-          yield* interruptAll(vm);
-        } else if (vm === "unreachable") {
-          return yield* publish(chatId, "inputs");
-        } else {
-          // No VM holds them, so no restore will send them again once they are cancelled here.
-          yield* repository.cancelInputs(chatId, stop.through, ["admitted"]);
-        }
-        const executed: ChatRepository.StopRequest = stop;
-        stop = (yield* repository.clearStop(chatId, executed))
-          ? null
-          : yield* repository.stopRequest(chatId);
-      }
-      yield* publish(chatId, "inputs");
-    });
-
-  /**
-   * One VM boot of a chat, from starting it until the chat sleeps or the VM goes away. `ready`
-   * runs once the chat is restored and caught up.
-   */
-  const awake = Effect.fnUntraced(function* (
-    chatId: ChatId,
-    mailbox: Queue.Queue<Message>,
-    ready: Effect.Effect<void>,
-    reports: Reports,
-  ) {
-    const hooks = yield* Deferred.await(hooksReady);
-    const cycle = (cycles += 1);
-    const chat = yield* repository.workerRow(chatId);
-    if (chat === null) return "gone" as const;
+  const attempt = Effect.fnUntraced(function* (chatId: ChatId, execution: Execution) {
+    const hooks = yield* Deferred.await(started);
+    execution.vm = null;
+    execution.sent.clear();
+    yield* Queue.clear(execution.signal);
+    const chat = yield* repository.get(chatId);
+    if (chat?.status !== "running" && chat?.status !== "waiting") return;
     const agent = yield* agents.get(chat.agentId);
-    if (agent === null) {
-      yield* Effect.logWarning("A chat's agent is gone, so its VM can't start", { chatId });
-      yield* setFailed(chatId);
-      return "gone" as const;
-    }
-    const root = rootSessionId(chatId);
+    if (agent === null) return yield* new AgentGoneError();
     const skills = yield* skillRepository.listForAgent(agent.id);
     const setup = {
       agent: {
@@ -558,27 +387,37 @@ const make = Effect.gen(function* () {
         ),
       },
     } satisfies RunConfig;
-    const { bootId } = yield* runner.ensureChat({ chatId, chat: setup });
-    if (chat.bootId !== bootId) reports.clear();
-    if ((yield* repository.workerRow(chatId)) === null) {
-      yield* runner.removeChat(chatId);
-      return "gone" as const;
-    }
+
+    yield* discard(chatId);
+    if (yield* repository.setStatus(chatId, "running", null)) yield* publish(chatId, "chat");
+
+    // Removed however the attempt ends, even when starting it failed halfway.
+    yield* Effect.addFinalizer(() =>
+      runner.removeChat(chatId).pipe(
+        Effect.catchTags({
+          RunnerUnavailableError: (error) =>
+            Effect.logWarning("Removing a chat's VM failed; the next start removes it", {
+              chatId,
+              cause: error,
+            }),
+        }),
+      ),
+    );
+    yield* runner.startChat({ chatId, chat: setup });
     const endpoint = runner.chatServer(chatId);
     const api = yield* OpenCode2Client.connect({
       baseUrl: endpoint.url,
       password: endpoint.password,
     }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
     const client = api.client;
+    const root = rootSessionId(chatId);
 
     // The stream only marks what to read again and forwards streamed text, so it never falls
-    // behind; it starts before anything is read, so nothing that changes after is missed.
-    const marks = { current: noMarks(false) };
-    // Marks accumulate while a job or capture runs; one notification is enough to read them.
-    let captureNotification: Extract<Message, { readonly _tag: "events" }> | undefined;
+    // behind; it starts before anything is sent, so nothing that changes after is missed.
+    let marks = noMarks();
+    let notified = false;
     const connected = yield* Deferred.make<void, StreamEndedError>();
-    const events = yield* api.events;
-    yield* events.pipe(
+    yield* (yield* api.events).pipe(
       Stream.runForEach((event) => {
         if (event.type === "server.connected") return Deferred.succeed(connected, undefined);
         if (event.type === "session.text.delta" || event.type === "session.reasoning.delta") {
@@ -592,40 +431,156 @@ const make = Effect.gen(function* () {
             delta: event.data.delta,
           });
         }
-        if (!mark(marks.current, event)) return Effect.void;
-        if (captureNotification !== undefined) {
-          captureNotification.urgent ||= isUrgent(event.type);
-          return Effect.void;
-        }
-        captureNotification = { _tag: "events", cycle, urgent: isUrgent(event.type) };
-        return Queue.offer(mailbox, captureNotification);
+        if (!mark(marks, event) || notified) return Effect.void;
+        notified = true;
+        return Queue.offer(execution.signal, "events");
       }),
       Effect.exit,
       Effect.tap((exit) =>
-        Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
+        Exit.isFailure(exit)
           ? Effect.logInfo("A chat's event stream ended", { chatId, cause: exit.cause })
           : Effect.void,
       ),
       Effect.andThen(Deferred.fail(connected, new StreamEndedError())),
-      Effect.andThen(Queue.offer(mailbox, { _tag: "ended", cycle })),
+      Effect.andThen(Queue.offer(execution.signal, "ended")),
       Effect.forkScoped,
     );
     yield* Deferred.await(connected).pipe(
-      Effect.timeoutOrElse({
-        duration: CONNECT_TIMEOUT,
-        orElse: () => new StreamEndedError(),
+      Effect.timeoutOrElse({ duration: CONNECT_TIMEOUT, orElse: () => new StreamEndedError() }),
+    );
+
+    const workspace = yield* repository.readWorkspace(chatId);
+    if (workspace !== null) {
+      yield* runner.putChatWorkspace({ chatId, content: workspace }).pipe(
+        Effect.catchTags({
+          RunnerRefusedError: (error) =>
+            Effect.logWarning("The runner refused a chat's workspace", {
+              chatId,
+              reason: error.reason,
+            }),
+        }),
+      );
+    }
+    // The saved /work leaves out attachments/, so every file sent to the chat goes back in.
+    yield* Effect.forEach(yield* files.boundTo(chatId), (id) => putFile(chatId, id), {
+      discard: true,
+    });
+    // The conversation as the last finished execution left it, parents before their children.
+    const model = OpenCode2Client.modelRef(agent.model);
+    const rootInfo = { title: titleOf(chat), ...(model === undefined ? {} : { model }) };
+    const permissions = OpenCode2Client.sessionRules({
+      questions: yield* hooks.questions(chatId),
+    });
+    const stored = (yield* repository.sessions(chatId)).map((session) => ({
+      ...session,
+      id: session.sessionId,
+      parentID: session.parentSessionId,
+    }));
+    if (!stored.some((session) => session.id === root)) {
+      yield* client.session.create({ id: root, ...rootInfo, location, permissions });
+    }
+    for (const session of [
+      ...stored.filter((session) => session.id === root),
+      ...OpenCode2Client.sessionsUnder(root, stored),
+    ]) {
+      yield* client.session.import({
+        info: { ...session.info, permissions, ...(session.id === root ? rootInfo : {}) },
+        messages: yield* repository.history(chatId, session.sessionId),
+        location,
+      });
+    }
+    execution.vm = {
+      client,
+      root,
+      putFiles: (attachmentIds) =>
+        Effect.forEach(attachmentIds, (id) => putFile(chatId, id), { discard: true }),
+    };
+
+    const readFile = (path: string) => api.readFile(path).pipe(Effect.orElseSucceed(() => null));
+    // The chat's sessions this VM holds, and what capture saw of each: its paging cursor, and
+    // whether each message it read was settled.
+    const known = new Set<string>([root]);
+    const cursors = new Map<string, string>();
+    const seen = new Map<string, Map<string, boolean>>();
+    // Per subagent session, the background launches the agent started (by tool call) and the
+    // reports that reached their parent (by message); a session the agent continues launches again.
+    const launches = new Map<string, Set<string>>();
+    const reports = new Map<string, Set<string>>();
+    const add = (map: Map<string, Set<string>>, child: string, id: string) =>
+      map.set(child, (map.get(child) ?? new Set()).add(id));
+
+    /** Sends the inputs the agent hasn't taken and this VM doesn't have yet, in order. */
+    const deliver = withInputs(
+      chatId,
+      Effect.gen(function* () {
+        for (const input of yield* repository.pendingInputs(chatId)) {
+          if (execution.sent.has(input.inputId)) continue;
+          yield* Effect.forEach(input.payload.attachments, (file) => putFile(chatId, file.id), {
+            discard: true,
+          });
+          yield* client.session.prompt({
+            sessionID: root,
+            id: inputMessageId(chatId, input.inputId),
+            text: PromptService.format(input.payload),
+            metadata: encodeInputMetadata({ t45: input.payload }),
+            delivery: "queue",
+          });
+          execution.sent.add(input.inputId);
+        }
       }),
     );
 
-    // The chat's sessions the VM holds, by id, with their title.
-    const present = new Map<string, string>();
-    let active = new Set<string>();
-    const awaitingReports = () =>
-      [...reports.values()].some((report) => !report.received && !active.has(report.child));
-    const readFile = (path: string) => api.readFile(path).pipe(Effect.orElseSucceed(() => null));
-    const captured = (sessionId: string, messages: ReadonlyArray<SessionMessage.Info>) =>
+    /** Keeps the root's sessions and what descends from it. */
+    const readTree = Effect.gen(function* () {
+      const all = yield* OpenCode2Client.listSessions(client).pipe(Stream.runCollect);
+      let changed = false;
+      for (const info of [
+        ...all.filter((info) => info.id === root),
+        ...OpenCode2Client.sessionsUnder(root, all),
+      ]) {
+        known.add(info.id);
+        const parentSessionId = info.id === root ? null : (info.parentID ?? null);
+        changed =
+          (yield* repository.putSession(chatId, { sessionId: info.id, parentSessionId, info })) ||
+          changed;
+      }
+      if (changed) yield* publish(chatId, "sessions");
+    });
+
+    /** Pages a session forward from where capture stood, and reads again what may have changed. */
+    const captureSession = (sessionId: string, touched: ReadonlySet<string>) =>
       Effect.gen(function* () {
+        const sessionID = Session.ID.make(sessionId);
+        const messages: Array<SessionMessage.Info> = [];
+        let cursor = cursors.get(sessionId);
+        while (true) {
+          const page = yield* client.message.list(
+            cursor === undefined
+              ? { sessionID, order: "asc", limit: CAPTURE_PAGE }
+              : { sessionID, cursor, limit: CAPTURE_PAGE },
+          );
+          messages.push(...page.data);
+          if (page.cursor.next === undefined) break;
+          cursor = page.cursor.next;
+          if (page.data.length < CAPTURE_PAGE) break;
+        }
+        if (cursor !== undefined) cursors.set(sessionId, cursor);
+        const settled = seen.get(sessionId) ?? new Map<string, boolean>();
+        seen.set(sessionId, settled);
+        const read = new Set<string>(messages.map((message) => message.id));
+        for (const [id, isSettled] of settled) {
+          if (read.has(id) || (isSettled && !touched.has(id))) continue;
+          const message = yield* client.session.message
+            .get({ sessionID, messageID: SessionMessage.ID.make(id) })
+            .pipe(
+              Effect.asSome,
+              Effect.catchTags({ MessageNotFoundError: () => Effect.succeedNone }),
+            );
+          if (Option.isSome(message)) messages.push(message.value);
+        }
+        if (messages.length === 0) return;
         for (const message of messages) {
+          settled.set(message.id, ChatRepository.isSettled(message));
           if (message.type === "assistant") {
             for (const part of message.content) {
               if (
@@ -636,989 +591,313 @@ const make = Effect.gen(function* () {
               )
                 continue;
               const child = part.state.metadata["sessionID"];
-              const key = `${message.id}/${part.id}`;
-              if (typeof child === "string" && !reports.has(key))
-                reports.set(key, { parent: sessionId, child, received: false });
+              if (typeof child === "string") add(launches, child, part.id);
             }
           } else if (message.type === "synthetic" && message.metadata?.["source"] === "subagent") {
-            for (const report of reports.values())
-              if (report.parent === sessionId && report.child === message.metadata["childID"])
-                report.received = true;
+            const child = message.metadata["childID"];
+            if (typeof child === "string") add(reports, child, message.id);
           }
         }
-        yield* hooks.saved(chatId, messages, readFile);
-      });
-    let shellsRunning = false;
-    // A turn ended since the workspace was saved; a new boot saves once before it sleeps.
-    let workspaceDirty = true;
-    let refusedSaves = 0;
-    let lastActivity = yield* Clock.currentTimeMillis;
-
-    /** Lets go of a subagent's session the VM no longer holds; what it left unfinished is lost. */
-    const forget = (sessionId: string) =>
-      Effect.gen(function* () {
-        present.delete(sessionId);
-        active.delete(sessionId);
-        const lost = yield* repository.loseSession(chatId, sessionId);
-        for (const report of reports.values())
-          if (report.child === sessionId || report.parent === sessionId) report.received = true;
-        if (lost.length > 0) {
-          yield* changes.publish({ chatId, kind: "messages", sessionId, messageIds: lost });
-        }
-      });
-
-    /**
-     * Answers `instead` for a session the VM no longer holds, as when the agent removed it: a
-     * subagent's is let go, and without its root the chat is restored into the VM again.
-     */
-    const missing = <A>(sessionId: string, instead: A) =>
-      Effect.gen(function* () {
-        if (sessionId === root) return yield* new RootMissingError();
-        yield* forget(sessionId);
-        return instead;
-      });
-
-    const vm = (): ChatVm => ({
-      api,
-      root,
-      sessions: [...present.keys()].map((id) => Session.ID.make(id)),
-      putFiles: (attachmentIds) =>
-        Effect.forEach(attachmentIds, (id) => putFile(chatId, id), { discard: true }),
-      withdraw: (input) => withdraw(client, chatId, input),
-    });
-
-    /** Keeps a session the VM holds; true when members see something new about it. */
-    const record = (info: Session.Info, stored?: Map<string, ChatRepository.SessionRow>) =>
-      Effect.gen(function* () {
-        const title = info.title ?? "";
-        const row = {
-          sessionId: info.id,
-          parentSessionId: info.id === root ? null : (info.parentID ?? null),
-          info,
-        };
-        yield* repository.putSession(chatId, row);
-        stored?.set(info.id, { ...row, tailCursor: stored.get(info.id)?.tailCursor ?? null });
-        const known = present.get(info.id);
-        present.set(info.id, title);
-        return known !== title;
-      });
-
-    const getSession = (sessionId: string) =>
-      client.session
-        .get({ sessionID: Session.ID.make(sessionId) })
-        .pipe(Effect.asSome, Effect.catchTags({ SessionNotFoundError: () => Effect.succeedNone }));
-
-    /** Reads the VM's sessions and keeps the chat's: its root and what descends from it. */
-    const readTree = (stored: Map<string, ChatRepository.SessionRow>) =>
-      Effect.gen(function* () {
-        const all = yield* OpenCode2Client.listSessions(client).pipe(Stream.runCollect);
-        if (!all.some((info) => info.id === root)) return yield* new RootMissingError();
-        const held = [
-          ...all.filter((info) => info.id === root),
-          ...OpenCode2Client.sessionsUnder(root, all),
-        ];
-        let changed = false;
-        for (const info of held) changed = (yield* record(info, stored)) || changed;
-        // A session it kept that the VM no longer holds was removed there, maybe while T45 was away.
-        const heldIds = new Set<string>(held.map((info) => info.id));
-        for (const sessionId of stored.keys()) {
-          if (heldIds.has(sessionId)) continue;
-          yield* forget(sessionId);
-          stored.delete(sessionId);
-        }
-        if (changed) yield* publish(chatId, "sessions");
-      });
-
-    /** Pages a session forward from where capture stood, then re-reads what may have changed. */
-    const captureSession = (
-      sessionId: string,
-      touched: ReadonlySet<string>,
-      stored: ChatRepository.SessionRow | undefined,
-    ) =>
-      Effect.gen(function* () {
-        const sessionID = Session.ID.make(sessionId);
-        const written = new Set<string>();
-        let inputsChanged = false;
-        const keep = (
-          saved: ChatRepository.Captured,
-          messages: ReadonlyArray<SessionMessage.Info>,
-        ) =>
-          Effect.gen(function* () {
-            for (const id of saved.messageIds) written.add(id);
-            inputsChanged = inputsChanged || saved.inputsChanged;
-            yield* captured(
-              sessionId,
-              messages.filter((message) => saved.messageIds.includes(message.id)),
-            );
-          });
-        let cursor = stored?.tailCursor ?? undefined;
-        while (true) {
-          const page = yield* client.message.list(
-            cursor === undefined
-              ? { sessionID, order: "asc", limit: CAPTURE_PAGE }
-              : { sessionID, cursor, limit: CAPTURE_PAGE },
-          );
-          if (page.data.length > 0) {
-            yield* keep(
-              yield* repository.capture(chatId, sessionId, page.data, page.cursor.next),
-              page.data,
-            );
-          }
-          if (page.data.length < CAPTURE_PAGE || page.cursor.next === undefined) break;
-          cursor = page.cursor.next;
-        }
-        const again = new Set([
-          ...(yield* repository.liveMessageIds(chatId, sessionId)),
-          ...touched,
-        ]);
-        for (const id of again) {
-          if ((yield* repository.message(chatId, sessionId, id)) === null) continue;
-          const message = yield* client.session.message
-            .get({ sessionID, messageID: SessionMessage.ID.make(id) })
-            .pipe(
-              Effect.asSome,
-              Effect.catchTags({ MessageNotFoundError: () => Effect.succeedNone }),
-            );
-          if (Option.isSome(message)) {
-            yield* keep(yield* repository.capture(chatId, sessionId, [message.value]), [
-              message.value,
-            ]);
-          }
-        }
-        // An input leaves the pending ones before it shows as a message, so it never shows twice.
-        if (inputsChanged) yield* publish(chatId, "inputs");
-        if (written.size > 0) {
-          yield* changes.publish({
-            chatId,
-            kind: "messages",
-            sessionId,
-            messageIds: [...written],
-          });
-        }
-      }).pipe(Effect.catchTags({ SessionNotFoundError: () => missing(sessionId, undefined) }));
+        const saved = yield* repository.saveMessages(chatId, sessionId, messages);
+        if (saved.inputsTaken) yield* publish(chatId, "inputs");
+        if (saved.messageIds.length === 0) return;
+        const written = new Set(saved.messageIds);
+        yield* hooks.saved(
+          chatId,
+          messages.filter((message) => written.has(message.id)),
+          readFile,
+        );
+        yield* changes.publish({
+          chatId,
+          kind: "messages",
+          sessionId,
+          messageIds: saved.messageIds,
+        });
+      }).pipe(
+        Effect.catchTags({
+          // A subagent's session removed inside the VM keeps what capture saw of it.
+          SessionNotFoundError: (error) =>
+            sessionId === root ? Effect.fail(error) : Effect.sync(() => known.delete(sessionId)),
+        }),
+      );
 
     const readForms = Effect.gen(function* () {
       const forms: Array<Form.Info> = [];
-      for (const sessionId of present.keys()) {
+      for (const sessionId of known) {
         const listed = yield* client.session.form
           .list({ sessionID: sessionId })
-          .pipe(Effect.catchTags({ SessionNotFoundError: () => missing(sessionId, []) }));
+          .pipe(Effect.catchTags({ SessionNotFoundError: () => Effect.succeed([]) }));
         forms.push(...listed);
       }
       if (yield* repository.setQuestions(chatId, forms, yield* nowIso)) {
         yield* publish(chatId, "questions");
       }
+      const status = forms.length > 0 ? "waiting" : "running";
+      if (yield* repository.setStatus(chatId, status, null)) yield* publish(chatId, "chat");
     });
 
-    const readActivity = Effect.gen(function* () {
-      const running = yield* client.session.active();
-      active = new Set(Object.keys(running).filter((id) => present.has(id)));
+    const capture = (marked: Marks) =>
+      Effect.gen(function* () {
+        if ([...marked.sessions.keys()].some((sessionId) => !known.has(sessionId))) {
+          marked.tree = true;
+        }
+        if (marked.tree) yield* readTree;
+        for (const [sessionId, touched] of marked.sessions) {
+          if (known.has(sessionId)) yield* captureSession(sessionId, touched);
+        }
+        if (marked.forms) yield* readForms;
+      });
+
+    /**
+     * Whether OpenCode is done, by its own account: every input sent, no session running, no
+     * shell running, nothing waiting in an inbox, and every background subagent reported.
+     */
+    const done = Effect.gen(function* () {
+      const pending = yield* repository.pendingInputs(chatId);
+      if (pending.some((input) => !execution.sent.has(input.inputId))) return false;
+      if (Object.keys(yield* client.session.active()).length > 0) return false;
       const shells = yield* client.shell.list({
         location: { directory: OpenCode2Client.WORK_DIRECTORY },
       });
-      shellsRunning = shells.data.some((shell) => shell.status === "running");
-    });
-
-    /** What the chat list shows: what the chat is doing and when its latest message came. */
-    const summarize = (rootRow: ChatRepository.SessionRow | undefined) =>
-      Effect.gen(function* () {
-        const questions = yield* repository.questions(chatId);
-        const open = yield* repository.openInputs(chatId);
-        const outcome = rootRow?.info.outcome;
-        const latest = yield* repository.latestTurn(chatId, root);
-        const lastActivityAt = latest === null ? null : DateTime.formatIso(latest.time.created);
-        const lost = yield* repository.lastTurnLost(chatId, root);
-        const status =
-          questions.length > 0
-            ? ("waiting" as const)
-            : open.length > 0 || active.size > 0 || shellsRunning || awaitingReports()
-              ? ("running" as const)
-              : outcome === "failed"
-                ? ("failed" as const)
-                : lost || outcome === "interrupted"
-                  ? ("interrupted" as const)
-                  : null;
-        if (yield* repository.setSummary(chatId, { status, lastActivityAt }))
-          yield* publish(chatId, "chat");
-        if (status !== "running" && status !== "waiting") yield* hooks.ended(chatId, status);
-      });
-
-    /**
-     * Tells the agent and members that /work isn't saved. T45 keeps the note at once, so members
-     * see it and a restore carries it; the agent reads it at its next turn, since posting it
-     * starts none.
-     */
-    const noteUnsaved = Effect.gen(function* () {
-      const at = yield* Clock.currentTimeMillis;
-      const note = PromptService.workspaceNote({
-        id: noteMessageId(chatId, "workspace", String(at)),
-        at: DateTime.makeUnsafe(at),
-        operation: "save",
-      });
-      yield* repository.capture(chatId, root, [note]);
-      yield* changes.publish({
-        chatId,
-        kind: "messages",
-        sessionId: root,
-        messageIds: [note.id],
-      });
-      yield* client.session
-        .synthetic({
-          id: note.id,
-          text: note.text,
-          description: note.description,
-          sessionID: root,
-          metadata: note.metadata,
-          delivery: "steer",
-          resume: false,
-        })
-        .pipe(
-          // T45 keeps the note either way, and a restore carries it into the VM.
-          Effect.catch((error) =>
-            error._tag === "SessionNotFoundError"
-              ? new RootMissingError()
-              : Effect.logWarning("A chat's VM didn't take T45's note", {
-                  chatId,
-                  cause: error,
-                }),
-          ),
-        );
-    });
-
-    /**
-     * Saves the agent's /work; true once saved, or once given up on after `SAVE_REFUSALS` refusals
-     * in a row. A save that failed otherwise is tried again before the chat sleeps.
-     */
-    const saveWorkspace = Effect.gen(function* () {
-      const content = yield* runner.getChatWorkspace(chatId);
-      refusedSaves = 0;
-      if (content.byteLength > 0) yield* repository.saveWorkspace(chatId, content);
-      return true;
-    }).pipe(
-      Effect.catchTags({
-        RunnerUnavailableError: (error) =>
-          Effect.logWarning("Saving a chat's workspace failed", { chatId, cause: error }).pipe(
-            Effect.as(false),
-          ),
-        RunnerRefusedError: (error) =>
-          Effect.gen(function* () {
-            yield* Effect.logWarning("The runner could not save a chat's workspace", {
-              chatId,
-              reason: error.reason,
-            });
-            refusedSaves += 1;
-            if (refusedSaves < SAVE_REFUSALS) return false;
-            // Refused every time: given up, so the chat can sleep; the last good one stays.
-            if (yield* repository.markWorkspaceUnsaved(chatId)) {
-              yield* noteUnsaved;
-            }
-            return true;
-          }),
-      }),
-    );
-
-    /** Reads what the marks say changed, then updates the chat's summary. */
-    const reconcile = (marked: Marks) =>
-      Effect.gen(function* () {
-        const stored = new Map(
-          (yield* repository.sessions(chatId)).map((row) => [row.sessionId, row]),
-        );
-        if (marked.full || marked.tree) yield* readTree(stored);
-        for (const sessionId of marked.info) {
-          if (!present.has(sessionId) || marked.full || marked.tree) continue;
-          const info = yield* getSession(sessionId);
-          if (Option.isNone(info)) {
-            yield* missing(sessionId, undefined);
-            stored.delete(sessionId);
-            continue;
-          }
-          if (yield* record(info.value, stored)) yield* publish(chatId, "sessions");
-        }
-        const sessions = marked.full ? [...present.keys()] : [...marked.messages];
-        for (const sessionId of sessions) {
-          if (!present.has(sessionId)) continue;
-          yield* captureSession(
-            sessionId,
-            marked.touched.get(sessionId) ?? new Set(),
-            stored.get(sessionId),
-          );
-        }
-        if (marked.full || marked.forms) yield* readForms;
-        if (marked.full || marked.activity) yield* readActivity;
-        if (marked.turnEnded) workspaceDirty = true;
-        if (marked.turnEnded && active.size === 0 && !shellsRunning) {
-          workspaceDirty = !(yield* saveWorkspace);
-        }
-        yield* summarize(stored.get(root));
-      });
-
-    /**
-     * Cancels an input OpenCode refused, which every later delivery would only repeat, and tells
-     * members with a note T45 keeps; false, as it never reached the agent.
-     */
-    const refuseInput = (input: Input, reason: string) =>
-      Effect.gen(function* () {
-        yield* Effect.logWarning("OpenCode refused a chat's input", {
-          chatId,
-          inputId: input.inputId,
-          reason,
-        });
-        yield* repository.moveInput(chatId, input.inputId, ["waiting", "admitted"], "cancelled");
-        const id = noteMessageId(chatId, "refused", input.inputId);
-        yield* repository.capture(chatId, root, [
-          PromptService.refusedInputNote({
-            id,
-            text: input.payload.text,
-            reason,
-            at: DateTime.makeUnsafe(yield* Clock.currentTimeMillis),
-          }),
-        ]);
-        yield* publish(chatId, "inputs");
-        yield* changes.publish({ chatId, kind: "messages", sessionId: root, messageIds: [id] });
-        return false;
-      });
-
-    /** Sends the chat's inputs OpenCode doesn't hold yet, in order, as the member sent them. */
-    const deliver = (everything: boolean) =>
-      Effect.gen(function* () {
-        for (const input of yield* repository.openInputs(chatId)) {
-          if (input.state === "admitted" && !everything) continue;
-          if (!everything) {
-            yield* Effect.forEach(input.payload.attachments, (file) => putFile(chatId, file.id), {
-              discard: true,
-            });
-          }
-          yield* whileNotDelivering(
-            chatId,
-            Effect.gen(function* () {
-              // A member may have cancelled it since it was read.
-              const current = yield* repository.input(chatId, input.inputId);
-              if (current?.state !== "waiting" && current?.state !== "admitted") return;
-              const stop = yield* repository.stopRequest(chatId);
-              if (stop !== null && input.ordinal <= stop.through) {
-                yield* repository.moveInput(
-                  chatId,
-                  input.inputId,
-                  ["waiting", "admitted"],
-                  "cancelled",
-                );
-                return yield* publish(chatId, "inputs");
-              }
-              const admitted = yield* client.session
-                .prompt({
-                  sessionID: root,
-                  id: inputMessageId(chatId, input.inputId),
-                  text: PromptService.format(input.payload),
-                  metadata: encodeInputMetadata({ t45: input.payload }),
-                  delivery: "queue",
-                })
-                .pipe(
-                  Effect.as(true),
-                  Effect.catchTags({
-                    SessionNotFoundError: () => new RootMissingError(),
-                    InvalidRequestError: (error) => refuseInput(input, error.message),
-                    ConflictError: (error) => refuseInput(input, error.message),
-                  }),
-                );
-              if (admitted) {
-                yield* repository.moveInput(chatId, input.inputId, ["waiting"], "admitted");
-              }
-            }),
-          );
-        }
-      });
-
-    const location = Location.PublicRef.make({
-      directory: AbsolutePath.make(OpenCode2Client.WORK_DIRECTORY),
-    });
-    const model = OpenCode2Client.modelRef(agent.model);
-    const permissions = OpenCode2Client.sessionRules(yield* hooks.policy(chatId));
-    const createRoot = client.session.create({
-      id: root,
-      title: titleOf(chat),
-      ...(model === undefined ? {} : { model }),
-      location,
-      permissions,
-    });
-
-    const resumeLostTurn = sql
-      .withTransaction(
-        Effect.gen(function* () {
-          if (
-            !(yield* hooks.policy(chatId)).recover ||
-            !(yield* repository.lastTurnLost(chatId, root))
-          )
-            return;
-          if (yield* repository.hasOpenInputs(chatId)) return;
-          if ((yield* repository.stopRequest(chatId)) !== null) return;
-          const latest = yield* repository.latestInput(chatId);
-          if (latest?.payload.text === PromptService.resumePrompt) return;
-          yield* repository.addInput(chatId, {
-            inputId: InputId.make(`t45-resume-${(latest?.ordinal ?? -1) + 1}`),
-            payload: { text: PromptService.resumePrompt, attachments: [] },
-            at: DateTime.formatIso(yield* DateTime.now),
-          });
-          yield* publish(chatId, "inputs");
-        }),
-      )
-      .pipe(Effect.orDie);
-
-    /**
-     * Puts the chat into a new boot: its files, its workspace, and its sessions, parents first,
-     * the root's ending with a note on what the VM that went away was in the middle of.
-     */
-    const restore = Effect.gen(function* () {
-      const workspace = yield* repository.readWorkspace(chatId);
-      const gone = yield* repository.loseVm(chatId, ({ lost, questions }) =>
-        Effect.gen(function* () {
-          return PromptService.restoreNote({
-            id: noteMessageId(chatId, "restore", bootId),
-            at: DateTime.makeUnsafe(yield* Clock.currentTimeMillis),
-            root,
-            lost,
-            questions,
-            workspaceRestored: workspace !== null,
-          });
-        }),
-      );
-      yield* resumeLostTurn;
-      const shown = [
-        ...gone.lost.map((each) => ({ sessionId: each.sessionId, messageId: each.message.id })),
-        ...(gone.note === null ? [] : [{ sessionId: root, messageId: gone.note.id }]),
-      ];
-      for (const sessionId of new Set(shown.map((each) => each.sessionId))) {
-        yield* changes.publish({
-          chatId,
-          kind: "messages",
-          sessionId,
-          messageIds: shown
-            .filter((each) => each.sessionId === sessionId)
-            .map((each) => each.messageId),
-        });
-      }
-      if (gone.questions.length > 0) yield* publish(chatId, "questions");
-      yield* Effect.forEach(yield* files.boundTo(chatId), (id) => putFile(chatId, id), {
-        discard: true,
-      });
-      if (workspace !== null) {
-        yield* runner.putChatWorkspace({ chatId, content: workspace }).pipe(
-          Effect.catchTags({
-            RunnerRefusedError: (error) =>
-              Effect.gen(function* () {
-                yield* Effect.logWarning("The runner refused a chat's workspace", {
-                  chatId,
-                  reason: error.reason,
-                });
-                // Kept before the root's import, which carries it, and after any note on what was
-                // lost, which said /work came back.
-                const id = noteMessageId(chatId, "workspace", `unpack.${bootId}`);
-                yield* repository.capture(chatId, root, [
-                  PromptService.workspaceNote({
-                    id,
-                    operation: "restore",
-                    at: DateTime.makeUnsafe(yield* Clock.currentTimeMillis),
-                  }),
-                ]);
-                yield* changes.publish({
-                  chatId,
-                  kind: "messages",
-                  sessionId: root,
-                  messageIds: [id],
-                });
-              }),
-          }),
-        );
-      }
-      const mirrored = yield* repository.sessions(chatId);
-      if (mirrored.length === 0) {
-        yield* record(yield* createRoot);
-        return yield* publish(chatId, "sessions");
-      }
-      // Parents before their children, as import needs.
-      const tree = mirrored.map((session) => ({
-        ...session,
-        id: session.sessionId,
-        parentID: session.parentSessionId,
-      }));
-      for (const session of [
-        ...tree.filter((session) => session.id === root),
-        ...OpenCode2Client.sessionsUnder(root, tree),
-      ]) {
-        const isRoot = session.sessionId === root;
-        const info = session.info;
-        // The root's ends with the note on what the VM that went away was doing, if anything.
-        const messages = yield* repository.settled(chatId, session.sessionId);
-        const imported = yield* client.session
-          .import({
-            info: {
-              ...info,
-              permissions,
-              ...(isRoot
-                ? { title: titleOf(chat), ...(model === undefined ? {} : { model }) }
-                : {}),
-            },
-            messages,
-            location,
-          })
-          .pipe(
-            Effect.as(true),
-            Effect.catch((error) =>
-              // Already there; out of reach, which fails the boot; or refused, which a retry
-              // would only repeat.
-              error._tag === "ConflictError"
-                ? Effect.succeed(true)
-                : outOfReach(error)
-                  ? Effect.fail(error)
-                  : Effect.logError("Restoring a chat's session failed", {
-                      chatId,
-                      sessionId: session.sessionId,
-                      cause: error,
-                    }).pipe(Effect.as(false)),
-            ),
-          );
-        const held = yield* getSession(session.sessionId);
-        if (Option.isSome(held)) {
-          yield* record(held.value);
-        } else if (isRoot && !imported) {
-          // The root is the chat: without its history it still goes on from here.
-          yield* record(yield* createRoot);
-        }
-      }
-      yield* repository.resetTails(chatId);
-      yield* publish(chatId, "sessions");
-    });
-
-    const newBoot = chat.bootId !== bootId;
-    if (newBoot) yield* restore;
-    // The VM may hold inputs T45 restarted before recording as sent; capture marks them
-    // materialized first, since sending one again makes OpenCode run an empty turn.
-    yield* reconcile(noMarks(true));
-    yield* consumeStop(chat.id, newBoot ? "absent" : vm());
-    yield* deliver(newBoot);
-    yield* repository.setBoot(chatId, bootId);
-    marks.current = noMarks(false);
-    yield* reconcile(noMarks(true));
-    yield* ready;
-
-    /** Null once the chat can sleep; otherwise when to look again. */
-    const trySleep = Effect.gen(function* () {
-      const now = yield* Clock.currentTimeMillis;
-      if (now - lastActivity < IDLE_MILLIS) return lastActivity + IDLE_MILLIS;
-      marks.current = noMarks(false);
-      yield* reconcile(noMarks(true));
-      // A question keeps its session active and what was sent behind it waiting, so it goes first.
-      const questions = yield* repository.questions(chatId);
-      if (questions.length > 0) {
-        const askedAt = questions.map((question) =>
-          DateTime.toEpochMillis(DateTime.makeUnsafe(question.askedAt)),
-        );
-        if (askedAt.every((at) => at + QUESTION_MILLIS > now)) {
-          return Math.min(...askedAt) + QUESTION_MILLIS;
-        }
-        // Nobody answered in time: the questions go, so the chat can sleep.
-        for (const [index, question] of questions.entries()) {
-          if ((askedAt[index] ?? now) + QUESTION_MILLIS > now) continue;
-          yield* client.session.form
-            .cancel({
-              sessionID: question.sessionId,
-              formID: question.form.id,
-              message: "Nobody answered in time.",
-            })
-            .pipe(
-              Effect.catchTags({
-                FormNotFoundError: () => Effect.void,
-                FormAlreadySettledError: () => Effect.void,
-                SessionNotFoundError: () => missing(question.sessionId, undefined),
-              }),
-            );
-        }
-        lastActivity = now;
-        yield* reconcile({ ...noMarks(false), forms: true, activity: true });
-        return now + IDLE_MILLIS;
-      }
-      if ((yield* repository.openInputs(chatId)).length > 0) return now + RECHECK_MILLIS;
-      if (active.size > 0 || shellsRunning) return now + RECHECK_MILLIS;
-      for (const sessionId of present.keys()) {
+      if (shells.data.some((shell) => shell.status === "running")) return false;
+      for (const sessionId of known) {
         const inbox = yield* client.session.inbox
           .list({ sessionID: Session.ID.make(sessionId) })
-          .pipe(Effect.catchTags({ SessionNotFoundError: () => missing(sessionId, []) }));
-        // T45's own note waits for the agent's next turn, and T45 keeps it besides.
-        if (inbox.some((item) => !isNoteOf(chatId, "workspace", item.id))) {
-          return now + RECHECK_MILLIS;
-        }
+          .pipe(Effect.catchTags({ SessionNotFoundError: () => Effect.succeed([]) }));
+        if (inbox.length > 0) return false;
       }
-      if (yield* repository.hasLive(chatId)) return now + RECHECK_MILLIS;
-      if (awaitingReports()) return now + RECHECK_MILLIS;
-      if (workspaceDirty) {
-        workspaceDirty = !(yield* saveWorkspace);
-        if (workspaceDirty) return now + RECHECK_MILLIS;
-      }
-      return null;
+      return [...launches].every(([child, ids]) => (reports.get(child)?.size ?? 0) >= ids.size);
     });
 
-    let nextCheck = lastActivity + IDLE_MILLIS;
-    while (true) {
-      const wait = Math.max(0, nextCheck - (yield* Clock.currentTimeMillis));
-      const first = yield* Queue.take(mailbox).pipe(Effect.timeoutOption(wait));
-      if (Option.isNone(first)) {
-        const next = yield* trySleep;
-        if (next === null) {
-          // Asleep before its stream ends, so the end isn't taken for a lost VM.
-          yield* repository.setVm(chatId, "asleep");
-          return "asleep" as const;
-        }
-        nextCheck = next;
-        continue;
-      }
-      if (first.value._tag === "events" && first.value.cycle === cycle && !first.value.urgent) {
-        yield* Effect.sleep(CAPTURE_BATCH);
-      }
-      const batch = [first.value, ...(yield* Queue.clear(mailbox))];
-      if (batch.some((each) => each === captureNotification)) captureNotification = undefined;
-      const jobs = batch.flatMap((each) => (each._tag === "job" ? [each] : []));
-      let started = 0;
-      const woken = batch.some((each) => each._tag === "wake");
-      // Jobs this boot couldn't start go back to the mailbox, for the next boot or to hear that
-      // no VM runs, so none is left waiting.
-      yield* Effect.gen(function* () {
-        if (batch.some((each) => each._tag === "ended" && each.cycle === cycle)) {
-          return yield* new StreamEndedError();
-        }
-        lastActivity = yield* Clock.currentTimeMillis;
-        nextCheck = lastActivity + IDLE_MILLIS;
-        if (woken) {
-          if ((yield* repository.stopRequest(chatId)) !== null)
-            for (const report of reports.values()) report.received = true;
-          yield* consumeStop(chat.id, vm());
-          yield* deliver(false);
-        }
-        for (const job of jobs) {
-          started += 1;
-          yield* job.run(vm());
-        }
-      }).pipe(
-        Effect.onExit((exit) =>
-          Exit.isSuccess(exit) ? Effect.void : Queue.offerAll(mailbox, jobs.slice(started)),
-        ),
+    /**
+     * Reads every session again once OpenCode says it's done: what it wrote before is stored, even
+     * when the events naming it haven't arrived yet.
+     */
+    const captureAll = Effect.gen(function* () {
+      yield* readTree;
+      yield* capture({
+        ...noMarks(),
+        forms: true,
+        sessions: new Map([...known].map((sessionId) => [sessionId, new Set<string>()])),
+      });
+    });
+
+    /**
+     * Saves /work and ends the execution with the root's outcome, committing what it wrote; false
+     * when an input came in since the last delivery, which this execution sends first.
+     */
+    const finish = Effect.gen(function* () {
+      const info = yield* client.session.get({ sessionID: root });
+      const status =
+        info.outcome === "failed"
+          ? ("failed" as const)
+          : info.outcome === "interrupted"
+            ? ("interrupted" as const)
+            : null;
+      const content = yield* runner.getChatWorkspace(chatId).pipe(
+        Effect.catchTags({
+          RunnerRefusedError: (error) =>
+            Effect.logWarning("The runner could not save a chat's workspace; the last one stays", {
+              chatId,
+              reason: error.reason,
+            }).pipe(Effect.as(new Uint8Array())),
+        }),
       );
-      const marked = marks.current;
-      marks.current = noMarks(false);
-      if (woken || jobs.length > 0) {
-        marked.forms = true;
-        marked.activity = true;
-        marked.messages.add(root);
+      // Checked in the transaction that ends the execution, which a post's transaction can't
+      // interleave with, so an input saved meanwhile is never left behind.
+      return yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const pending = yield* repository.pendingInputs(chatId);
+            if (pending.some((input) => !execution.sent.has(input.inputId))) return false;
+            if (content.byteLength > 0) yield* repository.saveWorkspace(chatId, content);
+            yield* end(chatId, status, true);
+            return true;
+          }),
+        )
+        .pipe(Effect.orDie);
+    });
+
+    let marked: Marks = { ...noMarks(), tree: true, forms: true };
+    let woken = true;
+    while (true) {
+      yield* deliver;
+      yield* capture(marked);
+      if ((woken || marked.activity) && (yield* done)) {
+        yield* captureAll;
+        if ((yield* done) && (yield* finish)) {
+          execution.vm = null;
+          return;
+        }
       }
-      yield* reconcile(marked);
+      const first = yield* Queue.take(execution.signal);
+      if (first === "events") yield* Effect.sleep(CAPTURE_BATCH);
+      const signals = new Set([first, ...(yield* Queue.clear(execution.signal))]);
+      notified = false;
+      if (signals.has("ended")) return yield* new StreamEndedError();
+      woken = signals.has("wake");
+      marked = marks;
+      marks = noMarks();
     }
   });
 
-  /**
-   * Whether the worker may end, from its mailbox alone: a job that boots, or a wake, keeps it, with
-   * its jobs in order. Otherwise jobs left hear that no VM runs.
-   */
-  const finish = (chatId: ChatId, mailbox: Queue.Queue<Message>) =>
-    SynchronizedRef.modifyEffect(registry, (entries) =>
-      Effect.gen(function* () {
-        const waiting = yield* Queue.clear(mailbox);
-        const jobs = waiting.flatMap((each) => (each._tag === "job" ? [each] : []));
-        if (jobs.some((job) => job.boot)) {
-          yield* Queue.offerAll(mailbox, jobs);
-          return ["boot", entries] as const;
-        }
-        if (waiting.some((each) => each._tag === "wake")) {
-          yield* Queue.offerAll(mailbox, jobs);
-          return ["recheck", entries] as const;
-        }
-        for (const job of jobs) yield* job.skip;
-        return ["done", without(entries, chatId, mailbox)] as const;
-      }),
-    );
-
-  const runWorker = (
-    chatId: ChatId,
-    mailbox: Queue.Queue<Message>,
-    retryFailed: boolean,
-    recover: boolean,
-  ) =>
+  /** Runs attempts until one finishes; a lost VM starts a new one, less and less often. */
+  const execute = (chatId: ChatId, execution: Execution) =>
     Effect.gen(function* () {
-      const reports: Reports = new Map();
       let failures = 0;
-      let mayRetryFailed = retryFailed;
-      let recovering = recover;
-      // The runner or the VM's server was out of reach, which a later try gets past.
-      const unreachable = (cause: unknown) =>
-        Effect.logWarning("A chat's VM couldn't be reached; trying again", {
-          chatId,
-          cause,
-        }).pipe(Effect.as("retry" as const));
       while (true) {
-        const chat = yield* repository.workerRow(chatId);
-        if (chat === null) return;
-        yield* consumeStop(chat.id, chat.vm === "awake" ? "unreachable" : "absent");
-        const isOwed =
-          chat.vm === "awake" ||
-          ((mayRetryFailed || chat.status !== "failed") &&
-            (yield* repository.hasOpenInputs(chatId)));
-        mayRetryFailed = false;
-        if (!isOwed) {
-          if (recovering) yield* recoverTask(chatId);
-          recovering = false;
-          yield* clearRunning(chatId);
-          const next = yield* finish(chatId, mailbox);
-          if (next === "done") return;
-          if (next === "recheck") continue;
+        const exit = yield* attempt(chatId, execution).pipe(Effect.scoped, Effect.exit);
+        if (Exit.isSuccess(exit)) return;
+        const reached = execution.vm !== null;
+        execution.vm = null;
+        const error = Cause.findErrorOption(exit.cause);
+        if (Option.isNone(error) || !isConnectionLost(error.value)) {
+          // Anything else, such as a VM the runner refuses, would fail the same way again.
+          yield* Effect.logError("A chat's execution failed; it waits for the chat's next input", {
+            chatId,
+            cause: exit.cause,
+          });
+          yield* discard(chatId);
+          yield* end(chatId, "failed", false);
+          return;
         }
-        if (chat.vm !== "awake") yield* repository.setVm(chatId, "awake");
-        const outcome = yield* awake(
+        failures = reached ? 1 : failures + 1;
+        yield* Effect.logWarning("A chat's VM was lost; its execution starts again", {
           chatId,
-          mailbox,
-          Effect.sync(() => {
-            failures = 0;
-            recovering = false;
-          }),
-          reports,
-        ).pipe(
-          Effect.scoped,
-          Effect.catchTags({
-            RunnerUnavailableError: unreachable,
-            StreamEndedError: unreachable,
-            HttpClientError: (error) => (outOfReach(error) ? unreachable(error) : error),
-            ClientError: (error) => (outOfReach(error) ? unreachable(error) : error),
-            RootMissingError: () =>
-              Effect.logInfo("A chat's VM no longer holds its root session; restoring the chat", {
-                chatId,
-              }).pipe(
-                Effect.andThen(repository.setBoot(chatId, null)),
-                Effect.as("retry" as const),
-              ),
-          }),
-          // Anything else, such as a refused VM or a stored message that no longer decodes, would
-          // fail the same way again.
-          Effect.catchCauseIf(
-            (cause) => !Cause.hasInterruptsOnly(cause),
-            (cause) =>
-              Effect.logError("A chat's VM failed; it waits for the chat's next message", {
-                chatId,
-                cause,
-              }).pipe(Effect.as("failed" as const)),
-          ),
-        );
-        if (outcome === "gone") {
-          yield* repository.setVm(chatId, "asleep");
-          continue;
-        }
-        if (outcome === "failed") {
-          yield* repository.setVm(chatId, "asleep");
-          yield* setFailed(chatId);
-          // What came in so far would fail the same way; a message sent from here on tries again.
-          for (const each of yield* Queue.clear(mailbox)) if (each._tag === "job") yield* each.skip;
-          continue;
-        }
-        if (outcome === "asleep") {
-          yield* runner.removeChat(chatId).pipe(
-            Effect.catchTags({
-              RunnerUnavailableError: (error) =>
-                Effect.logWarning("Removing a sleeping chat's VM failed", {
-                  chatId,
-                  cause: error,
-                }),
-            }),
-          );
-          continue;
-        }
-        // A dropped connection tries again at once; a VM out of reach, less and less often.
-        failures += 1;
+          cause: exit.cause,
+        });
         if (failures > 1) {
           yield* Effect.sleep(`${Math.min(30, 2 ** Math.min(failures - 2, 5))} seconds`);
         }
       }
-    }).pipe(
-      // Forked workers report to nobody, so one that dies says so here.
-      Effect.tapCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.void
-          : Effect.logError("A chat's worker stopped", { chatId, cause }),
-      ),
-      Effect.ensuring(
-        // Under the registry's lock, so nothing is offered to the mailbox once it is cleared.
-        SynchronizedRef.updateEffect(registry, (entries) =>
-          Effect.gen(function* () {
-            for (const each of yield* Queue.clear(mailbox)) {
-              if (each._tag === "job") yield* each.skip;
-            }
-            return without(entries, chatId, mailbox);
-          }),
-        ),
-      ),
-    );
-
-  const startWorker = (
-    chatId: ChatId,
-    entries: ReadonlyMap<string, Entry>,
-    message: Message,
-    retryFailed: boolean,
-    recover = false,
-  ) =>
-    Effect.gen(function* () {
-      const mailbox = yield* Queue.unbounded<Message>();
-      yield* Queue.offer(mailbox, message);
-      const fiber = yield* runWorker(chatId, mailbox, retryFailed, recover).pipe(
-        Effect.forkIn(layerScope),
-      );
-      return [true, new Map(entries).set(chatId, { mailbox, fiber })] as const;
     });
 
-  /** Offers `message` to the chat's worker, starting one when `start`; false when none runs. */
-  const offer = (chatId: ChatId, message: Message, start: boolean, retryFailed = false) =>
-    SynchronizedRef.modifyEffect(registry, (entries) =>
-      Effect.gen(function* () {
-        const entry = entries.get(chatId);
-        if (entry !== undefined) {
-          yield* Queue.offer(entry.mailbox, message);
-          return [true, entries] as const;
-        }
-        if (!start) return [false, entries] as const;
-        return yield* startWorker(chatId, entries, message, retryFailed);
+  const release = (chatId: ChatId, execution: Execution) =>
+    registry.withPermit(
+      Effect.sync(() => {
+        if (executions.get(chatId) === execution) executions.delete(chatId);
       }),
     );
 
-  const offerIfIdle = (chatId: ChatId, retryFailed: boolean, recover = false) =>
-    SynchronizedRef.modifyEffect(registry, (entries) =>
-      entries.has(chatId)
-        ? Effect.succeed([false, entries] as const)
-        : startWorker(chatId, entries, { _tag: "wake" }, retryFailed, recover),
-    );
-
-  const sweep = (includeFailed: boolean) =>
-    Effect.gen(function* () {
-      for (const chat of yield* repository.needingWorker(includeFailed)) {
-        if (chat.hasStop) yield* offer(chat.id, { _tag: "wake" }, true, includeFailed);
-        else yield* offerIfIdle(chat.id, includeFailed);
-      }
-    });
-
-  const run = <A>(
-    chatId: ChatId,
-    job: (vm: ChatVm) => Effect.Effect<A, Refused>,
-    options?: { readonly boot?: boolean },
-  ) =>
-    Effect.gen(function* () {
-      const done = yield* Deferred.make<Option.Option<A>, Refused | JobTimeoutError>();
-      return yield* Effect.gen(function* () {
-        const boot = options?.boot === true;
-        const offered = yield* offer(
-          chatId,
-          {
-            _tag: "job",
-            boot,
-            // A worker stopped mid-job, as for a deleted chat, answers that no VM runs.
-            run: (vm) =>
-              Effect.uninterruptibleMask((restore) =>
-                Effect.gen(function* () {
-                  // A caller that gave up hears nothing more, so its job never runs after that.
-                  if (yield* Deferred.isDone(done)) return;
-                  const exit = yield* restore(
-                    job(vm).pipe(Effect.asSome, Effect.raceFirst(Deferred.await(done))),
-                  ).pipe(Effect.exit);
-                  yield* Deferred.done(
-                    done,
-                    Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
-                      ? Exit.succeed(Option.none())
-                      : exit,
-                  );
-                }),
-              ),
-            skip: Deferred.succeed(done, Option.none()).pipe(Effect.asVoid),
-          },
-          boot,
-        );
-        if (!offered) return Option.none<A>();
-        return yield* Deferred.await(done).pipe(
-          Effect.timeoutOrElse({
-            duration: JOB_TIMEOUT,
-            // Whichever settles the job first wins: its outcome, or this giving up on it.
-            orElse: () =>
-              Deferred.fail(done, new JobTimeoutError()).pipe(Effect.andThen(Deferred.await(done))),
-          }),
-        );
-      }).pipe(
-        // The worker owns the job's fiber; ending its caller must also settle the job.
-        Effect.ensuring(Deferred.succeed(done, Option.none())),
-      );
-    });
-
-  const sweepLogged = sweep(false).pipe(
-    Effect.catchCause((cause) =>
-      Effect.logWarning("Sweeping chats for lost wakes failed", { cause }),
-    ),
-  );
-  const posted = yield* changes.subscribe((change) => change.kind === "posted");
-  yield* forkParked(
-    Stream.runForEach(posted, (change) =>
-      change.kind === "missed" ? sweepLogged : offer(change.chatId, { _tag: "wake" }, true),
-    ),
-  );
-  yield* forkParked(sweepLogged.pipe(Effect.delay("30 seconds"), Effect.forever));
+  /** Starts the chat's execution unless one runs; a running one delivers what it didn't send. */
+  const wake = (chatId: ChatId): Effect.Effect<void> =>
+    registry
+      .withPermit(
+        Effect.gen(function* () {
+          const running = executions.get(chatId);
+          if (running !== undefined) return yield* Queue.offer(running.signal, "wake");
+          const execution: Execution = {
+            signal: yield* Queue.unbounded<Signal>(),
+            fiber: null,
+            vm: null,
+            sent: new Set(),
+          };
+          executions.set(chatId, execution);
+          execution.fiber = yield* Effect.gen(function* () {
+            yield* execute(chatId, execution);
+            yield* release(chatId, execution);
+            // An input saved as the execution ended needs a new one.
+            const chat = yield* repository.get(chatId);
+            if (chat?.status === "running" || chat?.status === "waiting") yield* wake(chatId);
+          }).pipe(
+            Effect.ensuring(release(chatId, execution)),
+            Effect.tapCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.void
+                : Effect.logError("A chat's execution stopped", { chatId, cause }),
+            ),
+            Effect.forkIn(layerScope),
+          );
+        }),
+      )
+      .pipe(Effect.asVoid);
 
   return {
     inventory: runner.inventory,
     models: runner.models,
-    removeChat: runner.removeChat,
-    wake: (chatId: ChatId) => offer(chatId, { _tag: "wake" }, true).pipe(Effect.asVoid),
-    run,
-    whileNotDelivering,
-    cancelWaiting: (chatId: ChatId) =>
-      Effect.gen(function* () {
-        const stop = yield* repository.stopRequest(chatId);
-        if (stop === null) return;
-        const cancelled = yield* whileNotDelivering(
-          chatId,
-          repository.cancelInputs(chatId, stop.through, ["waiting"]),
-        );
-        if (cancelled) yield* publish(chatId, "inputs");
-      }),
+    wake,
+    /**
+     * Ends the chat's execution and removes its VM, discarding what it wrote as when the VM is
+     * lost: the next execution sends its inputs again. Never call it from the chat's own
+     * execution, which it waits for.
+     */
     stop: (chatId: ChatId) =>
-      SynchronizedRef.get(registry).pipe(
-        Effect.flatMap((entries) => {
-          const entry = entries.get(chatId);
-          return entry === undefined ? Effect.void : Fiber.interrupt(entry.fiber);
-        }),
-      ),
-    start: (hooks: ChatHooks, recover: ReadonlyArray<ChatId>) =>
       Effect.gen(function* () {
-        yield* Deferred.succeed(hooksReady, hooks);
-        for (const chatId of recover) yield* offerIfIdle(chatId, true, true);
-        const keep = new Set<string>(
-          (yield* repository.needingWorker(true)).map((chat) => chat.id),
+        const fiber = yield* registry.withPermit(
+          Effect.sync(() => executions.get(chatId)?.fiber ?? null),
         );
-        // A chat VM no awake chat holds is left over, as after a database wipe.
+        if (fiber !== null) yield* Fiber.interrupt(fiber);
+        yield* discard(chatId);
+        if (yield* repository.setStatus(chatId, "interrupted", null)) {
+          yield* publish(chatId, "chat");
+        }
+        yield* publish(chatId, "inputs");
+      }),
+    /** Runs `use` on the VM of the chat's running execution; none when nothing runs. */
+    withVm: <A, E>(chatId: ChatId, use: (vm: ChatVm) => Effect.Effect<A, E>) =>
+      Effect.suspend(() => {
+        const vm = executions.get(chatId)?.vm ?? null;
+        return vm === null
+          ? Effect.succeedNone
+          : use(vm).pipe(Effect.asSome, Effect.timeout(VM_TIMEOUT));
+      }),
+    /**
+     * Cancels an input the agent hasn't taken, taking it back from the running VM; false when the
+     * agent already took it.
+     */
+    cancel: (chatId: ChatId, inputId: InputId) =>
+      withInputs(
+        chatId,
+        Effect.gen(function* () {
+          const pending = yield* repository.pendingInputs(chatId);
+          if (!pending.some((input) => input.inputId === inputId)) return false;
+          const execution = executions.get(chatId);
+          const vm = execution?.vm ?? null;
+          if (vm !== null && execution?.sent.has(inputId) === true) {
+            const id = inputMessageId(chatId, inputId);
+            yield* vm.client.session.inbox.cancel({ sessionID: vm.root, inboxID: id });
+            const taken = yield* vm.client.session.message
+              .get({ sessionID: vm.root, messageID: id })
+              .pipe(
+                Effect.as(true),
+                Effect.catchTags({ MessageNotFoundError: () => Effect.succeed(false) }),
+              );
+            if (taken) return false;
+          }
+          return yield* repository.deletePending(chatId, inputId);
+        }),
+      ).pipe(Effect.timeout(VM_TIMEOUT)),
+    /**
+     * Removes the VMs an earlier process left, then runs again every execution that was owed. No
+     * execution starts a VM before this.
+     */
+    start: (hooks: ChatHooks) =>
+      Effect.gen(function* () {
         const inventory = yield* runner.inventory.pipe(
           Effect.asSome,
           Effect.catchTags({
             RunnerUnavailableError: (error) =>
               Effect.logWarning(
-                "Listing the runner's VMs failed; leftovers wait for its backstop",
+                "Listing the runner's VMs failed; leftovers wait for the next start",
                 {
                   cause: error,
                 },
-              ).pipe(Effect.andThen(Effect.succeedNone)),
+              ).pipe(Effect.as(Option.none())),
           }),
         );
-        if (Option.isSome(inventory)) {
-          for (const each of inventory.value.vms) {
-            if (keep.has(each.vmId)) continue;
-            yield* runner.removeChat(each.vmId).pipe(
-              Effect.catchTags({
-                RunnerUnavailableError: (error) =>
-                  Effect.logWarning("Removing a leftover chat VM failed", {
-                    vm: each.vmId,
-                    cause: error,
-                  }),
-              }),
-            );
-          }
+        for (const each of Option.match(inventory, { onNone: () => [], onSome: (i) => i.vms })) {
+          yield* runner.removeChat(each.vmId).pipe(
+            Effect.catchTags({
+              RunnerUnavailableError: (error) =>
+                Effect.logWarning("Removing a leftover chat VM failed", {
+                  vm: each.vmId,
+                  cause: error,
+                }),
+            }),
+          );
         }
-        yield* sweep(true);
+        yield* Deferred.succeed(started, hooks);
+        for (const chatId of yield* repository.owed) yield* wake(chatId);
       }),
   };
 });

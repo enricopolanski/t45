@@ -91,21 +91,10 @@ describe("userMessageContent", () => {
 });
 
 describe("betweenTurns", () => {
-  it("is between turns before the first and after each, and after T45's notes", () => {
+  it("is between turns before the first and after each", () => {
     const idle = nativeMessage({ id: "msg_2", type: "idle", outcome: "succeeded" });
     expect(betweenTurns([])).toBe(true);
     expect(betweenTurns([userMessage("msg_1", "hi"), idle])).toBe(true);
-    expect(
-      betweenTurns([
-        idle,
-        nativeMessage({
-          id: "msg_3",
-          type: "synthetic",
-          text: "The sandbox restarted.",
-          metadata: { t45: { note: "restore" } },
-        }),
-      ]),
-    ).toBe(true);
     expect(betweenTurns([idle, userMessage("msg_4", "go")])).toBe(false);
     expect(
       betweenTurns([idle, nativeMessage({ id: "msg_5", type: "synthetic", text: "report" })]),

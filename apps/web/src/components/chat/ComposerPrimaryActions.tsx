@@ -99,7 +99,7 @@ export function ComposerSendActions(props: {
   sendDisabledReason: string | null;
   hasSendableContent: boolean;
   preserveComposerFocus: boolean;
-  /** Offered while the run can be stopped, including one still preparing or starting. */
+  /** Offered while the agent is running or waiting on a question. */
   onInterrupt?: (() => void) | undefined;
 }) {
   if (props.onInterrupt && !props.hasSendableContent) {

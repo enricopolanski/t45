@@ -144,17 +144,8 @@ export const make = (
         if (task !== null) yield* transition(task, { type: "settled", outcome });
       }, transaction),
       hooks: {
-        policy: (chatId) =>
-          Effect.gen(function* () {
-            const origin = yield* origins.get(chatId);
-            return {
-              questions: origin?.kind === "conversation",
-              recover:
-                origin?.kind === "task" &&
-                origin.state.type === "active" &&
-                (yield* canRun(origin)),
-            };
-          }),
+        questions: (chatId) =>
+          origins.get(chatId).pipe(Effect.map((origin) => origin?.kind === "conversation")),
         saved,
         ended: (chatId, status) =>
           transaction(
@@ -163,7 +154,7 @@ export const make = (
               const task = yield* get(chatId);
               if (
                 task?.state.type !== "active" ||
-                (yield* repository.hasOpenInputs(chatId)) ||
+                (yield* repository.hasPending(chatId)) ||
                 !(yield* canRun(task))
               )
                 return;

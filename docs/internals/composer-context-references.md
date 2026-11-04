@@ -78,4 +78,4 @@ Context never travels through the clipboard, not even within one draft: copying 
 
 A context id is `<kind>_<draft attachment id>`; draft attachment ids are UUIDs, so context ids need no escaping.
 
-A sent input keeps its records in `chat_inputs.payload_json` until it is delivered, and the message it becomes keeps them under `metadata.t45.context` (`InputMetadata`), so chips stay resolvable after a restart and after the chat's VM is restored.
+A sent input keeps its records in `chat_inputs.payload_json`, which an execution sends while the input is pending, and the message it becomes keeps them under `metadata.t45.context` (`InputMetadata`), which OpenCode's import keeps, so chips stay resolvable after a restart and in every later execution.

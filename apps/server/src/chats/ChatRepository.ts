@@ -1,7 +1,7 @@
 /**
- * What T45 stores for its chats: the chats, their OpenCode sessions and messages, the inputs
- * sent to them, the questions waiting for an answer, and the agent's saved workspace, whose
- * tarball is a file in the server's state folder.
+ * What T45 stores for its chats: the chats, the inputs sent to them, the OpenCode sessions and
+ * messages their executions wrote, the questions waiting for an answer, and the agent's saved
+ * workspace, whose tarball is a file in the server's state folder.
  */
 import { Form, Session, SessionMessage } from "@opencode/client/effect";
 import type * as Statement from "effect/sql/Statement";
@@ -14,7 +14,6 @@ import {
   Input,
   type InputId,
   InputPayload,
-  type InputState,
 } from "@t45/contracts/models/Chat";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -24,28 +23,23 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import type { Member } from "./ChatService.ts";
 import * as ServerConfig from "../config.ts";
-import { inputIdOf, rootSessionId } from "./ChatIds.ts";
-
-export interface StopRequest {
-  readonly through: number;
-}
+import type { Member } from "./ChatService.ts";
+import { inputIdOf, inputMessageId, rootSessionId } from "./ChatIds.ts";
 
 const SessionRow = Schema.Struct({
   sessionId: Schema.String,
   parentSessionId: Schema.NullOr(Schema.String),
   info: Schema.fromJsonString(Session.Info),
-  tailCursor: Schema.NullOr(Schema.String),
 });
-export type SessionRow = typeof SessionRow.Type;
+type SessionRow = typeof SessionRow.Type;
 
 export interface MessageRow {
   readonly sessionId: string;
   readonly messageId: string;
   readonly ordinal: number;
   readonly type: string;
-  readonly state: "live" | "settled" | "lost";
+  readonly state: "live" | "settled";
   readonly json: string;
 }
 
@@ -54,18 +48,6 @@ const QuestionRow = Schema.Struct({
   form: Schema.fromJsonString(Form.Info),
   askedAt: Schema.String,
 });
-type QuestionRow = typeof QuestionRow.Type;
-
-interface LostMessage {
-  readonly sessionId: string;
-  readonly message: SessionMessage.Info;
-}
-
-/** What one captured page changed: the messages written and whether inputs materialized. */
-export interface Captured {
-  readonly messageIds: ReadonlyArray<string>;
-  readonly inputsChanged: boolean;
-}
 
 const decodeOrigin = Schema.decodeUnknownEffect(Schema.fromJsonString(ChatOrigin));
 const encodeTrigger = Schema.encodeSync(Schema.fromJsonString(Trigger));
@@ -100,7 +82,6 @@ const makeOrigins = Effect.gen(function* () {
     setState: (chatId: ChatId, state: TaskState) =>
       sql`UPDATE chat_origins SET state = ${encodeState(state)}
       WHERE chat_id = ${chatId} AND trigger IS NOT NULL`.pipe(Effect.asVoid, Effect.orDie),
-    nonterminal: tasks(sql`json_extract(state, '$.type') <> 'settled'`),
     listByTrigger: (reference: { readonly ticketId: string; readonly stepId: string }) =>
       tasks(
         sql`json_extract(trigger, '$.ticketId') = ${reference.ticketId} AND json_extract(trigger, '$.stepId') = ${reference.stepId}`,
@@ -126,13 +107,6 @@ const CHAT_COLUMNS = `id, agent_id AS "agentId", title, status, updated_at AS "l
 
 const decodeChat = Schema.decodeUnknownEffect(Chat);
 const decodeChats = Schema.decodeUnknownEffect(Schema.Array(Chat));
-const decodeWorker = Schema.decodeUnknownEffect(
-  Schema.Struct({
-    ...Chat.fields,
-    vm: Schema.Literals(["awake", "asleep"]),
-    bootId: Schema.NullOr(Schema.String),
-  }),
-);
 
 const MESSAGE_COLUMNS = `session_id AS "sessionId", message_id AS "messageId", ordinal, type,
   state, json`;
@@ -140,9 +114,9 @@ const MESSAGE_COLUMNS = `session_id AS "sessionId", message_id AS "messageId", o
 const QUESTION_COLUMNS = `session_id AS "sessionId", form_json AS "form", asked_at AS "askedAt"`;
 
 const SESSION_COLUMNS = `session_id AS "sessionId", parent_session_id AS "parentSessionId",
-  info_json AS "info", tail_cursor AS "tailCursor"`;
+  info_json AS "info"`;
 
-const INPUT_COLUMNS = `input_id AS "inputId", ordinal, state, payload_json AS "payload",
+const INPUT_COLUMNS = `input_id AS "inputId", ordinal, payload_json AS "payload",
   created_at AS "createdAt"`;
 
 const decodeInputs = Schema.decodeUnknownEffect(
@@ -160,15 +134,13 @@ const encodeForm = Schema.encodeSync(Schema.fromJsonString(Form.Info));
 
 const MessageJson = Schema.fromJsonString(SessionMessage.Info);
 const encodeMessage = Schema.encodeSync(MessageJson);
-const decodeMessageJson = Schema.decodeEffect(MessageJson);
-const decodeMessage = (json: string) => decodeMessageJson(json).pipe(Effect.orDie);
+const decodeMessage = Schema.decodeEffect(MessageJson);
 
 /**
  * Whether OpenCode finished writing the message, by its own rule: an assistant once completed, a
- * shell or compaction once it stopped running, anything else once it exists. Import keeps only
- * these.
+ * shell or compaction once it stopped running, anything else once it exists.
  */
-const isSettled = (message: SessionMessage.Info) => {
+export const isSettled = (message: SessionMessage.Info) => {
   switch (message.type) {
     case "assistant":
       return message.time.completed !== undefined;
@@ -179,9 +151,6 @@ const isSettled = (message: SessionMessage.Info) => {
       return true;
   }
 };
-
-/** Above this many messages a restore imports from the latest completed compaction. */
-const IMPORT_CUT_MESSAGES = 4_000;
 
 /** Where chats' workspace tarballs are kept, under the server's state folder. */
 const WORKSPACES_DIRECTORY = "chat-workspaces";
@@ -200,6 +169,24 @@ const make = Effect.gen(function* () {
   const messageColumns = sql.literal(MESSAGE_COLUMNS);
   const questionColumns = sql.literal(QUESTION_COLUMNS);
   const sessionColumns = sql.literal(SESSION_COLUMNS);
+  const inputs = (chatId: ChatId) =>
+    sql`SELECT ${inputColumns} FROM chat_inputs WHERE chat_id = ${chatId} ORDER BY ordinal`.pipe(
+      Effect.orDie,
+      Effect.flatMap(inputsOf),
+    );
+  /** The chat's inputs whose user message isn't stored: what its next execution sends. */
+  const pendingInputs = (chatId: ChatId) =>
+    Effect.gen(function* () {
+      const all = yield* inputs(chatId);
+      if (all.length === 0) return all;
+      const ids = all.map((input) => inputMessageId(chatId, input.inputId));
+      const stored = new Set(
+        (yield* sql<{ readonly id: string }>`SELECT message_id AS id FROM chat_messages
+          WHERE chat_id = ${chatId} AND session_id = ${rootSessionId(chatId)}
+            AND ${sql.in("message_id", ids)}`.pipe(Effect.orDie)).map((row) => row.id),
+      );
+      return all.filter((input) => !stored.has(inputMessageId(chatId, input.inputId)));
+    });
 
   const get = (chatId: ChatId) =>
     sql`SELECT ${chatColumns} FROM chats WHERE id = ${chatId} AND deleted_at IS NULL`.pipe(
@@ -207,76 +194,9 @@ const make = Effect.gen(function* () {
       Effect.orDie,
     );
 
-  /**
-   * Writes messages OpenCode returned for a session, new ones after the ones it has, with the
-   * tail cursor and the inputs they deliver; callers hold the transaction.
-   */
-  const captureIn = (
-    chatId: ChatId,
-    sessionId: string,
-    messages: ReadonlyArray<SessionMessage.Info>,
-    tailCursor: string | undefined,
-  ) =>
-    Effect.gen(function* () {
-      const ids = messages.map((message) => message.id);
-      const known = new Set(
-        ids.length === 0
-          ? []
-          : (yield* sql<{ readonly id: string }>`SELECT message_id AS id FROM chat_messages
-              WHERE chat_id = ${chatId} AND session_id = ${sessionId}
-                AND ${sql.in("message_id", ids)}`).map((row) => row.id),
-      );
-      const [next] = yield* sql<{ readonly next: number }>`SELECT next_ordinal AS next
-        FROM chat_sessions WHERE chat_id = ${chatId} AND session_id = ${sessionId}`;
-      let ordinal = next?.next ?? 0;
-      const written: Array<string> = [];
-      for (const message of messages) {
-        const json = encodeMessage(message);
-        const state = isSettled(message) ? "settled" : "live";
-        const changed = yield* sql<{ readonly id: string }>`INSERT INTO chat_messages
-            (chat_id, session_id, message_id, ordinal, type, state, json)
-          VALUES (${chatId}, ${sessionId}, ${message.id},
-            ${known.has(message.id) ? -1 : ordinal}, ${message.type}, ${state}, ${json})
-          ON CONFLICT (chat_id, session_id, message_id) DO UPDATE SET
-            type = excluded.type, state = excluded.state, json = excluded.json
-            WHERE chat_messages.json IS NOT excluded.json
-              OR chat_messages.state IS NOT excluded.state
-          RETURNING message_id AS id`;
-        if (!known.has(message.id)) {
-          known.add(message.id);
-          ordinal += 1;
-        }
-        if (changed.length > 0) written.push(message.id);
-      }
-      yield* sql`UPDATE chat_sessions SET next_ordinal = ${ordinal},
-          tail_cursor = COALESCE(${tailCursor ?? null}, tail_cursor)
-        WHERE chat_id = ${chatId} AND session_id = ${sessionId}`;
-      // A user message admitted under an input's id is that input, delivered.
-      const inputIds = messages.flatMap((message) => {
-        const inputId = message.type === "user" ? inputIdOf(chatId, message.id) : null;
-        return inputId === null ? [] : [inputId];
-      });
-      const materialized =
-        inputIds.length === 0
-          ? []
-          : yield* sql`UPDATE chat_inputs SET state = 'materialized'
-              WHERE chat_id = ${chatId} AND ${sql.in("input_id", inputIds)}
-                AND state <> 'materialized'
-              RETURNING input_id`;
-      return {
-        messageIds: written,
-        inputsChanged: materialized.length > 0,
-      } satisfies Captured;
-    });
-
   return {
     get,
     origins,
-    workerRow: (chatId: ChatId) =>
-      sql`SELECT ${chatColumns}, vm, boot_id AS "bootId" FROM chats WHERE id = ${chatId} AND deleted_at IS NULL`.pipe(
-        Effect.flatMap(([row]) => (row === undefined ? Effect.succeed(null) : decodeWorker(row))),
-        Effect.orDie,
-      ),
     insert: (row: {
       readonly id: ChatId;
       readonly agentId: Agent["id"];
@@ -305,72 +225,32 @@ const make = Effect.gen(function* () {
         Effect.asVoid,
         Effect.orDie,
       ),
-    setSummary: (
-      chatId: ChatId,
-      summary: {
-        readonly status: ChatStatus | null;
-        readonly lastActivityAt: string | null;
-      },
-    ) =>
-      sql<{ readonly id: string }>`UPDATE chats SET
-          status = ${summary.status},
-          updated_at = COALESCE(${summary.lastActivityAt}, created_at)
-        WHERE id = ${chatId}
-          AND (status IS NOT ${summary.status}
-            OR updated_at IS NOT COALESCE(${summary.lastActivityAt}, created_at))
+    /** An input owes the chat an execution: it runs, unless it waits for an answer. */
+    markRunning: (chatId: ChatId, at: string) =>
+      sql`UPDATE chats SET status = CASE WHEN status = 'waiting' THEN status ELSE 'running' END,
+          updated_at = ${at}
+        WHERE id = ${chatId}`.pipe(Effect.asVoid, Effect.orDie),
+    /**
+     * Moves a chat whose execution is owed to `status`, and its latest activity to `at` when
+     * given; false when nothing changed, as for a chat a stop already ended.
+     */
+    setStatus: (chatId: ChatId, status: ChatStatus | null, at: string | null) =>
+      sql<{ readonly id: string }>`UPDATE chats SET status = ${status},
+          updated_at = COALESCE(${at}, updated_at)
+        WHERE id = ${chatId} AND status IN ('running', 'waiting')
+          AND (status IS NOT ${status} OR ${at} IS NOT NULL)
         RETURNING id`.pipe(
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
-    markRunning: (chatId: ChatId) =>
-      sql`UPDATE chats SET status = 'running' WHERE id = ${chatId} AND status IS NOT 'waiting'`.pipe(
-        Effect.asVoid,
-        Effect.orDie,
-      ),
-    setVm: (chatId: ChatId, vm: "awake" | "asleep") =>
-      sql`UPDATE chats SET vm = ${vm} WHERE id = ${chatId}`.pipe(Effect.asVoid, Effect.orDie),
-    setBoot: (chatId: ChatId, bootId: string | null) =>
-      sql`UPDATE chats SET boot_id = ${bootId} WHERE id = ${chatId}`.pipe(
-        Effect.asVoid,
-        Effect.orDie,
-      ),
-    needingWorker: (includeFailed: boolean) =>
-      sql<{ readonly id: ChatId; readonly hasStop: number }>`SELECT id,
-          stop_through IS NOT NULL AS "hasStop"
-        FROM chats
-        WHERE deleted_at IS NULL AND (
-          stop_through IS NOT NULL OR vm = 'awake'
-          OR ((${includeFailed ? 1 : 0} OR status IS NOT 'failed')
-            AND EXISTS (SELECT 1 FROM chat_inputs i
-              WHERE i.chat_id = chats.id AND i.state IN ('waiting', 'admitted'))))
-        ORDER BY id`.pipe(
-        Effect.map((rows) => rows.map((row) => ({ id: row.id, hasStop: row.hasStop === 1 }))),
-        Effect.orDie,
-      ),
-    requestStop: (chatId: ChatId) =>
-      sql`UPDATE chats SET stop_through = MAX(COALESCE(stop_through, -1),
-          (SELECT COALESCE(MAX(ordinal), -1) FROM chat_inputs WHERE chat_id = ${chatId}))
-        WHERE id = ${chatId} AND deleted_at IS NULL
-        RETURNING ${chatColumns}`.pipe(
-        Effect.flatMap(([row]) => (row === undefined ? Effect.succeed(null) : decodeChat(row))),
-        Effect.orDie,
-      ),
-    stopRequest: (chatId: ChatId) =>
-      sql<StopRequest>`SELECT stop_through AS through
-        FROM chats WHERE id = ${chatId} AND stop_through IS NOT NULL`.pipe(
-        Effect.map(([row]) => row ?? null),
-        Effect.orDie,
-      ),
-    clearStop: (chatId: ChatId, stop: StopRequest) =>
-      sql<{ readonly id: string }>`UPDATE chats SET stop_through = NULL
-        WHERE id = ${chatId} AND stop_through = ${stop.through}
-        RETURNING id`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
+    /** The chats whose execution is owed, which a server start runs again. */
+    owed: sql<{ readonly id: ChatId }>`SELECT id FROM chats
+        WHERE deleted_at IS NULL AND status IN ('running', 'waiting') ORDER BY id`.pipe(
+      Effect.map((rows) => rows.map((row) => row.id)),
+      Effect.orDie,
+    ),
     markDeleted: (chatId: ChatId, at: string) =>
-      sql<{ readonly id: string }>`UPDATE chats SET deleted_at = ${at}, cleanup_pending = 1,
-          vm = 'asleep'
+      sql<{ readonly id: string }>`UPDATE chats SET deleted_at = ${at}, cleanup_pending = 1
         WHERE id = ${chatId}
         RETURNING id`.pipe(
         Effect.map((rows) => rows.length > 0),
@@ -389,8 +269,7 @@ const make = Effect.gen(function* () {
             yield* sql`DELETE FROM chat_sessions WHERE chat_id = ${chatId}`;
             yield* sql`DELETE FROM chat_inputs WHERE chat_id = ${chatId}`;
             yield* sql`DELETE FROM chat_questions WHERE chat_id = ${chatId}`;
-            yield* sql`UPDATE chats SET cleanup_pending = 0, boot_id = NULL, status = NULL
-              WHERE id = ${chatId}`;
+            yield* sql`UPDATE chats SET cleanup_pending = 0, status = NULL WHERE id = ${chatId}`;
           }),
         )
         .pipe(Effect.orDie),
@@ -398,13 +277,6 @@ const make = Effect.gen(function* () {
     input: (chatId: ChatId, inputId: InputId) =>
       sql`SELECT ${inputColumns} FROM chat_inputs
         WHERE chat_id = ${chatId} AND input_id = ${inputId}`.pipe(
-        Effect.orDie,
-        Effect.flatMap(inputsOf),
-        Effect.map(([input]) => input ?? null),
-      ),
-    latestInput: (chatId: ChatId) =>
-      sql`SELECT ${inputColumns} FROM chat_inputs
-        WHERE chat_id = ${chatId} ORDER BY ordinal DESC LIMIT 1`.pipe(
         Effect.orDie,
         Effect.flatMap(inputsOf),
         Effect.map(([input]) => input ?? null),
@@ -417,49 +289,31 @@ const make = Effect.gen(function* () {
         readonly at: string;
       },
     ) =>
-      sql`INSERT INTO chat_inputs (chat_id, input_id, ordinal, state, payload_json, created_at)
+      sql`INSERT INTO chat_inputs (chat_id, input_id, ordinal, payload_json, created_at)
         SELECT ${chatId}, ${input.inputId},
           COALESCE((SELECT MAX(ordinal) + 1 FROM chat_inputs WHERE chat_id = ${chatId}), 0),
-          'waiting', ${encodePayload(input.payload)}, ${input.at}
+          ${encodePayload(input.payload)}, ${input.at}
         ON CONFLICT DO NOTHING`.pipe(Effect.asVoid, Effect.orDie),
-    openInputs: (chatId: ChatId) =>
-      sql`SELECT ${inputColumns} FROM chat_inputs
-        WHERE chat_id = ${chatId} AND state IN ('waiting', 'admitted') ORDER BY ordinal`.pipe(
-        Effect.orDie,
-        Effect.flatMap(inputsOf),
-      ),
-    hasOpenInputs: (chatId: ChatId) =>
-      sql<{ readonly one: number }>`SELECT 1 AS one FROM chat_inputs
-        WHERE chat_id = ${chatId} AND state IN ('waiting', 'admitted') LIMIT 1`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
-    moveInput: (
-      chatId: ChatId,
-      inputId: InputId,
-      from: ReadonlyArray<InputState>,
-      to: InputState,
-    ) =>
-      sql<{ readonly inputId: string }>`UPDATE chat_inputs SET state = ${to}
-        WHERE chat_id = ${chatId} AND input_id = ${inputId} AND ${sql.in("state", from)}
-        RETURNING input_id AS "inputId"`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
-    cancelInputs: (chatId: ChatId, through: number, states: ReadonlyArray<InputState>) =>
-      sql<{ readonly inputId: string }>`UPDATE chat_inputs SET state = 'cancelled'
-        WHERE chat_id = ${chatId} AND ordinal <= ${through} AND ${sql.in("state", states)}
-        RETURNING input_id AS "inputId"`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
+    inputs,
+    pendingInputs,
+    hasPending: (chatId: ChatId) =>
+      pendingInputs(chatId).pipe(Effect.map((pending) => pending.length > 0)),
+    /** Deletes the input unless the agent took it; false when it did, or it is gone. */
+    deletePending: (chatId: ChatId, inputId: InputId) =>
+      Effect.gen(function* () {
+        const pending = yield* pendingInputs(chatId);
+        if (!pending.some((input) => input.inputId === inputId)) return false;
+        yield* sql`DELETE FROM chat_inputs WHERE chat_id = ${chatId} AND input_id = ${inputId}`;
+        return true;
+      }).pipe(Effect.orDie),
 
     sessions: (chatId: ChatId) =>
       sql`SELECT ${sessionColumns} FROM chat_sessions WHERE chat_id = ${chatId} ORDER BY rowid`.pipe(
         Effect.flatMap(decodeSessions),
         Effect.orDie,
       ),
-    putSession: (chatId: ChatId, session: Omit<SessionRow, "tailCursor">) =>
+    /** Keeps a session as OpenCode returned it; true when it is new or changed. */
+    putSession: (chatId: ChatId, session: SessionRow) =>
       sql<{ readonly sessionId: string }>`INSERT INTO chat_sessions (chat_id, session_id,
           parent_session_id, info_json)
         VALUES (${chatId}, ${session.sessionId}, ${session.parentSessionId}, ${encodeSessionInfo(session.info)})
@@ -469,63 +323,69 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
-    resetTails: (chatId: ChatId) =>
-      sql`UPDATE chat_sessions SET tail_cursor = NULL WHERE chat_id = ${chatId}`.pipe(
-        Effect.asVoid,
+    /** Drops what an execution that didn't finish wrote, and the questions it asked. */
+    discardUncommitted: (chatId: ChatId) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const messages = yield* sql`DELETE FROM chat_messages
+              WHERE chat_id = ${chatId} AND committed = 0 RETURNING message_id`;
+            const sessions = yield* sql`DELETE FROM chat_sessions
+              WHERE chat_id = ${chatId} AND committed = 0 RETURNING session_id`;
+            const questions = yield* sql`DELETE FROM chat_questions
+              WHERE chat_id = ${chatId} RETURNING form_id`;
+            return messages.length + sessions.length + questions.length > 0;
+          }),
+        )
+        .pipe(Effect.orDie),
+    /** Keeps what a finished execution wrote, which every later execution imports. */
+    commit: (chatId: ChatId) =>
+      Effect.gen(function* () {
+        yield* sql`UPDATE chat_messages SET committed = 1 WHERE chat_id = ${chatId}`;
+        yield* sql`UPDATE chat_sessions SET committed = 1 WHERE chat_id = ${chatId}`;
+      }).pipe(Effect.orDie),
+    /** A session's messages, in order, as an execution imports them. */
+    history: (chatId: ChatId, sessionId: string) =>
+      sql<{ readonly json: string }>`SELECT json FROM chat_messages
+        WHERE chat_id = ${chatId} AND session_id = ${sessionId} ORDER BY ordinal`.pipe(
+        Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeMessage(row.json))),
         Effect.orDie,
       ),
-    capture: (
+    /**
+     * Writes messages OpenCode returned for a session, each new one after the ones it has;
+     * `inputsTaken` when one is an input's user message, which takes it out of the pending ones.
+     */
+    saveMessages: (
       chatId: ChatId,
       sessionId: string,
       messages: ReadonlyArray<SessionMessage.Info>,
-      tailCursor?: string,
-    ) => sql.withTransaction(captureIn(chatId, sessionId, messages, tailCursor)).pipe(Effect.orDie),
-    liveMessageIds: (chatId: ChatId, sessionId: string) =>
-      sql<{ readonly id: string }>`SELECT message_id AS id FROM chat_messages
-        WHERE chat_id = ${chatId} AND session_id = ${sessionId} AND state = 'live'
-        ORDER BY ordinal`.pipe(
-        Effect.map((rows) => rows.map((row) => row.id)),
-        Effect.orDie,
-      ),
-    hasLive: (chatId: ChatId) =>
-      sql<{ readonly one: number }>`SELECT 1 AS one FROM chat_messages
-        WHERE chat_id = ${chatId} AND state = 'live' LIMIT 1`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
-    loseSession: (chatId: ChatId, sessionId: string) =>
-      sql<{ readonly messageId: string }>`UPDATE chat_messages SET state = 'lost'
-        WHERE chat_id = ${chatId} AND session_id = ${sessionId} AND state = 'live'
-        RETURNING message_id AS "messageId"`.pipe(
-        Effect.map((rows) => rows.map((row) => row.messageId)),
-        Effect.orDie,
-      ),
-    loseVm: (
-      chatId: ChatId,
-      noteOf: (gone: {
-        readonly lost: ReadonlyArray<LostMessage>;
-        readonly questions: ReadonlyArray<Form.Info>;
-      }) => Effect.Effect<SessionMessage.Info | null>,
     ) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
-            const rows = yield* sql<MessageRow>`UPDATE chat_messages SET state = 'lost'
-              WHERE chat_id = ${chatId} AND state = 'live' RETURNING ${messageColumns}`;
-            const lost = yield* Effect.forEach(
-              rows.toSorted((left, right) => left.ordinal - right.ordinal),
-              (row) =>
-                decodeMessage(row.json).pipe(
-                  Effect.map((message) => ({ sessionId: row.sessionId, message })),
-                ),
+            const written: Array<string> = [];
+            for (const message of messages) {
+              const changed = yield* sql<{ readonly id: string }>`INSERT INTO chat_messages
+                  (chat_id, session_id, message_id, ordinal, type, state, json)
+                VALUES (${chatId}, ${sessionId}, ${message.id},
+                  (SELECT COALESCE(MAX(ordinal) + 1, 0) FROM chat_messages
+                    WHERE chat_id = ${chatId} AND session_id = ${sessionId}),
+                  ${message.type}, ${isSettled(message) ? "settled" : "live"},
+                  ${encodeMessage(message)})
+                ON CONFLICT (chat_id, session_id, message_id) DO UPDATE SET
+                  type = excluded.type, state = excluded.state, json = excluded.json
+                  WHERE chat_messages.json IS NOT excluded.json
+                    OR chat_messages.state IS NOT excluded.state
+                RETURNING message_id AS id`;
+              if (changed.length > 0) written.push(message.id);
+            }
+            const inputsTaken = messages.some(
+              (message) =>
+                message.type === "user" &&
+                written.includes(message.id) &&
+                inputIdOf(chatId, message.id) !== null,
             );
-            const questions = (yield* sql`DELETE FROM chat_questions WHERE chat_id = ${chatId}
-              RETURNING ${questionColumns}`.pipe(Effect.flatMap(decodeQuestions))).map(
-              (question) => question.form,
-            );
-            const note = yield* noteOf({ lost, questions });
-            if (note !== null) yield* captureIn(chatId, rootSessionId(chatId), [note], undefined);
-            return { lost, questions, note };
+            return { messageIds: written, inputsTaken };
           }),
         )
         .pipe(Effect.orDie),
@@ -550,43 +410,6 @@ const make = Effect.gen(function* () {
         ORDER BY ordinal DESC LIMIT ${limit + 1}`.pipe(
         Effect.map((rows) => ({ rows: rows.slice(0, limit), earlier: rows.length > limit })),
         Effect.orDie,
-      ),
-    settled: (chatId: ChatId, sessionId: string) =>
-      Effect.gen(function* () {
-        const [count] = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
-          FROM chat_messages
-          WHERE chat_id = ${chatId} AND session_id = ${sessionId} AND state = 'settled'`;
-        // A long chat starts at its latest completed compaction, which gives the model the same
-        // context in fewer messages than one import can take.
-        const [cut] =
-          (count?.count ?? 0) > IMPORT_CUT_MESSAGES
-            ? yield* sql<{ readonly ordinal: number }>`SELECT ordinal FROM chat_messages
-                WHERE chat_id = ${chatId} AND session_id = ${sessionId} AND state = 'settled'
-                  AND type = 'compaction' AND json_extract(json, '$.status') = 'completed'
-                ORDER BY ordinal DESC LIMIT 1`
-            : [];
-        const rows = yield* sql<MessageRow>`SELECT ${messageColumns} FROM chat_messages
-          WHERE chat_id = ${chatId} AND session_id = ${sessionId} AND state = 'settled'
-            AND ordinal >= ${cut?.ordinal ?? 0}
-          ORDER BY ordinal`;
-        return yield* Effect.forEach(rows, (row) => decodeMessage(row.json));
-      }).pipe(Effect.orDie),
-    lastTurnLost: (chatId: ChatId, sessionId: string) =>
-      sql<{ readonly state: string }>`SELECT state FROM chat_messages
-        WHERE chat_id = ${chatId} AND session_id = ${sessionId} AND type IN ('user', 'assistant')
-        ORDER BY ordinal DESC LIMIT 1`.pipe(
-        Effect.map(([row]) => row?.state === "lost"),
-        Effect.orDie,
-      ),
-    latestTurn: (chatId: ChatId, sessionId: string) =>
-      sql<MessageRow>`SELECT ${messageColumns} FROM chat_messages
-        WHERE chat_id = ${chatId} AND session_id = ${sessionId} AND state = 'settled'
-          AND type IN ('user', 'assistant')
-        ORDER BY ordinal DESC LIMIT 1`.pipe(
-        Effect.orDie,
-        Effect.flatMap(([row]) =>
-          row === undefined ? Effect.succeed(null) : decodeMessage(row.json),
-        ),
       ),
 
     questions: (chatId: ChatId) =>
@@ -631,15 +454,7 @@ const make = Effect.gen(function* () {
         // Written beside it first, so a save cut short leaves the last good one.
         yield* fileSystem.writeFile(`${target}.part`, content);
         yield* fileSystem.rename(`${target}.part`, target);
-        yield* sql`UPDATE chats SET workspace_unsaved = 0 WHERE id = ${chatId}`;
       }).pipe(Effect.orDie),
-    markWorkspaceUnsaved: (chatId: ChatId) =>
-      sql<{ readonly id: string }>`UPDATE chats SET workspace_unsaved = 1
-        WHERE id = ${chatId} AND workspace_unsaved = 0
-        RETURNING id`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
     deleteWorkspace: (chatId: ChatId) =>
       Effect.gen(function* () {
         const target = workspaceFile(chatId);

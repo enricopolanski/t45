@@ -47,8 +47,6 @@ import * as ChatRepository from "./ChatRepository.ts";
 import { replaceComposerContextReferences } from "@t45/core/composerContextReferences";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
-import * as FiberMap from "effect/FiberMap";
-import * as Schedule from "effect/Schedule";
 import { TaskService, make as makeTasks, type StepHooks } from "../tasks/TaskService.ts";
 
 export interface Member {
@@ -140,9 +138,10 @@ const make = Effect.gen(function* () {
   const origins = repository.origins;
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "posted" | "deleted") =>
     changes.publish({ kind, chatId });
-  const cleanups = yield* FiberMap.make<string>();
   const scope = yield* Effect.scope;
-  const announce = (chatId: ChatId) => sql.afterCommit(publish(chatId, "posted"));
+  /** Members see the input, and the chat's execution takes it, once the post commits. */
+  const announce = (chatId: ChatId) =>
+    sql.afterCommit(publish(chatId, "posted").pipe(Effect.andThen(runner.wake(chatId))));
 
   const post = Effect.fnUntraced(function* (post: Post) {
     const chat = yield* repository.get(post.chatId);
@@ -168,7 +167,8 @@ const make = Effect.gen(function* () {
         if (encodePayload(sent.payload) !== payloadJson) {
           return yield* refuse("input_conflict");
         }
-        if (sent.state === "waiting") yield* announce(post.chatId);
+        const pending = yield* repository.pendingInputs(post.chatId);
+        if (pending.some((input) => input.inputId === post.inputId)) yield* announce(post.chatId);
         return;
       }
     }
@@ -177,7 +177,7 @@ const make = Effect.gen(function* () {
 
     yield* attachments.bindToChat(post.chatId, post.input.attachments, post.from);
     yield* repository.addInput(post.chatId, { inputId: post.inputId, payload: post.input, at });
-    yield* repository.markRunning(post.chatId);
+    yield* repository.markRunning(post.chatId, at);
     if ((chat?.title ?? post.start?.title ?? null) === null) {
       const plainText = replaceComposerContextReferences(post.input.text, () => "");
       yield* repository.setTitleIfUntitled(
@@ -188,73 +188,46 @@ const make = Effect.gen(function* () {
     yield* announce(post.chatId);
   }, transaction);
 
+  /**
+   * Ends the chat's execution once the caller's transaction commits. Recorded as interrupted at
+   * once, so a server start doesn't run it again; the stop itself runs on its own fiber, since the
+   * caller may be the execution's own hook.
+   */
   const requestStop = Effect.fnUntraced(function* (chatId: ChatId) {
-    const chat = yield* repository.requestStop(chatId);
-    if (chat !== null) yield* announce(chat.id);
+    if (yield* repository.setStatus(chatId, "interrupted", null)) {
+      yield* sql.afterCommit(publish(chatId, "chat"));
+    }
+    yield* sql.afterCommit(runner.stop(chatId).pipe(Effect.forkIn(scope), Effect.asVoid));
   }, transaction);
 
-  const onVm = <A, E>(
-    chatId: ChatId,
-    job: (vm: ChatVm) => Effect.Effect<A, E>,
-    options?: { readonly boot?: boolean },
-  ) =>
-    runner
-      .run(
-        chatId,
-        (vm) =>
-          job(vm).pipe(
-            Effect.catchCause((cause): Effect.Effect<A, Refused> => {
-              if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
-              const error = Cause.findErrorOption(cause);
-              if (Option.isSome(error) && isRefused(error.value)) return error.value;
-              return Effect.logWarning("A chat's VM refused a request", { chatId, cause }).pipe(
-                Effect.andThen(refuse("unavailable")),
-              );
-            }),
-          ),
-        options,
-      )
-      .pipe(Effect.catchTags({ JobTimeoutError: () => refuse("unavailable") }));
+  /** Runs `use` on the chat's running VM; none when no execution runs. */
+  const onVm = <A, E>(chatId: ChatId, use: (vm: ChatVm) => Effect.Effect<A, E>) =>
+    runner.withVm(chatId, use).pipe(
+      Effect.catchCause((cause): Effect.Effect<Option.Option<A>, Refused> => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
+        const error = Cause.findErrorOption(cause);
+        if (Option.isSome(error) && isRefused(error.value)) return error.value;
+        return Effect.logWarning("A chat's VM refused a request", { chatId, cause }).pipe(
+          Effect.andThen(refuse("unavailable")),
+        );
+      }),
+    );
 
+  /** Stops what runs for a deleted chat, then removes its files, workspace and copy. */
   const cleanup = (chatId: ChatId) =>
     Effect.gen(function* () {
-      yield* runner.removeChat(chatId);
+      yield* runner.stop(chatId);
       yield* attachments.release(chatId);
       yield* repository.deleteWorkspace(chatId);
       yield* repository.finishDelete(chatId);
-    });
-
-  const cleanUntilDone = (chatId: ChatId) =>
-    cleanup(chatId).pipe(
+    }).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.interrupt
-          : Effect.logWarning("Cleaning up a deleted chat failed; trying again", {
+          : Effect.logWarning("Cleaning up a deleted chat failed; the next start tries again", {
               chatId,
               cause,
-            }).pipe(
-              Effect.andThen(
-                FiberMap.run(
-                  cleanups,
-                  chatId,
-                  cleanup(chatId).pipe(
-                    Effect.tapCause((retry) =>
-                      Effect.logWarning("Cleaning up a deleted chat failed", {
-                        chatId,
-                        cause: retry,
-                      }),
-                    ),
-                    Effect.catchCause((retry) =>
-                      Cause.hasInterruptsOnly(retry) ? Effect.interrupt : Effect.fail(retry),
-                    ),
-                    Effect.retry(Schedule.spaced("30 seconds")),
-                    Effect.orDie,
-                  ),
-                  { onlyIfMissing: true },
-                ),
-              ),
-              Effect.asVoid,
-            ),
+            }),
       ),
     );
 
@@ -328,7 +301,7 @@ const make = Effect.gen(function* () {
     });
 
   const inputsOf = (chatId: ChatId) =>
-    repository.openInputs(chatId).pipe(
+    repository.pendingInputs(chatId).pipe(
       Effect.map((rows) =>
         rows.map((row): PendingInput => ({
           inputId: row.inputId,
@@ -419,6 +392,7 @@ const make = Effect.gen(function* () {
           ): Effect.Effect<ReadonlyArray<ChatEvent>, ChatErrors> => {
             switch (change.kind) {
               case "missed":
+              case "replaced":
                 return snapshotOf.pipe(Effect.map((snapshot) => [snapshot]));
               case "deleted":
                 return Effect.fail(notFound());
@@ -536,23 +510,19 @@ const make = Effect.gen(function* () {
     cancel: (input: Payload<"chats.cancel">, member: Member) =>
       Effect.gen(function* () {
         const chat = yield* commandChat(member, input.chatId);
-        const sent = yield* repository.input(chat.id, input.inputId);
-        if (sent === null) return yield* notFound();
-        if (sent.state === "cancelled") return;
-        if (sent.state === "materialized") return yield* refuse("already_taken");
-        const cancelled = yield* runner.whileNotDelivering(
-          chat.id,
-          repository.moveInput(chat.id, sent.inputId, ["waiting"], "cancelled"),
+        if ((yield* repository.input(chat.id, input.inputId)) === null) return yield* notFound();
+        const cancelled = yield* runner.cancel(chat.id, input.inputId).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : Effect.logWarning("A chat's VM refused a cancel", {
+                  chatId: chat.id,
+                  cause,
+                }).pipe(Effect.andThen(refuse("unavailable"))),
+          ),
         );
-        if (!cancelled) {
-          const withdrawn = yield* onVm(chat.id, (vm) => vm.withdraw(sent));
-          if (Option.isNone(withdrawn)) {
-            yield* repository.moveInput(chat.id, sent.inputId, ["admitted"], "cancelled");
-          }
-        }
+        if (!cancelled) return yield* refuse("already_taken");
         yield* publish(chat.id, "inputs");
-        const after = yield* repository.input(chat.id, sent.inputId);
-        if (after?.state === "materialized") return yield* refuse("already_taken");
       }),
 
     answer: (input: Payload<"chats.answer">, member: Member) =>
@@ -586,7 +556,7 @@ const make = Effect.gen(function* () {
         const answered = yield* onVm(chat.id, (vm) =>
           vm.putFiles(sent.map((file) => file.id)).pipe(
             Effect.andThen(
-              vm.api.client.session.form.reply({
+              vm.client.session.form.reply({
                 sessionID: input.sessionId,
                 formID: input.formId,
                 answer,
@@ -607,15 +577,13 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const chat = yield* commandChat(member, input.chatId);
         const dismissed = yield* onVm(chat.id, (vm) =>
-          vm.api.client.session.form
-            .cancel({ sessionID: input.sessionId, formID: input.formId })
-            .pipe(
-              Effect.catchTags({
-                FormNotFoundError: () => refuse("question_gone"),
-                FormAlreadySettledError: () => refuse("question_gone"),
-                SessionNotFoundError: () => refuse("question_gone"),
-              }),
-            ),
+          vm.client.session.form.cancel({ sessionID: input.sessionId, formID: input.formId }).pipe(
+            Effect.catchTags({
+              FormNotFoundError: () => refuse("question_gone"),
+              FormAlreadySettledError: () => refuse("question_gone"),
+              SessionNotFoundError: () => refuse("question_gone"),
+            }),
+          ),
         );
         if (Option.isNone(dismissed)) return yield* refuse("question_gone");
       }),
@@ -623,20 +591,7 @@ const make = Effect.gen(function* () {
     stop: (input: Payload<"chats.stop">, member: Member) =>
       Effect.gen(function* () {
         const chat = yield* commandChat(member, input.chatId);
-        yield* requestStop(chat.id);
-        yield* runner.cancelWaiting(chat.id);
-        yield* runner.wake(chat.id);
-      }),
-
-    compact: (input: Payload<"chats.compact">, member: Member) =>
-      Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
-        const compacted = yield* onVm(
-          chat.id,
-          (vm) => vm.api.client.session.compact({ sessionID: vm.root }),
-          { boot: true },
-        );
-        if (Option.isNone(compacted)) return yield* refuse("unavailable");
+        yield* runner.stop(chat.id);
       }),
 
     rename: (input: Payload<"chats.rename">, member: Member) =>
@@ -645,9 +600,6 @@ const make = Effect.gen(function* () {
         yield* repository.rename(chat.id, input.title);
         yield* publish(chat.id, "chat");
         yield* publish(chat.id, "sessions");
-        yield* onVm(chat.id, (vm) =>
-          vm.api.client.session.update({ sessionID: vm.root, title: input.title }),
-        ).pipe(Effect.ignore);
       }),
 
     delete: Effect.fnUntraced(function* (input: Payload<"chats.delete">, member: Member) {
@@ -659,26 +611,15 @@ const make = Effect.gen(function* () {
       if (!(yield* repository.markDeleted(chat.id, yield* nowIso))) return;
       yield* sql.afterCommit(
         publish(chat.id, "deleted").pipe(
-          Effect.andThen(
-            runner
-              .stop(chat.id)
-              .pipe(
-                Effect.andThen(cleanUntilDone(chat.id)),
-                Effect.interruptible,
-                Effect.forkIn(scope),
-              ),
-          ),
+          Effect.andThen(cleanup(chat.id).pipe(Effect.forkIn(scope))),
         ),
       );
     }, transaction),
     start: (hooks: StepHooks) =>
       Effect.gen(function* () {
         yield* Deferred.succeed(steps, hooks);
-        for (const chatId of yield* repository.pendingDeletes) yield* cleanUntilDone(chatId);
-        yield* runner.start(
-          tasks.hooks,
-          (yield* origins.nonterminal).map((task) => task.chatId),
-        );
+        for (const chatId of yield* repository.pendingDeletes) yield* cleanup(chatId);
+        yield* runner.start(tasks.hooks);
       }),
   };
 });
