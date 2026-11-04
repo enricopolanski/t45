@@ -179,7 +179,18 @@ describe("tool parts", () => {
   });
 
   it("reads a finished workflow draft, and leaves a refused one a tool call", () => {
-    const draft = { name: "Onboarding", steps: [] };
+    const draft = {
+      name: "Onboarding",
+      steps: [
+        {
+          id: "step-collect",
+          name: "Collect details",
+          instructions: "Confirm the contract is signed.",
+          fields: [{ id: "field-contract", label: "Contract signed", type: "boolean" }],
+          subSteps: [],
+        },
+      ],
+    };
     expect(
       workflowDraftOf(
         toolPart({

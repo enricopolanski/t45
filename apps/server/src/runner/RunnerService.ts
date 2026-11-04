@@ -2,6 +2,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { ChatHooks } from "../chats/ChatHooks.ts";
 import { AbsolutePath, Form, Location, Session, SessionMessage } from "@opencode/client/effect";
 import type { OpenCodeEvent } from "@opencode/protocol/groups/event";
+import { hasT45Tools } from "@t45/core/agentTools";
 import {
   type ChatId,
   type Refused,
@@ -24,6 +25,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
@@ -330,6 +332,24 @@ const make = Effect.gen(function* () {
   const skillRepository = yield* SkillRepository.SkillRepository;
   const files = yield* AttachmentRepository.AttachmentRepository;
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const runtime = path.resolve(
+    import.meta.dirname,
+    import.meta.filename.endsWith(".ts") ? "../../dist/runtime" : "runtime",
+  );
+  const toolFiles = yield* fileSystem.readDirectory(runtime).pipe(
+    Effect.flatMap((files) =>
+      Effect.forEach(
+        files.filter((file) => file.endsWith(".mjs")),
+        (file) =>
+          fileSystem
+            .readFileString(path.join(runtime, file))
+            .pipe(Effect.map((source) => [`runtime/${file}`, source] as const)),
+      ),
+    ),
+    Effect.map((files) => Object.fromEntries(files)),
+    Effect.orDie,
+  );
   const httpClient = yield* HttpClient.HttpClient;
   const layerScope = yield* Effect.scope;
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -528,7 +548,8 @@ const make = Effect.gen(function* () {
     const skills = yield* skillRepository.listForAgent(agent.id);
     const setup = {
       agent: {
-        ...Struct.pick(agent, ["instructions", "files", "mcpServers", "permissions"]),
+        ...Struct.pick(agent, ["instructions", "mcpServers", "permissions"]),
+        files: { ...agent.files, ...(hasT45Tools(agent.mcpServers) ? toolFiles : {}) },
         skills: Object.fromEntries(
           skills.map((skill) => [
             skill.name,

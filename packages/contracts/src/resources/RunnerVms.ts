@@ -6,8 +6,8 @@ import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import * as HttpApiMiddleware from "effect/http-api/HttpApiMiddleware";
 import * as HttpApiSchema from "effect/http-api/HttpApiSchema";
 
-import { Agent, AgentModel } from "../models/Agent.ts";
-import { TrimmedNonEmptyString } from "../models/primitives.ts";
+import { Agent, AgentModel, AGENT_SETUP_PATHS } from "../models/Agent.ts";
+import { FilesByPath, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { Name as SkillName, Skill } from "../models/Skill.ts";
 
 /** VM operations between T45 and the runner. The server owns the association to chats. */
@@ -20,7 +20,9 @@ export type SkillSnapshot = typeof SkillSnapshot.Type;
 export class RunConfig extends Schema.Opaque<RunConfig>()(
   Schema.Struct({
     agent: Schema.Struct({
-      ...Struct.pick(Agent.fields, ["instructions", "files", "mcpServers", "permissions"]),
+      ...Struct.pick(Agent.fields, ["instructions", "mcpServers", "permissions"]),
+      /** Includes application-supplied runtime files, which aren't editable agent files. */
+      files: FilesByPath(AGENT_SETUP_PATHS),
       skills: Schema.Record(Schema.String, SkillSnapshot).check(
         Schema.isPropertyNames(SkillName),
         Schema.makeFilter(
@@ -102,7 +104,7 @@ class RunnerApiGroup extends HttpApiGroup.make("runner")
   .add(
     /**
      * The running chat VM's `/work` as a gzipped tarball, less what T45 writes at every start
-     * (attachments, AGENTS.md, opencode.json, skills), the step tools' snapshots and rebuildable
+     * (attachments, AGENTS.md, opencode.json, skills, runtime), ephemeral .t45 files and rebuildable
      * caches.
      */
     HttpApiEndpoint.get("getChatWorkspace", "/chats/:vmId/workspace", {

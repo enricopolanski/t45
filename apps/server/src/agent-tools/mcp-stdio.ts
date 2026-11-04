@@ -1,23 +1,48 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import * as NodeReadline from "node:readline";
 
 class Refusal extends Error {}
 
-export const refuse = (message) => {
+export function refuse(message: string): never {
   throw new Refusal(message);
-};
+}
 
-export const serve = ({ name, tools, call, failure }) => {
-  const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
+interface Request {
+  readonly id?: string | number | null;
+  readonly method?: string;
+  readonly params?: {
+    readonly protocolVersion?: string;
+    readonly name?: string;
+    readonly arguments?: Record<string, unknown>;
+  };
+}
+
+export const serve = ({
+  name,
+  tools,
+  call,
+  failure,
+}: {
+  readonly name: string;
+  readonly tools: ReadonlyArray<{
+    readonly name: string;
+    readonly description: string;
+    readonly inputSchema: unknown;
+  }>;
+  readonly call: (name: string, args: Record<string, unknown>) => string;
+  readonly failure: string;
+}) => {
+  const send = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
   NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
     if (!line.trim()) return;
-    let message;
+    let message: Request;
     try {
-      message = JSON.parse(line);
+      message = JSON.parse(line) as Request;
     } catch {
       return;
     }
     if (message.id === undefined) return;
-    const reply = (result) => send({ jsonrpc: "2.0", id: message.id, result });
+    const reply = (result: unknown) => send({ jsonrpc: "2.0", id: message.id, result });
     switch (message.method) {
       case "initialize":
         return reply({
@@ -29,7 +54,7 @@ export const serve = ({ name, tools, call, failure }) => {
         return reply({ tools });
       case "tools/call":
         try {
-          const text = call(message.params?.name, message.params?.arguments ?? {});
+          const text = call(message.params?.name ?? "", message.params?.arguments ?? {});
           return reply({ content: [{ type: "text", text }] });
         } catch (error) {
           const text = error instanceof Refusal ? error.message : failure;

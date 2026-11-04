@@ -14,10 +14,13 @@ export const FieldPathSegment = StringId.check(isFieldPathSegment);
 const hasDistinctIds = (ids: ReadonlyArray<string>) => new Set(ids).size === ids.length;
 
 const FieldBase = {
-  id: FieldPathSegment,
+  id: FieldPathSegment.annotate({
+    description: "Identifier unique among sibling fields; used in dotted field paths.",
+  }),
   label: TrimmedNonEmptyString,
-  /** What to put in it, shown under the label. */
-  description: Schema.optionalKey(Schema.String),
+  description: Schema.optionalKey(
+    Schema.String.annotate({ description: "Guidance shown below the field label." }),
+  ),
 };
 
 const ValueField = Schema.Struct({
@@ -28,13 +31,15 @@ const ValueField = Schema.Struct({
 const SelectField = Schema.Struct({
   ...FieldBase,
   type: Schema.Literal("select"),
-  options: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
+  options: Schema.Array(TrimmedNonEmptyString)
+    .annotate({ description: "Allowed choices, shown as written." })
+    .check(Schema.isMinLength(1)),
 });
 
 class GroupField extends Schema.Class<GroupField>("GroupField")({
   ...FieldBase,
   type: Schema.Literal("group"),
-  repeatable: Schema.Boolean,
+  repeatable: Schema.Boolean.annotate({ description: "Whether the group allows multiple rows." }),
   fields: Schema.Array(Schema.suspend((): Schema.Codec<StepField> => StepField)),
 }) {}
 
@@ -47,14 +52,20 @@ const fieldIdsAreDistinct = (fields: ReadonlyArray<StepField>): boolean =>
   fields.every((field) => field.type !== "group" || fieldIdsAreDistinct(field.fields));
 
 export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition")({
-  id: StringId,
+  id: StringId.annotate({
+    description: "Identifier unique across all steps and sub-steps in the blueprint.",
+  }),
   name: TrimmedNonEmptyString,
   instructions: Schema.String,
   fields: Schema.Array(StepField).check(
     Schema.makeFilter(fieldIdsAreDistinct, { expected: "distinct field ids among siblings" }),
   ),
-  /** Start with their parent, which can't be done until every one is approved. */
-  subSteps: Schema.Array(Schema.suspend((): Schema.Codec<StepDefinition> => StepDefinition)),
+  subSteps: Schema.Array(
+    Schema.suspend((): Schema.Codec<StepDefinition> => StepDefinition),
+  ).annotate({
+    description:
+      "Steps that start with their parent and must all be approved before it can finish.",
+  }),
 }) {}
 
 const stepNodes = (

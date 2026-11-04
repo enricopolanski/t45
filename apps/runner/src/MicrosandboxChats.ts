@@ -9,6 +9,7 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { OpenCode } from "@opencode/client/effect";
 import { Config } from "@opencode/schema/config";
+import { AGENT_SETUP_PATHS } from "@t45/contracts/models/Agent";
 import type { RunConfig } from "@t45/contracts/resources/RunnerVms";
 import * as Bytes from "effect/Bytes";
 import * as Crypto from "effect/Crypto";
@@ -143,15 +144,14 @@ const writeInto = (
 
 /**
  * What a chat's saved workspace leaves out of /work: what every start writes (attachments, AGENTS.md,
- * opencode.json, skills), the step tools' snapshots, and caches anywhere that rebuild.
+ * opencode.json, skills, runtime), ephemeral .t45 files, and caches anywhere that rebuild.
  */
 const WORKSPACE_EXCLUDES = [
   "--anchored",
-  "--exclude=./attachments",
-  "--exclude=./AGENTS.md",
-  "--exclude=./opencode.json",
+  ...AGENT_SETUP_PATHS.map((path) => `--exclude=./${path}`),
   "--exclude=./.opencode/skills",
   "--exclude=./.t45",
+  "--exclude=./runtime",
   "--no-anchored",
   "--exclude=node_modules",
   "--exclude=.venv",

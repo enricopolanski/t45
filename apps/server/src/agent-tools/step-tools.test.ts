@@ -15,6 +15,10 @@ import { expect, it } from "vite-plus/test";
 const session = (calls: ReadonlyArray<readonly [string, unknown]>) => {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "step-tools-"));
   const work = NodePath.join(root, "work");
+  const runtime = NodePath.join(root, "runtime");
+  // Run with only injected assets, outside the checkout's dependency tree.
+  NodeFS.cpSync(new URL("../../dist/runtime/", import.meta.url), runtime, { recursive: true });
+  const tool = NodePath.join(runtime, "step-tools.mjs");
   NodeFS.mkdirSync(work);
   NodeFS.writeFileSync(NodePath.join(work, "summary.txt"), "the summary");
   NodeFS.writeFileSync(NodePath.join(root, "secret.txt"), "not the agent's");
@@ -29,11 +33,12 @@ const session = (calls: ReadonlyArray<readonly [string, unknown]>) => {
   ]
     .map((message) => JSON.stringify(message))
     .join("\n");
-  const run = NodeChildProcess.spawnSync(
-    "node",
-    [NodePath.join(import.meta.dirname, "../image/step-tools.mjs")],
-    { input: `${input}\n`, env: { ...process.env, T45_WORK_DIR: work }, encoding: "utf8" },
-  );
+  const run = NodeChildProcess.spawnSync("node", [tool], {
+    cwd: root,
+    input: `${input}\n`,
+    env: { ...process.env, T45_WORK_DIR: work },
+    encoding: "utf8",
+  });
   if (run.error) throw run.error;
   if (run.status !== 0) throw new Error(run.stderr);
   const replies = run.stdout

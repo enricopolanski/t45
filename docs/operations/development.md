@@ -60,11 +60,13 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 - **`OPENCODE_API_KEY`** in `.env`: the runner's OpenCode Go key. The runner doesn't start without it; the sandbox only sees a placeholder.
 - **The agent image**, built with Docker and loaded into microsandbox as `t45-agent:dev`: `vp run --filter @t45/runner image`. Rebuild after changing `apps/runner/image`. Without it, chats fail and the server log names the reason, as in production.
 
+The server and its built-in MCP tools are compiled together from `apps/server/src`; development watches that build and restarts the server after changes. Tools are injected through the boot file map under `/work/runtime`, so changing a tool does not require an image rebuild. Running VMs receive updated tools at their next boot.
+
 Without `/dev/kvm` the runner's inventory says it can't run sandboxes, which the runner page (`/settings/runner`) shows, and the runner refuses every chat.
 
 ## Release builds
 
-The build cleans `apps/server/dist`, packs the server and copies the complete web client into `dist/client`. Rebuilding or switching a checkout used by a running built server removes that server's assets, so build a release in a separate checkout before switching to it.
+The build cleans `apps/server/dist`, builds the server and MCP tools into `dist/bin.mjs` and `dist/runtime`, then copies the complete web client into `dist/client`. Rebuilding or switching a checkout used by a running built server removes that server's assets, so build a release in a separate checkout before switching to it.
 
 Capture the checkout's full commit SHA once and pass it to the build:
 

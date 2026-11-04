@@ -43,8 +43,8 @@ export class ChatSandbox extends Context.Service<
       readonly content: Uint8Array;
     }) => Effect.Effect<void, SandboxError>;
     /**
-     * The running VM's /work as a gzipped tarball, less what every start writes, the step tools'
-     * snapshots and rebuildable caches.
+     * The running VM's /work as a gzipped tarball, less what every start writes, ephemeral .t45
+     * files and rebuildable caches.
      */
     readonly packWorkspace: (chatId: string) => Effect.Effect<Uint8Array, SandboxError>;
     /** Unpacks a tarball from `packWorkspace` into the running VM's /work, keeping files there. */

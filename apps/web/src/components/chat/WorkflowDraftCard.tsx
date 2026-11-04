@@ -1,4 +1,3 @@
-import type { StepDefinition } from "@t45/contracts/models/Workflow";
 import type { WorkflowDraft } from "@t45/contracts/resources/AgentTools";
 import { Link } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
@@ -25,7 +24,7 @@ const rememberCreated = (itemId: string, definitionId: string) => {
   } catch {}
 };
 
-function DraftSteps({ steps }: { readonly steps: ReadonlyArray<StepDefinition> }) {
+function DraftSteps({ steps }: { readonly steps: WorkflowDraft["steps"] }) {
   return (
     <ol className="flex flex-col gap-1.5 list-decimal ps-4">
       {steps.map((step) => (
@@ -60,7 +59,7 @@ export function WorkflowDraftCard(props: {
   const create = () => {
     setCreating(true);
     setError(null);
-    void api("workflows.createDefinition", { name: draft.name, steps: draft.steps })
+    void api("workflows.createDefinition", draft)
       .then(
         (created) => {
           rememberCreated(itemId, created.definitionId);
