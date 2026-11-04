@@ -40,22 +40,6 @@ const RunnerFileContent = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array());
 /** An opaque VM identifier; its association to chats stays on T45. */
 const VmId = TrimmedNonEmptyString.check(Schema.isPattern(/^[^/?#\s]{1,200}$/u));
 
-const RunnerVmState = Schema.Literals(["starting", "running", "stopped"]);
-
-/** The VMs the runner holds, and whether it can run sandboxes now; when it can't, the reason. */
-export class RunnerInventory extends Schema.Opaque<RunnerInventory>()(
-  Schema.Struct({
-    isAvailable: Schema.Boolean,
-    reason: Schema.NullOr(Schema.String),
-    vms: Schema.Array(
-      Schema.Struct({
-        vmId: VmId,
-        state: RunnerVmState,
-      }),
-    ),
-  }),
-) {}
-
 export class RunnerUnauthorizedError extends Schema.TaggedError<RunnerUnauthorizedError>()(
   "RunnerUnauthorizedError",
   {},
@@ -83,7 +67,6 @@ export class RunnerAuth extends HttpApiMiddleware.Service<RunnerAuth>()("RunnerA
 }) {}
 
 class RunnerApiGroup extends HttpApiGroup.make("runner")
-  .add(HttpApiEndpoint.get("inventory", "/inventory", { success: RunnerInventory }))
   .add(
     /** The models the runner signs in to, which agents choose from. */
     HttpApiEndpoint.get("models", "/models", {

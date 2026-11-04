@@ -1,16 +1,16 @@
-import type { RunConfig, RunnerInventory } from "@t45/contracts/resources/RunnerVms";
+import type { RunConfig } from "@t45/contracts/resources/RunnerVms";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 
-import { ChatSandbox, type ChatServer, SandboxError } from "./ChatSandbox.ts";
+import { ChatSandbox, type ChatServer, type Health, SandboxError } from "./ChatSandbox.ts";
 import { ModelCatalog } from "./ModelCatalog.ts";
 import { RunnerConfig } from "./RunnerConfig.ts";
 
 /** VMs in memory: tests see which chats started and which VMs exist. */
 interface FakeChats {
   /** Set to stop VMs from running, as on a host without KVM. */
-  health: Pick<RunnerInventory, "isAvailable" | "reason">;
+  health: Health;
   /** Each start is a new VM. */
   readonly started: Array<string>;
   /** The chats whose VM exists: booted, even when its start then failed, and not yet removed. */

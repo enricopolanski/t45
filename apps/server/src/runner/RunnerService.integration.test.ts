@@ -355,22 +355,17 @@ describe("a chat's execution", () => {
 });
 
 describe("a server start", () => {
-  it.live("removes the VMs the runner lists, then runs again each execution owed", () =>
+  it.live("runs again each execution owed", () =>
     Effect.gen(function* () {
       const { chatId, repository } = yield* setup;
       const at = DateTime.formatIso(yield* DateTime.now);
-      // As an earlier process left it: an input saved, its execution owed, and VMs running.
+      // As an earlier process left it: an input saved and its execution owed.
       yield* repository.addInput(chatId, {
         inputId: "input-1",
         payload: { text: "Sort the files.", attachments: [] },
         at,
       });
       yield* repository.markRunning(chatId, at);
-      runner.inventory = {
-        isAvailable: true,
-        reason: null,
-        vms: [chatId, "orphan"].map((vmId) => ({ vmId, state: "running" as const })),
-      };
 
       yield* Layer.build(
         Layer.fresh(
@@ -381,7 +376,6 @@ describe("a server start", () => {
         ),
       );
       yield* FakeOpenCode.prompted(openCode, inputMessageId(chatId, "input-1"));
-      assert.deepEqual(runner.removedChats, [chatId, "orphan"]);
       assert.deepEqual(runner.starts, [chatId]);
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );

@@ -1,4 +1,4 @@
-import { RunConfig, RunnerInventory } from "@t45/contracts/resources/RunnerVms";
+import { RunConfig } from "@t45/contracts/resources/RunnerVms";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import type * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -6,8 +6,6 @@ import * as Schema from "effect/Schema";
 
 /** Scripted runner HTTP responses and receipts for T45's execution tests. */
 export interface FakeRunner {
-  /** What the runner lists as its VMs. */
-  inventory: RunnerInventory;
   /** The models it offers agents. */
   models: ReadonlyArray<{ readonly slug: string; readonly name: string }>;
   /** Set to refuse every VM start with this reason. */
@@ -18,8 +16,6 @@ export interface FakeRunner {
   down: boolean;
   /** VMs running, by chat id, with what each was started with. */
   readonly chats: Map<string, RunConfig>;
-  /** Each VM T45 removed, by chat id. */
-  readonly removedChats: Array<string>;
   /** Told of each VM T45 removes, for `removed`. */
   readonly removals: Set<(chatId: string) => void>;
   /** Files put into running VMs, by `<chatId>:<path>`. */
@@ -31,13 +27,11 @@ export interface FakeRunner {
 }
 
 export const makeFakeRunner = (): FakeRunner => ({
-  inventory: { isAvailable: true, reason: null, vms: [] },
   models: [{ slug: "opencode-go/test-model", name: "test-model" }],
   refuse: null,
   starts: [],
   down: false,
   chats: new Map(),
-  removedChats: [],
   removals: new Set(),
   chatFiles: new Map(),
   workspaces: new Map(),
@@ -65,7 +59,6 @@ export const removed = (runner: FakeRunner, chatId: string) =>
         }),
   );
 
-const encodeInventory = Schema.encodeSync(Schema.toCodecJson(RunnerInventory));
 const decodeRunConfig = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.toCodecJson(RunConfig)),
 );
@@ -95,27 +88,25 @@ export const respond = (
   const chatId = decodeURIComponent(matched?.[1] ?? "");
   const part = matched?.[2];
   const operation =
-    request.method === "GET" && url.pathname === "/inventory"
-      ? "inventory"
-      : request.method === "GET" && url.pathname === "/models"
-        ? "models"
-        : matched === null
-          ? null
-          : part === "files"
-            ? request.method === "PUT"
-              ? "putChatFile"
-              : null
-            : part === "workspace"
-              ? request.method === "GET"
-                ? "getChatWorkspace"
-                : request.method === "PUT"
-                  ? "putChatWorkspace"
-                  : null
+    request.method === "GET" && url.pathname === "/models"
+      ? "models"
+      : matched === null
+        ? null
+        : part === "files"
+          ? request.method === "PUT"
+            ? "putChatFile"
+            : null
+          : part === "workspace"
+            ? request.method === "GET"
+              ? "getChatWorkspace"
               : request.method === "PUT"
-                ? "startChat"
-                : request.method === "DELETE"
-                  ? "removeChat"
-                  : null;
+                ? "putChatWorkspace"
+                : null
+            : request.method === "PUT"
+              ? "startChat"
+              : request.method === "DELETE"
+                ? "removeChat"
+                : null;
   if (operation === null) {
     throw new Error(`Unscripted runner request: ${request.method} ${url.pathname}`);
   }
@@ -127,8 +118,6 @@ export const respond = (
   }
   const bytes = request.body._tag === "Uint8Array" ? request.body.body : new Uint8Array();
   switch (operation) {
-    case "inventory":
-      return json(encodeInventory(runner.inventory));
     case "models":
       return json({ models: runner.models });
     case "startChat":
@@ -147,7 +136,6 @@ export const respond = (
       runner.workspaces.set(chatId, bytes);
       return noContent();
     case "removeChat":
-      runner.removedChats.push(chatId);
       runner.chats.delete(chatId);
       forget(runner, chatId);
       for (const told of runner.removals) told(chatId);

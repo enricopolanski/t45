@@ -45,7 +45,6 @@ it.effect("Every start boots a new VM, which takes requests until T45 removes it
     yield* table.remove("chat-1");
     assert.deepStrictEqual([...chats.vms], []);
     assert.isFalse(yield* reachable("chat-1"));
-    assert.deepStrictEqual((yield* table.inventory).vms, []);
   }).pipe(Effect.provide(layer));
 });
 
@@ -84,27 +83,21 @@ it.effect(
       yield* Fiber.join(removing);
       assert.deepStrictEqual([...chats.vms], []);
       assert.isFalse(yield* reachable("chat-1"));
-      assert.deepStrictEqual((yield* table.inventory).vms, []);
     }).pipe(Effect.provide(layer));
   },
 );
 
-it.effect("A VM that could not be removed stays listed, and is removed when T45 asks again", () => {
+it.effect("A VM that could not be removed is removed when T45 asks again", () => {
   const { chats, layer } = withTable();
   return Effect.gen(function* () {
     const table = yield* ChatTable.ChatTable;
     yield* start("chat-1");
     chats.failRemove = true;
     assert.strictEqual(yield* refusal(table.remove("chat-1")), "SandboxError");
-    // T45's start-up sweep still finds it to remove.
-    assert.deepStrictEqual(
-      (yield* table.inventory).vms.map(({ vmId, state }) => [vmId, state]),
-      [["chat-1", "stopped"]],
-    );
+    assert.deepStrictEqual([...chats.vms], ["chat-1"]);
     chats.failRemove = false;
     yield* table.remove("chat-1");
     assert.deepStrictEqual([...chats.vms], []);
-    assert.deepStrictEqual((yield* table.inventory).vms, []);
   }).pipe(Effect.provide(layer));
 });
 

@@ -3,7 +3,7 @@
  * letting it go removes it. The chat table only knows this port, so tests run it with a fake and
  * production with microsandbox.
  */
-import type { RunConfig, RunnerInventory } from "@t45/contracts/resources/RunnerVms";
+import type { RunConfig } from "@t45/contracts/resources/RunnerVms";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Redacted from "effect/Redacted";
@@ -24,11 +24,16 @@ export interface ChatServer {
   readonly password: Redacted.Redacted;
 }
 
+/** Whether VMs can run now, and why not. */
+export interface Health {
+  readonly isAvailable: boolean;
+  readonly reason: string | null;
+}
+
 export class ChatSandbox extends Context.Service<
   ChatSandbox,
   {
-    /** Whether VMs can run now, and why not. */
-    readonly health: Effect.Effect<Pick<RunnerInventory, "isAvailable" | "reason">>;
+    readonly health: Effect.Effect<Health>;
     /** Starts a new VM from `chat`, replacing any left of it, and its OpenCode server. */
     readonly start: (input: {
       readonly chatId: string;

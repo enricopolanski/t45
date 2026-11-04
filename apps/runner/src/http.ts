@@ -47,7 +47,6 @@ export const layer = HttpApiBuilder.group(
     const sandboxes = yield* ChatSandbox;
 
     return handlers
-      .handle("inventory", () => chats.inventory)
       .handle(
         "models",
         Effect.fn("runner.models")(function* () {

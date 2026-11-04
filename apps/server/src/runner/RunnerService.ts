@@ -86,9 +86,6 @@ const makeConnection = Effect.gen(function* () {
   };
 
   return {
-    inventory: client
-      .inventory()
-      .pipe(Effect.timeout("10 seconds"), Effect.catchTags(unavailable("inventory"))),
     models: client.models().pipe(
       Effect.map((page) => page.models),
       Effect.timeout("20 seconds"),
@@ -796,24 +793,6 @@ const make = Effect.gen(function* () {
       )
       .pipe(Effect.asVoid);
 
-  // Construction clears leftovers before any caller can start a new execution.
-  const inventory = yield* runner.inventory.pipe(
-    Effect.map((inventory) => inventory.vms),
-    Effect.catchTags({
-      RunnerUnavailableError: (error) =>
-        Effect.logWarning("Listing the runner's VMs failed; leftovers wait for the next start", {
-          cause: error,
-        }).pipe(Effect.as([])),
-    }),
-  );
-  for (const each of inventory) {
-    yield* runner.removeChat(each.vmId).pipe(
-      Effect.catchTags({
-        RunnerUnavailableError: (error) =>
-          Effect.logWarning("Removing a leftover chat VM failed", { vm: each.vmId, cause: error }),
-      }),
-    );
-  }
   return {
     models: runner.models,
     processInputs,

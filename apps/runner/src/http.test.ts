@@ -109,13 +109,13 @@ const api = (chatUrl = "http://127.0.0.1:9") => {
 it.effect("Only T45's token reaches the runner", () =>
   Effect.gen(function* () {
     const runner = api();
-    assert.strictEqual((yield* runner.call("/inventory", {}, "wrong")).status, 401);
-    assert.strictEqual((yield* runner.call("/inventory")).status, 200);
+    assert.strictEqual((yield* runner.call("/models", {}, "wrong")).status, 401);
+    assert.strictEqual((yield* runner.call("/models")).status, 200);
     yield* runner.dispose;
   }),
 );
 
-it.effect("A runner that can't run sandboxes says why in its inventory and refuses VMs", () =>
+it.effect("A runner that can't run sandboxes refuses VMs, saying why", () =>
   Effect.gen(function* () {
     const runner = api();
     const json = (response: Response) => Effect.promise(() => response.json());
@@ -124,11 +124,6 @@ it.effect("A runner that can't run sandboxes says why in its inventory and refus
         .call(`/chats/${chatId}`, { method: "PUT", body: encodeChat(Fixture.chat()) })
         .pipe(Effect.flatMap(json));
     runner.chats.health = { isAvailable: false, reason: "No KVM on this host." };
-    assert.deepStrictEqual(yield* runner.call("/inventory").pipe(Effect.flatMap(json)), {
-      isAvailable: false,
-      reason: "No KVM on this host.",
-      vms: [],
-    });
     assert.deepStrictEqual(yield* start("chat-1"), {
       _tag: "RunnerRefusedError",
       reason: "No KVM on this host.",

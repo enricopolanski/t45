@@ -4,11 +4,7 @@
  * when the execution finishes and puts it back at the next execution's start.
  */
 import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
-import {
-  type RunnerInventory,
-  type RunConfig,
-  RunnerRefusedError,
-} from "@t45/contracts/resources/RunnerVms";
+import { type RunConfig, RunnerRefusedError } from "@t45/contracts/resources/RunnerVms";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -52,12 +48,8 @@ export class ChatTable extends Context.Service<
       readonly chatId: string;
       readonly content: Uint8Array;
     }) => Effect.Effect<void, RunnerRefusedError>;
-    /**
-     * Stops the VM and deletes it with its disk; fails when it could not, so T45 tries again, and
-     * keeps it listed as stopped until then.
-     */
+    /** Stops the VM and deletes it with its disk; fails when it could not. */
     readonly remove: (chatId: string) => Effect.Effect<void, SandboxError>;
-    readonly inventory: Effect.Effect<RunnerInventory>;
   }
 >()("@t45/runner/ChatTable") {}
 
@@ -112,10 +104,6 @@ const make = Effect.gen(function* () {
     });
 
   return ChatTable.of({
-    inventory: Effect.map(sandboxes.health, (health) => ({
-      ...health,
-      vms: [...chats.values()].map(({ chatId, state }) => ({ vmId: chatId, state })),
-    })),
     start: ({ chatId, chat }) =>
       Effect.gen(function* () {
         const entry = yield* entryFor(chatId);
@@ -201,7 +189,6 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             entry.state = "stopped";
             entry.server = null;
-            // Forgotten only once gone, so a VM that outlived a failed remove stays listed.
             yield* remove;
             chats.delete(chatId);
           }),
