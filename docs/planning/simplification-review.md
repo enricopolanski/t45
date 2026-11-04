@@ -8,7 +8,7 @@ The skeptics knocked out only 4 of 98, so treat this as a list of candidates, no
 
 The list is about 55 distinct mechanisms in 9 groups:
 
-- **VM inventory, VM states and the admin VM list:** 32, 28, 34, 75, 83, 27, 63. One decision: does the runner expose anything beyond whether it is available?
+- **VM inventory and VM states:** 28, 34, 75, 83, 27, 63. With the runner page gone, only the server's start-up sweep reads the inventory, and only its VM ids.
 - **Leftover-VM mechanisms:** 17, 18, 20, 21, 25, 26, 73, 76. These are alternatives, not separate deletions. 73 relies on microsandbox removing ephemeral VMs after the runner dies, which nobody has checked.
 - **Runner re-checking T45's writes (security):** 33, 60, 74, 19, 62, 71, 24.
 - **Catching and continuing, and timeouts:** 1, 3, 4, 8, 54, 11, 57, 12, 50, 51, 52, 58, 59, 77, 81.
@@ -164,8 +164,6 @@ Line numbers are from the tree during the run, and you have since changed `Runne
 - Change: The Bearer alternative goes, leaving a single Basic comparison.
 
 ## Contracts and runner settings UI
-
-32. `packages/contracts/src/resources/Runner.ts:14`: RunnerStatus.vms per-VM chat list on the runner page, which handles Admin inspecting long-lived chat VMs and what uses each (~75 lines).
 
 - Why it can go: It was built for VMs that outlived turns: its text still says 'The VMs the runner has seen since it started' and 'No chat has run since the runner started', and its connections/lastActiveAt are already gone. Now a VM lives for exactly one execution, so the list only repeats which chats have status running or waiting, flickers under the 5 s poll, and the page offers no VM action.
 - Change: RunnerStatus shrinks to {isAvailable, reason}. Runner.handlers loses the per-VM chat join (ChatService and AgentRepository deps, isChatId, access checks). RunnerSettings loses the Chats section, the RunnerVm type, VM_STATES and vmDetails, and the server-auth doc line goes.

@@ -32,8 +32,6 @@ An admin-only RPC says so in its contract with the [`AdminOnly` middleware](../.
 
 Every Automation configuration call is admin-only. Each firing, manual run or accepted webhook creates its own Task and Chat; source configurations are disabled rather than deleted so each historical task retains its source configuration. A webhook's signing secret is a field of its schedule, readable by admins like the token in its URL, which is the same kind of credential.
 
-The runner page (`runner.get`) is admin-only, and a VM's row names its chat only when that admin may open it; a member's chat shows as one the admin can't open.
-
 ## Profile identity belongs to the member
 
 A new user gets Clerk's non-empty name, falling back to their email or subject. The stored display name is always non-empty. Later sign-ins refresh email but preserve the name and avatar, which the user can edit. Accepted images are stored locally and served only to active members at `/api/avatars/:userId`, which stays plain HTTP while every other user and organization request is RPC, so an `<img>` can load it with the session cookie. Choosing Clerk's picture copies it rather than retaining an external image dependency. Profile editing is available from the account menu; it is not an admission gate. New users start with a slate letter avatar, and avatar images are served with revalidation rather than versioned URLs.

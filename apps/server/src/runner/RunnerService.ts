@@ -815,7 +815,6 @@ const make = Effect.gen(function* () {
     );
   }
   return {
-    inventory: runner.inventory,
     models: runner.models,
     processInputs,
     runs: Stream.fromQueue(runs),

@@ -14,7 +14,7 @@ The consumer and execution share a fiber, so result handling finishes before the
 
 ## Fail closed
 
-The server doesn't start without `RUNNER_URL` and `RUNNER_TOKEN`, and the runner doesn't start without `T45_RUNNER_TOKEN` and `OPENCODE_API_KEY`, the OpenCode Go key every VM's model runs on. A VM the runner refuses, because it can't sandbox (no KVM) or the VM could not start, fails the chat, and with it a step's agent work; the reason goes to the server's log and, while the runner can't sandbox, to the runner page. Nothing falls back to T45. The runner checks it can sandbox whenever a VM starts, and its inventory says whether it can and why not, so the server asks nothing first. A runner out of reach is only waited out (see [Chats](./chats.md)): a step's agent has no deadline and no outage limit.
+The server doesn't start without `RUNNER_URL` and `RUNNER_TOKEN`, and the runner doesn't start without `T45_RUNNER_TOKEN` and `OPENCODE_API_KEY`, the OpenCode Go key every VM's model runs on. A VM the runner refuses, because it can't sandbox (no KVM) or the VM could not start, fails the chat, and with it a step's agent work; the reason goes to the server's log. Nothing falls back to T45. The runner checks it can sandbox whenever a VM starts, and its inventory says whether it can and why not, so the server asks nothing first. A runner out of reach is only waited out (see [Chats](./chats.md)): a step's agent has no deadline and no outage limit.
 
 ## What a chat reaches
 

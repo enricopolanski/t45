@@ -62,7 +62,7 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 
 The server and its built-in MCP tools are compiled together from `apps/server/src`; development watches that build and restarts the server after changes. Tools are injected into every VM T45 starts, under `/work/runtime`, so changing a tool does not require an image rebuild. The server reads them when it starts, so a chat gets changed tools at its first execution after the restart.
 
-Without `/dev/kvm` the runner's inventory says it can't run sandboxes, which the runner page (`/settings/runner`) shows, and the runner refuses every chat.
+Without `/dev/kvm` the runner refuses every chat, and the server log names the reason.
 
 ## Release builds
 

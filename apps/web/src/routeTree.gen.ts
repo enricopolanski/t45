@@ -19,7 +19,6 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as MyWorkIndexRouteImport } from './routes/my-work.index'
 import { Route as ChatsIndexRouteImport } from './routes/chats.index'
 import { Route as BoardsIndexRouteImport } from './routes/boards.index'
-import { Route as SettingsRunnerRouteImport } from './routes/settings.runner'
 import { Route as SettingsOrganizationRouteImport } from './routes/settings.organization'
 import { Route as SettingsAutomationsRouteImport } from './routes/settings.automations'
 import { Route as MyWorkStepIdRouteImport } from './routes/my-work.$stepId'
@@ -87,11 +86,6 @@ const BoardsIndexRoute = BoardsIndexRouteImport.update({
   id: '/boards/',
   path: '/boards/',
   getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsRunnerRoute = SettingsRunnerRouteImport.update({
-  id: '/runner',
-  path: '/runner',
-  getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsOrganizationRoute = SettingsOrganizationRouteImport.update({
   id: '/organization',
@@ -198,7 +192,6 @@ export interface FileRoutesByFullPath {
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/organization': typeof SettingsOrganizationRoute
-  '/settings/runner': typeof SettingsRunnerRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
   '/my-work/': typeof MyWorkIndexRoute
@@ -228,7 +221,6 @@ export interface FileRoutesByTo {
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/organization': typeof SettingsOrganizationRoute
-  '/settings/runner': typeof SettingsRunnerRoute
   '/boards': typeof BoardsIndexRoute
   '/chats': typeof ChatsIndexRoute
   '/my-work': typeof MyWorkIndexRoute
@@ -259,7 +251,6 @@ export interface FileRoutesById {
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/organization': typeof SettingsOrganizationRoute
-  '/settings/runner': typeof SettingsRunnerRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
   '/my-work/': typeof MyWorkIndexRoute
@@ -291,7 +282,6 @@ export interface FileRouteTypes {
     | '/my-work/$stepId'
     | '/settings/automations'
     | '/settings/organization'
-    | '/settings/runner'
     | '/boards/'
     | '/chats/'
     | '/my-work/'
@@ -321,7 +311,6 @@ export interface FileRouteTypes {
     | '/my-work/$stepId'
     | '/settings/automations'
     | '/settings/organization'
-    | '/settings/runner'
     | '/boards'
     | '/chats'
     | '/my-work'
@@ -351,7 +340,6 @@ export interface FileRouteTypes {
     | '/my-work/$stepId'
     | '/settings/automations'
     | '/settings/organization'
-    | '/settings/runner'
     | '/boards/'
     | '/chats/'
     | '/my-work/'
@@ -468,13 +456,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/boards/'
       preLoaderRoute: typeof BoardsIndexRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/settings/runner': {
-      id: '/settings/runner'
-      path: '/runner'
-      fullPath: '/settings/runner'
-      preLoaderRoute: typeof SettingsRunnerRouteImport
-      parentRoute: typeof SettingsRoute
     }
     '/settings/organization': {
       id: '/settings/organization'
@@ -601,13 +582,11 @@ declare module '@tanstack/react-router' {
 interface SettingsRouteChildren {
   SettingsAutomationsRoute: typeof SettingsAutomationsRoute
   SettingsOrganizationRoute: typeof SettingsOrganizationRoute
-  SettingsRunnerRoute: typeof SettingsRunnerRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAutomationsRoute: SettingsAutomationsRoute,
   SettingsOrganizationRoute: SettingsOrganizationRoute,
-  SettingsRunnerRoute: SettingsRunnerRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
