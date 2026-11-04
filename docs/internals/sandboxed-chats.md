@@ -6,11 +6,11 @@ T45 writes its tools into `/work/runtime` of every VM it starts for agents with 
 
 ## Workflow effects cross the boundary as native tool calls
 
-The step tools (`STEP_TOOLS_MCP`, `step-tools.mjs`) return receipts without mutating T45. The execution passes saved native messages to TaskService, which finds the task by chat id and invokes WorkflowService for step calls. A receipt saying `ok: true` means the VM accepted the call; workflow refusals return as input to the same task.
+The step tools (`STEP_TOOLS_MCP`, `step-tools.mjs`) return receipts without mutating T45. Dependencies flow from WorkflowService to TaskService to ChatService to RunnerService. TaskService consumes executions through ChatService, using WorkflowService's receipt functions to apply calls and task transitions in one transaction. A receipt saying `ok: true` means the VM accepted the call; workflow refusals return as input to the same task.
 
 Each native message/part key is checked before attachment preparation and recorded in `task_calls` in the transaction applying its effect; an input sent again after a discard writes new keys, so a repeated call applies again (see [Chats](./chats.md#executions-and-tasks)). Receipts ignored after submission are consumed too. `step_done` requires every required field and substep to be complete before submitting its task. Approval readiness is checked only when a task submits or the automation configuration changes. Rejection continues those tasks and chats, approval settles them, and `step_give_up` fails only its task.
 
-The hook reads attachment snapshots with the execution's own file reader. Task and workflow commands only save inputs and request stops: the wake and the stop run after commit, the stop on its own fiber, so a hook never waits on its own execution.
+The consumer and execution share a fiber, so result handling finishes before the VM is removed and stops cancel it directly, without an acknowledgement protocol. Chat and task completion commit together. Task and workflow commands save inputs and request stops after commit, with stops on a separate fiber so result handling never waits on its own execution.
 
 ## Fail closed
 

@@ -11,6 +11,7 @@ Each entry names the file and what could change. Delete an entry once it is done
 
 ## apps/server/src/chats, opencode
 
+- `apps/server/src/runner/RunnerService.ts` — move OpenCode session creation/restoration, configuration, and prompt delivery into the runner behind an execution API that accepts agent configuration and inputs and streams results back, so the T45 server does not manage OpenCode sessions directly.
 - `apps/server/src/chats/ChatService.ts` — `open` reads a `messages` change's rows when it sends the change, not when the worker published it, so on a slow link a copy can reach the browser after deltas that streamed before the copy was read, and show their text twice until the next copy. Send the copy the reconcile read with the change instead.
 - `apps/server/src/chats/ChatService.ts` — a later input no longer checks the chat's agent, so archiving an agent only stops new chats with it, and members keep writing in their existing ones. Decide whether those chats should freeze again, with the composer saying why.
 - `apps/server/src/runner/RunnerService.ts` — `setBoot` is the boot's last write, so a T45 that dies after restoring a new boot but before recording it restores again into the same running VM on restart: `/work` goes back to the last save and attachments are put again.

@@ -1,12 +1,12 @@
 /**
- * Runs chats' executions. An execution starts a new VM from the chat's agent, puts back /work and
- * imports the conversation as the last finished execution left them, sends the inputs the agent
- * hasn't taken, and streams and stores what OpenCode writes. Once OpenCode is done, including
- * background work, it saves /work, commits what it wrote and removes the VM. An execution that
- * doesn't finish (stopped, failed, or its VM lost) has what it wrote discarded, so the next one
- * sends its inputs again; a lost VM starts the next one at once.
- *
- * Nothing waits on a VM but its execution: sends save inputs and wake it, and a running one
+ * Runs chats' executions.
+ * An execution starts a new VM from the chat's agent, puts back /work and imports the conversation
+ * as the last finished execution left them, sends the inputs the agent hasn't taken, and streams and
+ * stores what OpenCode writes. Once OpenCode is done, including background work, it saves /work,
+ * commits what it wrote and removes the VM. An execution that doesn't finish (stopped, failed, or
+ * its VM lost) has what it wrote discarded, so the next one sends its inputs again; a lost VM starts
+ * the next one at once.
+ * Nothing waits on a VM but its execution: sends save inputs and signal it, and a running one
  * delivers what it didn't send yet. Answers, dismissals and cancels use the running VM directly.
  */
 import { AbsolutePath, Form, Location, Session, SessionMessage } from "@opencode/client/effect";
@@ -44,7 +44,6 @@ import * as Struct from "effect/Struct";
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as SkillRepository from "../agents/SkillRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
-import type { ChatHooks } from "../chats/ChatHooks.ts";
 import { inputMessageId, rootSessionId } from "../chats/ChatIds.ts";
 import { ChatEvents } from "../chats/ChatEvents.ts";
 import * as ChatRepository from "../chats/ChatRepository.ts";
@@ -108,11 +107,7 @@ const makeConnection = Effect.gen(function* () {
     putChatWorkspace: (input: { readonly chatId: string; readonly content: Uint8Array }) =>
       client
         .putChatWorkspace({ params: { vmId: input.chatId }, payload: input.content })
-        .pipe(
-          Effect.timeout("2 minutes"),
-          Effect.asVoid,
-          Effect.catchTags(unavailable("putChatWorkspace")),
-        ),
+        .pipe(Effect.timeout("2 minutes"), Effect.catchTags(unavailable("putChatWorkspace"))),
     putChatFile: (input: {
       readonly chatId: string;
       readonly path: string;
@@ -124,19 +119,11 @@ const makeConnection = Effect.gen(function* () {
           query: { path: input.path },
           payload: input.content,
         })
-        .pipe(
-          Effect.timeout("2 minutes"),
-          Effect.asVoid,
-          Effect.catchTags(unavailable("putChatFile")),
-        ),
+        .pipe(Effect.timeout("2 minutes"), Effect.catchTags(unavailable("putChatFile"))),
     removeChat: (chatId: string) =>
       client
         .removeChat({ params: { vmId: chatId } })
-        .pipe(
-          Effect.timeout("60 seconds"),
-          Effect.asVoid,
-          Effect.catchTags(unavailable("removeChat")),
-        ),
+        .pipe(Effect.timeout("60 seconds"), Effect.catchTags(unavailable("removeChat"))),
     chatServer: (chatId: string) => ({
       url: `${baseUrl}/chats/${encodeURIComponent(chatId)}/opencode`,
       password: Redacted.value(token),
@@ -157,14 +144,20 @@ export interface ChatVm {
   ) => Effect.Effect<void, RunnerUnavailableError>;
 }
 
+/** A run calls its consumer before continuing, while its VM and files still exist. */
+type ExecutionResult = { readonly chatId: ChatId } & (
+  | {
+      readonly type: "messages";
+      readonly messages: ReadonlyArray<SessionMessage.Info>;
+      readonly read: (path: string) => Effect.Effect<Uint8Array | null>;
+    }
+  | { readonly type: "ended"; readonly status: "failed" | "interrupted" | null }
+);
+type Receive = (result: ExecutionResult) => Effect.Effect<void>;
+type Run = (receive: Receive) => Effect.Effect<void>;
+
 /** The event stream ended, or never said it was connected: the VM is out of reach. */
 class StreamEndedError extends Schema.TaggedError<StreamEndedError>()("StreamEndedError", {}) {}
-
-class AgentGoneError extends Schema.TaggedError<AgentGoneError>()("AgentGoneError", {}) {
-  override get message(): string {
-    return "The chat's agent is gone, so its VM can't start.";
-  }
-}
 
 /** Batches events this long before reading what they changed. */
 const CAPTURE_BATCH = "150 millis";
@@ -174,27 +167,27 @@ const VM_TIMEOUT = "1 minute";
 /** Messages per page when capture reads a session. */
 const CAPTURE_PAGE = 200;
 
-/** What wakes an execution: an input saved, OpenCode events, or the event stream ending. */
-type Signal = "wake" | "events" | "ended";
+/** What signals an execution: an input saved, OpenCode events, or the event stream ending. */
+type Signal = "inputs" | "events" | "ended";
 
 interface Execution {
   readonly signal: Queue.Queue<Signal>;
-  fiber: Fiber.Fiber<void> | null;
+  fiber: Fiber.Fiber<unknown, unknown> | null;
   /** The attempt's VM, once its root session exists. */
   vm: ChatVm | null;
   /** The inputs the attempt sent its VM, by id. */
   readonly sent: Set<string>;
+  readonly questions: boolean;
 }
 
 /** What events marked to read again: sessions to capture, with the messages events named. */
 interface Marks {
   tree: boolean;
   forms: boolean;
-  activity: boolean;
   readonly sessions: Map<string, Set<string>>;
 }
 
-const noMarks = (): Marks => ({ tree: false, forms: false, activity: false, sessions: new Map() });
+const noMarks = (): Marks => ({ tree: false, forms: false, sessions: new Map() });
 
 /** Session events that change nothing T45 keeps. */
 const IGNORED = new Set([
@@ -221,10 +214,7 @@ const mark = (marks: Marks, event: OpenCodeEvent): boolean => {
     marks.forms = true;
     return true;
   }
-  if (type.startsWith("shell.")) {
-    marks.activity = true;
-    return true;
-  }
+  if (type.startsWith("shell.")) return true;
   if (!type.startsWith("session.") || IGNORED.has(type)) return false;
   if (!("sessionID" in event.data) || typeof event.data.sessionID !== "string") return false;
   if (type === "session.created" || type === "session.deleted" || type === "session.renamed") {
@@ -237,7 +227,6 @@ const mark = (marks: Marks, event: OpenCodeEvent): boolean => {
     ("inboxID" in event.data ? event.data.inboxID : undefined);
   if (typeof id === "string") touched.add(id);
   marks.sessions.set(event.data.sessionID, touched);
-  if (type.startsWith("session.execution.")) marks.activity = true;
   return true;
 };
 
@@ -292,10 +281,8 @@ const make = Effect.gen(function* () {
     Effect.orDie,
   );
   const httpClient = yield* HttpClient.HttpClient;
-  const layerScope = yield* Effect.scope;
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-  /** Set once the server started and removed the VMs an earlier process left. */
-  const started = yield* Deferred.make<ChatHooks>();
+  const runs = yield* Queue.unbounded<Run>();
 
   /** The running execution of each chat; the registry lock keeps it to one, and runs no SQL. */
   const executions = new Map<ChatId, Execution>();
@@ -345,18 +332,28 @@ const make = Effect.gen(function* () {
       }
     });
 
-  /**
-   * Records how the chat's execution ended and tells its origin, unless a stop ended it first; a
-   * finished execution commits what it wrote in the same transaction.
-   */
-  const end = (chatId: ChatId, status: "failed" | "interrupted" | null, finished: boolean) =>
+  /** Checks new inputs and commits the conversation and its task outcome together. */
+  const end = (
+    chatId: ChatId,
+    status: "failed" | "interrupted" | null,
+    receive: Receive,
+    completion?: { readonly sent: ReadonlySet<string>; readonly workspace: Uint8Array },
+  ) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
-          if (!(yield* repository.setStatus(chatId, status, yield* nowIso))) return;
-          if (finished) yield* repository.commit(chatId);
+          if (completion !== undefined) {
+            const pending = yield* repository.pendingInputs(chatId);
+            if (pending.some((input) => !completion.sent.has(input.inputId))) return false;
+          }
+          if (!(yield* repository.setStatus(chatId, status, yield* nowIso))) return false;
+          if (completion !== undefined) {
+            yield* repository.saveWorkspace(chatId, completion.workspace);
+            yield* repository.commit(chatId);
+          }
+          yield* receive({ chatId, type: "ended", status });
           yield* sql.afterCommit(publish(chatId, "chat"));
-          yield* (yield* Deferred.await(started)).ended(chatId, status);
+          return true;
         }),
       )
       .pipe(Effect.orDie);
@@ -365,15 +362,23 @@ const make = Effect.gen(function* () {
    * One attempt at the chat's execution, from a new VM until OpenCode is done. Fails when the VM
    * is out of reach, which starts the execution again.
    */
-  const attempt = Effect.fnUntraced(function* (chatId: ChatId, execution: Execution) {
-    const hooks = yield* Deferred.await(started);
+  const attempt = Effect.fnUntraced(function* (
+    chatId: ChatId,
+    execution: Execution,
+    receive: Receive,
+  ) {
     execution.vm = null;
     execution.sent.clear();
     yield* Queue.clear(execution.signal);
     const chat = yield* repository.get(chatId);
     if (chat?.status !== "running" && chat?.status !== "waiting") return;
-    const agent = yield* agents.get(chat.agentId);
-    if (agent === null) return yield* new AgentGoneError();
+    const agent = yield* agents.get(chat.agentId).pipe(
+      Effect.filterOrFail(
+        (agent) => agent !== null,
+        () => "A chat must refer to an agent.",
+      ),
+      Effect.orDie,
+    );
     const skills = yield* skillRepository.listForAgent(agent.id);
     const setup = {
       agent: {
@@ -451,15 +456,7 @@ const make = Effect.gen(function* () {
 
     const workspace = yield* repository.readWorkspace(chatId);
     if (workspace !== null) {
-      yield* runner.putChatWorkspace({ chatId, content: workspace }).pipe(
-        Effect.catchTags({
-          RunnerRefusedError: (error) =>
-            Effect.logWarning("The runner refused a chat's workspace", {
-              chatId,
-              reason: error.reason,
-            }),
-        }),
-      );
+      yield* runner.putChatWorkspace({ chatId, content: workspace });
     }
     // The saved /work leaves out attachments/, so every file sent to the chat goes back in.
     yield* Effect.forEach(yield* files.boundTo(chatId), (id) => putFile(chatId, id), {
@@ -469,7 +466,7 @@ const make = Effect.gen(function* () {
     const model = OpenCode2Client.modelRef(agent.model);
     const rootInfo = { title: titleOf(chat), ...(model === undefined ? {} : { model }) };
     const permissions = OpenCode2Client.sessionRules({
-      questions: yield* hooks.questions(chatId),
+      questions: execution.questions,
     });
     const stored = (yield* repository.sessions(chatId)).map((session) => ({
       ...session,
@@ -602,11 +599,12 @@ const make = Effect.gen(function* () {
         if (saved.inputsTaken) yield* publish(chatId, "inputs");
         if (saved.messageIds.length === 0) return;
         const written = new Set(saved.messageIds);
-        yield* hooks.saved(
+        yield* receive({
           chatId,
-          messages.filter((message) => written.has(message.id)),
-          readFile,
-        );
+          type: "messages",
+          messages: messages.filter((message) => written.has(message.id)),
+          read: readFile,
+        });
         yield* changes.publish({
           chatId,
           kind: "messages",
@@ -649,12 +647,10 @@ const make = Effect.gen(function* () {
       });
 
     /**
-     * Whether OpenCode is done, by its own account: every input sent, no session running, no
+     * Whether OpenCode is done, by its own account: no session running, no
      * shell running, nothing waiting in an inbox, and every background subagent reported.
      */
     const done = Effect.gen(function* () {
-      const pending = yield* repository.pendingInputs(chatId);
-      if (pending.some((input) => !execution.sent.has(input.inputId))) return false;
       if (Object.keys(yield* client.session.active()).length > 0) return false;
       const shells = yield* client.shell.list({
         location: { directory: OpenCode2Client.WORK_DIRECTORY },
@@ -694,36 +690,15 @@ const make = Effect.gen(function* () {
           : info.outcome === "interrupted"
             ? ("interrupted" as const)
             : null;
-      const content = yield* runner.getChatWorkspace(chatId).pipe(
-        Effect.catchTags({
-          RunnerRefusedError: (error) =>
-            Effect.logWarning("The runner could not save a chat's workspace; the last one stays", {
-              chatId,
-              reason: error.reason,
-            }).pipe(Effect.as(new Uint8Array())),
-        }),
-      );
-      // Checked in the transaction that ends the execution, which a post's transaction can't
-      // interleave with, so an input saved meanwhile is never left behind.
-      return yield* sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const pending = yield* repository.pendingInputs(chatId);
-            if (pending.some((input) => !execution.sent.has(input.inputId))) return false;
-            if (content.byteLength > 0) yield* repository.saveWorkspace(chatId, content);
-            yield* end(chatId, status, true);
-            return true;
-          }),
-        )
-        .pipe(Effect.orDie);
+      const content = yield* runner.getChatWorkspace(chatId);
+      return yield* end(chatId, status, receive, { sent: execution.sent, workspace: content });
     });
 
     let marked: Marks = { ...noMarks(), tree: true, forms: true };
-    let woken = true;
     while (true) {
       yield* deliver;
       yield* capture(marked);
-      if ((woken || marked.activity) && (yield* done)) {
+      if (yield* done) {
         yield* captureAll;
         if ((yield* done) && (yield* finish)) {
           execution.vm = null;
@@ -735,18 +710,17 @@ const make = Effect.gen(function* () {
       const signals = new Set([first, ...(yield* Queue.clear(execution.signal))]);
       notified = false;
       if (signals.has("ended")) return yield* new StreamEndedError();
-      woken = signals.has("wake");
       marked = marks;
       marks = noMarks();
     }
   });
 
   /** Runs attempts until one finishes; a lost VM starts a new one, less and less often. */
-  const execute = (chatId: ChatId, execution: Execution) =>
+  const execute = (chatId: ChatId, execution: Execution, receive: Receive) =>
     Effect.gen(function* () {
       let failures = 0;
       while (true) {
-        const exit = yield* attempt(chatId, execution).pipe(Effect.scoped, Effect.exit);
+        const exit = yield* attempt(chatId, execution, receive).pipe(Effect.scoped, Effect.exit);
         if (Exit.isSuccess(exit)) return;
         const reached = execution.vm !== null;
         execution.vm = null;
@@ -758,7 +732,7 @@ const make = Effect.gen(function* () {
             cause: exit.cause,
           });
           yield* discard(chatId);
-          yield* end(chatId, "failed", false);
+          yield* end(chatId, "failed", receive);
           return;
         }
         failures = reached ? 1 : failures + 1;
@@ -773,49 +747,78 @@ const make = Effect.gen(function* () {
     });
 
   const release = (chatId: ChatId, execution: Execution) =>
-    registry.withPermit(
-      Effect.sync(() => {
-        if (executions.get(chatId) === execution) executions.delete(chatId);
-      }),
-    );
+    Effect.sync(() => {
+      if (executions.get(chatId) === execution) executions.delete(chatId);
+    });
 
   /** Starts the chat's execution unless one runs; a running one delivers what it didn't send. */
-  const wake = (chatId: ChatId): Effect.Effect<void> =>
+  const processInputs = (
+    chatId: ChatId,
+    options: { readonly questions: boolean },
+  ): Effect.Effect<void> =>
     registry
       .withPermit(
         Effect.gen(function* () {
           const running = executions.get(chatId);
-          if (running !== undefined) return yield* Queue.offer(running.signal, "wake");
+          if (running !== undefined) return yield* Queue.offer(running.signal, "inputs");
           const execution: Execution = {
             signal: yield* Queue.unbounded<Signal>(),
             fiber: null,
             vm: null,
             sent: new Set(),
+            questions: options.questions,
           };
           executions.set(chatId, execution);
-          execution.fiber = yield* Effect.gen(function* () {
-            yield* execute(chatId, execution);
-            yield* release(chatId, execution);
-            // An input saved as the execution ended needs a new one.
-            const chat = yield* repository.get(chatId);
-            if (chat?.status === "running" || chat?.status === "waiting") yield* wake(chatId);
-          }).pipe(
-            Effect.ensuring(release(chatId, execution)),
-            Effect.tapCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.void
-                : Effect.logError("A chat's execution stopped", { chatId, cause }),
+          yield* Queue.offer(runs, (receive) =>
+            Effect.gen(function* () {
+              const claimed = yield* Effect.withFiberSucceed((fiber) => {
+                if (executions.get(chatId) !== execution) return false;
+                execution.fiber = fiber;
+                return true;
+              });
+              if (!claimed) return;
+              yield* execute(chatId, execution, receive);
+              yield* release(chatId, execution);
+              // An input saved as the execution ended needs a new one.
+              const chat = yield* repository.get(chatId);
+              if (chat?.status === "running" || chat?.status === "waiting")
+                yield* processInputs(chatId, execution);
+            }).pipe(
+              Effect.ensuring(release(chatId, execution)),
+              Effect.tapCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.void
+                  : Effect.logError("A chat's execution stopped", { chatId, cause }),
+              ),
             ),
-            Effect.forkIn(layerScope),
           );
         }),
       )
       .pipe(Effect.asVoid);
 
+  // Construction clears leftovers before any caller can start a new execution.
+  const inventory = yield* runner.inventory.pipe(
+    Effect.map((inventory) => inventory.vms),
+    Effect.catchTags({
+      RunnerUnavailableError: (error) =>
+        Effect.logWarning("Listing the runner's VMs failed; leftovers wait for the next start", {
+          cause: error,
+        }).pipe(Effect.as([])),
+    }),
+  );
+  for (const each of inventory) {
+    yield* runner.removeChat(each.vmId).pipe(
+      Effect.catchTags({
+        RunnerUnavailableError: (error) =>
+          Effect.logWarning("Removing a leftover chat VM failed", { vm: each.vmId, cause: error }),
+      }),
+    );
+  }
   return {
     inventory: runner.inventory,
     models: runner.models,
-    wake,
+    processInputs,
+    runs: Stream.fromQueue(runs),
     /**
      * Ends the chat's execution and removes its VM, discarding what it wrote as when the VM is
      * lost: the next execution sends its inputs again. Never call it from the chat's own
@@ -823,9 +826,11 @@ const make = Effect.gen(function* () {
      */
     stop: (chatId: ChatId) =>
       Effect.gen(function* () {
-        const fiber = yield* registry.withPermit(
-          Effect.sync(() => executions.get(chatId)?.fiber ?? null),
-        );
+        const fiber = yield* Effect.sync(() => {
+          const execution = executions.get(chatId);
+          if (execution?.fiber === null) executions.delete(chatId);
+          return execution?.fiber ?? null;
+        });
         if (fiber !== null) yield* Fiber.interrupt(fiber);
         yield* discard(chatId);
         if (yield* repository.setStatus(chatId, "interrupted", null)) {
@@ -867,38 +872,6 @@ const make = Effect.gen(function* () {
           return yield* repository.deletePending(chatId, inputId);
         }),
       ).pipe(Effect.timeout(VM_TIMEOUT)),
-    /**
-     * Removes the VMs an earlier process left, then runs again every execution that was owed. No
-     * execution starts a VM before this.
-     */
-    start: (hooks: ChatHooks) =>
-      Effect.gen(function* () {
-        const inventory = yield* runner.inventory.pipe(
-          Effect.asSome,
-          Effect.catchTags({
-            RunnerUnavailableError: (error) =>
-              Effect.logWarning(
-                "Listing the runner's VMs failed; leftovers wait for the next start",
-                {
-                  cause: error,
-                },
-              ).pipe(Effect.as(Option.none())),
-          }),
-        );
-        for (const each of Option.match(inventory, { onNone: () => [], onSome: (i) => i.vms })) {
-          yield* runner.removeChat(each.vmId).pipe(
-            Effect.catchTags({
-              RunnerUnavailableError: (error) =>
-                Effect.logWarning("Removing a leftover chat VM failed", {
-                  vm: each.vmId,
-                  cause: error,
-                }),
-            }),
-          );
-        }
-        yield* Deferred.succeed(started, hooks);
-        for (const chatId of yield* repository.owed) yield* wake(chatId);
-      }),
   };
 });
 

@@ -1141,13 +1141,6 @@ describe("UserService", () => {
                 Layer.mock(UserRepository.UserRepository)({}),
                 Layer.mock(WorkflowService)({
                   memberDeactivated,
-                  // The mock needs every non-function member; the user handlers never run these.
-                  taskHooks: {
-                    canAccess: () => Effect.succeed(null),
-                    canRun: () => Effect.succeed(false),
-                    prepare: () => Effect.succeed(null),
-                    changed: () => Effect.void,
-                  },
                 }),
               ),
             ),

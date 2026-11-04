@@ -7,6 +7,7 @@ import type { ChatMessage } from "@t45/contracts/resources/Chats";
 import type { NotFound } from "@t45/contracts/resources/errors";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -266,7 +267,7 @@ describe("chats", () => {
         assert.deepEqual(yield* listed(chats, alice), []);
 
         // The next start finishes the delete at the latest.
-        yield* chats.start(Fixture.stepHooks);
+        yield* Layer.build(Layer.fresh(ChatService.layer));
         const sql = yield* SqlClient.SqlClient;
         const fileSystem = yield* FileSystem.FileSystem;
         assert.isFalse(yield* fileSystem.exists(files.path(sent.id) ?? ""));

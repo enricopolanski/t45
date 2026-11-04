@@ -29,10 +29,12 @@ import * as FakeOpenCode from "../runner/FakeOpenCode.testkit.ts";
 import * as FakeRunner from "../runner/FakeRunner.testkit.ts";
 import { inputMessageId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
-import { ChatService, layerTasks, type Member } from "./ChatService.ts";
+import { ChatService, type Member } from "./ChatService.ts";
 import * as TicketRepository from "../workflows/TicketRepository.ts";
 import * as WorkflowRepository from "../workflows/WorkflowRepository.ts";
 
+import { TaskService } from "../tasks/TaskService.ts";
+import * as WorkflowService from "../workflows/WorkflowService.ts";
 import { ServerActivation } from "../serverActivation.ts";
 
 export const testChatId = (n: number) =>
@@ -66,25 +68,14 @@ const layerPersistence = Layer.mergeAll(
 );
 
 /** Chats over a fresh database. */
-export const stepHooks = {
-  canAccess: () => Effect.succeed(null),
-  canRun: () => Effect.succeed(true),
-  prepare: () => Effect.succeed(null),
-  changed: () => Effect.void,
-};
-export const layerBase = layerTasks.pipe(
+export const layer = WorkflowService.layer.pipe(
+  Layer.provideMerge(TaskService.layer),
   Layer.provideMerge(ChatService.layer),
   Layer.provideMerge(FakeRunner.layer(runner)),
   Layer.provideMerge(Layer.succeed(HttpClient.HttpClient, FakeOpenCode.httpClient(openCode))),
   // The fake VMs' streams send no heartbeats, so a test can move the clock past any silence.
   Layer.provideMerge(Layer.succeed(OpenCode2Client.SilentStreamTimeout, Duration.infinity)),
   Layer.provideMerge(layerPersistence),
-);
-
-export const layer = layerBase.pipe(
-  Layer.tap((context) =>
-    Effect.flatMap(ChatService, (chats) => chats.start(stepHooks)).pipe(Effect.provide(context)),
-  ),
 );
 
 /** Chat commands over the same fixture, with background execution parked. */

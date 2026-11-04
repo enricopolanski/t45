@@ -3,6 +3,7 @@ import { Form } from "@opencode/client/effect";
 import type { ChatEvent, ChatSummary } from "@t45/contracts/resources/Chats";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
@@ -10,6 +11,8 @@ import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
 import { inputMessageId, rootSessionId } from "../chats/ChatIds.ts";
 import * as ChatRepository from "../chats/ChatRepository.ts";
 import { ChatService } from "../chats/ChatService.ts";
+import { TaskService } from "../tasks/TaskService.ts";
+import * as WorkflowService from "../workflows/WorkflowService.ts";
 import * as Fixture from "../chats/Chats.testkit.ts";
 import * as FakeOpenCode from "./FakeOpenCode.testkit.ts";
 import * as FakeRunner from "./FakeRunner.testkit.ts";
@@ -354,7 +357,7 @@ describe("a chat's execution", () => {
 describe("a server start", () => {
   it.live("removes the VMs the runner lists, then runs again each execution owed", () =>
     Effect.gen(function* () {
-      const { chats, chatId, repository, events } = yield* setup;
+      const { chatId, repository } = yield* setup;
       const at = DateTime.formatIso(yield* DateTime.now);
       // As an earlier process left it: an input saved, its execution owed, and VMs running.
       yield* repository.addInput(chatId, {
@@ -369,10 +372,17 @@ describe("a server start", () => {
         vms: [chatId, "orphan"].map((vmId) => ({ vmId, state: "running" as const })),
       };
 
-      yield* chats.start(Fixture.stepHooks);
-      yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, "input-1"), "settled"));
+      yield* Layer.build(
+        Layer.fresh(
+          WorkflowService.layer.pipe(
+            Layer.provideMerge(TaskService.layer),
+            Layer.provideMerge(ChatService.layer),
+          ),
+        ),
+      );
+      yield* FakeOpenCode.prompted(openCode, inputMessageId(chatId, "input-1"));
       assert.deepEqual(runner.removedChats, [chatId, "orphan"]);
       assert.deepEqual(runner.starts, [chatId]);
-    }).pipe(Effect.scoped, Effect.provide(Fixture.layerBase)),
+    }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 });

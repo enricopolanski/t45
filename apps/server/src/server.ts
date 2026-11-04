@@ -1,4 +1,5 @@
-import { ChatService, layerTasks } from "./chats/ChatService.ts";
+import { ChatService } from "./chats/ChatService.ts";
+import { TaskService } from "./tasks/TaskService.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeHttp from "node:http";
 
@@ -70,10 +71,12 @@ const layerWorkflowRepositories = Layer.mergeAll(
   NotificationRepository.layer,
 );
 
-const layerChatServices = ChatService.layer.pipe(Layer.provideMerge(layerStore));
+const layerChatServices = ChatService.layer.pipe(
+  Layer.provideMerge(layerWorkflowRepositories),
+  Layer.provideMerge(layerStore),
+);
 
 const layerOrg = OrganizationRepository.layer.pipe(
-  Layer.provideMerge(layerWorkflowRepositories),
   Layer.provideMerge(UserRepository.layer),
   Layer.provideMerge(layerChatServices),
 );
@@ -82,7 +85,7 @@ const layerRuntimeDependencies = Layer.effect(UserService, UserService.make).pip
   Layer.provide(Authentication.layer),
   Layer.provideMerge(WorkflowService.layer),
   Layer.provideMerge(AutomationService.layer),
-  Layer.provideMerge(layerTasks),
+  Layer.provideMerge(TaskService.layer),
   Layer.provideMerge(layerOrg),
 );
 
@@ -100,12 +103,6 @@ const layerMakeServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     const activation = yield* Deferred.make<void>();
-    const layerStartup = Layer.effectDiscard(
-      Effect.gen(function* () {
-        const chats = yield* ChatService;
-        yield* chats.start((yield* WorkflowService.WorkflowService).taskHooks);
-      }),
-    ).pipe(Layer.provideMerge(layerRuntimeDependencies));
 
     const layerRoutes = HttpRouter.serve(layerMakeRoutes, {
       disableLogger: !config.logRequests,
@@ -121,7 +118,7 @@ const layerMakeServer = Layer.unwrap(
     );
     return layerRoutes.pipe(
       Layer.provideMerge(layerHttpServer),
-      Layer.provideMerge(layerStartup),
+      Layer.provideMerge(layerRuntimeDependencies),
       Layer.provide(Layer.succeed(ServerActivation.ServerActivation, Deferred.await(activation))),
       Layer.provide(Logger.layer([Logger.consolePretty()])),
       Layer.provide(Layer.succeed(References.MinimumLogLevel, config.logLevel)),

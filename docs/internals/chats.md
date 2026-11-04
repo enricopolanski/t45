@@ -14,9 +14,9 @@ An execution drops uncommitted output, starts a new VM from the agent's current 
 
 ## One execution per chat
 
-`RunnerService` keeps the running executions in memory, at most one per chat, and runs one only while the chat's `status` is `running` or `waiting`. A wake starts an execution unless one runs, and a running one sends the inputs posted since to its own VM; one that would finish first sends them and goes on. The VM belongs to its execution alone: the execution starts it and removes it however it ends. An execution that ends wakes a new one while the chat is still owed one, as for an input saved as it ended.
+`RunnerService` keeps the running executions in memory, at most one per chat, and runs one only while the chat's `status` is `running` or `waiting`. `processInputs` starts an execution unless one runs, and a running one sends the inputs posted since to its own VM; one that would finish first sends them and goes on. The VM belongs to its execution alone: the execution starts it and removes it however it ends. An execution that ends starts a new one while the chat is still owed one, as for an input saved as it ended.
 
-A post wakes the chat after it commits: [`ChatService.post`](../../apps/server/src/chats/ChatService.ts) publishes `posted` and wakes the runner through `SqlClient.afterCommit`, which runs once the outermost transaction commits, is dropped with a savepoint that rolls back, and runs at once outside a transaction. The post writes `running` in the same transaction, and a server start wakes every chat still `running` or `waiting`, so a wake lost to a crash is not lost work. No execution starts a VM before `RunnerService.start`, which first removes every VM the runner lists.
+A post signals the execution after it commits: [`ChatService.post`](../../apps/server/src/chats/ChatService.ts) publishes `posted` and calls `processInputs` through `SqlClient.afterCommit`, which runs once the outermost transaction commits, is dropped with a savepoint that rolls back, and runs at once outside a transaction. The post writes `running` in the same transaction, so a signal lost to a crash is not lost work. `RunnerService` construction removes every VM the runner lists; `ChatService` construction finishes pending deletions and schedules recovery for every chat still `running` or `waiting`. Recovery waits for server activation so the execution consumer is running before chats resume; there is no separate service start call.
 
 ## Inputs, pending and cancel
 
@@ -44,7 +44,7 @@ The execution relies on an open question keeping its session active, so a waitin
 
 ## The workspace
 
-Only a finished execution saves `/work`, through the runner, which leaves out what every start writes again and rebuildable caches ([sandboxed chats](./sandboxed-chats.md#chats)); what a discarded execution changed there goes with its VM. The tarball is written beside the last one and renamed in, so a save cut short keeps the last good one, as does a save the runner refuses. There is no size limit, by decision: the tarball is held whole in the runner's and the server's memory on its way, so a workspace grows until one of them, or a disk, runs out.
+Only a finished execution saves `/work`, through the runner, which leaves out what every start writes again and rebuildable caches ([sandboxed chats](./sandboxed-chats.md#chats)); what a discarded execution changed there goes with its VM. The tarball is written beside the last one and renamed in, so a save cut short keeps the last good one. A refused restore or save fails the execution; its conversation cannot commit without its workspace. There is no size limit, by decision: the tarball is held whole in the runner's and the server's memory on its way, so a workspace grows until one of them, or a disk, runs out.
 
 The save is not part of the commit: it lands before the transaction, so a stop or crash between the two leaves `/work` as an execution whose output was discarded left it.
 
@@ -56,11 +56,11 @@ The root session is `ses_t45_<chat>` and an input's message `msg_t45_<chat>_<inp
 
 ## Executions and tasks
 
-An execution calls a fixed interface defined in `chats` and implemented by TaskService: whether the chat may ask questions, messages just saved, and the execution ended, inside the transaction that records its status. Hooks run on the execution's fiber and receive its file reader. They must never stop the execution themselves: `RunnerService.stop` interrupts the execution and waits for it. A task settling in a hook goes through ChatService's `requestStop`, which records `interrupted` in the caller's transaction and runs the stop on its own fiber after commit.
+ChatService passes question policy into RunnerService; TaskService consumes its queued executions through ChatService, using WorkflowService's receipt functions. The consumer runs on the execution's fiber, so attachment reads finish before the VM is removed, cancellation interrupts receipt handling, and chat and task completion share a transaction. A task settling during execution uses ChatService's `requestStop`, which records `interrupted` in the caller's transaction and stops on a separate fiber after commit: stopping and waiting on the current execution would deadlock.
 
-TaskService starts, continues, stops and settles tasks. A stop leaves a task active, and step submission is provisional until approval; rejection continues the same task and chat. Settlement rechecks pending inputs in its transaction, so an ended execution is not a verdict while the task is still owed work. The call ledger and workflow effects commit together.
+TaskService starts, continues, stops and settles tasks. A stop leaves a task active, and step submission is provisional until approval; rejection continues the same task and chat. Execution checks pending inputs before committing completion; task handling trusts that result. The call ledger and workflow effects commit together.
 
-Discarded and re-sent inputs repeat workflow side effects. The saved-messages hook applies step calls as capture saves them, before the execution commits, and the ledger keys them by native message and part ids; the execution that sends an input again writes new ones, so a step call the agent makes again is applied again, and discarding the output undoes nothing that committed. This gap is deliberate for now and recorded in `todo.md`.
+Discarded and re-sent inputs repeat workflow side effects. The result consumer applies step calls as capture saves them, before the execution commits, and the ledger keys them by native message and part ids; the execution that sends an input again writes new ones, so a step call the agent makes again is applied again, and discarding the output undoes nothing that committed. This gap is deliberate for now and recorded in `todo.md`.
 
 ## Streams
 
@@ -76,7 +76,7 @@ A chat exists from its first input on: a member's new chat is a page the web kee
 
 ## Locks and waits
 
-Nothing inside a transaction waits on an execution, the per-chat input lock or the registry, and the registry runs no SQL. SQLite has one connection, so a transaction that waits on work needing SQL stalls every request. Public VM commands (answer, dismiss, cancel) run outside transactions on the running VM and give up after a minute. Task hooks read and store attachment snapshots before opening the transaction that records calls and applies workflow effects.
+Nothing inside a transaction waits on an execution, the per-chat input lock or the registry, and the registry runs no SQL. SQLite has one connection, so a transaction that waits on work needing SQL stalls every request. Public VM commands (answer, dismiss, cancel) run outside transactions on the running VM and give up after a minute. Task handling reads and stores attachment snapshots before opening the transaction that records calls and applies workflow effects.
 
 ## OpenCode traps
 

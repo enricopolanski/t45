@@ -26,7 +26,6 @@ import {
 } from "@t45/contracts/resources/Chats";
 import { NotFound } from "@t45/contracts/resources/errors";
 import * as Context from "effect/Context";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -47,7 +46,10 @@ import * as ChatRepository from "./ChatRepository.ts";
 import { replaceComposerContextReferences } from "@t45/core/composerContextReferences";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
-import { TaskService, make as makeTasks, type StepHooks } from "../tasks/TaskService.ts";
+import { isInvolved } from "@t45/contracts/models/Workflow";
+import { TicketRepository } from "../workflows/TicketRepository.ts";
+import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
+import { forkParked } from "../serverActivation.ts";
 
 export interface Member {
   readonly userId: StringId;
@@ -136,12 +138,18 @@ const make = Effect.gen(function* () {
   const agents = yield* AgentRepository.AgentRepository;
   const attachments = yield* AttachmentRepository.AttachmentRepository;
   const origins = repository.origins;
+  const tickets = yield* TicketRepository;
+  const workflows = yield* WorkflowRepository;
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "posted" | "deleted") =>
     changes.publish({ kind, chatId });
   const scope = yield* Effect.scope;
-  /** Members see the input, and the chat's execution takes it, once the post commits. */
+  const processInputs = (chatId: ChatId) =>
+    Effect.flatMap(origins.get(chatId), (origin) =>
+      runner.processInputs(chatId, { questions: origin?.kind === "conversation" }),
+    );
+  /** Members see the input, and execution takes it, once the post commits. */
   const announce = (chatId: ChatId) =>
-    sql.afterCommit(publish(chatId, "posted").pipe(Effect.andThen(runner.wake(chatId))));
+    sql.afterCommit(publish(chatId, "posted").pipe(Effect.andThen(processInputs(chatId))));
 
   const post = Effect.fnUntraced(function* (post: Post) {
     const chat = yield* repository.get(post.chatId);
@@ -191,12 +199,11 @@ const make = Effect.gen(function* () {
   /**
    * Ends the chat's execution once the caller's transaction commits. Recorded as interrupted at
    * once, so a server start doesn't run it again; the stop itself runs on its own fiber, since the
-   * caller may be the execution's own hook.
+   * caller may be processing the execution's results.
    */
   const requestStop = Effect.fnUntraced(function* (chatId: ChatId) {
-    if (yield* repository.setStatus(chatId, "interrupted", null)) {
-      yield* sql.afterCommit(publish(chatId, "chat"));
-    }
+    if (!(yield* repository.setStatus(chatId, "interrupted", null))) return;
+    yield* sql.afterCommit(publish(chatId, "chat"));
     yield* sql.afterCommit(runner.stop(chatId).pipe(Effect.forkIn(scope), Effect.asVoid));
   }, transaction);
 
@@ -231,8 +238,6 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const steps = yield* Deferred.make<StepHooks>();
-  const tasks = yield* makeTasks({ post, requestStop }, Deferred.await(steps));
   const liveChat = (chatId: ChatId) =>
     repository.get(chatId).pipe(Effect.filterOrFail((chat) => chat !== null, notFound));
   const permission = (member: Member, chatId: ChatId) =>
@@ -247,9 +252,21 @@ const make = Effect.gen(function* () {
             ? "write"
             : null
           : trigger?.type === "step"
-            ? yield* Effect.flatMap(Deferred.await(steps), (step) =>
-                step.canAccess(trigger.ticketId, member.userId),
-              )
+            ? yield* Effect.gen(function* () {
+                const ticket = yield* tickets.get(trigger.ticketId);
+                if (ticket === null) return null;
+                const workflow = yield* workflows.get(ticket.workflowId);
+                if (workflow === null) return null;
+                return isInvolved(
+                  { id: member.userId, isOrgAdmin: member.role === "admin" },
+                  workflow,
+                  ticket,
+                )
+                  ? ("write" as const)
+                  : workflow.isPublic
+                    ? ("read" as const)
+                    : null;
+              })
             : origin !== null && member.role === "admin"
               ? "write"
               : null;
@@ -337,8 +354,17 @@ const make = Effect.gen(function* () {
       };
     });
 
+  for (const chatId of yield* repository.pendingDeletes) yield* cleanup(chatId);
+  yield* forkParked(
+    Effect.gen(function* () {
+      for (const chatId of yield* repository.owed) yield* processInputs(chatId);
+    }),
+  );
+
   return {
-    tasks,
+    post,
+    requestStop,
+    runs: runner.runs,
     access,
     subscribe: (member: Member) =>
       Stream.unwrap(
@@ -481,11 +507,6 @@ const make = Effect.gen(function* () {
         attachments: input.attachments,
         ...(input.context === undefined ? {} : { context: input.context }),
       };
-      if (origin?.kind === "task")
-        return yield* tasks.continue(input.chatId, payload, {
-          inputId: input.inputId,
-          from: member.userId,
-        });
       yield* post({
         chatId: input.chatId,
         inputId: input.inputId,
@@ -604,10 +625,6 @@ const make = Effect.gen(function* () {
 
     delete: Effect.fnUntraced(function* (input: Payload<"chats.delete">, member: Member) {
       const chat = yield* commandChat(member, input.chatId);
-      yield* tasks.settle(chat.id, {
-        type: "failed",
-        reason: "The task's chat was deleted.",
-      });
       if (!(yield* repository.markDeleted(chat.id, yield* nowIso))) return;
       yield* sql.afterCommit(
         publish(chat.id, "deleted").pipe(
@@ -615,12 +632,6 @@ const make = Effect.gen(function* () {
         ),
       );
     }, transaction),
-    start: (hooks: StepHooks) =>
-      Effect.gen(function* () {
-        yield* Deferred.succeed(steps, hooks);
-        for (const chatId of yield* repository.pendingDeletes) yield* cleanup(chatId);
-        yield* runner.start(tasks.hooks);
-      }),
   };
 });
 
@@ -634,9 +645,4 @@ export class ChatService extends Context.Service<ChatService, Effect.Success<typ
 const layer = Layer.effect(ChatService, make).pipe(
   Layer.provideMerge(RunnerService.layer),
   Layer.provideMerge(ChatEvents.layer),
-);
-
-export const layerTasks = Layer.effect(
-  TaskService,
-  Effect.map(ChatService, (chats) => chats.tasks),
 );

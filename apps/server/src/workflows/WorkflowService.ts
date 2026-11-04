@@ -367,8 +367,15 @@ const make = Effect.gen(function* () {
 
   const stepTasks = (work: Work, step: Step) =>
     tasks.listByTrigger({ ticketId: work.ticket.id, stepId: step.id });
+  const settleTask = (chatId: Task["chatId"], outcome: Parameters<typeof tasks.settle>[1]) =>
+    transaction(
+      Effect.gen(function* () {
+        const changed = yield* tasks.settle(chatId, outcome);
+        if (changed !== null) yield* taskHooks.changed(changed);
+      }),
+    );
   const cancelTask = (task: Task) =>
-    tasks.settle(task.chatId, { type: "cancelled", reason: "Work was cancelled." });
+    settleTask(task.chatId, { type: "cancelled", reason: "Work was cancelled." });
   const takeFromAgent = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
@@ -514,7 +521,7 @@ const make = Effect.gen(function* () {
         .continue(task.chatId, yield* taskInput(work, step, entry, true))
         .pipe(
           Effect.catch((error) =>
-            tasks.settle(task.chatId, { type: "failed", reason: error.message }),
+            settleTask(task.chatId, { type: "failed", reason: error.message }),
           ),
         );
     });
@@ -574,7 +581,7 @@ const make = Effect.gen(function* () {
 
   const complete = Effect.fnUntraced(function* (work: Work, step: Step, actorId: string) {
     for (const task of yield* stepTasks(work, step)) {
-      if (task.state.type === "submitted") yield* tasks.settle(task.chatId, { type: "succeeded" });
+      if (task.state.type === "submitted") yield* settleTask(task.chatId, { type: "succeeded" });
       else if (task.state.type !== "settled") yield* cancelTask(task);
     }
     const completed = completeTicketStep(
@@ -1303,19 +1310,6 @@ const make = Effect.gen(function* () {
     });
   });
   const taskHooks: StepHooks = {
-    canAccess: (ticketId, userId) =>
-      Effect.gen(function* () {
-        const work = yield* loadTicket(ticketId).pipe(Effect.option);
-        if (Option.isNone(work)) return null;
-        const actor = yield* actorOf(userId);
-        if (isInvolved(actor, work.value.workflow, work.value.ticket)) return "write" as const;
-        return work.value.workflow.isPublic ? ("read" as const) : null;
-      }),
-    canRun: (task) =>
-      loadTaskStep(task).pipe(
-        Effect.map(({ work, step }) => work.ticket.status.type === "open" && isActionable(step)),
-        Effect.orElseSucceed(() => false),
-      ),
     prepare: (task, part, read) =>
       Effect.gen(function* () {
         const parsed = callOf(part);
@@ -1401,6 +1395,8 @@ const make = Effect.gen(function* () {
       }),
   };
 
+  yield* tasks.consume(taskHooks).pipe(Effect.forkScoped);
+
   const memberCommand = <I extends { readonly stepId: string }, A, E>(
     mutate: (work: Work, step: Step, actorId: string, input: I) => Effect.Effect<A, E>,
   ) =>
@@ -1412,7 +1408,7 @@ const make = Effect.gen(function* () {
 
   return {
     memberDeactivated,
-    taskHooks,
+    taskChanged: taskHooks.changed,
     setStepAutomations,
     listDefinitions: definitions.list,
     getDefinition: (actorId: string, definitionId: string) =>

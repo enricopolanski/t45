@@ -296,8 +296,6 @@ const make = Effect.gen(function* () {
         ON CONFLICT DO NOTHING`.pipe(Effect.asVoid, Effect.orDie),
     inputs,
     pendingInputs,
-    hasPending: (chatId: ChatId) =>
-      pendingInputs(chatId).pipe(Effect.map((pending) => pending.length > 0)),
     /** Deletes the input unless the agent took it; false when it did, or it is gone. */
     deletePending: (chatId: ChatId, inputId: InputId) =>
       Effect.gen(function* () {

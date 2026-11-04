@@ -15,8 +15,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter } from "effect/http";
 
-import { ChatService } from "../chats/ChatService.ts";
-import * as WorkflowService from "../workflows/WorkflowService.ts";
 import { ServerActivation } from "../serverActivation.ts";
 import { UserService } from "../org/UserService.ts";
 import { SessionInvalidError } from "../auth/Authentication.ts";
@@ -135,16 +133,7 @@ describe("attachment routes", () => {
         : Effect.fail(new SessionInvalidError({})),
   });
   const layerContext = layerAuth.pipe(
-    Layer.provideMerge(
-      WorkflowService.layer.pipe(
-        Layer.provideMerge(Fixture.layerBase),
-        Layer.tap((context) =>
-          Context.get(context, ChatService).start(
-            Context.get(context, WorkflowService.WorkflowService).taskHooks,
-          ),
-        ),
-      ),
-    ),
+    Layer.provideMerge(Fixture.layer),
     Layer.provideMerge(layerFileResponse),
     Layer.provide(Layer.succeed(ServerActivation, Effect.never)),
   );
