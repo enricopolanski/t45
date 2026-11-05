@@ -33,8 +33,6 @@ import * as Stream from "effect/Stream";
 
 import * as SandboxManager from "./SandboxManager.ts";
 
-const GENERATED_FILES = ".t45/attached";
-
 interface Running {
   readonly request: ExecutionRequest;
   /** Null once cancelled, so a late `send` can't bring it back. */
@@ -280,7 +278,7 @@ export const layer = RunnerRpcs.toLayer(
       /** The agent may remove a file before it is read, which leaves it out. */
       const emitGenerated = Effect.gen(function* () {
         const listed = yield* client.file
-          .list({ path: GENERATED_FILES })
+          .list({ path: ".t45/attached" })
           .pipe(Effect.catchTags({ FileNotFoundError: () => Effect.succeed({ data: [] }) }));
         for (const entry of listed.data) {
           if (entry.type !== "file" || generated.has(entry.path)) continue;
