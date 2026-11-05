@@ -26,6 +26,8 @@ import * as Latch from "effect/Latch";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import type * as Redacted from "effect/Redacted";
+import type * as Rpc from "effect/rpc/Rpc";
+import type * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -33,21 +35,12 @@ import * as Stream from "effect/Stream";
 
 import * as SandboxManager from "./SandboxManager.ts";
 
-interface Running {
-  readonly request: ExecutionRequest;
-  /** Null once cancelled, so a late `send` can't bring it back. */
-  readonly messages: Map<string, Message | null>;
-  readonly files: Map<string, Uint8Array>;
-  /** Open while a message or an event gives the execution something to look at. */
-  readonly wake: Latch.Latch;
-  readonly lock: Semaphore.Semaphore;
-  /** Available after the root is created, until OpenCode finishes. */
-  session: {
-    readonly client: OpenCodeClient;
-    readonly sent: Set<string>;
-    readonly putFiles: Effect.Effect<void>;
-  } | null;
-}
+type ControlRpc = Exclude<RpcGroup.Rpcs<typeof RunnerRpcs>, { readonly _tag: "execute" }>;
+type ExecutionHandlers = {
+  readonly [R in ControlRpc as R["_tag"]]: (
+    input: Rpc.Payload<R>,
+  ) => Effect.Effect<void, Rpc.Error<R>>;
+};
 
 const decodeEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(OpenCodeEvent));
 
@@ -156,13 +149,7 @@ const ready = Effect.fnUntraced(function* (
 class StreamEndedError extends Schema.TaggedError<StreamEndedError>()("StreamEndedError", {}) {}
 
 /** Sessions to read again, with the messages events named. */
-interface Marks {
-  tree: boolean;
-  forms: boolean;
-  readonly sessions: Map<string, Set<string>>;
-}
-
-const noMarks = (): Marks => ({ tree: false, forms: false, sessions: new Map() });
+const noMarks = () => ({ tree: false, forms: false, sessions: new Map<string, Set<string>>() });
 
 const IGNORED = new Set([
   "session.inbox.enqueued",
@@ -182,7 +169,7 @@ const IGNORED = new Set([
 ]);
 
 /** Whether a pass has to look again: a shell event marks nothing, but `done` asks about shells. */
-const mark = (marks: Marks, event: OpenCodeEvent): boolean => {
+const mark = (marks: ReturnType<typeof noMarks>, event: OpenCodeEvent): boolean => {
   const type = event.type;
   if (type.startsWith("form.")) {
     marks.forms = true;
@@ -205,19 +192,13 @@ const mark = (marks: Marks, event: OpenCodeEvent): boolean => {
 };
 
 /** The sessions under `root`, each after its parent; the agent controls parents, so a cycle can't repeat one. */
-const sessionsUnder = (root: string, sessions: ReadonlyArray<Session.Info>) => {
-  const children = new Map<string, Array<Session.Info>>();
-  for (const session of sessions) {
-    if (session.parentID === undefined) continue;
-    const siblings = children.get(session.parentID) ?? [];
-    siblings.push(session);
-    children.set(session.parentID, siblings);
-  }
+const sessionsUnder = (root: Session.ID, sessions: ReadonlyArray<Session.Info>) => {
+  const children = Map.groupBy(sessions, (session) => session.parentID);
   const under: Array<Session.Info> = [];
   const seen = new Set([root]);
   const parents = [root];
-  for (let at = 0; at < parents.length; at++) {
-    for (const child of children.get(parents[at] ?? "") ?? []) {
+  for (const parent of parents) {
+    for (const child of children.get(parent) ?? []) {
       if (seen.has(child.id)) continue;
       seen.add(child.id);
       under.push(child);
@@ -230,7 +211,7 @@ const sessionsUnder = (root: string, sessions: ReadonlyArray<Session.Info>) => {
 export const layer = RunnerRpcs.toLayer(
   Effect.gen(function* () {
     const start = yield* SandboxManager.make;
-    const executions = new Map<string, Running>();
+    const controls = new Map<string, ExecutionHandlers>();
 
     /**
      * In a new sandbox, removed when it ends, whose disk is saved once OpenCode is done with every
@@ -238,11 +219,65 @@ export const layer = RunnerRpcs.toLayer(
      */
     const execute = Effect.fnUntraced(function* (
       id: string,
-      running: Running,
+      request: ExecutionRequest,
       emit: (event: ExecutionUpdate) => Effect.Effect<void>,
     ) {
-      const { request } = running;
+      let state: "starting" | "active" | "finished" = "starting";
       const root = request.root;
+      /** Null after delivery or cancellation, so a duplicate send cannot deliver it again. */
+      const inputs = new Map<string, { message: Message; files: ExecutionRequest["files"] } | null>(
+        request.messages.map((message) => [message.id, { message, files: {} }]),
+      );
+      const wake = yield* Latch.make();
+      const lock = yield* Semaphore.make(1);
+      // Inputs can arrive during startup; only active executions can use the sandbox below.
+      const handlers: ExecutionHandlers = {
+        send: ({ message, files }) =>
+          Effect.suspend(() => {
+            if (state === "finished" || inputs.has(message.id)) return Effect.void;
+            inputs.set(message.id, { message, files });
+            return wake.open.pipe(Effect.asVoid);
+          }),
+        cancel: ({ messageId }) =>
+          lock.withPermit(
+            Effect.gen(function* () {
+              const input = inputs.get(messageId);
+              inputs.set(messageId, null);
+              if (state !== "active" || input !== null) return;
+              yield* client.session.inbox
+                .cancel({ sessionID: root, inboxID: messageId })
+                .pipe(Effect.ignore);
+            }),
+          ),
+        answer: ({ sessionId, formId, answer, files }) =>
+          Effect.gen(function* () {
+            if (state !== "active") return yield* new QuestionGone();
+            yield* writeFiles(files);
+            yield* client.session.form.reply({ sessionID: sessionId, formID: formId, answer });
+          }).pipe(
+            Effect.mapError((error) =>
+              error._tag === "FormInvalidAnswerError" ? new AnswerInvalid() : new QuestionGone(),
+            ),
+          ),
+        dismiss: ({ sessionId, formId }) =>
+          Effect.suspend(() =>
+            state === "active"
+              ? client.session.form
+                  .cancel({ sessionID: sessionId, formID: formId })
+                  .pipe(Effect.mapError(() => new QuestionGone()))
+              : new QuestionGone(),
+          ),
+      };
+      controls.set(id, handlers);
+      const close = () => {
+        state = "finished";
+        if (controls.get(id) === handlers) controls.delete(id);
+      };
+      yield* Effect.addFinalizer(() => Effect.sync(close));
+      yield* emit({ _tag: "heartbeat" }).pipe(
+        Effect.repeat(Schedule.spaced("15 seconds")),
+        Effect.forkScoped,
+      );
       const sandbox = yield* start(id, request.agent, request.disk);
       const { client, events, readFile } = yield* connect(
         `http://127.0.0.1:${sandbox.port}`,
@@ -250,12 +285,11 @@ export const layer = RunnerRpcs.toLayer(
       );
       yield* ready(client, request.agent);
 
-      // What events marked since the last pass, and what the passes read so far: each session's
-      // paging cursor, and whether each message was settled.
-      let marks: Marks = { ...noMarks(), tree: true, forms: true };
+      // Events mark the next reads; unfinished messages are read again until they settle.
+      let marks = { ...noMarks(), tree: true, forms: true };
       const known = new Set<string>([root]);
       const cursors = new Map<string, string>();
-      const seen = new Map<string, Map<string, boolean>>();
+      const unfinished = new Map<string, Set<string>>();
       // Per subagent session, the background launches (by tool call) and the reports that reached
       // its parent (by message); a session the agent continues launches again.
       const launches = new Map<string, Set<string>>();
@@ -305,11 +339,11 @@ export const layer = RunnerRpcs.toLayer(
             cursor = page.cursor.next;
           }
           if (cursor !== undefined) cursors.set(sessionId, cursor);
-          const settled = seen.get(sessionId) ?? new Map<string, boolean>();
-          seen.set(sessionId, settled);
+          const pending = unfinished.get(sessionId) ?? new Set<string>();
+          unfinished.set(sessionId, pending);
           const read = new Set<string>(messages.map((message) => message.id));
-          for (const [id, wasSettled] of settled) {
-            if (read.has(id) || (wasSettled && !touched.has(id))) continue;
+          for (const id of new Set([...pending, ...touched])) {
+            if (read.has(id)) continue;
             const message = yield* client.session.message
               .get({ sessionID, messageID: SessionMessage.ID.make(id) })
               .pipe(
@@ -320,7 +354,8 @@ export const layer = RunnerRpcs.toLayer(
           }
           if (messages.length === 0) return;
           for (const message of messages) {
-            settled.set(message.id, isSettled(message));
+            if (isSettled(message)) pending.delete(message.id);
+            else pending.add(message.id);
             if (message.type === "assistant") {
               for (const part of message.content) {
                 if (
@@ -353,59 +388,30 @@ export const layer = RunnerRpcs.toLayer(
         yield* emit({ _tag: "questions", forms });
       });
 
-      const read = (marked: Marks) =>
-        Effect.gen(function* () {
-          if ([...marked.sessions.keys()].some((sessionId) => !known.has(sessionId))) {
-            marked.tree = true;
-          }
-          if (marked.tree) yield* readTree;
-          for (const [sessionId, touched] of marked.sessions) {
-            if (known.has(sessionId)) yield* readSession(sessionId, touched);
-          }
-          if (marked.forms) yield* readForms;
-        });
-      /** Reads what events marked since the last pass. */
-      const readMarked = Effect.suspend(() => {
-        const marked = marks;
-        marks = noMarks();
-        return read(marked);
-      });
-      /** Reads every session again: the events naming OpenCode's last writes can arrive late. */
-      const readAll = readTree.pipe(
-        Effect.andThen(
-          Effect.suspend(() =>
-            read({
-              ...noMarks(),
-              forms: true,
-              sessions: new Map([...known].map((sessionId) => [sessionId, new Set<string>()])),
-            }),
-          ),
-        ),
-      );
-
       const written = new Set<string>();
       /** One the sandbox refuses is skipped. */
-      const putFiles = Effect.forEach(
-        running.files,
-        ([path, content]) =>
-          written.has(path)
-            ? Effect.void
-            : sandbox.write(path, content).pipe(
+      const writeFiles = (files: ExecutionRequest["files"]) =>
+        Effect.gen(function* () {
+          for (const [path, content] of Object.entries(files)) {
+            if (written.has(path)) continue;
+            yield* sandbox
+              .write(path, content)
+              .pipe(
                 Effect.catch((error) =>
                   Effect.logWarning("Writing a file into a sandbox failed", { id, path, error }),
                 ),
-                Effect.andThen(Effect.sync(() => written.add(path))),
-              ),
-        { discard: true },
-      );
-      const sent = new Set<string>();
-      const deliver = running.lock.withPermit(
+              );
+            written.add(path);
+          }
+        });
+      const deliver = lock.withPermit(
         Effect.gen(function* () {
-          yield* putFiles;
-          for (const message of running.messages.values()) {
-            if (message === null || sent.has(message.id)) continue;
+          for (const input of inputs.values()) {
+            if (input === null) continue;
+            const { message, files } = input;
+            yield* writeFiles(files);
             yield* client.session.prompt({ ...message, sessionID: root, delivery: "queue" });
-            sent.add(message.id);
+            inputs.set(message.id, null);
           }
         }),
       );
@@ -414,9 +420,7 @@ export const layer = RunnerRpcs.toLayer(
        * background subagent reported.
        */
       const done = Effect.gen(function* () {
-        for (const message of running.messages.values()) {
-          if (message !== null && !sent.has(message.id)) return false;
-        }
+        if ([...inputs.values()].some((input) => input !== null)) return false;
         if (Object.keys(yield* client.session.active()).length > 0) return false;
         const shells = yield* client.shell.list({});
         if (shells.data.some((shell) => shell.status === "running")) return false;
@@ -431,13 +435,13 @@ export const layer = RunnerRpcs.toLayer(
       /** Until OpenCode is done with every message; returns the root's outcome. */
       const converse = Effect.gen(function* () {
         yield* connected.await;
-        yield* putFiles;
+        yield* writeFiles(request.files);
         const model = Model.Ref.parse(request.agent.model);
         yield* client.session.create({
           id: root,
           title: request.title,
           model,
-          // Session permissions overrid agent's ones.
+          // Session permissions override the agent's ones.
           // Allow tools without approval; commands and file access run safely inside the sandbox.
           permissions: [
             { action: "*", resource: "*", effect: "allow" },
@@ -447,28 +451,39 @@ export const layer = RunnerRpcs.toLayer(
           ],
         });
         yield* client.session.switchModel({ sessionID: root, model });
-        running.session = { client, sent, putFiles };
+        state = "active";
         while (true) {
           yield* deliver;
-          yield* readMarked;
+          const marked = marks;
+          marks = noMarks();
+          if (
+            marked.tree ||
+            [...marked.sessions.keys()].some((sessionId) => !known.has(sessionId))
+          ) {
+            yield* readTree;
+          }
+          for (const [sessionId, touched] of marked.sessions) {
+            if (known.has(sessionId)) yield* readSession(sessionId, touched);
+          }
+          if (marked.forms) yield* readForms;
           if (yield* done) {
-            yield* readAll;
+            // Read every session again: events naming OpenCode's last writes can arrive late.
+            yield* readTree;
+            for (const sessionId of known) yield* readSession(sessionId, new Set());
+            yield* readForms;
             if (yield* done) {
               const info = yield* client.session.get({ sessionID: root });
-              return info.outcome === "failed" ? ("failed" as const) : null;
+              if ([...inputs.values()].every((input) => input === null)) {
+                close();
+                return info.outcome === "failed" ? ("failed" as const) : null;
+              }
             }
           }
-          yield* running.wake.await;
+          yield* wake.await;
           yield* Effect.sleep("150 millis");
-          yield* running.wake.close;
+          yield* wake.close;
         }
-      }).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            running.session = null;
-          }),
-        ),
-      );
+      }).pipe(Effect.ensuring(Effect.sync(close)));
 
       /** Deltas go out as they come; any other event only marks what the next pass reads. */
       const consumeEvents = events.pipe(
@@ -487,7 +502,7 @@ export const layer = RunnerRpcs.toLayer(
                 kind: event.type === "session.text.delta" ? "text" : "reasoning",
                 delta: event.data.delta,
               });
-            } else if (mark(marks, event)) yield* running.wake.open;
+            } else if (mark(marks, event)) yield* wake.open;
           }),
         ),
         Effect.andThen(Effect.fail(new StreamEndedError())),
@@ -499,93 +514,22 @@ export const layer = RunnerRpcs.toLayer(
       yield* emit({ _tag: "finished", outcome, disk: yield* sandbox.save });
     });
 
-    /** A question is available only while its session is running. */
-    const withSession = <A, E>(
-      id: string,
-      use: (running: Running, session: NonNullable<Running["session"]>) => Effect.Effect<A, E>,
-    ) =>
-      Effect.gen(function* () {
-        const running = executions.get(id);
-        if (running === undefined || running.session === null) return yield* new QuestionGone();
-        return yield* use(running, running.session);
-      });
-
     return RunnerRpcs.of({
       execute: ({ id, request }) =>
         Stream.callback((queue) =>
-          Effect.gen(function* () {
-            const running: Running = {
-              request,
-              messages: new Map(request.messages.map((message) => [message.id, message])),
-              files: new Map(Object.entries(request.files)),
-              wake: yield* Latch.make(),
-              lock: yield* Semaphore.make(1),
-              session: null,
-            };
-            executions.set(id, running);
-            yield* Effect.addFinalizer(() =>
-              Effect.sync(() => {
-                if (executions.get(id) === running) executions.delete(id);
-              }),
-            );
-            const emit = (event: ExecutionUpdate) => Queue.offer(queue, event).pipe(Effect.asVoid);
-            yield* emit({ _tag: "heartbeat" }).pipe(
-              Effect.repeat(Schedule.spaced("15 seconds")),
-              Effect.forkScoped,
-            );
-            yield* execute(id, running, emit).pipe(
-              Effect.scoped,
-              Effect.tapError((error) => Effect.logError("An execution failed", { id, error })),
-              Effect.orDie,
-            );
-            yield* Queue.end(queue);
-          }),
-        ),
-      send: ({ id, message, files }) =>
-        Effect.suspend(() => {
-          const running = executions.get(id);
-          if (running === undefined || running.messages.has(message.id)) return Effect.void;
-          for (const [path, content] of Object.entries(files)) running.files.set(path, content);
-          running.messages.set(message.id, message);
-          return running.wake.open.pipe(Effect.asVoid);
-        }),
-      answer: ({ id, sessionId, formId, answer, files }) =>
-        withSession(id, (running, session) =>
-          Effect.gen(function* () {
-            for (const [path, content] of Object.entries(files)) running.files.set(path, content);
-            yield* session.putFiles;
-            yield* session.client.session.form.reply({
-              sessionID: sessionId,
-              formID: formId,
-              answer,
-            });
-          }).pipe(
-            Effect.mapError((error) =>
-              error._tag === "FormInvalidAnswerError" ? new AnswerInvalid() : new QuestionGone(),
-            ),
+          execute(id, request, (event) => Queue.offer(queue, event).pipe(Effect.asVoid)).pipe(
+            Effect.scoped,
+            Effect.tapError((error) => Effect.logError("An execution failed", { id, error })),
+            Effect.orDie,
+            Effect.andThen(Queue.end(queue)),
           ),
         ),
-      dismiss: ({ id, sessionId, formId }) =>
-        withSession(id, (_, session) =>
-          session.client.session.form
-            .cancel({ sessionID: sessionId, formID: formId })
-            .pipe(Effect.mapError(() => new QuestionGone())),
-        ),
-      cancel: ({ id, messageId }) =>
-        Effect.suspend(() => {
-          const running = executions.get(id);
-          if (running === undefined) return Effect.void;
-          return running.lock.withPermit(
-            Effect.gen(function* () {
-              running.messages.set(messageId, null);
-              const current = running.session;
-              if (current === null || !current.sent.has(messageId)) return;
-              yield* current.client.session.inbox
-                .cancel({ sessionID: running.request.root, inboxID: messageId })
-                .pipe(Effect.ignore);
-            }),
-          );
-        }),
+      send: (input) => Effect.suspend(() => controls.get(input.id)?.send(input) ?? Effect.void),
+      cancel: (input) => Effect.suspend(() => controls.get(input.id)?.cancel(input) ?? Effect.void),
+      answer: (input) =>
+        Effect.suspend(() => controls.get(input.id)?.answer(input) ?? new QuestionGone()),
+      dismiss: (input) =>
+        Effect.suspend(() => controls.get(input.id)?.dismiss(input) ?? new QuestionGone()),
     });
   }),
 );
