@@ -37,8 +37,6 @@ import * as SandboxManager from "./SandboxManager.ts";
 
 const RESTART = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("30 seconds")]);
 
-const PAGE = 200;
-
 const GENERATED_FILES = ".t45/attached";
 
 /**
@@ -328,14 +326,11 @@ export const layer = RunnerRpcs.toLayer(
           let cursor = cursors.get(sessionId);
           while (true) {
             const page = yield* client.message.list(
-              cursor === undefined
-                ? { sessionID, order: "asc", limit: PAGE }
-                : { sessionID, cursor, limit: PAGE },
+              cursor === undefined ? { sessionID, order: "asc" } : { sessionID, cursor },
             );
             messages.push(...page.data);
             if (page.cursor.next === undefined) break;
             cursor = page.cursor.next;
-            if (page.data.length < PAGE) break;
           }
           if (cursor !== undefined) cursors.set(sessionId, cursor);
           const settled = seen.get(sessionId) ?? new Map<string, boolean>();
