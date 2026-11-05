@@ -107,7 +107,7 @@ describe("a chat's execution", () => {
           skills: [],
         });
         assert.deepEqual(
-          [request.root, request.title, request.questions, request.disk],
+          [request.root, request.title, request.allowQuestions, request.disk],
           [root, chatId, true, null],
         );
         assert.deepEqual(request.files, { [`attachments/${file.id}`]: new Uint8Array([4, 2]) });

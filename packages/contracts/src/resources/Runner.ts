@@ -30,7 +30,7 @@ export const ExecutionRequest = Schema.Struct({
   }),
   root: Session.ID,
   title: Schema.String,
-  questions: Schema.Boolean,
+  allowQuestions: Schema.Boolean,
   /** The disk the last finished execution left, conversation included; null for a new chat. */
   disk: Schema.NullOr(Schema.Uint8Array),
   /** The messages' files. */

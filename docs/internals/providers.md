@@ -8,7 +8,7 @@ A chat names its agent, and the agent alone decides the model and the permission
 
 T45 never installs, updates or spawns OpenCode on the server. Each execution of a chat gets its own VM on the runner, which starts the agent's setup and its own [OpenCode server](../../apps/runner/src/SandboxManager.ts); only the runner reaches it.
 
-Every session's rules allow every tool (`sessionRules`) but one: the agent's sandbox is what confines it. T45 has no approval prompt and answers no permission ask; chats rely on the rules alone.
+Every session's rules allow every tool but one: the agent's sandbox is what confines it. T45 has no approval prompt and answers no permission ask; chats rely on the rules alone.
 
 ## Questions
 

@@ -3,7 +3,6 @@ import {
   Model,
   OpenCode,
   type OpenCodeClient,
-  type Permission,
   Session,
   SessionMessage,
 } from "@opencode/client/effect";
@@ -38,15 +37,6 @@ import * as SandboxManager from "./SandboxManager.ts";
 const RESTART = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("30 seconds")]);
 
 const GENERATED_FILES = ".t45/attached";
-
-/**
- * OpenCode checks the agent's rules, then these, and the last match decides: the sandbox is what
- * confines the agent.
- */
-const sessionRules = (questions: boolean): ReadonlyArray<Permission.Rule> => [
-  { action: "*", resource: "*", effect: "allow" },
-  ...(questions ? [] : [{ action: "question", resource: "*", effect: "deny" } as const]),
-];
 
 interface Running {
   readonly request: ExecutionRequest;
@@ -461,12 +451,18 @@ export const layer = RunnerRpcs.toLayer(
         yield* connected.await;
         yield* putFiles;
         const model = Model.Ref.parse(request.agent.model);
-        // A root the disk kept comes back as it is.
         yield* client.session.create({
           id: root,
           title: request.title,
           model,
-          permissions: sessionRules(request.questions),
+          // Session permissions overrid agent's ones.
+          // Allow tools without approval; commands and file access run safely inside the sandbox.
+          permissions: [
+            { action: "*", resource: "*", effect: "allow" },
+            ...(request.allowQuestions
+              ? []
+              : [{ action: "question", resource: "*", effect: "deny" } as const]),
+          ],
         });
         yield* client.session.switchModel({ sessionID: root, model });
         running.attempt = { client, sent, putFiles };

@@ -143,7 +143,7 @@ export const make = Effect.gen(function* () {
         },
         root: rootSessionId(chat.id),
         title: titleOf(chat),
-        questions: origin?.kind === "conversation",
+        allowQuestions: origin?.kind === "conversation",
         disk: yield* repository.readDisk(chat.id),
         files: yield* filesOf(
           inputs.flatMap((input) => input.payload.attachments.map((file) => file.id)),
