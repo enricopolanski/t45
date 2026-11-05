@@ -2,7 +2,7 @@ import type { SessionMessage } from "@opencode/schema/session-message";
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import { type Chat, type ChatId, type Input, titleOf } from "@t45/contracts/models/Chat";
 import { InputMetadata } from "@t45/contracts/resources/Chats";
-import type { RunRequest, RunUpdate } from "@t45/contracts/resources/Runner";
+import type { ExecutionRequest, ExecutionUpdate } from "@t45/contracts/resources/Runner";
 import { hasT45Tools } from "@t45/core/agentTools";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -149,7 +149,7 @@ export const make = Effect.gen(function* () {
           inputs.flatMap((input) => input.payload.attachments.map((file) => file.id)),
         ),
         messages: inputs.map((input) => messageOf(chat.id, input)),
-      } satisfies RunRequest;
+      } satisfies ExecutionRequest;
     });
 
   /** Atomic with posts: one that commits after this finds no owner and starts one. */
@@ -172,7 +172,7 @@ export const make = Effect.gen(function* () {
       yield* discard(chatId);
       const request = yield* requestOf(chat);
       const generated = new Map<string, Uint8Array>();
-      const handle = (event: RunUpdate): Effect.Effect<void> => {
+      const handle = (event: ExecutionUpdate): Effect.Effect<void> => {
         switch (event._tag) {
           case "sessions":
             return Effect.gen(function* () {
@@ -233,7 +233,7 @@ export const make = Effect.gen(function* () {
             return end(chatId, receive, event.outcome, event.disk);
         }
       };
-      yield* runner.run({ id: chatId, request }).pipe(Stream.runForEach(handle));
+      yield* runner.execute({ id: chatId, request }).pipe(Stream.runForEach(handle));
     }).pipe(
       Effect.retry({
         schedule: RETRY,

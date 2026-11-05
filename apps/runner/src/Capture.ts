@@ -1,24 +1,8 @@
-import { type Form, OpenCode, Session, SessionMessage } from "@opencode/client/effect";
-import { OpenCodeEvent } from "@opencode/protocol/groups/event";
-import { type RunUpdate, isSettled } from "@t45/contracts/resources/Runner";
-import * as Deferred from "effect/Deferred";
+import { type Form, type OpenCodeClient, Session, SessionMessage } from "@opencode/client/effect";
+import type { OpenCodeEvent } from "@opencode/protocol/groups/event";
+import { type ExecutionUpdate, isSettled } from "@t45/contracts/resources/Runner";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
-import * as Sse from "effect/encoding/Sse";
-import * as HttpClient from "effect/http/HttpClient";
-import * as HttpClientError from "effect/http/HttpClientError";
-import * as HttpClientRequest from "effect/http/HttpClientRequest";
-import * as HttpClientResponse from "effect/http/HttpClientResponse";
-
-import type { Sandbox } from "./Sandbox.ts";
-
-export class StreamEndedError extends Schema.TaggedError<StreamEndedError>()(
-  "StreamEndedError",
-  {},
-) {}
 
 const PAGE = 200;
 
@@ -51,7 +35,7 @@ const IGNORED = new Set([
   "session.moved",
 ]);
 
-/** False for events that change nothing T45 keeps. */
+/** Whether a pass has to look again: a shell event marks nothing, but `idle` asks about shells. */
 const mark = (marks: Marks, event: OpenCodeEvent): boolean => {
   const type = event.type;
   if (type.startsWith("form.")) {
@@ -97,140 +81,22 @@ const sessionsUnder = (root: string, sessions: ReadonlyArray<Session.Info>) => {
   return under;
 };
 
-const decodeEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(OpenCodeEvent));
-
-/** The agent controls what OpenCode answers, so the runner reads no more of any answer. */
-const RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
-
-const BODYLESS = new Set([101, 204, 205, 304]);
-
-const capResponses = (client: HttpClient.HttpClient) =>
-  HttpClient.transformResponse(
-    client,
-    Effect.flatMap((response) => {
-      if (BODYLESS.has(response.status)) return Effect.succeed(response);
-      let size = 0;
-      const body = response.stream.pipe(
-        Stream.mapEffect((chunk) => {
-          size += chunk.byteLength;
-          return size <= RESPONSE_MAX_BYTES
-            ? Effect.succeed(chunk)
-            : Effect.fail(
-                new HttpClientError.HttpClientError({
-                  reason: new HttpClientError.DecodeError({
-                    request: response.request,
-                    response,
-                    description: `The answer is larger than ${RESPONSE_MAX_BYTES} bytes.`,
-                  }),
-                }),
-              );
-        }),
-      );
-      return Effect.succeed(
-        HttpClientResponse.fromWeb(
-          response.request,
-          new Response(Stream.toReadableStream(body), {
-            status: response.status,
-            headers: { ...response.headers },
-          }),
-        ),
-      );
-    }),
-  );
-
-/** OpenCode writes a heartbeat every 10 to 15 seconds. */
-const readEvents = (httpClient: HttpClient.HttpClient) =>
-  httpClient.get("/api/event", { headers: { accept: "text/event-stream" } }).pipe(
-    Effect.flatMap(HttpClientResponse.filterStatusOk),
-    Effect.map((response) =>
-      response.stream.pipe(
-        Stream.timeout("45 seconds"),
-        Stream.decodeText,
-        Stream.pipeThroughChannel(Sse.decode()),
-        Stream.mapEffect((frame) => decodeEvent(frame.data)),
-      ),
-    ),
-    Stream.unwrap,
-  );
-
 /**
- * The event stream is volatile: work whose events matter starts after its `server.connected`.
- * It ends when OpenCode goes silent.
+ * What an attempt reads of its sandbox's OpenCode and sends to T45. Events only mark what to read
+ * again and forward deltas, so reading never falls behind them.
  */
-export const connect = Effect.fnUntraced(function* (server: Pick<Sandbox, "url" | "password">) {
-  const authenticated = HttpClient.mapRequest(
-    yield* HttpClient.HttpClient,
-    HttpClientRequest.basicAuth("opencode", server.password),
-  );
-  const client = yield* OpenCode.make({ baseUrl: server.url }).pipe(
-    Effect.provideService(HttpClient.HttpClient, capResponses(authenticated)),
-  );
-  const prefixed = HttpClient.mapRequest(authenticated, HttpClientRequest.prependUrl(server.url));
-  return {
-    client,
-    events: readEvents(prefixed),
-    /** Bounded by time only: an agent can make a file as large as its disk. */
-    readFile: (path: string) =>
-      prefixed.get(`/api/fs/read/${path.split("/").map(encodeURIComponent).join("/")}`).pipe(
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
-        Effect.flatMap((response) => response.arrayBuffer),
-        Effect.map((buffer) => new Uint8Array(buffer)),
-        Effect.timeout("60 seconds"),
-      ),
-  };
-});
-
-/**
- * What an attempt reads of its sandbox's OpenCode and sends to T45. The event stream only marks what to
- * read again and forwards deltas, so it never falls behind; it is connected before this returns, so
- * nothing that changes after is missed.
- */
-export const make = Effect.fnUntraced(function* ({
-  opencode,
+export const make = <E>({
+  client,
+  readFile,
   root,
   emit,
-  changed,
-  ended,
 }: {
-  readonly opencode: Effect.Success<ReturnType<typeof connect>>;
+  readonly client: OpenCodeClient;
+  readonly readFile: (path: string) => Effect.Effect<Uint8Array, E>;
   readonly root: Session.ID;
-  readonly emit: (event: RunUpdate) => Effect.Effect<void>;
-  /** Once per batch of events that marked something. */
-  readonly changed: Effect.Effect<void>;
-  readonly ended: Effect.Effect<void>;
-}) {
-  const { client, events, readFile } = opencode;
+  readonly emit: (event: ExecutionUpdate) => Effect.Effect<void>;
+}) => {
   let marks: Marks = { ...noMarks(), tree: true, forms: true };
-  let notified = false;
-  const connected = yield* Deferred.make<void, StreamEndedError>();
-  yield* events.pipe(
-    Stream.runForEach((event) => {
-      if (event.type === "server.connected") return Deferred.succeed(connected, undefined);
-      if (event.type === "session.text.delta" || event.type === "session.reasoning.delta") {
-        return emit({
-          _tag: "delta",
-          sessionId: event.data.sessionID,
-          messageId: event.data.assistantMessageID,
-          ordinal: event.data.ordinal,
-          kind: event.type === "session.text.delta" ? "text" : "reasoning",
-          delta: event.data.delta,
-        });
-      }
-      if (!mark(marks, event) || notified) return Effect.void;
-      notified = true;
-      return changed;
-    }),
-    Effect.exit,
-    Effect.tap((exit) =>
-      Exit.isFailure(exit)
-        ? Effect.logInfo("A sandbox's event stream ended", { root, cause: exit.cause })
-        : Effect.void,
-    ),
-    Effect.andThen(Deferred.fail(connected, new StreamEndedError())),
-    Effect.andThen(ended),
-    Effect.forkScoped,
-  );
-  yield* Deferred.await(connected);
 
   // What capture saw of each session: its paging cursor, and whether each message was settled.
   const known = new Set<string>([root]);
@@ -346,11 +212,24 @@ export const make = Effect.fnUntraced(function* ({
     });
 
   return {
+    /** Forwards a delta, or marks what to read again; true when a pass has something to look at. */
+    observe: (event: OpenCodeEvent) => {
+      if (event.type === "session.text.delta" || event.type === "session.reasoning.delta") {
+        return emit({
+          _tag: "delta",
+          sessionId: event.data.sessionID,
+          messageId: event.data.assistantMessageID,
+          ordinal: event.data.ordinal,
+          kind: event.type === "session.text.delta" ? "text" : "reasoning",
+          delta: event.data.delta,
+        }).pipe(Effect.as(false));
+      }
+      return Effect.succeed(mark(marks, event));
+    },
     /** Reads what events marked since the last call. */
     marked: Effect.suspend(() => {
       const marked = marks;
       marks = noMarks();
-      notified = false;
       return capture(marked);
     }),
     /** Reads every session again: the events naming OpenCode's last writes can arrive late. */
@@ -377,4 +256,4 @@ export const make = Effect.fnUntraced(function* ({
       return [...launches].every(([child, ids]) => (reports.get(child)?.size ?? 0) >= ids.size);
     }),
   };
-});
+};

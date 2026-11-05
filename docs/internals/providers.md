@@ -1,12 +1,12 @@
 # Provider constraints
 
-OpenCode is the only agent runtime, and the runner drives it from one place: an execution ([chats](./chats.md)), which reaches the VM's OpenCode server through [`Capture.ts`](../../apps/runner/src/Capture.ts). A step's agent works in a chat like any other ([sandboxed chats](./sandboxed-chats.md)).
+OpenCode is the only agent runtime, and the runner drives it from one place: an execution ([chats](./chats.md)), which reaches the VM's OpenCode server through [`ExecutionOrchestrator.ts`](../../apps/runner/src/ExecutionOrchestrator.ts). A step's agent works in a chat like any other ([sandboxed chats](./sandboxed-chats.md)).
 
 A chat names its agent, and the agent alone decides the model and the permissions; nothing past agent setup chooses or reads a model or provider.
 
 ## Process and account isolation
 
-T45 never installs, updates or spawns OpenCode on the server. Each execution of a chat gets its own VM on the runner, which starts the agent's setup and its own [OpenCode server](../../apps/runner/src/Microsandbox.ts); only the runner reaches it.
+T45 never installs, updates or spawns OpenCode on the server. Each execution of a chat gets its own VM on the runner, which starts the agent's setup and its own [OpenCode server](../../apps/runner/src/SandboxManager.ts); only the runner reaches it.
 
 Every session's rules allow every tool (`sessionRules`) but one: the agent's sandbox is what confines it. T45 has no approval prompt and answers no permission ask; chats rely on the rules alone.
 

@@ -1,24 +1,28 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
-import { OpenCode } from "@opencode/client/effect";
 import { Config } from "@opencode/schema/config";
-import type { RunRequest } from "@t45/contracts/resources/Runner";
+import type { ExecutionRequest } from "@t45/contracts/resources/Runner";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import * as Schedule from "effect/Schedule";
-import { HttpClient, HttpClientRequest } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { type NetworkBuilder, NetworkPolicy, Sandbox as Microvm } from "microsandbox";
 
 import * as RunnerConfig from "./RunnerConfig.ts";
-import { SandboxError, SandboxManager } from "./Sandbox.ts";
 
-type Agent = RunRequest["agent"];
+type Agent = ExecutionRequest["agent"];
+
+class SandboxError extends Schema.TaggedError<SandboxError>()("SandboxError", {
+  operation: Schema.String,
+  cause: Schema.Defect(),
+}) {
+  override get message(): string {
+    return `The sandbox's ${this.operation} failed.`;
+  }
+}
 
 /** Built by `image/build-local.sh`. */
 const IMAGE = "t45-agent:dev";
@@ -101,7 +105,7 @@ const writeInto = (vm: Microvm, relative: string, content: string | Uint8Array) 
   );
 };
 
-const writeAgentSetup = Effect.fn("Microsandbox.writeAgentSetup")(function* (
+const writeAgentSetup = Effect.fn("SandboxManager.writeAgentSetup")(function* (
   vm: Microvm,
   agent: Agent,
 ) {
@@ -130,10 +134,14 @@ const freePort = NodeSocketServer.make({ host: "127.0.0.1", port: 0 }).pipe(
   Effect.mapError((cause) => new SandboxError({ operation: "port", cause })),
 );
 
-const make = Effect.gen(function* () {
-  const port = yield* RunnerConfig.port;
+/**
+ * Reads the runner's settings once, so a runner without them doesn't start, and makes `start`: a VM
+ * on the disk, removed when its scope closes, with `opencode serve` launched in it for the agent.
+ * OpenCode answers on the host's `port` with `password` once it has booted.
+ */
+export const make = Effect.gen(function* () {
+  const runnerPort = yield* RunnerConfig.port;
   const openCodeKey = yield* RunnerConfig.openCodeKey;
-  const httpClient = yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -168,12 +176,39 @@ const make = Effect.gen(function* () {
       return { file, save };
     }).pipe(Effect.mapError((cause) => new SandboxError({ operation: "disk", cause })));
 
-  /** OpenCode answers before its MCP servers connect, and a turn started then finds no tools. */
-  const serve = Effect.fn("Microsandbox.serve")(function* (
-    vm: Microvm,
-    hostPort: number,
+  return Effect.fn("SandboxManager.start")(function* (
+    id: string,
     agent: Agent,
+    saved: Uint8Array | null,
   ) {
+    const hostPort = yield* freePort;
+    const disk = yield* prepareDisk(saved);
+    const { vm, remove } = yield* Effect.acquireRelease(
+      Effect.gen(function* () {
+        const vm = yield* sdk("create", () =>
+          // The port keeps one runner's VMs apart from another's on the same machine.
+          Microvm.builder(`vm-${runnerPort}-${id}`)
+            .image(IMAGE)
+            .pullPolicy("if-missing")
+            .user("agent")
+            .security("restricted")
+            .cpus(LIMITS.cpus)
+            .memory(LIMITS.memoryMib)
+            .rootDisk((root) => root.disk(disk.file).format("raw").fstype("ext4"))
+            // Removed by microsandbox once it stops, including when this runner dies.
+            .ephemeral(true)
+            .replace()
+            .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort))
+            .create(),
+        );
+        return { vm, remove: yield* Effect.cached(sdk("remove", () => vm.destroy())) };
+      }),
+      ({ remove }) =>
+        remove.pipe(
+          Effect.catch((error) => Effect.logWarning("Removing a VM failed", { id, error })),
+        ),
+    );
+    yield* writeAgentSetup(vm, agent);
     const password = Redacted.make(
       Base64Url.encode(yield* crypto.randomBytes(24).pipe(Effect.orDie)),
     );
@@ -187,82 +222,12 @@ const make = Effect.gen(function* () {
           .env("OPENCODE_PASSWORD", Redacted.value(password)),
       ),
     );
-    const url = `http://127.0.0.1:${hostPort}`;
-    const client = yield* OpenCode.make({ baseUrl: url }).pipe(
-      Effect.provideService(
-        HttpClient.HttpClient,
-        HttpClient.mapRequest(httpClient, HttpClientRequest.basicAuth("opencode", password)),
-      ),
-    );
-    yield* client.server.info().pipe(
-      Effect.retry({ schedule: Schedule.spaced("250 millis"), times: 240 }),
-      Effect.mapError(
-        (cause) =>
-          new SandboxError({
-            operation: "serve",
-            cause: new Error("OpenCode did not start.", { cause }),
-          }),
-      ),
-    );
-    const servers = Object.keys(agent.mcpServers);
-    if (servers.length > 0) {
-      yield* client.mcp.list().pipe(
-        Effect.filterOrFail(({ data }) =>
-          servers.every((name) =>
-            data.some((server) => server.name === name && server.status.status === "connected"),
-          ),
-        ),
-        Effect.retry({ schedule: Schedule.spaced("500 millis"), times: 120 }),
-        Effect.mapError(
-          (cause) =>
-            new SandboxError({
-              operation: "serve",
-              cause: new Error("The agent's MCP servers did not connect.", { cause }),
-            }),
-        ),
-      );
-    }
-    return { url, password };
-  });
-
-  return SandboxManager.of({
-    start: Effect.fn("Microsandbox.start")(function* (id, agent, saved) {
-      const hostPort = yield* freePort;
-      const disk = yield* prepareDisk(saved);
-      const { vm, remove } = yield* Effect.acquireRelease(
-        Effect.gen(function* () {
-          const vm = yield* sdk("create", () =>
-            // The port keeps one runner's VMs apart from another's on the same machine.
-            Microvm.builder(`vm-${port}-${id}`)
-              .image(IMAGE)
-              .pullPolicy("if-missing")
-              .user("agent")
-              .security("restricted")
-              .cpus(LIMITS.cpus)
-              .memory(LIMITS.memoryMib)
-              .rootDisk((root) => root.disk(disk.file).format("raw").fstype("ext4"))
-              // Removed by microsandbox once it stops, including when this runner dies.
-              .ephemeral(true)
-              .replace()
-              .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort))
-              .create(),
-          );
-          return { vm, remove: yield* Effect.cached(sdk("remove", () => vm.destroy())) };
-        }),
-        ({ remove }) =>
-          remove.pipe(
-            Effect.catch((error) => Effect.logWarning("Removing a VM failed", { id, error })),
-          ),
-      );
-      yield* writeAgentSetup(vm, agent);
-      return {
-        ...(yield* serve(vm, hostPort, agent)),
-        write: (path, content) => writeInto(vm, path, content),
-        // Only a removed VM has flushed its disk.
-        save: remove.pipe(Effect.andThen(disk.save)),
-      };
-    }),
+    return {
+      port: hostPort,
+      password,
+      write: (path: string, content: Uint8Array) => writeInto(vm, path, content),
+      // Only a removed VM has flushed its disk.
+      save: remove.pipe(Effect.andThen(disk.save)),
+    };
   });
 });
-
-export const layer = Layer.effect(SandboxManager, make);

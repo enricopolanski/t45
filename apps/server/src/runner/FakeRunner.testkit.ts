@@ -3,8 +3,8 @@ import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import {
   type Message,
-  type RunRequest,
-  type RunUpdate,
+  type ExecutionRequest,
+  type ExecutionUpdate,
   RunnerRpcs,
 } from "@t45/contracts/resources/Runner";
 import type * as Cause from "effect/Cause";
@@ -24,10 +24,10 @@ import { RunnerService } from "./RunnerService.ts";
 type RunnerRpc = RpcGroup.Rpcs<typeof RunnerRpcs>;
 type Payload<Tag extends RunnerRpc["_tag"]> = Rpc.Payload<Rpc.ExtractTag<RunnerRpc, Tag>>;
 
-interface Run {
-  readonly request: RunRequest;
+interface Execution {
+  readonly request: ExecutionRequest;
   readonly messages: Array<Message>;
-  readonly events: Queue.Queue<RunUpdate, Cause.Done>;
+  readonly events: Queue.Queue<ExecutionUpdate, Cause.Done>;
   readonly ended: Deferred.Deferred<void>;
 }
 
@@ -35,29 +35,30 @@ const NOW = 1_790_000_000_000;
 const decodeSession = Schema.decodeUnknownSync(Session.Info);
 const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Info);
 
-/** A runner at the contract's level: tests script what its runs emit and read what T45 sent it. */
+/** A runner at the contract's level: tests script what its executions emit and read what T45 sent it. */
 const make = () => {
-  const running = new Map<string, Run>();
+  const running = new Map<string, Execution>();
   let next = 1;
 
-  const runOf = (id: string) => {
-    const run = running.get(id);
-    if (run === undefined) throw new Error(`No run for ${id}.`);
-    return run;
+  const executionOf = (id: string) => {
+    const execution = running.get(id);
+    if (execution === undefined) throw new Error(`No execution for ${id}.`);
+    return execution;
   };
-  const emit = (run: Run, event: RunUpdate) => void Queue.offerUnsafe(run.events, event);
-  const write = (run: Run, message: unknown) =>
-    emit(run, {
+  const emit = (execution: Execution, event: ExecutionUpdate) =>
+    void Queue.offerUnsafe(execution.events, event);
+  const write = (execution: Execution, message: unknown) =>
+    emit(execution, {
       _tag: "messages",
-      sessionId: run.request.root,
+      sessionId: execution.request.root,
       messages: [decodeMessage(message)],
     });
-  const deliver = (run: Run, message: Message) => {
-    if (!fake.hold) write(run, { ...message, type: "user", time: { created: NOW } });
+  const deliver = (execution: Execution, message: Message) => {
+    if (!fake.hold) write(execution, { ...message, type: "user", time: { created: NOW } });
   };
   /** As in a new VM: the root session, then each message the agent takes. */
-  const begin = (run: Run) => {
-    const { root, title } = run.request;
+  const begin = (execution: Execution) => {
+    const { root, title } = execution.request;
     const info = decodeSession({
       id: root,
       title,
@@ -67,21 +68,21 @@ const make = () => {
       time: { created: NOW, updated: NOW },
       location: { directory: "/work" },
     });
-    emit(run, { _tag: "sessions", sessions: [info] });
-    for (const message of run.messages) deliver(run, message);
+    emit(execution, { _tag: "sessions", sessions: [info] });
+    for (const message of execution.messages) deliver(execution, message);
   };
 
   const fake = {
     /** Set to keep messages from the agent: they stay pending. */
     hold: false,
-    /** Set to fail each run with this reason. */
+    /** Set to fail each execution with this reason. */
     refuse: null as string | null,
-    /** Every run T45 asked for, refused ones included. */
-    runs: [] as Array<Payload<"run">>,
+    /** Every execution T45 asked for, refused ones included. */
+    executions: [] as Array<Payload<"execute">>,
     sends: [] as Array<Payload<"send">>,
     answers: [] as Array<Payload<"answer">>,
     cancels: [] as Array<Payload<"cancel">>,
-    emit: (id: string, event: RunUpdate) => emit(runOf(id), event),
+    emit: (id: string, event: ExecutionUpdate) => emit(executionOf(id), event),
     /** The agent writes a reply in the root, unfinished while `streaming`. Returns its id. */
     reply: (
       id: string,
@@ -89,7 +90,7 @@ const make = () => {
       options: { readonly streaming?: boolean; readonly parts?: number } = {},
     ) => {
       const messageId = `msg_a${String(next++)}`;
-      write(runOf(id), {
+      write(executionOf(id), {
         id: messageId,
         type: "assistant",
         agent: "build",
@@ -101,21 +102,21 @@ const make = () => {
     },
     /** The agent asks a question in the root. Returns its form's id. */
     ask: (id: string) => {
-      const run = runOf(id);
+      const execution = executionOf(id);
       const form = Form.Info.make({
         id: Form.ID.make(`frm_${String(next++)}`),
-        sessionID: run.request.root,
+        sessionID: execution.request.root,
         title: "Which year?",
         fields: [{ key: "year", type: "string" }],
       });
-      emit(run, { _tag: "questions", forms: [form] });
+      emit(execution, { _tag: "questions", forms: [form] });
       return form.id;
     },
-    /** The run's VM was lost: it starts over in a new one. */
+    /** The execution's VM was lost: it starts over in a new one. */
     restart: (id: string) => {
-      const run = runOf(id);
-      emit(run, { _tag: "restarted" });
-      begin(run);
+      const execution = executionOf(id);
+      emit(execution, { _tag: "restarted" });
+      begin(execution);
     },
     finish: (
       id: string,
@@ -124,39 +125,39 @@ const make = () => {
         disk = new Uint8Array(),
       }: { readonly outcome?: "failed" | null; readonly disk?: Uint8Array } = {},
     ) => {
-      const run = runOf(id);
-      emit(run, { _tag: "finished", outcome, disk });
-      Queue.endUnsafe(run.events);
+      const execution = executionOf(id);
+      emit(execution, { _tag: "finished", outcome, disk });
+      Queue.endUnsafe(execution.events);
     },
-    /** Waits until the chat's run call ended: at once when none runs. */
+    /** Waits until the chat's `execute` call ended: at once when none runs. */
     ended: (id: string) =>
       Effect.suspend(() => {
-        const run = running.get(id);
-        return run === undefined ? Effect.void : Deferred.await(run.ended);
+        const execution = running.get(id);
+        return execution === undefined ? Effect.void : Deferred.await(execution.ended);
       }),
   };
 
   const handlers = RunnerRpcs.of({
-    run: (payload) =>
+    execute: (payload) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          fake.runs.push(payload);
+          fake.executions.push(payload);
           if (fake.refuse !== null) {
             return Stream.die(fake.refuse);
           }
-          const run: Run = {
+          const execution: Execution = {
             request: payload.request,
             messages: [...payload.request.messages],
-            events: yield* Queue.unbounded<RunUpdate, Cause.Done>(),
+            events: yield* Queue.unbounded<ExecutionUpdate, Cause.Done>(),
             ended: yield* Deferred.make<void>(),
           };
-          running.set(payload.id, run);
-          begin(run);
-          return Stream.fromQueue(run.events).pipe(
+          running.set(payload.id, execution);
+          begin(execution);
+          return Stream.fromQueue(execution.events).pipe(
             Stream.ensuring(
               Effect.suspend(() => {
-                if (running.get(payload.id) === run) running.delete(payload.id);
-                return Deferred.succeed(run.ended, undefined);
+                if (running.get(payload.id) === execution) running.delete(payload.id);
+                return Deferred.succeed(execution.ended, undefined);
               }),
             ),
           );
@@ -165,10 +166,10 @@ const make = () => {
     send: (payload) =>
       Effect.sync(() => {
         fake.sends.push(payload);
-        const run = running.get(payload.id);
-        if (run === undefined) return;
-        run.messages.push(payload.message);
-        deliver(run, payload.message);
+        const execution = running.get(payload.id);
+        if (execution === undefined) return;
+        execution.messages.push(payload.message);
+        deliver(execution, payload.message);
       }),
     answer: (payload) => Effect.sync(() => void fake.answers.push(payload)),
     dismiss: () => Effect.void,

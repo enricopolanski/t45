@@ -97,7 +97,7 @@ describe("a chat's execution", () => {
         );
         yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, "input-1"), "settled"));
 
-        const { request } = runner.runs[0]!;
+        const { request } = runner.executions[0]!;
         assert.deepEqual(request.agent, {
           instructions: "Use the policy.",
           model: "opencode-go/other-model",
@@ -147,14 +147,14 @@ describe("a chat's execution", () => {
   );
 
   it.effect(
-    "runs a follow-up on the saved disk, sending only the new input, and ends with the run's outcome",
+    "runs a follow-up on the saved disk, sending only the new input, and ends with the execution's outcome",
     () =>
       Effect.gen(function* () {
         const { runner, chatId, ended, deliver, converse } = yield* setup;
         yield* converse("input-1", "Sum the receipts.");
 
         yield* deliver("input-2", "Email it.");
-        const { request } = runner.runs[1]!;
+        const { request } = runner.executions[1]!;
         assert.deepEqual(request.disk, disk);
         assert.deepEqual(
           request.messages.map((message) => message.id),
@@ -166,7 +166,7 @@ describe("a chat's execution", () => {
   );
 
   it.effect(
-    "discards what a run wrote when the runner starts it over, and keeps the chat running",
+    "discards what an execution wrote when the runner starts it over, and keeps the chat running",
     () =>
       Effect.gen(function* () {
         const { runner, chatId, events, ended, deliver, converse } = yield* setup;
@@ -187,7 +187,7 @@ describe("a chat's execution", () => {
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
-  it.effect("fails when its run fails, and runs every pending input at the next send", () =>
+  it.effect("fails when its execution fails, and runs every pending input at the next send", () =>
     Effect.gen(function* () {
       const { runner, chatId, ended, send, deliver } = yield* setup;
       runner.refuse = "The agent's image is missing.";
@@ -197,14 +197,14 @@ describe("a chat's execution", () => {
       runner.refuse = null;
       yield* deliver("input-2", "Still there?");
       assert.deepEqual(
-        runner.runs.map(({ request }) => request.messages.map((message) => message.id)),
+        runner.executions.map(({ request }) => request.messages.map((message) => message.id)),
         [messageIds(chatId, "input-1"), messageIds(chatId, "input-1", "input-2")],
       );
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
   it.effect(
-    "stops by ending its run and discarding what it wrote, and the next run sends the input again",
+    "stops by ending its execution and discarding what it wrote, and the next execution sends the input again",
     () =>
       Effect.gen(function* () {
         const { runner, chats, chatId, events, ended, deliver } = yield* setup;
@@ -224,29 +224,31 @@ describe("a chat's execution", () => {
 
         yield* deliver("input-2", "Zip them too.");
         assert.deepEqual(
-          runner.runs.at(-1)?.request.messages.map((message) => message.id),
+          runner.executions.at(-1)?.request.messages.map((message) => message.id),
           messageIds(chatId, "input-1", "input-2"),
         );
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
-  it.effect("sends a follow-up to its run, and cancels it by having the runner withdraw it", () =>
-    Effect.gen(function* () {
-      const { runner, chats, chatId, repository, send, deliver } = yield* setup;
-      yield* deliver("input-1", "Sort the files.");
-      runner.hold = true;
-      yield* send("input-2", "Then zip them.");
-      assert.include(
-        runner.sends.map(({ message }) => message.id),
-        inputMessageId(chatId, "input-2"),
-      );
+  it.effect(
+    "sends a follow-up to its execution, and cancels it by having the runner withdraw it",
+    () =>
+      Effect.gen(function* () {
+        const { runner, chats, chatId, repository, send, deliver } = yield* setup;
+        yield* deliver("input-1", "Sort the files.");
+        runner.hold = true;
+        yield* send("input-2", "Then zip them.");
+        assert.include(
+          runner.sends.map(({ message }) => message.id),
+          inputMessageId(chatId, "input-2"),
+        );
 
-      yield* chats.cancel({ chatId, inputId: "input-2" }, alice);
-      assert.deepEqual(runner.cancels, [
-        { id: chatId, messageId: inputMessageId(chatId, "input-2") },
-      ]);
-      assert.isNull(yield* repository.input(chatId, "input-2"));
-    }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
+        yield* chats.cancel({ chatId, inputId: "input-2" }, alice);
+        assert.deepEqual(runner.cancels, [
+          { id: chatId, messageId: inputMessageId(chatId, "input-2") },
+        ]);
+        assert.isNull(yield* repository.input(chatId, "input-2"));
+      }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
   it.effect("shows the agent's question and answers it with the files the answer names", () =>
@@ -303,7 +305,7 @@ describe("a server start", () => {
       const events = yield* Fixture.follow(chatId, alice).pipe(Effect.provide(started));
       yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, "input-1"), "settled"));
       assert.deepEqual(
-        runner.runs.map(({ id }) => id),
+        runner.executions.map(({ id }) => id),
         [chatId],
       );
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),

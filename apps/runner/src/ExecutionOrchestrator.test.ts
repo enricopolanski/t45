@@ -7,7 +7,7 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
-import * as Capture from "./Capture.ts";
+import * as ExecutionOrchestrator from "./ExecutionOrchestrator.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -23,10 +23,7 @@ const serving = (events: ReadonlyArray<unknown>) =>
     ),
   );
 
-const connect = Capture.connect({
-  url: "http://127.0.0.1:4096",
-  password: Redacted.make("secret"),
-});
+const connect = ExecutionOrchestrator.connect("http://127.0.0.1:4096", Redacted.make("secret"));
 
 /** Sends `events`, then keeps the connection open without another byte, like a frozen server. */
 const servingThenSilent = (events: ReadonlyArray<unknown>) =>

@@ -39,7 +39,7 @@ TODO:
 ## Taste
 
 - TODO:
-- Complexity lives at the OpenCode boundary, in the runner's `Executions.ts` for how an execution happens, `ChatExecutions.ts` for what T45 keeps of it, and `TaskService.ts` and workflow hooks for applying task receipts; T45 stores and sends OpenCode's own shapes, imported from `@opencode/*` and never declared again, and UI stays dumb.
+- Complexity lives at the OpenCode boundary, in the runner's `ExecutionOrchestrator.ts` for how an execution happens, `ChatExecutions.ts` for what T45 keeps of it, and `TaskService.ts` and workflow hooks for applying task receipts; T45 stores and sends OpenCode's own shapes, imported from `@opencode/*` and never declared again, and UI stays dumb.
 - Inferred types over annotations; no `any`. Comments describe how a thing is used.
 
 ## Documentation

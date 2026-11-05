@@ -20,7 +20,7 @@ export const Message = Schema.Struct({
 });
 export type Message = typeof Message.Type;
 
-export const RunRequest = Schema.Struct({
+export const ExecutionRequest = Schema.Struct({
   agent: Schema.Struct({
     ...Struct.pick(Agent.fields, ["instructions", "model", "mcpServers", "permissions"]),
     files: FilesByPath(AGENT_SETUP_PATHS),
@@ -37,9 +37,9 @@ export const RunRequest = Schema.Struct({
   files: Files,
   messages: Schema.Array(Message),
 });
-export type RunRequest = typeof RunRequest.Type;
+export type ExecutionRequest = typeof ExecutionRequest.Type;
 
-export const RunUpdate = Schema.Union([
+export const ExecutionUpdate = Schema.Union([
   /** The root and every session under it, parents first. */
   Schema.TaggedStruct("sessions", { sessions: Schema.Array(Session.Info) }),
   Schema.TaggedStruct("messages", {
@@ -56,7 +56,7 @@ export const RunUpdate = Schema.Union([
   Schema.TaggedStruct("questions", { forms: Schema.Array(Form.Info) }),
   /** Before the messages that name it. */
   Schema.TaggedStruct("file", { path: Schema.String, content: Schema.Uint8Array }),
-  /** The sandbox was lost: everything since the run started is void, and a new sandbox starts over. */
+  /** The sandbox was lost: everything since the execution started is void, and a new sandbox starts over. */
   Schema.TaggedStruct("restarted", {}),
   /** Keeps the call's connection from going idle while the agent waits. */
   Schema.TaggedStruct("heartbeat", {}),
@@ -65,7 +65,7 @@ export const RunUpdate = Schema.Union([
     disk: Schema.Uint8Array,
   }),
 ]);
-export type RunUpdate = typeof RunUpdate.Type;
+export type ExecutionUpdate = typeof ExecutionUpdate.Type;
 
 /** Whether OpenCode finished writing the message. */
 export const isSettled = (message: SessionMessage.Info) => {
@@ -86,11 +86,11 @@ export class AnswerInvalid extends Schema.TaggedError<AnswerInvalid>()("AnswerIn
 
 const question = { id: Schema.String, sessionId: Session.ID, formId: Form.ID };
 
-/** One execution per `id` at a time; it lasts as long as its `run` call. */
+/** One execution per `id` at a time; it lasts as long as its `execute` call. */
 export const RunnerRpcs = RpcGroup.make(
-  Rpc.make("run", {
-    payload: { id: Schema.String, request: RunRequest },
-    success: RunUpdate,
+  Rpc.make("execute", {
+    payload: { id: Schema.String, request: ExecutionRequest },
+    success: ExecutionUpdate,
     stream: true,
   }),
   Rpc.make("send", { payload: { id: Schema.String, message: Message, files: Files } }),
