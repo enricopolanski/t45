@@ -6,7 +6,7 @@ import {
   Session,
   SessionMessage,
 } from "@opencode/client/effect";
-import { OpenCodeEvent } from "@opencode/protocol/groups/event";
+import type { OpenCodeEvent } from "@opencode/protocol/groups/event";
 import {
   AnswerInvalid,
   type Message,
@@ -17,7 +17,6 @@ import {
   RunnerRpcs,
 } from "@t45/contracts/resources/Runner";
 import * as Effect from "effect/Effect";
-import * as Sse from "effect/encoding/Sse";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
@@ -41,38 +40,30 @@ type ExecutionHandlers = {
   ) => Effect.Effect<void, Rpc.Error<R>>;
 };
 
-const decodeEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(OpenCodeEvent));
-
-const readEvents = (httpClient: HttpClient.HttpClient) =>
-  httpClient.get("/api/event", { headers: { accept: "text/event-stream" } }).pipe(
-    Effect.flatMap(HttpClientResponse.filterStatusOk),
-    Effect.map((response) =>
-      response.stream.pipe(
-        Stream.timeout("45 seconds"),
-        Stream.decodeText,
-        Stream.pipeThroughChannel(Sse.decode()),
-        Stream.mapEffect((frame) => decodeEvent(frame.data)),
-      ),
-    ),
-    Stream.unwrap,
-  );
-
 /**
  * The event stream is volatile: work whose events matter starts after its `server.connected`.
  * It ends when OpenCode goes silent.
  */
 export const connect = Effect.fnUntraced(function* (url: string, password: Redacted.Redacted) {
-  const authenticated = HttpClient.mapRequest(
-    yield* HttpClient.HttpClient,
-    HttpClientRequest.basicAuth("opencode", password),
+  const httpClient = (yield* HttpClient.HttpClient).pipe(
+    HttpClient.mapRequest(HttpClientRequest.basicAuth("opencode", password)),
+    HttpClient.transformResponse(
+      Effect.map((response) => {
+        if (!response.headers["content-type"]?.startsWith("text/event-stream")) return response;
+        // Count heartbeat bytes before the SDK discards SSE comments.
+        return Object.defineProperty(response, "stream", {
+          value: response.stream.pipe(Stream.timeout("45 seconds")),
+        });
+      }),
+    ),
   );
   const client = yield* OpenCode.make({ baseUrl: url }).pipe(
-    Effect.provideService(HttpClient.HttpClient, authenticated),
+    Effect.provideService(HttpClient.HttpClient, httpClient),
   );
-  const prefixed = HttpClient.mapRequest(authenticated, HttpClientRequest.prependUrl(url));
+  const prefixed = HttpClient.mapRequest(httpClient, HttpClientRequest.prependUrl(url));
   return {
     client,
-    events: readEvents(prefixed),
+    events: client.event.subscribe(),
     /** Bounded by time only: an agent can make a file as large as its disk. */
     readFile: (path: string) =>
       prefixed.get(`/api/fs/read/${path.split("/").map(encodeURIComponent).join("/")}`).pipe(

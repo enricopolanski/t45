@@ -78,7 +78,7 @@ describe("OpenCode events", () => {
         ),
       );
       const failure = yield* events.pipe(Stream.runDrain, Effect.flip);
-      assert.strictEqual(failure._tag, "SchemaError");
+      assert.isTrue(failure._tag === "ClientError" && Schema.isSchemaError(failure.cause));
     }),
   );
 });
