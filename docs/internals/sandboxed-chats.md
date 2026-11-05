@@ -14,14 +14,13 @@ The consumer and execution share a fiber, so stops cancel result handling direct
 
 ## Fail closed
 
-The server doesn't start without `RUNNER_URL` and `RUNNER_TOKEN`, and the runner doesn't start without `T45_RUNNER_TOKEN` and `OPENCODE_API_KEY`, the OpenCode Go key every VM's model runs on. A VM the sandbox refuses, because it could not start (as without KVM), fails the chat, and with it a step's agent work; the reason goes to the runner's log. Nothing falls back to T45. A runner out of reach is only waited out (see [Chats](./chats.md)): a step's agent has no deadline and no outage limit.
+The server doesn't start without `RUNNER_URL` and `RUNNER_TOKEN`, and the runner doesn't start without any of its settings, among them `OPENCODE_API_KEY`, the OpenCode Go key every VM's model runs on. A VM the sandbox refuses, because it could not start (as without KVM), fails the chat, and with it a step's agent work; the reason goes to the runner's log. Nothing falls back to T45. A runner out of reach is only waited out (see [Chats](./chats.md)): a step's agent has no deadline and no outage limit.
 
 ## What a chat reaches
 
 - **Network.** Deny by default, OpenCode Go's host allowed on 443. TLS interception is always on: microsandbox's strict mode refuses a domain rule without it, and it adds the `Host` check. The provider-only network has no DNS rule; one would resolve every name, which leaks through query names. With the network open, DNS goes through the host and the public internet is allowed, T45's and the runner's public addresses included: their endpoints authenticate every caller.
 - **The key.** A microsandbox secret bound to OpenCode Go's host and substituted only in the `authorization` header. The guest holds a placeholder; sent anywhere else, it is refused.
 - **Files.** A chat's files reach the runner with `run`, `send` and `answer`, and go into `/work/attachments`, at most 50 MiB each (`ATTACHMENT_MAX_FILE_BYTES`). Nothing of the host is mounted, and the host never writes a path the guest named. An attach copies the file to `/work/.t45/attached/<uuid>`, which the saved workspace leaves out. The runner reads every file there through OpenCode, as the agent, and sends it as a `file` event before the messages naming it; the workflow hook looks up the name the reply gives among the files the runner sent, so the agent can't point T45 at a file it didn't leave there. The hook reads and stores the snapshot as the agent's pending `application/octet-stream` file before the call transaction, which only claims the stored attachment and applies workflow changes; a refused attachment is left to the sweep. An attach whose snapshot never arrived, as when the agent removed it first, is refused in the chat, so the agent can attach the file again.
-- **Addresses.** Sandboxes take their addresses from `T45_RUNNER_SANDBOX_POOL` (10.200.0.0/16 by default). Choose a pool that does not overlap the runner's network.
 
 ## Limits
 

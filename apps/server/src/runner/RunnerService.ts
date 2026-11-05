@@ -3,7 +3,7 @@ import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { RpcClient, RpcSerialization } from "effect/rpc";
@@ -20,15 +20,8 @@ export class RunnerService extends Context.Service<RunnerService, Effect.Success
 
 const layer = Layer.unwrap(
   Effect.gen(function* () {
-    const url = (yield* Config.String("RUNNER_URL").pipe(Config.withDefault(""))).trim();
-    const token = yield* Config.Redacted("RUNNER_TOKEN").pipe(
-      Config.withDefault(Redacted.make("")),
-    );
-    if (url === "" || Redacted.value(token).trim() === "") {
-      return yield* Effect.die(
-        "RUNNER_URL and RUNNER_TOKEN are required: chats run on that runner.",
-      );
-    }
+    const url = yield* Config.schema(Schema.NonEmptyString, "RUNNER_URL");
+    const token = yield* Config.schema(Schema.Redacted(Schema.NonEmptyString), "RUNNER_TOKEN");
     return Layer.effect(RunnerService, make).pipe(
       Layer.provide(
         RpcClient.layerProtocolHttp({

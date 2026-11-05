@@ -55,7 +55,6 @@ const sandboxNetwork =
     }
     return settings
       .policyFromBuilder(policy)
-      .ipv4Pool(config.ipv4Pool)
       .tls((tls) => tls)
       .secret((secret) =>
         secret

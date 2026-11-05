@@ -1,17 +1,16 @@
 /*
- * The runner's settings, from its environment:
+ * The runner's settings, from its environment, all required:
  *
- *   T45_RUNNER_HOST, T45_RUNNER_PORT   where it listens (127.0.0.1:8790 by default)
- *   T45_RUNNER_TOKEN                   the bearer token T45 sends; required
- *   T45_RUNNER_IMAGE                   the agent image (t45-agent:dev by default)
- *   T45_RUNNER_SANDBOX_POOL            sandbox addresses (10.200.0.0/16 by default)
- *   OPENCODE_API_KEY                   the OpenCode Go key agents' models run on; required
+ *   T45_RUNNER_HOST, T45_RUNNER_PORT   where it listens
+ *   T45_RUNNER_TOKEN                   the bearer token T45 sends
+ *   T45_RUNNER_IMAGE                   the agent image
+ *   OPENCODE_API_KEY                   the OpenCode Go key agents' models run on
  */
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Redacted from "effect/Redacted";
+import type * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
 
 export class RunnerConfig extends Context.Service<
   RunnerConfig,
@@ -20,35 +19,19 @@ export class RunnerConfig extends Context.Service<
     readonly port: number;
     readonly token: Redacted.Redacted;
     readonly image: string;
-    readonly ipv4Pool: string;
-    /** Signs VMs in to OpenCode Go; inside a VM, OpenCode only sees a placeholder. */
     readonly openCodeKey: Redacted.Redacted;
   }
 >()("@t45/runner/RunnerConfig") {}
 
-/** A secret the runner can't start without; `why` says what it is for. */
-const required = (name: string, why: string) =>
-  Effect.gen(function* () {
-    const value = yield* Config.Redacted(name).pipe(Config.withDefault(Redacted.make("")));
-    if (Redacted.value(value).trim() === "") {
-      return yield* Effect.die(`${name} is required: ${why}`);
-    }
-    return value;
-  });
+const secret = (name: string) => Config.schema(Schema.Redacted(Schema.NonEmptyString), name);
 
-const make = Effect.gen(function* () {
-  const token = yield* required("T45_RUNNER_TOKEN", "T45 sends it as its bearer token.");
-  const openCodeKey = yield* required("OPENCODE_API_KEY", "agents' models run on OpenCode Go.");
-  return RunnerConfig.of({
-    host: yield* Config.String("T45_RUNNER_HOST").pipe(Config.withDefault("127.0.0.1")),
-    port: yield* Config.Port("T45_RUNNER_PORT").pipe(Config.withDefault(8790)),
-    token,
-    image: yield* Config.String("T45_RUNNER_IMAGE").pipe(Config.withDefault("t45-agent:dev")),
-    ipv4Pool: yield* Config.String("T45_RUNNER_SANDBOX_POOL").pipe(
-      Config.withDefault("10.200.0.0/16"),
-    ),
-    openCodeKey,
-  });
-});
-
-export const layer = Layer.effect(RunnerConfig, make);
+export const layer = Layer.effect(
+  RunnerConfig,
+  Config.all({
+    host: Config.schema(Schema.NonEmptyString, "T45_RUNNER_HOST"),
+    port: Config.Port("T45_RUNNER_PORT"),
+    token: secret("T45_RUNNER_TOKEN"),
+    image: Config.schema(Schema.NonEmptyString, "T45_RUNNER_IMAGE"),
+    openCodeKey: secret("OPENCODE_API_KEY"),
+  }),
+);
