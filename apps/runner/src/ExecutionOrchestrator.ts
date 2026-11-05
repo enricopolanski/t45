@@ -19,7 +19,6 @@ import {
 import * as Effect from "effect/Effect";
 import * as Sse from "effect/encoding/Sse";
 import * as HttpClient from "effect/http/HttpClient";
-import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as Latch from "effect/Latch";
@@ -43,45 +42,6 @@ type ExecutionHandlers = {
 };
 
 const decodeEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(OpenCodeEvent));
-
-/** The agent controls what OpenCode answers, so the runner reads no more of any answer. */
-const RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
-
-const BODYLESS = new Set([101, 204, 205, 304]);
-
-const capResponses = (client: HttpClient.HttpClient) =>
-  HttpClient.transformResponse(
-    client,
-    Effect.flatMap((response) => {
-      if (BODYLESS.has(response.status)) return Effect.succeed(response);
-      let size = 0;
-      const body = response.stream.pipe(
-        Stream.mapEffect((chunk) => {
-          size += chunk.byteLength;
-          return size <= RESPONSE_MAX_BYTES
-            ? Effect.succeed(chunk)
-            : Effect.fail(
-                new HttpClientError.HttpClientError({
-                  reason: new HttpClientError.DecodeError({
-                    request: response.request,
-                    response,
-                    description: `The answer is larger than ${RESPONSE_MAX_BYTES} bytes.`,
-                  }),
-                }),
-              );
-        }),
-      );
-      return Effect.succeed(
-        HttpClientResponse.fromWeb(
-          response.request,
-          new Response(Stream.toReadableStream(body), {
-            status: response.status,
-            headers: { ...response.headers },
-          }),
-        ),
-      );
-    }),
-  );
 
 const readEvents = (httpClient: HttpClient.HttpClient) =>
   httpClient.get("/api/event", { headers: { accept: "text/event-stream" } }).pipe(
@@ -107,7 +67,7 @@ export const connect = Effect.fnUntraced(function* (url: string, password: Redac
     HttpClientRequest.basicAuth("opencode", password),
   );
   const client = yield* OpenCode.make({ baseUrl: url }).pipe(
-    Effect.provideService(HttpClient.HttpClient, capResponses(authenticated)),
+    Effect.provideService(HttpClient.HttpClient, authenticated),
   );
   const prefixed = HttpClient.mapRequest(authenticated, HttpClientRequest.prependUrl(url));
   return {
@@ -222,7 +182,7 @@ export const layer = RunnerRpcs.toLayer(
       request: ExecutionRequest,
       emit: (event: ExecutionUpdate) => Effect.Effect<void>,
     ) {
-      let state: "starting" | "active" | "finished" = "starting";
+      let active = false;
       const root = request.root;
       /** Null after delivery or cancellation, so a duplicate send cannot deliver it again. */
       const inputs = new Map<string, { message: Message; files: ExecutionRequest["files"] } | null>(
@@ -234,7 +194,7 @@ export const layer = RunnerRpcs.toLayer(
       const handlers: ExecutionHandlers = {
         send: ({ message, files }) =>
           Effect.suspend(() => {
-            if (state === "finished" || inputs.has(message.id)) return Effect.void;
+            if (inputs.has(message.id)) return Effect.void;
             inputs.set(message.id, { message, files });
             return wake.open.pipe(Effect.asVoid);
           }),
@@ -243,7 +203,7 @@ export const layer = RunnerRpcs.toLayer(
             Effect.gen(function* () {
               const input = inputs.get(messageId);
               inputs.set(messageId, null);
-              if (state !== "active" || input !== null) return;
+              if (!active || input !== null) return;
               yield* client.session.inbox
                 .cancel({ sessionID: root, inboxID: messageId })
                 .pipe(Effect.ignore);
@@ -251,7 +211,7 @@ export const layer = RunnerRpcs.toLayer(
           ),
         answer: ({ sessionId, formId, answer, files }) =>
           Effect.gen(function* () {
-            if (state !== "active") return yield* new QuestionGone();
+            if (!active) return yield* new QuestionGone();
             yield* writeFiles(files);
             yield* client.session.form.reply({ sessionID: sessionId, formID: formId, answer });
           }).pipe(
@@ -261,7 +221,7 @@ export const layer = RunnerRpcs.toLayer(
           ),
         dismiss: ({ sessionId, formId }) =>
           Effect.suspend(() =>
-            state === "active"
+            active
               ? client.session.form
                   .cancel({ sessionID: sessionId, formID: formId })
                   .pipe(Effect.mapError(() => new QuestionGone()))
@@ -270,7 +230,7 @@ export const layer = RunnerRpcs.toLayer(
       };
       controls.set(id, handlers);
       const close = () => {
-        state = "finished";
+        active = false;
         if (controls.get(id) === handlers) controls.delete(id);
       };
       yield* Effect.addFinalizer(() => Effect.sync(close));
@@ -451,7 +411,7 @@ export const layer = RunnerRpcs.toLayer(
           ],
         });
         yield* client.session.switchModel({ sessionID: root, model });
-        state = "active";
+        active = true;
         while (true) {
           yield* deliver;
           const marked = marks;
@@ -483,7 +443,7 @@ export const layer = RunnerRpcs.toLayer(
           yield* Effect.sleep("150 millis");
           yield* wake.close;
         }
-      }).pipe(Effect.ensuring(Effect.sync(close)));
+      });
 
       /** Deltas go out as they come; any other event only marks what the next pass reads. */
       const consumeEvents = events.pipe(

@@ -129,7 +129,7 @@ The worker is the main OpenCode boundary: VM boot/restore, native event reconcil
 
 Concrete fixes to consider before cosmetic extraction:
 
-- The mailbox is unbounded and receives an `events` item for every marked native event even though Marks already coalesces their effects. Use a single pending-capture notification with an urgent flag while retaining separately queued member jobs/wakes. Slow capture or VM jobs otherwise allow an arbitrarily large redundant backlog.
+- The mailbox is unbounded and receives an `events` item for every marked native event even though the marks already coalesce their effects. Use a single pending-capture notification with an urgent flag while retaining separately queued member jobs/wakes. Slow capture or VM jobs otherwise allow an arbitrarily large redundant backlog.
 - A malformed model becomes undefined and create/import omit it, letting OpenCode select a default. Fail explicitly at the boundary; the shared parser's own comment says silent defaulting records the wrong model.
 - Both activity detection and a stop's shell removal read only the first shell page. Paginate consistently; otherwise a running shell can be missed and its VM slept/stopped incorrectly.
 - `captureSession` re-fetches the whole stored session list for every session, while tree reconciliation repeatedly scans held sessions. Index session state once per pass, retain incremental captures and keep paged tail cursors. Batch repeated row reads where possible.
