@@ -79,10 +79,6 @@ Issues random opaque cookies, stores only hashes, checks current user role/state
 
 Turns verified identity into an approved/pending/deactivated membership decision and an ordinary server session. Preserve token verification outside the SQL transaction, first-user administration, admission/session atomicity, confirmed-name preservation and current email/avatar suggestions. Normalize the old interface-plus-Context.Service definition to the class with inline interface used elsewhere. `toInternalError` only constructs an error; inline it or make a meaningful error factory, and use Schema.TaggedError rather than the isolated Data.TaggedError form. Avoid conditional object spreads for optional properties when the types can accept undefined directly. These are modest readability cuts, not reasons to split a small service into admission/profile/session coordinators.
 
-### `src/bin.ts` — Keep
-
-The 14-line composition root resolves configuration, scopes resources, provides Node services, and runs the server. It has no CLI compatibility layer or hidden work. No useful cut. Consider duplicate `NodeServices.layer` provision together with `server.ts`, rather than changing either independently.
-
 ### `src/chats/AttachmentPrompt.test.ts` — Keep both; reduce prose snapshot brittleness
 
 One test checks usable image/document paths; the other checks quote escaping, preserving answer selections and special-key safety without mutation. These are distinct meaningful behaviors. Assert references/path/retained answers without pinning every surrounding sentence if prompt wording is not a contract. Add the length-bound/omitted-reference behavior when that policy is decided. Do not remove the prototype-key case as an arbitrary edge: object construction otherwise changes answer meaning.
@@ -205,7 +201,7 @@ Accepts raw methods and body, caps the body at `WEBHOOK_MAX_BODY_BYTES`, keeps t
 
 Renders a webhook's prompt from path lookups and explicit whole-body/request placeholders, with aggregate headers and query redacted and explicitly named fields raw, and checks an HMAC-SHA256 signature over the raw body. Keep that distinction: indiscriminate redaction would change requested agent input, while indiscriminate raw expansion would leak secrets; own-property lookup prevents prototype traversal. A `query` placeholder builds a new `URLSearchParams` for every occurrence; parse it once per render. A small template repeating `{{body}}` can expand far beyond the body cap before the 120,000-character refusal; bound output while rendering. `constantTimeEquals` hashes both strings, so its time still depends on their length even though the final compare is fixed-length; state the real guarantee. `verifySignature`'s comment says GitHub, Linear, Shopify and most other senders sign only the raw body; some schemes include timestamps or canonical strings, so keep the supported scheme explicit rather than adding vendor modes speculatively.
 
-### `src/server.ts` — Keep the layer groups
+### `src/bin.ts` — Keep the layer groups
 
 Owns the actual HTTP server, domain layer graph, routes, logging and worker activation. The named layer groups are useful; do not replace them with a generic service registry. Router segment length and zero preemptive shutdown delay address real transport constraints. Imports/layer wiring are large but not business logic to move into domain services.
 
