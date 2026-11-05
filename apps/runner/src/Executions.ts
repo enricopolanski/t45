@@ -17,7 +17,6 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as Capture from "./Capture.ts";
-import { ModelCatalog } from "./ModelCatalog.ts";
 import { type Sandbox, SandboxManager } from "./Sandbox.ts";
 
 const CAPTURE_BATCH = "150 millis";
@@ -63,7 +62,6 @@ const isLost = (error: unknown) => {
 export const layer = RunnerRpcs.toLayer(
   Effect.gen(function* () {
     const sandboxManager = yield* SandboxManager;
-    const catalog = yield* ModelCatalog;
     const httpClient = yield* HttpClient.HttpClient;
     const executions = new Map<string, Running>();
 
@@ -182,7 +180,6 @@ export const layer = RunnerRpcs.toLayer(
       });
 
     return RunnerRpcs.of({
-      getModels: () => catalog.models,
       run: ({ id, request }) =>
         Stream.callback<RunUpdate>((queue) =>
           Effect.gen(function* () {

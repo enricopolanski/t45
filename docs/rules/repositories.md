@@ -13,4 +13,4 @@ One repository per entity (`agents/AgentRepository.ts`, `agents/SkillRepository.
 
 ## Handlers decide, repositories store
 
-A handler checks what the request needs (the caller's permission, a model the runner offers, skills that exist), builds the entity's next value (`{ ...agent, status: "archived", updatedAt }`), and hands it to the repository. Rules that involve other entities read them through those entities' repositories, never with a join of their own.
+A handler checks what the request needs (the caller's permission, a model OpenCode Go offers, skills that exist), builds the entity's next value (`{ ...agent, status: "archived", updatedAt }`), and hands it to the repository. Rules that involve other entities read them through those entities' repositories, never with a join of their own.

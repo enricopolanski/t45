@@ -7,7 +7,7 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { Agent, AgentModel, AGENT_SETUP_PATHS } from "../models/Agent.ts";
+import { Agent, AGENT_SETUP_PATHS } from "../models/Agent.ts";
 import { FilesByPath } from "../models/primitives.ts";
 import { Skill } from "../models/Skill.ts";
 
@@ -88,7 +88,6 @@ const question = { id: Schema.String, sessionId: Session.ID, formId: Form.ID };
 
 /** One execution per `id` at a time; it lasts as long as its `run` call. */
 export const RunnerRpcs = RpcGroup.make(
-  Rpc.make("getModels", { success: Schema.Array(AgentModel) }),
   Rpc.make("run", {
     payload: { id: Schema.String, request: RunRequest },
     success: RunUpdate,
