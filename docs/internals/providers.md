@@ -1,6 +1,6 @@
 # Provider constraints
 
-OpenCode is the only agent runtime, and the runner drives it from one place: an execution ([chats](./chats.md)), which reaches the VM's OpenCode server through [`OpenCode.ts`](../../apps/runner/src/OpenCode.ts). A step's agent works in a chat like any other ([sandboxed chats](./sandboxed-chats.md)).
+OpenCode is the only agent runtime, and the runner drives it from one place: an execution ([chats](./chats.md)), which reaches the VM's OpenCode server through [`Capture.ts`](../../apps/runner/src/Capture.ts). A step's agent works in a chat like any other ([sandboxed chats](./sandboxed-chats.md)).
 
 A chat names its agent, and the agent alone decides the model and the permissions; nothing past agent setup chooses or reads a model or provider.
 

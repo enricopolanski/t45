@@ -1,5 +1,5 @@
-import { type Form, Session, SessionMessage } from "@opencode/client/effect";
-import type { OpenCodeEvent } from "@opencode/protocol/groups/event";
+import { type Form, OpenCode, Session, SessionMessage } from "@opencode/client/effect";
+import { OpenCodeEvent } from "@opencode/protocol/groups/event";
 import { type RunUpdate, isSettled } from "@t45/contracts/resources/Runner";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -7,8 +7,13 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as Sse from "effect/encoding/Sse";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
-import * as OpenCode from "./OpenCode.ts";
+import type { Sandbox } from "./Sandbox.ts";
 
 export class StreamEndedError extends Schema.TaggedError<StreamEndedError>()(
   "StreamEndedError",
@@ -69,8 +74,114 @@ const mark = (marks: Marks, event: OpenCodeEvent): boolean => {
   return true;
 };
 
+/** The sessions under `root`, each after its parent; the agent controls parents, so a cycle can't repeat one. */
+const sessionsUnder = (root: string, sessions: ReadonlyArray<Session.Info>) => {
+  const children = new Map<string, Array<Session.Info>>();
+  for (const session of sessions) {
+    if (session.parentID === undefined) continue;
+    const siblings = children.get(session.parentID) ?? [];
+    siblings.push(session);
+    children.set(session.parentID, siblings);
+  }
+  const under: Array<Session.Info> = [];
+  const seen = new Set([root]);
+  const parents = [root];
+  for (let at = 0; at < parents.length; at++) {
+    for (const child of children.get(parents[at] ?? "") ?? []) {
+      if (seen.has(child.id)) continue;
+      seen.add(child.id);
+      under.push(child);
+      parents.push(child.id);
+    }
+  }
+  return under;
+};
+
+const decodeEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(OpenCodeEvent));
+
+/** The agent controls what OpenCode answers, so the runner reads no more of any answer. */
+const RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
+
+const BODYLESS = new Set([101, 204, 205, 304]);
+
+const capResponses = (client: HttpClient.HttpClient) =>
+  HttpClient.transformResponse(
+    client,
+    Effect.flatMap((response) => {
+      if (BODYLESS.has(response.status)) return Effect.succeed(response);
+      let size = 0;
+      const body = response.stream.pipe(
+        Stream.mapEffect((chunk) => {
+          size += chunk.byteLength;
+          return size <= RESPONSE_MAX_BYTES
+            ? Effect.succeed(chunk)
+            : Effect.fail(
+                new HttpClientError.HttpClientError({
+                  reason: new HttpClientError.DecodeError({
+                    request: response.request,
+                    response,
+                    description: `The answer is larger than ${RESPONSE_MAX_BYTES} bytes.`,
+                  }),
+                }),
+              );
+        }),
+      );
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(
+          response.request,
+          new Response(Stream.toReadableStream(body), {
+            status: response.status,
+            headers: { ...response.headers },
+          }),
+        ),
+      );
+    }),
+  );
+
+/** OpenCode writes a heartbeat every 10 to 15 seconds. */
+const readEvents = (httpClient: HttpClient.HttpClient) =>
+  httpClient.get("/api/event", { headers: { accept: "text/event-stream" } }).pipe(
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
+    Effect.map((response) =>
+      response.stream.pipe(
+        Stream.timeout("45 seconds"),
+        Stream.decodeText,
+        Stream.pipeThroughChannel(Sse.decode()),
+        Stream.mapEffect((frame) => decodeEvent(frame.data)),
+      ),
+    ),
+    Stream.unwrap,
+  );
+
 /**
- * What an attempt reads of its VM's OpenCode and sends to T45. The event stream only marks what to
+ * The event stream is volatile: work whose events matter starts after its `server.connected`.
+ * It ends when OpenCode goes silent.
+ */
+export const connect = Effect.fnUntraced(function* (server: Pick<Sandbox, "url" | "password">) {
+  const authenticated = HttpClient.mapRequest(
+    yield* HttpClient.HttpClient,
+    HttpClientRequest.basicAuth("opencode", server.password),
+  );
+  const client = yield* OpenCode.make({ baseUrl: server.url }).pipe(
+    Effect.provideService(HttpClient.HttpClient, capResponses(authenticated)),
+  );
+  const prefixed = HttpClient.mapRequest(authenticated, HttpClientRequest.prependUrl(server.url));
+  return {
+    client,
+    events: readEvents(prefixed),
+    /** Bounded by time only: an agent can make a file as large as its disk. */
+    readFile: (path: string) =>
+      prefixed.get(`/api/fs/read/${path.split("/").map(encodeURIComponent).join("/")}`).pipe(
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap((response) => response.arrayBuffer),
+        Effect.map((buffer) => new Uint8Array(buffer)),
+        Effect.timeout("60 seconds"),
+      ),
+  };
+});
+
+/**
+ * What an attempt reads of its sandbox's OpenCode and sends to T45. The event stream only marks what to
  * read again and forwards deltas, so it never falls behind; it is connected before this returns, so
  * nothing that changes after is missed.
  */
@@ -81,7 +192,7 @@ export const make = Effect.fnUntraced(function* ({
   changed,
   ended,
 }: {
-  readonly opencode: Effect.Success<ReturnType<typeof OpenCode.connect>>;
+  readonly opencode: Effect.Success<ReturnType<typeof connect>>;
   readonly root: Session.ID;
   readonly emit: (event: RunUpdate) => Effect.Effect<void>;
   /** Once per batch of events that marked something. */
@@ -112,7 +223,7 @@ export const make = Effect.fnUntraced(function* ({
     Effect.exit,
     Effect.tap((exit) =>
       Exit.isFailure(exit)
-        ? Effect.logInfo("A VM's event stream ended", { root, cause: exit.cause })
+        ? Effect.logInfo("A sandbox's event stream ended", { root, cause: exit.cause })
         : Effect.void,
     ),
     Effect.andThen(Deferred.fail(connected, new StreamEndedError())),
@@ -139,10 +250,7 @@ export const make = Effect.fnUntraced(function* ({
       order: "asc",
       limit: Number.MAX_SAFE_INTEGER,
     });
-    const sessions = [
-      ...all.filter((info) => info.id === root),
-      ...OpenCode.sessionsUnder(root, all),
-    ];
+    const sessions = [...all.filter((info) => info.id === root), ...sessionsUnder(root, all)];
     for (const info of sessions) known.add(info.id);
     yield* emit({ _tag: "sessions", sessions });
   });

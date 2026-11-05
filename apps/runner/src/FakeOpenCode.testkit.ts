@@ -1,7 +1,7 @@
 /**
- * Scripted VMs: a fake `Sandbox`, and an `HttpClient` that answers each VM's OpenCode at its url as
- * the real client expects. No OpenCode server or agent runs; a saved disk carries a VM's files and
- * sessions to the VM that boots on it.
+ * Scripted sandboxes: a fake `SandboxManager`, and an `HttpClient` that answers each sandbox's OpenCode
+ * at its url as the real client expects. No OpenCode server or agent runs; a saved disk carries a
+ * sandbox's files and sessions to the sandbox that boots on it.
  */
 import { Form } from "@opencode/client/effect";
 import type { RunRequest } from "@t45/contracts/resources/Runner";
@@ -14,7 +14,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
-import { Sandbox, SandboxError } from "./Sandbox.ts";
+import { SandboxError, SandboxManager } from "./Sandbox.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
@@ -35,12 +35,12 @@ interface FakeSession {
   hold: boolean;
 }
 
-/** Every start is a new VM. */
-interface Vm {
+/** Every start is a new sandbox. */
+interface FakeSandbox {
   readonly id: string;
   readonly url: string;
   readonly agent: RunRequest["agent"];
-  /** A lost or removed VM's OpenCode stops answering. */
+  /** A lost or removed sandbox's OpenCode stops answering. */
   state: "up" | "lost" | "removed";
   readonly booted: Uint8Array | null;
   saved: Uint8Array | null;
@@ -52,43 +52,43 @@ interface Vm {
   readonly streams: Set<ReadableStreamDefaultController<Uint8Array>>;
 }
 
-interface Fake {
+interface State {
   /** In start order. */
-  readonly started: Array<Vm>;
-  /** Across every VM. */
+  readonly started: Array<FakeSandbox>;
+  /** Across every sandbox. */
   readonly prompts: Array<Json>;
   /** By form id. */
   readonly replies: Map<string, unknown>;
-  /** Run by each start once its VM exists. */
+  /** Run by each start once its sandbox exists. */
   starting: Effect.Effect<void, SandboxError>;
   readonly listeners: Set<() => void>;
   next: number;
 }
 
-export class Vms extends Context.Service<Vms, Fake>()("@t45/runner/FakeOpenCode.testkit/Vms") {}
+export class Fake extends Context.Service<Fake, State>()("@t45/runner/FakeOpenCode.testkit/Fake") {}
 
 const NOW = 1_790_000_000_000;
 
-const nextId = (fake: Fake, prefix: string) => `${prefix}${String(fake.next++)}`;
+const nextId = (fake: State, prefix: string) => `${prefix}${String(fake.next++)}`;
 
-/** The latest VM started for `id`. */
-export const vm = (fake: Fake, id: string) => {
+/** The latest sandbox started for `id`. */
+export const sandbox = (fake: State, id: string) => {
   const found = fake.started.findLast((each) => each.id === id);
-  if (found === undefined) throw new Error(`No VM started for ${id}`);
+  if (found === undefined) throw new Error(`No sandbox started for ${id}`);
   return found;
 };
 
-export const root = (fake: Fake, id: string) => {
-  const found = vm(fake, id).sessions[0];
+export const root = (fake: State, id: string) => {
+  const found = sandbox(fake, id).sessions[0];
   if (found === undefined) throw new Error(`No root session in ${id}`);
   return found;
 };
 
-const changed = (fake: Fake) => {
+const changed = (fake: State) => {
   for (const listener of fake.listeners) listener();
 };
 
-const until = (fake: Fake, holds: () => boolean) =>
+const until = (fake: State, holds: () => boolean) =>
   Effect.callback<void>((resume) => {
     const check = () => {
       if (!holds()) return;
@@ -100,40 +100,40 @@ const until = (fake: Fake, holds: () => boolean) =>
     return Effect.sync(() => fake.listeners.delete(check));
   });
 
-export const prompted = (fake: Fake, inputId: string) =>
+export const prompted = (fake: State, inputId: string) =>
   until(fake, () => fake.prompts.some((prompt) => prompt.id === inputId));
 
-/** Every VM started for `id` is removed. */
-export const removed = (fake: Fake, id: string) =>
+/** Every sandbox started for `id` is removed. */
+export const removed = (fake: State, id: string) =>
   until(fake, () => fake.started.every((each) => each.id !== id || each.state === "removed"));
 
 const frameOf = (event: Json) => new TextEncoder().encode(`data: ${encodeJson(event)}\n\n`);
 
 /** Ephemeral events ignore the durable envelope. */
-export const emit = (fake: Fake, id: string, type: string, data: Json) => {
+export const emit = (fake: State, id: string, type: string, data: Json) => {
   const durable = { aggregateID: id, seq: fake.next, version: 1 };
   const frame = frameOf({ id: nextId(fake, "evt_"), created: NOW, type, data, durable });
-  for (const stream of vm(fake, id).streams) stream.enqueue(frame);
+  for (const stream of sandbox(fake, id).streams) stream.enqueue(frame);
 };
 
-const closeStreams = (target: Vm) => {
+const closeStreams = (target: FakeSandbox) => {
   for (const stream of target.streams) stream.close();
   target.streams.clear();
 };
 
 /** It loses its event streams and answers nothing more. */
-export const crash = (fake: Fake, id: string) => {
-  const target = vm(fake, id);
+export const crash = (fake: State, id: string) => {
+  const target = sandbox(fake, id);
   target.state = "lost";
   closeStreams(target);
 };
 
 /** It answers nothing more, while its event streams stay open. */
-export const hang = (fake: Fake, id: string) => {
-  vm(fake, id).state = "lost";
+export const hang = (fake: State, id: string) => {
+  sandbox(fake, id).state = "lost";
 };
 
-const write = (fake: Fake, id: string, item: Json) => {
+const write = (fake: State, id: string, item: Json) => {
   const session = root(fake, id);
   session.items.push(item);
   emit(fake, id, "session.text.started", {
@@ -144,7 +144,7 @@ const write = (fake: Fake, id: string, item: Json) => {
   return String(item.id);
 };
 
-const assistant = (fake: Fake, content: ReadonlyArray<Json>) => {
+const assistant = (fake: State, content: ReadonlyArray<Json>) => {
   const at = NOW + fake.next * 1000;
   return {
     id: nextId(fake, "msg_a"),
@@ -157,13 +157,13 @@ const assistant = (fake: Fake, content: ReadonlyArray<Json>) => {
 };
 
 /** Returns the message's id. */
-export const answerText = (fake: Fake, id: string, text: string) =>
+export const answerText = (fake: State, id: string, text: string) =>
   write(fake, id, assistant(fake, [{ type: "text", text }]));
 
 /** The subagent already finished its own turn; its report hasn't reached the root. Returns its session's id. */
-export const backgroundSubagent = (fake: Fake, id: string) => {
+export const backgroundSubagent = (fake: State, id: string) => {
   const child = nextId(fake, "ses_sub");
-  vm(fake, id).sessions.push(
+  sandbox(fake, id).sessions.push(
     newSession({ id: child, parentID: root(fake, id).id, title: "Research" }),
   );
   write(
@@ -188,7 +188,7 @@ export const backgroundSubagent = (fake: Fake, id: string) => {
 };
 
 /** Returns the report's id. */
-export const reportSubagent = (fake: Fake, id: string, child: string) => {
+export const reportSubagent = (fake: State, id: string, child: string) => {
   const session = root(fake, id);
   const report = nextId(fake, "msg_s");
   session.items.push({
@@ -203,9 +203,9 @@ export const reportSubagent = (fake: Fake, id: string, child: string) => {
 };
 
 /** Listed as running until `exitShell`. Returns its id. */
-export const runningShell = (fake: Fake, id: string) => {
+export const runningShell = (fake: State, id: string) => {
   const shell = nextId(fake, "sh_");
-  vm(fake, id).shells.push({
+  sandbox(fake, id).shells.push({
     id: shell,
     status: "running",
     command: "build",
@@ -218,15 +218,15 @@ export const runningShell = (fake: Fake, id: string) => {
   return shell;
 };
 
-export const exitShell = (fake: Fake, id: string, shell: string) => {
-  for (const each of vm(fake, id).shells) {
+export const exitShell = (fake: State, id: string, shell: string) => {
+  for (const each of sandbox(fake, id).shells) {
     if (each.id === shell) each.status = "exited";
   }
   emit(fake, id, "shell.exited", { id: shell, status: "exited", exit: 0 });
 };
 
 /** Returns the id of the idle message that ends the turn. */
-export const finishTurn = (fake: Fake, id: string) => {
+export const finishTurn = (fake: State, id: string) => {
   const session = root(fake, id);
   const idle = nextId(fake, "msg_i");
   session.items.push({
@@ -240,7 +240,7 @@ export const finishTurn = (fake: Fake, id: string) => {
   return idle;
 };
 
-export const failTurn = (fake: Fake, id: string) => {
+export const failTurn = (fake: State, id: string) => {
   const session = root(fake, id);
   session.active = false;
   session.outcome = "failed";
@@ -258,7 +258,7 @@ const formInfo = (sessionID: string, id: string) => ({
 });
 
 /** The agent asks in the root. Returns the form's id. */
-export const ask = (fake: Fake, id: string) => {
+export const ask = (fake: State, id: string) => {
   const session = root(fake, id);
   const form = Form.ID.make(nextId(fake, "frm_"));
   session.forms.push(form);
@@ -267,14 +267,14 @@ export const ask = (fake: Fake, id: string) => {
 };
 
 /** OpenCode makes an inbox entry the session's message, which starts a turn. */
-const deliver = (fake: Fake, id: string, session: FakeSession, entry: Json) => {
+const deliver = (fake: State, id: string, session: FakeSession, entry: Json) => {
   const payload = entry.payload as Json;
   session.items.push({ id: entry.id, type: entry.type, ...payload, time: { created: NOW } });
   session.active = true;
   emit(fake, id, "session.inbox.delivered", { sessionID: session.id, inboxID: entry.id });
 };
 
-export const hold = (fake: Fake, id: string, held: boolean) => {
+export const hold = (fake: State, id: string, held: boolean) => {
   const session = root(fake, id);
   session.hold = held;
   if (!held) for (const entry of session.inbox.splice(0)) deliver(fake, id, session, entry);
@@ -325,7 +325,7 @@ const listMessages = (session: FakeSession, query: URLSearchParams) => {
   return json({ data: page, cursor: { next: page.at(-1)?.id } });
 };
 
-const openStream = (fake: Fake, target: Vm) => {
+const openStream = (fake: State, target: FakeSandbox) => {
   const connected = frameOf({
     id: nextId(fake, "evt_"),
     created: NOW,
@@ -347,8 +347,8 @@ const openStream = (fake: Fake, target: Vm) => {
 };
 
 const answer = (
-  fake: Fake,
-  target: Vm,
+  fake: State,
+  target: FakeSandbox,
   method: string,
   path: string,
   query: URLSearchParams,
@@ -450,14 +450,17 @@ const answer = (
   throw new Error(`Unscripted OpenCode request: ${route}`);
 };
 
-const httpClient = (fake: Fake) =>
+const httpClient = (fake: State) =>
   HttpClient.make((request, url) =>
     Effect.suspend(() => {
       const target = fake.started.find((each) => each.url === url.origin);
       if (target?.state !== "up") {
         return Effect.fail(
           new HttpClientError.HttpClientError({
-            reason: new HttpClientError.TransportError({ request, description: "No VM answers." }),
+            reason: new HttpClientError.TransportError({
+              request,
+              description: "No sandbox answers.",
+            }),
           }),
         );
       }
@@ -478,7 +481,7 @@ interface Disk {
   readonly sessions: ReadonlyArray<{ readonly info: Json; readonly items: Array<Json> }>;
 }
 
-const saveDisk = (booted: Vm) => {
+const saveDisk = (booted: FakeSandbox) => {
   const disk: Disk = {
     files: [...booted.files].map(([path, content]) => [path, [...content]]),
     sessions: booted.sessions.map(({ info, items }) => ({ info, items })),
@@ -486,22 +489,22 @@ const saveDisk = (booted: Vm) => {
   return new TextEncoder().encode(encodeJson(disk));
 };
 
-const remove = (fake: Fake, booted: Vm) => {
+const remove = (fake: State, booted: FakeSandbox) => {
   booted.state = "removed";
   closeStreams(booted);
   changed(fake);
 };
 
-const sandbox = (fake: Fake) =>
-  Sandbox.of({
+const manager = (fake: State) =>
+  SandboxManager.of({
     start: (id, agent, disk) =>
       Effect.acquireRelease(
         Effect.sync(() => {
           const restored =
             disk === null ? null : (decodeJson(new TextDecoder().decode(disk)) as Disk);
-          const booted: Vm = {
+          const booted: FakeSandbox = {
             id,
-            url: `http://vm${fake.started.length + 1}.test`,
+            url: `http://sandbox${fake.started.length + 1}.test`,
             agent,
             booted: disk,
             saved: null,
@@ -521,7 +524,7 @@ const sandbox = (fake: Fake) =>
         Effect.tap(() => fake.starting),
         Effect.map((booted) => ({
           url: booted.url,
-          password: Redacted.make("vm-password"),
+          password: Redacted.make("sandbox-password"),
           write: (path: string, content: Uint8Array) =>
             Effect.sync(() => void booted.files.set(path, content)),
           save: Effect.sync(() => {
@@ -533,10 +536,10 @@ const sandbox = (fake: Fake) =>
       ),
   });
 
-/** Fresh VMs per build, as `Vms`, behind the `Sandbox` and the `HttpClient` that reaches them. */
+/** Fresh sandboxes per build, as `Fake`, behind the `SandboxManager` and the `HttpClient` that reaches them. */
 export const layer = Layer.unwrap(
   Effect.sync(() => {
-    const fake: Fake = {
+    const fake: State = {
       started: [],
       prompts: [],
       replies: new Map(),
@@ -545,8 +548,8 @@ export const layer = Layer.unwrap(
       next: 1,
     };
     return Layer.mergeAll(
-      Layer.succeed(Vms, fake),
-      Layer.succeed(Sandbox, sandbox(fake)),
+      Layer.succeed(Fake, fake),
+      Layer.succeed(SandboxManager, manager(fake)),
       Layer.succeed(HttpClient.HttpClient, httpClient(fake)),
     );
   }),

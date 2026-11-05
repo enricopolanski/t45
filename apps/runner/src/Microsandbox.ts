@@ -16,7 +16,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { type NetworkBuilder, NetworkPolicy, Sandbox as Microvm } from "microsandbox";
 
 import * as RunnerConfig from "./RunnerConfig.ts";
-import { Sandbox, SandboxError } from "./Sandbox.ts";
+import { SandboxError, SandboxManager } from "./Sandbox.ts";
 
 type Agent = RunRequest["agent"];
 
@@ -225,7 +225,7 @@ const make = Effect.gen(function* () {
     return { url, password };
   });
 
-  return Sandbox.of({
+  return SandboxManager.of({
     start: Effect.fn("Microsandbox.start")(function* (id, agent, saved) {
       const hostPort = yield* freePort;
       const disk = yield* prepareDisk(saved);
@@ -265,4 +265,4 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(Sandbox, make);
+export const layer = Layer.effect(SandboxManager, make);

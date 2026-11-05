@@ -7,7 +7,7 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
-import * as OpenCode from "./OpenCode.ts";
+import * as Capture from "./Capture.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -23,7 +23,7 @@ const serving = (events: ReadonlyArray<unknown>) =>
     ),
   );
 
-const connect = OpenCode.connect({
+const connect = Capture.connect({
   url: "http://127.0.0.1:4096",
   password: Redacted.make("secret"),
 });
@@ -87,30 +87,32 @@ describe("OpenCode events", () => {
 });
 
 describe("OpenCode files", () => {
-  it.effect("readFile returns the file's bytes as they are, asking with the VM's password", () =>
-    Effect.gen(function* () {
-      const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0xff, 0xfe, 0x00, 0x80]);
-      const asked: Array<[string, string | undefined]> = [];
-      const { readFile } = yield* connect.pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          HttpClient.make((request, url) =>
-            Effect.sync(() => {
-              asked.push([url.pathname, request.headers.authorization]);
-              return HttpClientResponse.fromWeb(
-                request,
-                new Response(bytes, { headers: { "content-type": "application/octet-stream" } }),
-              );
-            }),
+  it.effect(
+    "readFile returns the file's bytes as they are, asking with the sandbox's password",
+    () =>
+      Effect.gen(function* () {
+        const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0xff, 0xfe, 0x00, 0x80]);
+        const asked: Array<[string, string | undefined]> = [];
+        const { readFile } = yield* connect.pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make((request, url) =>
+              Effect.sync(() => {
+                asked.push([url.pathname, request.headers.authorization]);
+                return HttpClientResponse.fromWeb(
+                  request,
+                  new Response(bytes, { headers: { "content-type": "application/octet-stream" } }),
+                );
+              }),
+            ),
           ),
-        ),
-      );
-      const read = yield* readFile(".t45/attached/report (2).pdf");
-      assert.deepStrictEqual([...read], [...bytes]);
-      assert.deepStrictEqual(asked, [
-        ["/api/fs/read/.t45/attached/report%20(2).pdf", `Basic ${btoa("opencode:secret")}`],
-      ]);
-    }),
+        );
+        const read = yield* readFile(".t45/attached/report (2).pdf");
+        assert.deepStrictEqual([...read], [...bytes]);
+        assert.deepStrictEqual(asked, [
+          ["/api/fs/read/.t45/attached/report%20(2).pdf", `Basic ${btoa("opencode:secret")}`],
+        ]);
+      }),
   );
 });
 

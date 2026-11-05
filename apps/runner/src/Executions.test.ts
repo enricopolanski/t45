@@ -21,7 +21,7 @@ const attachment = { "attachments/w2.txt": new Uint8Array([4, 2]) };
 const MODEL = { providerID: "opencode-go", id: "test-model" };
 const ALLOW = { action: "*", resource: "*", effect: "allow" };
 
-const setup = Effect.all({ runner: Fixture.Runner, vms: FakeOpenCode.Vms });
+const setup = Effect.all({ runner: Fixture.Runner, fake: FakeOpenCode.Fake });
 
 const start = (request: RunRequest) =>
   Effect.gen(function* () {
@@ -57,25 +57,25 @@ const asking =
 
 /** A finished first run whose agent waited on a background subagent; returns the disk it saved. */
 const converse = Effect.gen(function* () {
-  const { runner, vms } = yield* setup;
+  const { runner, fake } = yield* setup;
   const run = yield* runner
     .run({ id: ID, request: Fixture.request({ messages: [first] }) })
     .pipe(Stream.runCollect, Effect.forkChild);
-  yield* FakeOpenCode.prompted(vms, first.id);
-  const child = FakeOpenCode.backgroundSubagent(vms, ID);
-  FakeOpenCode.reportSubagent(vms, ID, child);
-  FakeOpenCode.finishTurn(vms, ID);
+  yield* FakeOpenCode.prompted(fake, first.id);
+  const child = FakeOpenCode.backgroundSubagent(fake, ID);
+  FakeOpenCode.reportSubagent(fake, ID, child);
+  FakeOpenCode.finishTurn(fake, ID);
   const finished = (yield* Fiber.join(run)).find(is("finished"));
   assert.isDefined(finished);
-  const messages = FakeOpenCode.root(vms, ID).items.map((item) => item.id);
+  const messages = FakeOpenCode.root(fake, ID).items.map((item) => item.id);
   return { disk: finished.disk, child, messages };
 });
 
 it.live(
-  "runs in a fresh VM on a new disk set up from the agent, streams the agent's work, then saves the disk and finishes with it",
+  "runs in a fresh sandbox on a new disk set up from the agent, streams the agent's work, then saves the disk and finishes with it",
   () =>
     Effect.gen(function* () {
-      const { vms } = yield* setup;
+      const { fake } = yield* setup;
       const message = { ...first, metadata: { t45: { attachments: [] } } };
       const request = Fixture.request({ files: attachment, messages: [message] });
       const events = yield* start(request);
@@ -85,14 +85,14 @@ it.live(
         [[ROOT, "Receipts"]],
       );
       yield* next(events, showing(message.id));
-      const vm = FakeOpenCode.vm(vms, ID);
-      const root = FakeOpenCode.root(vms, ID);
-      assert.deepEqual([vm.agent, vm.booted], [request.agent, null]);
-      assert.deepEqual(Object.fromEntries(vm.files), attachment);
+      const sandbox = FakeOpenCode.sandbox(fake, ID);
+      const root = FakeOpenCode.root(fake, ID);
+      assert.deepEqual([sandbox.agent, sandbox.booted], [request.agent, null]);
+      assert.deepEqual(Object.fromEntries(sandbox.files), attachment);
       assert.deepEqual([root.info.model, root.info.permissions], [MODEL, [ALLOW]]);
-      assert.deepEqual(vms.prompts, [{ ...message, delivery: "queue" }]);
+      assert.deepEqual(fake.prompts, [{ ...message, delivery: "queue" }]);
 
-      FakeOpenCode.emit(vms, ID, "session.text.delta", {
+      FakeOpenCode.emit(fake, ID, "session.text.delta", {
         sessionID: ROOT,
         assistantMessageID: "msg_streaming",
         ordinal: 0,
@@ -107,12 +107,12 @@ it.live(
         delta: "Fil",
       });
 
-      const reply = FakeOpenCode.answerText(vms, ID, "Filed.");
-      FakeOpenCode.finishTurn(vms, ID);
+      const reply = FakeOpenCode.answerText(fake, ID, "Filed.");
+      FakeOpenCode.finishTurn(fake, ID);
       yield* next(events, showing(reply));
       const finished = yield* next(events, is("finished"));
-      assert.strictEqual(vm.state, "removed");
-      assert.deepEqual([finished.outcome, finished.disk], [null, vm.saved]);
+      assert.strictEqual(sandbox.state, "removed");
+      assert.deepEqual([finished.outcome, finished.disk], [null, sandbox.saved]);
     }).pipe(Effect.provide(Fixture.layer)),
 );
 
@@ -120,14 +120,14 @@ it.live(
   "a follow-up boots on the saved disk, switches its root to the agent's model, prompts only its messages, and ends failed with the root's turn",
   () =>
     Effect.gen(function* () {
-      const { vms } = yield* setup;
+      const { fake } = yield* setup;
       const { disk, child, messages } = yield* converse;
       const agent = { ...Fixture.request().agent, model: "opencode-go/other-model" };
       const events = yield* start(Fixture.request({ agent, disk, messages: [second] }));
       yield* next(events, showing(second.id));
-      const vm = FakeOpenCode.vm(vms, ID);
-      const [root, subagent] = vm.sessions;
-      assert.deepEqual(vm.booted, disk);
+      const sandbox = FakeOpenCode.sandbox(fake, ID);
+      const [root, subagent] = sandbox.sessions;
+      assert.deepEqual(sandbox.booted, disk);
       assert.deepEqual(
         [root?.id, root?.info.model, subagent?.id, subagent?.info.parentID],
         [ROOT, { providerID: "opencode-go", id: "other-model" }, child, ROOT],
@@ -137,129 +137,131 @@ it.live(
         [...messages, second.id],
       );
       assert.deepEqual(
-        vms.prompts.map((prompt) => prompt.id),
+        fake.prompts.map((prompt) => prompt.id),
         [first.id, second.id],
       );
-      FakeOpenCode.failTurn(vms, ID);
+      FakeOpenCode.failTurn(fake, ID);
       assert.strictEqual((yield* next(events, is("finished"))).outcome, "failed");
     }).pipe(Effect.provide(Fixture.layer)),
 );
 
 it.live.each(["crash", "hang"] as const)(
-  "a VM lost to a %s starts over in a new VM on the same disk, which prompts again, and finishes",
+  "a sandbox lost to a %s starts over in a new sandbox on the same disk, which prompts again, and finishes",
   (loss) =>
     Effect.gen(function* () {
-      const { vms } = yield* setup;
+      const { fake } = yield* setup;
       const { disk, messages } = yield* converse;
       const events = yield* start(Fixture.request({ disk, messages: [second] }));
       yield* next(events, showing(second.id));
-      if (loss === "crash") FakeOpenCode.crash(vms, ID);
+      if (loss === "crash") FakeOpenCode.crash(fake, ID);
       else {
-        FakeOpenCode.hang(vms, ID);
-        FakeOpenCode.answerText(vms, ID, "Sent.");
+        FakeOpenCode.hang(fake, ID);
+        FakeOpenCode.answerText(fake, ID, "Sent.");
       }
       yield* next(events, is("restarted"));
       yield* next(events, showing(second.id));
-      assert.lengthOf(vms.started, 3);
-      assert.deepEqual(FakeOpenCode.vm(vms, ID).booted, disk);
+      assert.lengthOf(fake.started, 3);
+      assert.deepEqual(FakeOpenCode.sandbox(fake, ID).booted, disk);
       assert.deepEqual(
-        FakeOpenCode.root(vms, ID).items.map((item) => item.id),
+        FakeOpenCode.root(fake, ID).items.map((item) => item.id),
         [...messages, second.id],
       );
       assert.deepEqual(
-        vms.prompts.map((prompt) => prompt.id),
+        fake.prompts.map((prompt) => prompt.id),
         [first.id, second.id, second.id],
       );
-      FakeOpenCode.finishTurn(vms, ID);
+      FakeOpenCode.finishTurn(fake, ID);
       assert.isNull((yield* next(events, is("finished"))).outcome);
-      yield* FakeOpenCode.removed(vms, ID);
+      yield* FakeOpenCode.removed(fake, ID);
     }).pipe(Effect.provide(Fixture.layer)),
 );
 
-it.live("fails when the sandbox refuses the VM, and removes it", () =>
+it.live("fails when the sandbox fails to start, and removes it", () =>
   Effect.gen(function* () {
-    const { runner, vms } = yield* setup;
-    vms.starting = Effect.fail(
+    const { runner, fake } = yield* setup;
+    fake.starting = Effect.fail(
       new SandboxError({ operation: "start", cause: new Error("The image is missing.") }),
     );
     const exit = yield* runner
       .run({ id: ID, request: Fixture.request({ messages: [first] }) })
       .pipe(Stream.runDrain, Effect.exit);
     assert.isTrue(Exit.hasDies(exit));
-    assert.lengthOf(vms.started, 1);
-    yield* FakeOpenCode.removed(vms, ID);
+    assert.lengthOf(fake.started, 1);
+    yield* FakeOpenCode.removed(fake, ID);
   }).pipe(Effect.provide(Fixture.layer)),
 );
 
 it.live.each(["starts", "runs"] as const)(
-  "ending the run call while the VM %s removes the VM",
+  "ending the run call while the sandbox %s removes the sandbox",
   (phase) =>
     Effect.gen(function* () {
-      const { runner, vms } = yield* setup;
+      const { runner, fake } = yield* setup;
       const entered = yield* Deferred.make<void>();
       if (phase === "starts") {
-        vms.starting = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never));
+        fake.starting = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never));
       }
       const run = yield* runner
         .run({ id: ID, request: Fixture.request({ messages: [first] }) })
         .pipe(Stream.runDrain, Effect.forkChild);
-      yield* phase === "starts" ? Deferred.await(entered) : FakeOpenCode.prompted(vms, first.id);
+      yield* phase === "starts" ? Deferred.await(entered) : FakeOpenCode.prompted(fake, first.id);
       yield* Fiber.interrupt(run);
-      assert.lengthOf(vms.started, 1);
-      yield* FakeOpenCode.removed(vms, ID);
+      assert.lengthOf(fake.started, 1);
+      yield* FakeOpenCode.removed(fake, ID);
     }).pipe(Effect.provide(Fixture.layer)),
 );
 
 it.live("send writes the message's files and prompts it once, however often it is sent", () =>
   Effect.gen(function* () {
-    const { runner, vms } = yield* setup;
+    const { runner, fake } = yield* setup;
     const events = yield* start(Fixture.request({ messages: [first] }));
     yield* next(events, showing(first.id));
     yield* runner.send({ id: ID, message: second, files: attachment });
     yield* runner.send({ id: ID, message: second, files: {} });
     yield* next(events, showing(second.id));
-    assert.deepEqual(Object.fromEntries(FakeOpenCode.vm(vms, ID).files), attachment);
-    FakeOpenCode.finishTurn(vms, ID);
+    assert.deepEqual(Object.fromEntries(FakeOpenCode.sandbox(fake, ID).files), attachment);
+    FakeOpenCode.finishTurn(fake, ID);
     yield* next(events, is("finished"));
     assert.deepEqual(
-      vms.prompts.map((prompt) => prompt.id),
+      fake.prompts.map((prompt) => prompt.id),
       [first.id, second.id],
     );
   }).pipe(Effect.provide(Fixture.layer)),
 );
 
-it.live("cancel takes a queued message back from the VM's inbox, so it is never delivered", () =>
-  Effect.gen(function* () {
-    const { runner, vms } = yield* setup;
-    const events = yield* start(Fixture.request({ messages: [first] }));
-    yield* next(events, showing(first.id));
-    FakeOpenCode.hold(vms, ID, true);
-    yield* runner.send({ id: ID, message: second, files: {} });
-    yield* FakeOpenCode.prompted(vms, second.id);
-    yield* runner.cancel({ id: ID, messageId: second.id });
-    const root = FakeOpenCode.root(vms, ID);
-    assert.deepEqual(root.inbox, []);
-    FakeOpenCode.hold(vms, ID, false);
-    FakeOpenCode.finishTurn(vms, ID);
-    yield* next(events, is("finished"));
-    assert.notInclude(
-      root.items.map((item) => item.id),
-      second.id,
-    );
-  }).pipe(Effect.provide(Fixture.layer)),
+it.live(
+  "cancel takes a queued message back from the sandbox's inbox, so it is never delivered",
+  () =>
+    Effect.gen(function* () {
+      const { runner, fake } = yield* setup;
+      const events = yield* start(Fixture.request({ messages: [first] }));
+      yield* next(events, showing(first.id));
+      FakeOpenCode.hold(fake, ID, true);
+      yield* runner.send({ id: ID, message: second, files: {} });
+      yield* FakeOpenCode.prompted(fake, second.id);
+      yield* runner.cancel({ id: ID, messageId: second.id });
+      const root = FakeOpenCode.root(fake, ID);
+      assert.deepEqual(root.inbox, []);
+      FakeOpenCode.hold(fake, ID, false);
+      FakeOpenCode.finishTurn(fake, ID);
+      yield* next(events, is("finished"));
+      assert.notInclude(
+        root.items.map((item) => item.id),
+        second.id,
+      );
+    }).pipe(Effect.provide(Fixture.layer)),
 );
 
 it.live("a send that arrives after its message's cancel is ignored", () =>
   Effect.gen(function* () {
-    const { runner, vms } = yield* setup;
+    const { runner, fake } = yield* setup;
     const events = yield* start(Fixture.request({ messages: [first] }));
     yield* next(events, showing(first.id));
     yield* runner.cancel({ id: ID, messageId: second.id });
     yield* runner.send({ id: ID, message: second, files: {} });
-    FakeOpenCode.finishTurn(vms, ID);
+    FakeOpenCode.finishTurn(fake, ID);
     yield* next(events, is("finished"));
     assert.deepEqual(
-      vms.prompts.map((prompt) => prompt.id),
+      fake.prompts.map((prompt) => prompt.id),
       [first.id],
     );
   }).pipe(Effect.provide(Fixture.layer)),
@@ -269,10 +271,10 @@ it.live(
   "answer writes its files and replies to the agent's question, dismiss cancels one, and neither reaches a run that isn't there",
   () =>
     Effect.gen(function* () {
-      const { runner, vms } = yield* setup;
+      const { runner, fake } = yield* setup;
       const events = yield* start(Fixture.request({ messages: [first] }));
       yield* next(events, showing(first.id));
-      const answered = FakeOpenCode.ask(vms, ID);
+      const answered = FakeOpenCode.ask(fake, ID);
       yield* next(events, asking(1));
       const answer = { year: "2025" };
       yield* runner.answer({
@@ -282,15 +284,15 @@ it.live(
         answer,
         files: attachment,
       });
-      assert.deepEqual(Object.fromEntries(FakeOpenCode.vm(vms, ID).files), attachment);
-      assert.deepEqual(vms.replies.get(answered), answer);
+      assert.deepEqual(Object.fromEntries(FakeOpenCode.sandbox(fake, ID).files), attachment);
+      assert.deepEqual(fake.replies.get(answered), answer);
       yield* next(events, asking(0));
 
-      const dismissed = FakeOpenCode.ask(vms, ID);
+      const dismissed = FakeOpenCode.ask(fake, ID);
       yield* next(events, asking(1));
       yield* runner.dismiss({ id: ID, sessionId: ROOT, formId: dismissed });
       yield* next(events, asking(0));
-      assert.isFalse(vms.replies.has(dismissed));
+      assert.isFalse(fake.replies.has(dismissed));
 
       const elsewhere = { id: "exec-2", sessionId: ROOT, formId: dismissed };
       const gone = yield* runner.answer({ ...elsewhere, answer, files: {} }).pipe(Effect.flip);
@@ -301,11 +303,11 @@ it.live(
 
 it.live("captures past one page of OpenCode's messages at once", () =>
   Effect.gen(function* () {
-    const { vms } = yield* setup;
+    const { fake } = yield* setup;
     const events = yield* start(Fixture.request({ messages: [first] }));
     yield* next(events, showing(first.id));
     const replies = Array.from({ length: 201 }, (_, at) =>
-      FakeOpenCode.answerText(vms, ID, `Line ${at}`),
+      FakeOpenCode.answerText(fake, ID, `Line ${at}`),
     );
     const { messages } = yield* next(events, showing(replies[200] ?? ""));
     assert.include(
@@ -316,24 +318,24 @@ it.live("captures past one page of OpenCode's messages at once", () =>
 );
 
 it.live.each(["a shell runs", "a background subagent hasn't reported"] as const)(
-  "keeps the VM while %s, and finishes once OpenCode is done",
+  "keeps the sandbox while %s, and finishes once OpenCode is done",
   (blocker) =>
     Effect.gen(function* () {
-      const { vms } = yield* setup;
+      const { fake } = yield* setup;
       const events = yield* start(Fixture.request({ messages: [first] }));
       yield* next(events, showing(first.id));
-      const shell = blocker === "a shell runs" ? FakeOpenCode.runningShell(vms, ID) : null;
-      const child = shell === null ? FakeOpenCode.backgroundSubagent(vms, ID) : null;
-      const idle = FakeOpenCode.finishTurn(vms, ID);
+      const shell = blocker === "a shell runs" ? FakeOpenCode.runningShell(fake, ID) : null;
+      const child = shell === null ? FakeOpenCode.backgroundSubagent(fake, ID) : null;
+      const idle = FakeOpenCode.finishTurn(fake, ID);
       // The root is read idle before OpenCode is asked whether anything else runs.
       yield* next(events, showing(idle));
 
       // Only an execution still running reads what the agent writes next.
       const last =
         shell === null
-          ? FakeOpenCode.reportSubagent(vms, ID, child ?? "")
-          : FakeOpenCode.answerText(vms, ID, "Built.");
-      if (shell !== null) FakeOpenCode.exitShell(vms, ID, shell);
+          ? FakeOpenCode.reportSubagent(fake, ID, child ?? "")
+          : FakeOpenCode.answerText(fake, ID, "Built.");
+      if (shell !== null) FakeOpenCode.exitShell(fake, ID, shell);
       yield* next(events, showing(last));
       yield* next(events, is("finished"));
     }).pipe(Effect.provide(Fixture.layer)),
@@ -341,12 +343,12 @@ it.live.each(["a shell runs", "a background subagent hasn't reported"] as const)
 
 it.live("sends a file the agent leaves in .t45/attached before the messages naming it", () =>
   Effect.gen(function* () {
-    const { vms } = yield* setup;
+    const { fake } = yield* setup;
     const events = yield* start(Fixture.request({ messages: [first] }));
     yield* next(events, showing(first.id));
     const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
-    FakeOpenCode.vm(vms, ID).files.set(".t45/attached/report.pdf", pdf);
-    const reply = FakeOpenCode.answerText(vms, ID, "Attached report.pdf.");
+    FakeOpenCode.sandbox(fake, ID).files.set(".t45/attached/report.pdf", pdf);
+    const reply = FakeOpenCode.answerText(fake, ID, "Attached report.pdf.");
     const naming = showing(reply);
     assert.deepEqual(
       yield* next(events, (event): event is RunUpdate => event._tag === "file" || naming(event)),

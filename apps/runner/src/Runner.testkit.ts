@@ -45,7 +45,7 @@ export const layerConfig = ConfigProvider.layer(
   }),
 );
 
-/** The runner's handlers over fake VMs; logs are dropped. */
+/** The runner's handlers over fake sandboxes; logs are dropped. */
 export const layerExecutions = Executions.layer.pipe(
   Layer.provide(layerModels),
   Layer.provideMerge(FakeOpenCode.layer),

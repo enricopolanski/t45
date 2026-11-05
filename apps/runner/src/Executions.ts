@@ -1,4 +1,4 @@
-import { Model, type OpenCodeClient } from "@opencode/client/effect";
+import { Model, type OpenCodeClient, type Permission } from "@opencode/client/effect";
 import {
   AnswerInvalid,
   type Message,
@@ -18,12 +18,20 @@ import * as Stream from "effect/Stream";
 
 import * as Capture from "./Capture.ts";
 import { ModelCatalog } from "./ModelCatalog.ts";
-import * as OpenCode from "./OpenCode.ts";
-import { Sandbox, type Vm } from "./Sandbox.ts";
+import { type Sandbox, SandboxManager } from "./Sandbox.ts";
 
 const CAPTURE_BATCH = "150 millis";
 
 const RESTART = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("30 seconds")]);
+
+/**
+ * OpenCode checks the agent's rules, then these, and the last match decides: the sandbox is what
+ * confines the agent.
+ */
+const sessionRules = (questions: boolean): ReadonlyArray<Permission.Rule> => [
+  { action: "*", resource: "*", effect: "allow" },
+  ...(questions ? [] : [{ action: "question", resource: "*", effect: "deny" } as const]),
+];
 
 type Signal = "messages" | "events" | "ended";
 
@@ -34,7 +42,7 @@ interface Running {
   readonly files: Map<string, Uint8Array>;
   readonly signal: Queue.Queue<Signal>;
   readonly lock: Semaphore.Semaphore;
-  /** The current one, once its root is in its VM. */
+  /** The current one, once its root is in its sandbox. */
   attempt: Attempt | null;
 }
 
@@ -44,7 +52,7 @@ interface Attempt {
   readonly putFiles: Effect.Effect<void>;
 }
 
-/** The VM is out of reach; OpenCode's client wraps such a failure in a `ClientError`. */
+/** The sandbox is out of reach; OpenCode's client wraps such a failure in a `ClientError`. */
 const isLost = (error: unknown) => {
   if (Predicate.isTagged(error, "StreamEndedError")) return true;
   const failure =
@@ -54,22 +62,22 @@ const isLost = (error: unknown) => {
 
 export const layer = RunnerRpcs.toLayer(
   Effect.gen(function* () {
-    const sandbox = yield* Sandbox;
+    const sandboxManager = yield* SandboxManager;
     const catalog = yield* ModelCatalog;
     const httpClient = yield* HttpClient.HttpClient;
     const executions = new Map<string, Running>();
 
-    /** Until OpenCode is done with every message; returns the root's outcome, and fails when the VM is lost. */
+    /** Until OpenCode is done with every message; returns the root's outcome, and fails when the sandbox is lost. */
     const converse = Effect.fnUntraced(function* (
       id: string,
-      vm: Vm,
+      sandbox: Sandbox,
       running: Running,
       emit: (event: RunUpdate) => Effect.Effect<void>,
     ) {
       const { request } = running;
       const root = request.root;
       yield* Queue.clear(running.signal);
-      const opencode = yield* OpenCode.connect(vm).pipe(
+      const opencode = yield* Capture.connect(sandbox).pipe(
         Effect.provideService(HttpClient.HttpClient, httpClient),
       );
       const { client } = opencode;
@@ -88,9 +96,9 @@ export const layer = RunnerRpcs.toLayer(
         ([path, content]) =>
           written.has(path)
             ? Effect.void
-            : vm.write(path, content).pipe(
+            : sandbox.write(path, content).pipe(
                 Effect.catch((error) =>
-                  Effect.logWarning("Writing a file into a VM failed", { id, path, error }),
+                  Effect.logWarning("Writing a file into a sandbox failed", { id, path, error }),
                 ),
                 Effect.andThen(Effect.sync(() => written.add(path))),
               ),
@@ -98,7 +106,7 @@ export const layer = RunnerRpcs.toLayer(
       );
       yield* putFiles;
       const model = Model.Ref.parse(request.agent.model);
-      const permissions = OpenCode.sessionRules(request.questions);
+      const permissions = sessionRules(request.questions);
       // A root the disk kept comes back as it is.
       yield* client.session.create({
         id: root,
@@ -150,19 +158,19 @@ export const layer = RunnerRpcs.toLayer(
       }
     });
 
-    /** In a new VM, removed when it ends, whose disk is saved once OpenCode is done. */
+    /** In a new sandbox, removed when it ends, whose disk is saved once OpenCode is done. */
     const attempt = Effect.fnUntraced(function* (
       id: string,
       running: Running,
       emit: (event: RunUpdate) => Effect.Effect<void>,
     ) {
       const { agent, disk } = running.request;
-      const vm = yield* sandbox.start(id, agent, disk);
-      const outcome = yield* Effect.scoped(converse(id, vm, running, emit));
-      yield* emit({ _tag: "finished", outcome, disk: yield* vm.save });
+      const sandbox = yield* sandboxManager.start(id, agent, disk);
+      const outcome = yield* Effect.scoped(converse(id, sandbox, running, emit));
+      yield* emit({ _tag: "finished", outcome, disk: yield* sandbox.save });
     });
 
-    /** A question goes with its VM, so there is none without an attempt. */
+    /** A question goes with its sandbox, so there is none without an attempt. */
     const onAttempt = <A, E>(
       id: string,
       use: (running: Running, attempt: Attempt) => Effect.Effect<A, E>,
@@ -201,7 +209,7 @@ export const layer = RunnerRpcs.toLayer(
               Effect.scoped,
               Effect.tapError((error) =>
                 isLost(error)
-                  ? Effect.logWarning("A VM was lost; its execution starts over", {
+                  ? Effect.logWarning("A sandbox was lost; its execution starts over", {
                       id,
                       error,
                     }).pipe(Effect.andThen(emit({ _tag: "restarted" })))

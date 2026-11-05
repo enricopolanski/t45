@@ -14,24 +14,21 @@ export class SandboxError extends Schema.TaggedError<SandboxError>()("SandboxErr
   }
 }
 
-/** A running VM: where the runner reaches its OpenCode server. */
-export interface Vm {
+export interface Sandbox {
   readonly url: string;
   readonly password: Redacted.Redacted;
   readonly write: (path: string, content: Uint8Array) => Effect.Effect<void, SandboxError>;
-  /** Removes the VM and returns its disk, for a later start. */
+  /** Removes the sandbox and returns its disk, for a later start. */
   readonly save: Effect.Effect<Uint8Array, SandboxError>;
 }
 
-/** Every start is a new VM, removed when its scope closes. */
-export class Sandbox extends Context.Service<
-  Sandbox,
+export class SandboxManager extends Context.Service<
+  SandboxManager,
   {
-    /** Replaces any VM left under `id`, boots it on `disk` or a new one, and waits for OpenCode and the agent's MCP servers. */
     readonly start: (
       id: string,
       agent: RunRequest["agent"],
       disk: Uint8Array | null,
-    ) => Effect.Effect<Vm, SandboxError, Scope.Scope>;
+    ) => Effect.Effect<Sandbox, SandboxError, Scope.Scope>;
   }
->()("@t45/runner/Sandbox") {}
+>()("@t45/runner/Sandbox/SandboxManager") {}

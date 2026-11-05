@@ -56,7 +56,7 @@ export const RunUpdate = Schema.Union([
   Schema.TaggedStruct("questions", { forms: Schema.Array(Form.Info) }),
   /** Before the messages that name it. */
   Schema.TaggedStruct("file", { path: Schema.String, content: Schema.Uint8Array }),
-  /** The VM was lost: everything since the run started is void, and a new VM starts over. */
+  /** The sandbox was lost: everything since the run started is void, and a new sandbox starts over. */
   Schema.TaggedStruct("restarted", {}),
   /** Keeps the call's connection from going idle while the agent waits. */
   Schema.TaggedStruct("heartbeat", {}),
