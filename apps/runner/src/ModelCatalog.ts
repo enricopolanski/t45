@@ -11,7 +11,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
-import { RunnerConfig } from "./RunnerConfig.ts";
+import * as RunnerConfig from "./RunnerConfig.ts";
 
 export class ModelCatalog extends Context.Service<
   ModelCatalog,
@@ -27,13 +27,13 @@ const ModelList = Schema.Struct({
 const decodeModelList = HttpClientResponse.schemaBodyJson(ModelList);
 
 const make = Effect.gen(function* () {
-  const config = yield* RunnerConfig;
+  const openCodeKey = yield* RunnerConfig.openCodeKey;
   const client = yield* HttpClient.HttpClient;
 
   const list = client
     .execute(
       HttpClientRequest.get(MODELS_URL).pipe(
-        HttpClientRequest.bearerToken(Redacted.value(config.openCodeKey)),
+        HttpClientRequest.bearerToken(Redacted.value(openCodeKey)),
       ),
     )
     .pipe(

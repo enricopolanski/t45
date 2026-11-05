@@ -49,10 +49,11 @@ const HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS = 0;
 
 const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
+    const host = yield* ServerConfig.host;
+    const port = yield* ServerConfig.port;
     return NodeHttpServer.layer(() => NodeHttp.createServer(), {
-      host: config.host,
-      port: config.port,
+      host,
+      port,
       gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
     });
   }),
@@ -103,18 +104,19 @@ const layerMakeRoutes = Layer.mergeAll(
 
 const layerMakeServer = Layer.unwrap(
   Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
+    const host = yield* ServerConfig.host;
+    const port = yield* ServerConfig.port;
+    const logLevel = yield* ServerConfig.logLevel;
+    const logRequests = yield* ServerConfig.logRequests;
     const activation = yield* Deferred.make<void>();
 
     const layerRoutes = HttpRouter.serve(layerMakeRoutes, {
-      disableLogger: !config.logRequests,
+      disableLogger: !logRequests,
       routerConfig: HTTP_ROUTER_CONFIG,
     }).pipe(
       Layer.tap(() =>
         Deferred.succeed(activation, undefined).pipe(
-          Effect.andThen(
-            Effect.logInfo("T45 server is ready", { host: config.host, port: config.port }),
-          ),
+          Effect.andThen(Effect.logInfo("T45 server is ready", { host, port })),
         ),
       ),
     );
@@ -123,12 +125,11 @@ const layerMakeServer = Layer.unwrap(
       Layer.provideMerge(layerRuntimeDependencies),
       Layer.provide(Layer.succeed(ServerActivation.ServerActivation, Deferred.await(activation))),
       Layer.provide(Logger.layer([Logger.consolePretty()])),
-      Layer.provide(Layer.succeed(References.MinimumLogLevel, config.logLevel)),
+      Layer.provide(Layer.succeed(References.MinimumLogLevel, logLevel)),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provideMerge(NodeServices.layer),
     );
   }),
 );
 
-// bin.ts supplies configuration.
 export const runServer = Layer.launch(layerMakeServer).pipe(Effect.withTracerEnabled(false));

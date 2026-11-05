@@ -19,7 +19,7 @@ import {
   Sandbox as Microvm,
 } from "microsandbox";
 
-import { RunnerConfig } from "./RunnerConfig.ts";
+import * as RunnerConfig from "./RunnerConfig.ts";
 import { Sandbox, SandboxError } from "./Sandbox.ts";
 
 type Agent = Execution["agent"];
@@ -47,7 +47,7 @@ const KEY_ENV = "OPENCODE_API_KEY";
  * provider. OpenCode's port binds to the host's loopback, so only the host reaches it.
  */
 const sandboxNetwork =
-  (config: RunnerConfig["Service"], network: Agent["permissions"]["network"], hostPort: number) =>
+  (openCodeKey: Redacted.Redacted, network: Agent["permissions"]["network"], hostPort: number) =>
   (settings: NetworkSettings) => {
     let policy = NetworkPolicy.builder().defaultEgress("deny").defaultIngress("allow");
     if (network === "provider") {
@@ -62,7 +62,7 @@ const sandboxNetwork =
       .secret((secret) =>
         secret
           .env(KEY_ENV)
-          .value(Redacted.value(config.openCodeKey))
+          .value(Redacted.value(openCodeKey))
           .allow(PROVIDER_HOST)
           .substituteInHeaderFields(["authorization"]),
       )
@@ -169,7 +169,8 @@ const freePort = NodeSocketServer.make({ host: "127.0.0.1", port: 0 }).pipe(
 );
 
 const make = Effect.gen(function* () {
-  const config = yield* RunnerConfig;
+  const port = yield* RunnerConfig.port;
+  const openCodeKey = yield* RunnerConfig.openCodeKey;
   const httpClient = yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
 
@@ -236,7 +237,7 @@ const make = Effect.gen(function* () {
       const vm = yield* Effect.acquireRelease(
         sdk("create", () =>
           // The port keeps one runner's VMs apart from another's on the same machine.
-          Microvm.builder(`vm-${config.port}-${id}`)
+          Microvm.builder(`vm-${port}-${id}`)
             .image(IMAGE)
             .pullPolicy("if-missing")
             .user("agent")
@@ -247,7 +248,7 @@ const make = Effect.gen(function* () {
             // Removed by microsandbox once it stops, including when this runner dies.
             .ephemeral(true)
             .replace()
-            .network(sandboxNetwork(config, agent.permissions.network, hostPort))
+            .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort))
             .create(),
         ),
         (vm) =>

@@ -93,7 +93,7 @@ const reasonOf = (check: Effect.Effect<void, Refused>) =>
   );
 
 const storedFiles = Effect.gen(function* () {
-  const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+  const attachmentsDir = yield* ServerConfig.attachmentsDir;
   return NodeFS.readdirSync(attachmentsDir).toSorted();
 });
 
@@ -275,7 +275,7 @@ describe("AttachmentRepository", () => {
       const bound = yield* uploadText(alice);
       yield* files.bindToChat(aliceChat, [sent(bound)], alice);
       const held = yield* stepFile(seeded.stepId);
-      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      const attachmentsDir = yield* ServerConfig.attachmentsDir;
       for (const entry of yield* storedFiles) {
         NodeFS.utimesSync(NodePath.join(attachmentsDir, entry), 0, 0);
       }
@@ -292,7 +292,7 @@ describe("AttachmentRepository", () => {
   it.effect("removes bytes without a row once they are a day old, keeping younger ones", () =>
     Effect.gen(function* () {
       const { files } = yield* setup;
-      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      const attachmentsDir = yield* ServerConfig.attachmentsDir;
       yield* TestClock.adjust("25 hours");
       const old = "00000000-0000-4000-8000-000000000001.txt";
       const cutShort = "00000000-0000-4000-8000-000000000002.txt.part";

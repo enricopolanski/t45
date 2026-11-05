@@ -9,7 +9,6 @@ import { describe, expect, it } from "@effect/vitest";
 import { type Attachment, type ChatAttachment } from "@t45/contracts/models/Attachment";
 import { ATTACHMENT_ROUTE_PREFIX } from "@t45/contracts/resources/Attachments";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
-import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -151,7 +150,9 @@ describe("attachment routes", () => {
     Effect.gen(function* () {
       // Route handlers read these per request, like the server provides them.
       const requestContext = yield* Layer.build(layerContext);
-      const { attachmentsDir } = Context.get(requestContext, ServerConfig.ServerConfig);
+      const attachmentsDir = yield* ServerConfig.attachmentsDir.pipe(
+        Effect.provideContext(requestContext),
+      );
       const seeded = yield* seed.pipe(Effect.provideContext(requestContext));
       const layerApp = Layer.mergeAll(
         AttachmentsHttp.layerAttachmentRoute,

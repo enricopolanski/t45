@@ -1,17 +1,16 @@
 import { Session } from "@opencode/client/effect";
 import { type Execution, RunnerRpcs } from "@t45/contracts/resources/Runner";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
-import * as Redacted from "effect/Redacted";
 import type { RpcClient, RpcGroup } from "effect/rpc";
 import * as RpcTest from "effect/rpc/RpcTest";
 
 import * as Executions from "./Executions.ts";
 import * as FakeOpenCode from "./FakeOpenCode.testkit.ts";
 import { ModelCatalog } from "./ModelCatalog.ts";
-import { RunnerConfig } from "./RunnerConfig.ts";
 
 export const ROOT = Session.ID.make("ses_root");
 
@@ -41,13 +40,9 @@ const layerModels = Layer.succeed(
   }),
 );
 
-export const layerConfig = Layer.succeed(
-  RunnerConfig,
-  RunnerConfig.of({
-    host: "127.0.0.1",
-    port: 0,
-    token: Redacted.make("secret-token"),
-    openCodeKey: Redacted.make("sk-test"),
+export const layerConfig = ConfigProvider.layer(
+  ConfigProvider.fromUnknown({
+    T45_RUNNER_TOKEN: "secret-token",
   }),
 );
 

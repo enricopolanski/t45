@@ -131,8 +131,9 @@ const decodeAttachment = Schema.decodeUnknownEffect(Attachment);
 const decodeAttachments = Schema.decodeUnknownEffect(Schema.Array(Attachment));
 
 const make = Effect.gen(function* () {
-  const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+  const attachmentsDir = yield* ServerConfig.attachmentsDir;
   const fileSystem = yield* FileSystem.FileSystem;
+  yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
 

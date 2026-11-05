@@ -204,7 +204,7 @@ const RevokedRow = Schema.Struct({ sessionId: AuthSessionId });
 const makeSessions = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
-  const { stateDir } = yield* ServerConfig.ServerConfig;
+  const stateDir = yield* ServerConfig.stateDir;
   const revocations = yield* PubSub.unbounded<AuthSessionId>();
 
   const sha256 = (value: string) =>

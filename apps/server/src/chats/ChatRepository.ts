@@ -130,7 +130,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const { stateDir } = yield* ServerConfig.ServerConfig;
+  const stateDir = yield* ServerConfig.stateDir;
   const workspacesDir = path.join(stateDir, WORKSPACES_DIRECTORY);
   const workspaceFile = (chatId: ChatId) => path.join(workspacesDir, `${chatId}.tar.gz`);
 

@@ -15,10 +15,11 @@ import * as RunnerConfig from "./RunnerConfig.ts";
 
 const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
-    const config = yield* RunnerConfig.RunnerConfig;
+    const host = yield* RunnerConfig.host;
+    const port = yield* RunnerConfig.port;
     return NodeHttpServer.layer(() => NodeHttp.createServer(), {
-      host: config.host,
-      port: config.port,
+      host,
+      port,
     });
   }),
 );
@@ -28,7 +29,6 @@ export const layer = HttpRouter.serve(RunnerHttp.layer).pipe(
   Layer.provide(ModelCatalog.layer),
   Layer.provide(Microsandbox.layer),
   Layer.provideMerge(layerHttpServer),
-  Layer.provideMerge(RunnerConfig.layer),
   Layer.provideMerge(FetchHttpClient.layer),
   Layer.provide(NodeServices.layer),
 );
