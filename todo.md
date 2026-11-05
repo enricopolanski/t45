@@ -12,7 +12,7 @@
 
 ## Workflow side effects when replaying inputs
 
-- [ ] Define how to prevent duplicate workflow actions when a failed attempt is restarted by replaying all saved inputs. Replacing the generated conversation does not undo committed workflow changes, and new tool-call IDs can bypass the existing receipt ledger. Decide which effects can repeat and how the others are deduplicated.
+- [ ] Define how to prevent duplicate workflow actions when pending inputs are replayed after a new input starts a failed chat, or server startup recovers a running chat. Replacing the generated conversation does not undo committed workflow changes, and new tool-call IDs can bypass the existing receipt ledger. Decide which effects can repeat and how the others are deduplicated.
 
 ## Port from PR #4 (`feat/add-workflow-agent`) what PR #5 lacks
 

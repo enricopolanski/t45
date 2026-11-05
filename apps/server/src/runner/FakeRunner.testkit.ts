@@ -7,7 +7,7 @@ import {
   type ExecutionUpdate,
   RunnerRpcs,
 } from "@t45/contracts/resources/Runner";
-import type * as Cause from "effect/Cause";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -112,12 +112,8 @@ const make = () => {
       emit(execution, { _tag: "questions", forms: [form] });
       return form.id;
     },
-    /** The execution's VM was lost: it starts over in a new one. */
-    restart: (id: string) => {
-      const execution = executionOf(id);
-      emit(execution, { _tag: "restarted" });
-      begin(execution);
-    },
+    fail: (id: string) =>
+      void Queue.failCauseUnsafe(executionOf(id).events, Cause.die("The sandbox was lost.")),
     finish: (
       id: string,
       {

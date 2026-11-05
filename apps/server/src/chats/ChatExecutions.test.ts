@@ -166,24 +166,31 @@ describe("a chat's execution", () => {
   );
 
   it.effect(
-    "discards what an execution wrote when the runner starts it over, and keeps the chat running",
+    "discards a failed execution's output and questions, keeps the saved disk, and ends without retrying",
     () =>
       Effect.gen(function* () {
-        const { runner, chatId, events, ended, deliver, converse } = yield* setup;
+        const { runner, chatId, repository, events, ended, deliver, converse } = yield* setup;
         const reply = yield* converse("input-1", "Sum the receipts.");
         yield* deliver("input-2", "Then email it.");
         const partial = runner.reply(chatId, "Emailing");
         yield* Fixture.next(events, Fixture.showing(partial, "settled"));
-        runner.restart(chatId);
+        runner.ask(chatId);
+        yield* Fixture.next(events, asking);
+        runner.fail(chatId);
 
-        const shown = (yield* Fixture.next(events, Fixture.isSnapshot)).messages.map(
-          (each) => each.message.id,
-        );
+        const snapshot = yield* Fixture.next(events, Fixture.isSnapshot);
+        const shown = snapshot.messages.map((each) => each.message.id);
         assert.include(shown, reply);
         assert.notInclude(shown, partial);
-        yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, "input-2"), "settled"));
-        runner.finish(chatId);
-        assert.isNull(yield* ended);
+        assert.deepEqual(snapshot.questions, []);
+        assert.deepEqual(
+          snapshot.inputs.map((input) => input.inputId),
+          ["input-2"],
+        );
+        assert.equal(yield* ended, "failed");
+        yield* runner.ended(chatId);
+        assert.lengthOf(runner.executions, 2);
+        assert.deepEqual(yield* repository.readDisk(chatId), disk);
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 

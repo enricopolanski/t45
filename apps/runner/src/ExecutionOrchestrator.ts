@@ -24,7 +24,6 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as Latch from "effect/Latch";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
 import * as Queue from "effect/Queue";
 import type * as Redacted from "effect/Redacted";
 import * as Schedule from "effect/Schedule";
@@ -34,8 +33,6 @@ import * as Stream from "effect/Stream";
 
 import * as SandboxManager from "./SandboxManager.ts";
 
-const RESTART = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("30 seconds")]);
-
 const GENERATED_FILES = ".t45/attached";
 
 interface Running {
@@ -43,17 +40,15 @@ interface Running {
   /** Null once cancelled, so a late `send` can't bring it back. */
   readonly messages: Map<string, Message | null>;
   readonly files: Map<string, Uint8Array>;
-  /** Open while a message or an event gives the attempt something to look at. */
+  /** Open while a message or an event gives the execution something to look at. */
   readonly wake: Latch.Latch;
   readonly lock: Semaphore.Semaphore;
-  /** The current one, once its root is in its sandbox. */
-  attempt: Attempt | null;
-}
-
-interface Attempt {
-  readonly client: OpenCodeClient;
-  readonly sent: Set<string>;
-  readonly putFiles: Effect.Effect<void>;
+  /** Available after the root is created, until OpenCode finishes. */
+  session: {
+    readonly client: OpenCodeClient;
+    readonly sent: Set<string>;
+    readonly putFiles: Effect.Effect<void>;
+  } | null;
 }
 
 const decodeEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(OpenCodeEvent));
@@ -138,10 +133,7 @@ export const connect = Effect.fnUntraced(function* (url: string, password: Redac
   };
 });
 
-/**
- * OpenCode answers before its MCP servers connect, and a turn started then finds no tools. Giving
- * up is not a loss: the chat fails instead of restarting a sandbox whose OpenCode never serves.
- */
+/** OpenCode answers before its MCP servers connect, and a turn started then finds no tools. */
 const ready = Effect.fnUntraced(function* (
   client: OpenCodeClient,
   agent: ExecutionRequest["agent"],
@@ -162,16 +154,8 @@ const ready = Effect.fnUntraced(function* (
   );
 });
 
-/** The event stream ended, by silence, a frame that doesn't decode, or anything else. */
+/** The event stream ended before OpenCode finished. */
 class StreamEndedError extends Schema.TaggedError<StreamEndedError>()("StreamEndedError", {}) {}
-
-/** The sandbox is out of reach; OpenCode's client wraps such a failure in a `ClientError`. */
-const isLost = (error: unknown) => {
-  if (Predicate.isTagged(error, "StreamEndedError")) return true;
-  const failure =
-    Predicate.isTagged(error, "ClientError") && "cause" in error ? error.cause : error;
-  return HttpClientError.isHttpClientError(failure) && failure.reason._tag === "TransportError";
-};
 
 /** Sessions to read again, with the messages events named. */
 interface Marks {
@@ -254,7 +238,7 @@ export const layer = RunnerRpcs.toLayer(
      * In a new sandbox, removed when it ends, whose disk is saved once OpenCode is done with every
      * message. Fails when the sandbox is lost.
      */
-    const attempt = Effect.fnUntraced(function* (
+    const execute = Effect.fnUntraced(function* (
       id: string,
       running: Running,
       emit: (event: ExecutionUpdate) => Effect.Effect<void>,
@@ -465,7 +449,7 @@ export const layer = RunnerRpcs.toLayer(
           ],
         });
         yield* client.session.switchModel({ sessionID: root, model });
-        running.attempt = { client, sent, putFiles };
+        running.session = { client, sent, putFiles };
         while (true) {
           yield* deliver;
           yield* readMarked;
@@ -483,13 +467,13 @@ export const layer = RunnerRpcs.toLayer(
       }).pipe(
         Effect.ensuring(
           Effect.sync(() => {
-            running.attempt = null;
+            running.session = null;
           }),
         ),
       );
 
       /** Deltas go out as they come; any other event only marks what the next pass reads. */
-      const lost = events.pipe(
+      const consumeEvents = events.pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             if (event.type === "server.connected") yield* connected.open;
@@ -508,25 +492,24 @@ export const layer = RunnerRpcs.toLayer(
             } else if (mark(marks, event)) yield* running.wake.open;
           }),
         ),
-        Effect.catch((error) => Effect.logInfo("A sandbox's event stream failed", { id, error })),
         Effect.andThen(Effect.fail(new StreamEndedError())),
       );
 
       // The loser is interrupted before the race returns, so the stream is gone before `save`
       // removes the VM.
-      const outcome = yield* Effect.raceFirst(converse, lost);
+      const outcome = yield* Effect.raceFirst(converse, consumeEvents);
       yield* emit({ _tag: "finished", outcome, disk: yield* sandbox.save });
     });
 
-    /** A question goes with its sandbox, so there is none without an attempt. */
-    const onAttempt = <A, E>(
+    /** A question is available only while its session is running. */
+    const withSession = <A, E>(
       id: string,
-      use: (running: Running, attempt: Attempt) => Effect.Effect<A, E>,
+      use: (running: Running, session: NonNullable<Running["session"]>) => Effect.Effect<A, E>,
     ) =>
       Effect.gen(function* () {
         const running = executions.get(id);
-        if (running === undefined || running.attempt === null) return yield* new QuestionGone();
-        return yield* use(running, running.attempt);
+        if (running === undefined || running.session === null) return yield* new QuestionGone();
+        return yield* use(running, running.session);
       });
 
     return RunnerRpcs.of({
@@ -539,7 +522,7 @@ export const layer = RunnerRpcs.toLayer(
               files: new Map(Object.entries(request.files)),
               wake: yield* Latch.make(),
               lock: yield* Semaphore.make(1),
-              attempt: null,
+              session: null,
             };
             executions.set(id, running);
             yield* Effect.addFinalizer(() =>
@@ -552,17 +535,9 @@ export const layer = RunnerRpcs.toLayer(
               Effect.repeat(Schedule.spaced("15 seconds")),
               Effect.forkScoped,
             );
-            yield* attempt(id, running, emit).pipe(
+            yield* execute(id, running, emit).pipe(
               Effect.scoped,
-              Effect.tapError((error) =>
-                isLost(error)
-                  ? Effect.logWarning("A sandbox was lost; its execution starts over", {
-                      id,
-                      error,
-                    }).pipe(Effect.andThen(emit({ _tag: "restarted" })))
-                  : Effect.logError("An execution failed", { id, error }),
-              ),
-              Effect.retry({ while: isLost, schedule: RESTART }),
+              Effect.tapError((error) => Effect.logError("An execution failed", { id, error })),
               Effect.orDie,
             );
             yield* Queue.end(queue);
@@ -577,11 +552,11 @@ export const layer = RunnerRpcs.toLayer(
           return running.wake.open.pipe(Effect.asVoid);
         }),
       answer: ({ id, sessionId, formId, answer, files }) =>
-        onAttempt(id, (running, attempt) =>
+        withSession(id, (running, session) =>
           Effect.gen(function* () {
             for (const [path, content] of Object.entries(files)) running.files.set(path, content);
-            yield* attempt.putFiles;
-            yield* attempt.client.session.form.reply({
+            yield* session.putFiles;
+            yield* session.client.session.form.reply({
               sessionID: sessionId,
               formID: formId,
               answer,
@@ -593,8 +568,8 @@ export const layer = RunnerRpcs.toLayer(
           ),
         ),
       dismiss: ({ id, sessionId, formId }) =>
-        onAttempt(id, (_, attempt) =>
-          attempt.client.session.form
+        withSession(id, (_, session) =>
+          session.client.session.form
             .cancel({ sessionID: sessionId, formID: formId })
             .pipe(Effect.mapError(() => new QuestionGone())),
         ),
@@ -605,7 +580,7 @@ export const layer = RunnerRpcs.toLayer(
           return running.lock.withPermit(
             Effect.gen(function* () {
               running.messages.set(messageId, null);
-              const current = running.attempt;
+              const current = running.session;
               if (current === null || !current.sent.has(messageId)) return;
               yield* current.client.session.inbox
                 .cancel({ sessionID: running.request.root, inboxID: messageId })

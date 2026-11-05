@@ -56,8 +56,6 @@ export const ExecutionUpdate = Schema.Union([
   Schema.TaggedStruct("questions", { forms: Schema.Array(Form.Info) }),
   /** Before the messages that name it. */
   Schema.TaggedStruct("file", { path: Schema.String, content: Schema.Uint8Array }),
-  /** The sandbox was lost: everything since the execution started is void, and a new sandbox starts over. */
-  Schema.TaggedStruct("restarted", {}),
   /** Keeps the call's connection from going idle while the agent waits. */
   Schema.TaggedStruct("heartbeat", {}),
   Schema.TaggedStruct("finished", {

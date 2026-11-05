@@ -10,8 +10,6 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as Predicate from "effect/Predicate";
-import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
@@ -38,8 +36,6 @@ export type Receive = (
     | { readonly type: "ended"; readonly status: "failed" | null }
   ),
 ) => Effect.Effect<void>;
-
-const RETRY = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("30 seconds")]);
 
 const encodeInputMetadata = Schema.encodeSync(InputMetadata);
 
@@ -165,7 +161,7 @@ export const make = Effect.gen(function* () {
       )
       .pipe(Effect.orDie);
 
-  /** A runner out of reach is waited out; any other failure ends the chat `failed`. */
+  /** Any execution failure ends the chat `failed`; a new input can start another execution. */
   const execute = (chat: Chat, receive: Receive) =>
     Effect.gen(function* () {
       const chatId = chat.id;
@@ -227,24 +223,12 @@ export const make = Effect.gen(function* () {
             return Effect.sync(() => void generated.set(event.path, event.content));
           case "heartbeat":
             return Effect.void;
-          case "restarted":
-            return Effect.sync(() => generated.clear()).pipe(Effect.andThen(discard(chatId)));
           case "finished":
             return end(chatId, receive, event.outcome, event.disk);
         }
       };
       yield* runner.execute({ id: chatId, request }).pipe(Stream.runForEach(handle));
     }).pipe(
-      Effect.retry({
-        schedule: RETRY,
-        while: (error) =>
-          Predicate.isTagged(error, "RpcClientError")
-            ? Effect.logWarning("The runner is out of reach; the chat's execution runs again", {
-                chatId: chat.id,
-                error,
-              }).pipe(Effect.as(true))
-            : Effect.succeed(false),
-      }),
       Effect.catchCauseIf(
         (cause) => !Cause.hasInterruptsOnly(cause),
         (cause) =>
