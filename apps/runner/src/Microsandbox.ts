@@ -40,8 +40,7 @@ const PROVIDER_HOST = "opencode.ai";
 const KEY_ENV = "OPENCODE_API_KEY";
 
 /**
- * Outbound denied but for the provider on 443, or the public internet less the runner's own
- * addresses, with DNS through the host. TLS interception is on and the key is a secret bound to the
+ * Outbound denied but for the provider on 443, or the public internet with DNS through the host. TLS interception is on and the key is a secret bound to the
  * provider. OpenCode's port binds to the host's loopback, so only the host reaches it.
  */
 const sandboxNetwork =
@@ -51,9 +50,6 @@ const sandboxNetwork =
     if (network === "provider") {
       policy = policy.egress((rule) => rule.tcp().port(443).allowDomain(PROVIDER_HOST));
     } else {
-      for (const ip of config.denyIps) {
-        policy = policy.egress((rule) => rule.deny((to) => to.ip(ip)));
-      }
       policy = policy.egress((rule) => rule.udp().tcp().port(53).allowHost());
       policy = policy.egress((rule) => rule.allowPublic());
     }

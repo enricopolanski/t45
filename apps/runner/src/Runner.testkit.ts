@@ -49,7 +49,6 @@ export const layerConfig = Layer.succeed(
     token: Redacted.make("secret-token"),
     image: "t45-agent:test",
     ipv4Pool: "10.200.0.0/16",
-    denyIps: [],
     openCodeKey: Redacted.make("sk-test"),
   }),
 );

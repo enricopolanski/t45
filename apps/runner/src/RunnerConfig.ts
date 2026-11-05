@@ -5,7 +5,6 @@
  *   T45_RUNNER_TOKEN                   the bearer token T45 sends; required
  *   T45_RUNNER_IMAGE                   the agent image (t45-agent:dev by default)
  *   T45_RUNNER_SANDBOX_POOL            sandbox addresses (10.200.0.0/16 by default)
- *   T45_RUNNER_DENY_IPS                public addresses an open network refuses, comma-separated
  *   OPENCODE_API_KEY                   the OpenCode Go key agents' models run on; required
  */
 import * as Config from "effect/Config";
@@ -22,7 +21,6 @@ export class RunnerConfig extends Context.Service<
     readonly token: Redacted.Redacted;
     readonly image: string;
     readonly ipv4Pool: string;
-    readonly denyIps: ReadonlyArray<string>;
     /** Signs VMs in to OpenCode Go; inside a VM, OpenCode only sees a placeholder. */
     readonly openCodeKey: Redacted.Redacted;
   }
@@ -49,10 +47,6 @@ const make = Effect.gen(function* () {
     ipv4Pool: yield* Config.String("T45_RUNNER_SANDBOX_POOL").pipe(
       Config.withDefault("10.200.0.0/16"),
     ),
-    denyIps: (yield* Config.String("T45_RUNNER_DENY_IPS").pipe(Config.withDefault("")))
-      .split(",")
-      .map((ip) => ip.trim())
-      .filter(Boolean),
     openCodeKey,
   });
 });
