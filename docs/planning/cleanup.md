@@ -25,6 +25,7 @@ Each entry names the file and what could change. Delete an entry once it is done
 
 ## apps/runner
 
+- `apps/runner/src/Executions.ts`, `apps/runner/src/Capture.ts` — nothing tests the execution logic since the scripted OpenCode fake and `Executions.test.ts` went. Evaluate the middle ground: tests only of restarting on a lost sandbox and of cancel racing send, over a fake cut down to the few OpenCode routes they use.
 - `apps/runner/src/Executions.ts`, `apps/runner/src/Microsandbox.ts` — execution recovery recognizes OpenCode transport loss but not VM-loss errors wrapped in `SandboxError.cause`, so a VM that dies while it starts fails the chat instead of restarting it. Normalize VM loss at the sandbox boundary so recovery uses one classification.
 - `apps/runner/src/Executions.ts` — `Stream.callback` creates an unbounded output queue before the RPC transport's bounded queue, so messages, file events and heartbeats can accumulate while T45 consumes them slowly. Give output a bounded buffering policy that preserves durable event order and stream backpressure without adding another acknowledgement protocol.
 - `apps/runner/src/Executions.ts` — the runner doesn't check the path or size of a file T45 puts in a VM; review whether it should.

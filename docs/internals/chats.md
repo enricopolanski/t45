@@ -92,4 +92,4 @@ Checked against the v2.1.4 source; check them again when bumping the pin.
 
 ## Tests
 
-Chat tests run the real services over test SQLite against a scripted runner ([`FakeRunner.testkit.ts`](../../apps/server/src/runner/FakeRunner.testkit.ts)) and wait on the chat's change feed. The runner's tests run its executions against a fake sandbox and fake OpenCode servers ([`apps/runner/src`](../../apps/runner/src)).
+Chat tests run the real services over test SQLite against a scripted runner ([`FakeRunner.testkit.ts`](../../apps/server/src/runner/FakeRunner.testkit.ts)) and wait on the chat's change feed.
