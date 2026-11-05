@@ -4,7 +4,7 @@
  * sessions to the VM that boots on it.
  */
 import { Form } from "@opencode/client/effect";
-import type { Execution } from "@t45/contracts/resources/Runner";
+import type { RunRequest } from "@t45/contracts/resources/Runner";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -39,7 +39,7 @@ interface FakeSession {
 interface Vm {
   readonly id: string;
   readonly url: string;
-  readonly agent: Execution["agent"];
+  readonly agent: RunRequest["agent"];
   /** A lost or removed VM's OpenCode stops answering. */
   state: "up" | "lost" | "removed";
   readonly booted: Uint8Array | null;

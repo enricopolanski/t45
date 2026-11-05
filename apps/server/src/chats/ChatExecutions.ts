@@ -2,7 +2,7 @@ import type { SessionMessage } from "@opencode/schema/session-message";
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import { type Chat, type ChatId, type Input, titleOf } from "@t45/contracts/models/Chat";
 import { InputMetadata } from "@t45/contracts/resources/Chats";
-import type { Execution, ExecutionEvent } from "@t45/contracts/resources/Runner";
+import type { RunRequest, RunUpdate } from "@t45/contracts/resources/Runner";
 import { hasT45Tools } from "@t45/core/agentTools";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -45,7 +45,7 @@ const encodeInputMetadata = Schema.encodeSync(InputMetadata);
 
 export type Posted = Pick<Input, "inputId" | "payload">;
 
-const inputOf = (chatId: ChatId, { inputId, payload }: Posted) => ({
+const messageOf = (chatId: ChatId, { inputId, payload }: Posted) => ({
   id: inputMessageId(chatId, inputId),
   text: PromptService.format(payload),
   metadata: encodeInputMetadata({ t45: payload }),
@@ -128,7 +128,7 @@ export const make = Effect.gen(function* () {
       )
       .pipe(Effect.orDie);
 
-  const executionOf = (chat: Chat) =>
+  const requestOf = (chat: Chat) =>
     Effect.gen(function* () {
       const agent = (yield* agents.get(chat.agentId))!;
       const origin = yield* repository.origins.get(chat.id);
@@ -148,8 +148,8 @@ export const make = Effect.gen(function* () {
         files: yield* filesOf(
           inputs.flatMap((input) => input.payload.attachments.map((file) => file.id)),
         ),
-        inputs: inputs.map((input) => inputOf(chat.id, input)),
-      } satisfies Execution;
+        messages: inputs.map((input) => messageOf(chat.id, input)),
+      } satisfies RunRequest;
     });
 
   /** Atomic with posts: one that commits after this finds no owner and starts one. */
@@ -170,15 +170,15 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const chatId = chat.id;
       yield* discard(chatId);
-      const execution = yield* executionOf(chat);
+      const request = yield* requestOf(chat);
       const generated = new Map<string, Uint8Array>();
-      const handle = (event: ExecutionEvent): Effect.Effect<void> => {
+      const handle = (event: RunUpdate): Effect.Effect<void> => {
         switch (event._tag) {
           case "sessions":
             return Effect.gen(function* () {
               let changed = false;
               for (const info of event.sessions) {
-                const parentSessionId = info.id === execution.root ? null : (info.parentID ?? null);
+                const parentSessionId = info.id === request.root ? null : (info.parentID ?? null);
                 changed =
                   (yield* repository.putSession(chatId, {
                     sessionId: info.id,
@@ -233,7 +233,7 @@ export const make = Effect.gen(function* () {
             return end(chatId, receive, event.outcome, event.disk);
         }
       };
-      yield* runner.run({ id: chatId, execution }).pipe(Stream.runForEach(handle));
+      yield* runner.run({ id: chatId, request }).pipe(Stream.runForEach(handle));
     }).pipe(
       Effect.retry({
         schedule: RETRY,
@@ -294,11 +294,11 @@ export const make = Effect.gen(function* () {
       if (posted === undefined) return Effect.void;
       return filesOf(posted.payload.attachments.map((file) => file.id)).pipe(
         Effect.flatMap((files) =>
-          runner.send({ id: chatId, input: inputOf(chatId, posted), files }),
+          runner.send({ id: chatId, message: messageOf(chatId, posted), files }),
         ),
         Effect.catchTags({
           RpcClientError: (error) =>
-            Effect.logWarning("Sending a chat's input failed", { chatId, error }),
+            Effect.logWarning("Sending a chat's message failed", { chatId, error }),
         }),
       );
     });

@@ -97,8 +97,8 @@ describe("a chat's execution", () => {
         );
         yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, "input-1"), "settled"));
 
-        const { execution } = runner.runs[0]!;
-        assert.deepEqual(execution.agent, {
+        const { request } = runner.runs[0]!;
+        assert.deepEqual(request.agent, {
           instructions: "Use the policy.",
           model: "opencode-go/other-model",
           mcpServers: { docs: { type: "remote", url: "https://docs.example" } },
@@ -107,12 +107,12 @@ describe("a chat's execution", () => {
           skills: [],
         });
         assert.deepEqual(
-          [execution.root, execution.title, execution.questions, execution.disk],
+          [request.root, request.title, request.questions, request.disk],
           [root, chatId, true, null],
         );
-        assert.deepEqual(execution.files, { [`attachments/${file.id}`]: new Uint8Array([4, 2]) });
+        assert.deepEqual(request.files, { [`attachments/${file.id}`]: new Uint8Array([4, 2]) });
         assert.deepEqual(
-          execution.inputs.map(({ id, metadata }) => ({ id, metadata })),
+          request.messages.map(({ id, metadata }) => ({ id, metadata })),
           [
             {
               id: inputMessageId(chatId, "input-1"),
@@ -154,10 +154,10 @@ describe("a chat's execution", () => {
         yield* converse("input-1", "Sum the receipts.");
 
         yield* deliver("input-2", "Email it.");
-        const { execution } = runner.runs[1]!;
-        assert.deepEqual(execution.disk, disk);
+        const { request } = runner.runs[1]!;
+        assert.deepEqual(request.disk, disk);
         assert.deepEqual(
-          execution.inputs.map((input) => input.id),
+          request.messages.map((message) => message.id),
           messageIds(chatId, "input-2"),
         );
         runner.finish(chatId, { outcome: "failed" });
@@ -197,7 +197,7 @@ describe("a chat's execution", () => {
       runner.refuse = null;
       yield* deliver("input-2", "Still there?");
       assert.deepEqual(
-        runner.runs.map(({ execution }) => execution.inputs.map((input) => input.id)),
+        runner.runs.map(({ request }) => request.messages.map((message) => message.id)),
         [messageIds(chatId, "input-1"), messageIds(chatId, "input-1", "input-2")],
       );
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
@@ -224,7 +224,7 @@ describe("a chat's execution", () => {
 
         yield* deliver("input-2", "Zip them too.");
         assert.deepEqual(
-          runner.runs.at(-1)?.execution.inputs.map((input) => input.id),
+          runner.runs.at(-1)?.request.messages.map((message) => message.id),
           messageIds(chatId, "input-1", "input-2"),
         );
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
@@ -237,13 +237,13 @@ describe("a chat's execution", () => {
       runner.hold = true;
       yield* send("input-2", "Then zip them.");
       assert.include(
-        runner.sends.map(({ input }) => input.id),
+        runner.sends.map(({ message }) => message.id),
         inputMessageId(chatId, "input-2"),
       );
 
       yield* chats.cancel({ chatId, inputId: "input-2" }, alice);
       assert.deepEqual(runner.cancels, [
-        { id: chatId, inputId: inputMessageId(chatId, "input-2") },
+        { id: chatId, messageId: inputMessageId(chatId, "input-2") },
       ]);
       assert.isNull(yield* repository.input(chatId, "input-2"));
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),

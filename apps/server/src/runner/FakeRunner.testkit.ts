@@ -2,9 +2,9 @@ import { Form } from "@opencode/schema/form";
 import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import {
-  type Execution,
-  type ExecutionEvent,
-  type ExecutionInput,
+  type Message,
+  type RunRequest,
+  type RunUpdate,
   RunnerRpcs,
 } from "@t45/contracts/resources/Runner";
 import type * as Cause from "effect/Cause";
@@ -25,9 +25,9 @@ type RunnerRpc = RpcGroup.Rpcs<typeof RunnerRpcs>;
 type Payload<Tag extends RunnerRpc["_tag"]> = Rpc.Payload<Rpc.ExtractTag<RunnerRpc, Tag>>;
 
 interface Run {
-  readonly execution: Execution;
-  readonly inputs: Array<ExecutionInput>;
-  readonly events: Queue.Queue<ExecutionEvent, Cause.Done>;
+  readonly request: RunRequest;
+  readonly messages: Array<Message>;
+  readonly events: Queue.Queue<RunUpdate, Cause.Done>;
   readonly ended: Deferred.Deferred<void>;
 }
 
@@ -45,19 +45,19 @@ const make = () => {
     if (run === undefined) throw new Error(`No run for ${id}.`);
     return run;
   };
-  const emit = (run: Run, event: ExecutionEvent) => void Queue.offerUnsafe(run.events, event);
+  const emit = (run: Run, event: RunUpdate) => void Queue.offerUnsafe(run.events, event);
   const write = (run: Run, message: unknown) =>
     emit(run, {
       _tag: "messages",
-      sessionId: run.execution.root,
+      sessionId: run.request.root,
       messages: [decodeMessage(message)],
     });
-  const deliver = (run: Run, input: ExecutionInput) => {
-    if (!fake.hold) write(run, { ...input, type: "user", time: { created: NOW } });
+  const deliver = (run: Run, message: Message) => {
+    if (!fake.hold) write(run, { ...message, type: "user", time: { created: NOW } });
   };
-  /** As in a new VM: the root session, then each input the agent takes. */
+  /** As in a new VM: the root session, then each message the agent takes. */
   const begin = (run: Run) => {
-    const { root, title } = run.execution;
+    const { root, title } = run.request;
     const info = decodeSession({
       id: root,
       title,
@@ -68,11 +68,11 @@ const make = () => {
       location: { directory: "/work" },
     });
     emit(run, { _tag: "sessions", sessions: [info] });
-    for (const input of run.inputs) deliver(run, input);
+    for (const message of run.messages) deliver(run, message);
   };
 
   const fake = {
-    /** Set to keep inputs from the agent: they stay pending. */
+    /** Set to keep messages from the agent: they stay pending. */
     hold: false,
     /** Set to fail each run with this reason. */
     refuse: null as string | null,
@@ -81,7 +81,7 @@ const make = () => {
     sends: [] as Array<Payload<"send">>,
     answers: [] as Array<Payload<"answer">>,
     cancels: [] as Array<Payload<"cancel">>,
-    emit: (id: string, event: ExecutionEvent) => emit(runOf(id), event),
+    emit: (id: string, event: RunUpdate) => emit(runOf(id), event),
     /** The agent writes a reply in the root, unfinished while `streaming`. Returns its id. */
     reply: (
       id: string,
@@ -104,7 +104,7 @@ const make = () => {
       const run = runOf(id);
       const form = Form.Info.make({
         id: Form.ID.make(`frm_${String(next++)}`),
-        sessionID: run.execution.root,
+        sessionID: run.request.root,
         title: "Which year?",
         fields: [{ key: "year", type: "string" }],
       });
@@ -146,9 +146,9 @@ const make = () => {
             return Stream.die(fake.refuse);
           }
           const run: Run = {
-            execution: payload.execution,
-            inputs: [...payload.execution.inputs],
-            events: yield* Queue.unbounded<ExecutionEvent, Cause.Done>(),
+            request: payload.request,
+            messages: [...payload.request.messages],
+            events: yield* Queue.unbounded<RunUpdate, Cause.Done>(),
             ended: yield* Deferred.make<void>(),
           };
           running.set(payload.id, run);
@@ -168,8 +168,8 @@ const make = () => {
         fake.sends.push(payload);
         const run = running.get(payload.id);
         if (run === undefined) return;
-        run.inputs.push(payload.input);
-        deliver(run, payload.input);
+        run.messages.push(payload.message);
+        deliver(run, payload.message);
       }),
     answer: (payload) => Effect.sync(() => void fake.answers.push(payload)),
     dismiss: () => Effect.void,

@@ -521,7 +521,7 @@ const make = Effect.gen(function* () {
           return yield* refuse("already_taken");
         }
         yield* runner
-          .cancel({ id: chat.id, inputId: inputMessageId(chat.id, input.inputId) })
+          .cancel({ id: chat.id, messageId: inputMessageId(chat.id, input.inputId) })
           .pipe(Effect.catchTags({ RpcClientError: unavailable(chat.id) }));
         yield* repository.deleteInput(chat.id, input.inputId);
         yield* publish(chat.id, "inputs");

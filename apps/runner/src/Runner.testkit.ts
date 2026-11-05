@@ -1,5 +1,5 @@
 import { Session } from "@opencode/client/effect";
-import { type Execution, RunnerRpcs } from "@t45/contracts/resources/Runner";
+import { type RunRequest, RunnerRpcs } from "@t45/contracts/resources/Runner";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -14,7 +14,7 @@ import { ModelCatalog } from "./ModelCatalog.ts";
 
 export const ROOT = Session.ID.make("ses_root");
 
-export const execution = (overrides: Partial<Execution> = {}): Execution => ({
+export const request = (overrides: Partial<RunRequest> = {}): RunRequest => ({
   agent: {
     instructions: "Be brief.",
     model: "opencode-go/test-model",
@@ -28,7 +28,7 @@ export const execution = (overrides: Partial<Execution> = {}): Execution => ({
   questions: true,
   disk: null,
   files: {},
-  inputs: [],
+  messages: [],
   ...overrides,
 });
 

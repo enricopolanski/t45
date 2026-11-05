@@ -1,6 +1,6 @@
 import { type Form, Session, SessionMessage } from "@opencode/client/effect";
 import type { OpenCodeEvent } from "@opencode/protocol/groups/event";
-import { type ExecutionEvent, isSettled } from "@t45/contracts/resources/Runner";
+import { type RunUpdate, isSettled } from "@t45/contracts/resources/Runner";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -83,7 +83,7 @@ export const make = Effect.fnUntraced(function* ({
 }: {
   readonly opencode: Effect.Success<ReturnType<typeof OpenCode.connect>>;
   readonly root: Session.ID;
-  readonly emit: (event: ExecutionEvent) => Effect.Effect<void>;
+  readonly emit: (event: RunUpdate) => Effect.Effect<void>;
   /** Once per batch of events that marked something. */
   readonly changed: Effect.Effect<void>;
   readonly ended: Effect.Effect<void>;

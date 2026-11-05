@@ -1,4 +1,4 @@
-import type { Execution } from "@t45/contracts/resources/Runner";
+import type { RunRequest } from "@t45/contracts/resources/Runner";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Redacted from "effect/Redacted";
@@ -30,7 +30,7 @@ export class Sandbox extends Context.Service<
     /** Replaces any VM left under `id`, boots it on `disk` or a new one, and waits for OpenCode and the agent's MCP servers. */
     readonly start: (
       id: string,
-      agent: Execution["agent"],
+      agent: RunRequest["agent"],
       disk: Uint8Array | null,
     ) => Effect.Effect<Vm, SandboxError, Scope.Scope>;
   }

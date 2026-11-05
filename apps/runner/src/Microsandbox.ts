@@ -1,7 +1,7 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { OpenCode } from "@opencode/client/effect";
 import { Config } from "@opencode/schema/config";
-import type { Execution } from "@t45/contracts/resources/Runner";
+import type { RunRequest } from "@t45/contracts/resources/Runner";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
@@ -18,7 +18,7 @@ import { type NetworkBuilder, NetworkPolicy, Sandbox as Microvm } from "microsan
 import * as RunnerConfig from "./RunnerConfig.ts";
 import { Sandbox, SandboxError } from "./Sandbox.ts";
 
-type Agent = Execution["agent"];
+type Agent = RunRequest["agent"];
 
 /** Built by `image/build-local.sh`. */
 const IMAGE = "t45-agent:dev";

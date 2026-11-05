@@ -14,13 +14,13 @@ import { Skill } from "../models/Skill.ts";
 /** Files by their path under /work. */
 const Files = Schema.Record(Schema.String, Schema.Uint8Array);
 
-export const ExecutionInput = Schema.Struct({
+export const Message = Schema.Struct({
   id: SessionMessage.ID,
   ...Struct.pick(SessionInbox.UserPayload.fields, ["text", "metadata"]),
 });
-export type ExecutionInput = typeof ExecutionInput.Type;
+export type Message = typeof Message.Type;
 
-export const Execution = Schema.Struct({
+export const RunRequest = Schema.Struct({
   agent: Schema.Struct({
     ...Struct.pick(Agent.fields, ["instructions", "model", "mcpServers", "permissions"]),
     files: FilesByPath(AGENT_SETUP_PATHS),
@@ -33,13 +33,13 @@ export const Execution = Schema.Struct({
   questions: Schema.Boolean,
   /** The disk the last finished execution left, conversation included; null for a new chat. */
   disk: Schema.NullOr(Schema.Uint8Array),
-  /** The inputs' files. */
+  /** The messages' files. */
   files: Files,
-  inputs: Schema.Array(ExecutionInput),
+  messages: Schema.Array(Message),
 });
-export type Execution = typeof Execution.Type;
+export type RunRequest = typeof RunRequest.Type;
 
-export const ExecutionEvent = Schema.Union([
+export const RunUpdate = Schema.Union([
   /** The root and every session under it, parents first. */
   Schema.TaggedStruct("sessions", { sessions: Schema.Array(Session.Info) }),
   Schema.TaggedStruct("messages", {
@@ -65,7 +65,7 @@ export const ExecutionEvent = Schema.Union([
     disk: Schema.Uint8Array,
   }),
 ]);
-export type ExecutionEvent = typeof ExecutionEvent.Type;
+export type RunUpdate = typeof RunUpdate.Type;
 
 /** Whether OpenCode finished writing the message. */
 export const isSettled = (message: SessionMessage.Info) => {
@@ -90,15 +90,15 @@ const question = { id: Schema.String, sessionId: Session.ID, formId: Form.ID };
 export const RunnerRpcs = RpcGroup.make(
   Rpc.make("getModels", { success: Schema.Array(AgentModel) }),
   Rpc.make("run", {
-    payload: { id: Schema.String, execution: Execution },
-    success: ExecutionEvent,
+    payload: { id: Schema.String, request: RunRequest },
+    success: RunUpdate,
     stream: true,
   }),
-  Rpc.make("send", { payload: { id: Schema.String, input: ExecutionInput, files: Files } }),
+  Rpc.make("send", { payload: { id: Schema.String, message: Message, files: Files } }),
   Rpc.make("answer", {
     payload: { ...question, answer: Form.Answer, files: Files },
     error: Schema.Union([QuestionGone, AnswerInvalid]),
   }),
   Rpc.make("dismiss", { payload: question, error: QuestionGone }),
-  Rpc.make("cancel", { payload: { id: Schema.String, inputId: SessionMessage.ID } }),
+  Rpc.make("cancel", { payload: { id: Schema.String, messageId: SessionMessage.ID } }),
 );

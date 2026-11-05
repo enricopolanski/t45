@@ -1,9 +1,9 @@
 import { Model, type OpenCodeClient } from "@opencode/client/effect";
 import {
   AnswerInvalid,
-  type Execution,
-  type ExecutionEvent,
-  type ExecutionInput,
+  type Message,
+  type RunRequest,
+  type RunUpdate,
   QuestionGone,
   RunnerRpcs,
 } from "@t45/contracts/resources/Runner";
@@ -25,12 +25,12 @@ const CAPTURE_BATCH = "150 millis";
 
 const RESTART = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("30 seconds")]);
 
-type Signal = "inputs" | "events" | "ended";
+type Signal = "messages" | "events" | "ended";
 
 interface Running {
-  readonly execution: Execution;
+  readonly request: RunRequest;
   /** Null once cancelled, so a late `send` can't bring it back. */
-  readonly inputs: Map<string, ExecutionInput | null>;
+  readonly messages: Map<string, Message | null>;
   readonly files: Map<string, Uint8Array>;
   readonly signal: Queue.Queue<Signal>;
   readonly lock: Semaphore.Semaphore;
@@ -59,15 +59,15 @@ export const layer = RunnerRpcs.toLayer(
     const httpClient = yield* HttpClient.HttpClient;
     const executions = new Map<string, Running>();
 
-    /** Until OpenCode is done with every input; returns the root's outcome, and fails when the VM is lost. */
+    /** Until OpenCode is done with every message; returns the root's outcome, and fails when the VM is lost. */
     const converse = Effect.fnUntraced(function* (
       id: string,
       vm: Vm,
       running: Running,
-      emit: (event: ExecutionEvent) => Effect.Effect<void>,
+      emit: (event: RunUpdate) => Effect.Effect<void>,
     ) {
-      const { execution } = running;
-      const root = execution.root;
+      const { request } = running;
+      const root = request.root;
       yield* Queue.clear(running.signal);
       const opencode = yield* OpenCode.connect(vm).pipe(
         Effect.provideService(HttpClient.HttpClient, httpClient),
@@ -97,12 +97,12 @@ export const layer = RunnerRpcs.toLayer(
         { discard: true },
       );
       yield* putFiles;
-      const model = Model.Ref.parse(execution.agent.model);
-      const permissions = OpenCode.sessionRules(execution.questions);
+      const model = Model.Ref.parse(request.agent.model);
+      const permissions = OpenCode.sessionRules(request.questions);
       // A root the disk kept comes back as it is.
       yield* client.session.create({
         id: root,
-        title: execution.title,
+        title: request.title,
         model,
         permissions,
       });
@@ -118,17 +118,17 @@ export const layer = RunnerRpcs.toLayer(
       const deliver = running.lock.withPermit(
         Effect.gen(function* () {
           yield* putFiles;
-          for (const input of running.inputs.values()) {
-            if (input === null || sent.has(input.id)) continue;
-            yield* client.session.prompt({ ...input, sessionID: root, delivery: "queue" });
-            sent.add(input.id);
+          for (const message of running.messages.values()) {
+            if (message === null || sent.has(message.id)) continue;
+            yield* client.session.prompt({ ...message, sessionID: root, delivery: "queue" });
+            sent.add(message.id);
           }
         }),
       );
 
       const done = Effect.gen(function* () {
-        for (const input of running.inputs.values()) {
-          if (input !== null && !sent.has(input.id)) return false;
+        for (const message of running.messages.values()) {
+          if (message !== null && !sent.has(message.id)) return false;
         }
         return yield* capture.idle;
       });
@@ -154,9 +154,9 @@ export const layer = RunnerRpcs.toLayer(
     const attempt = Effect.fnUntraced(function* (
       id: string,
       running: Running,
-      emit: (event: ExecutionEvent) => Effect.Effect<void>,
+      emit: (event: RunUpdate) => Effect.Effect<void>,
     ) {
-      const { agent, disk } = running.execution;
+      const { agent, disk } = running.request;
       const vm = yield* sandbox.start(id, agent, disk);
       const outcome = yield* Effect.scoped(converse(id, vm, running, emit));
       yield* emit({ _tag: "finished", outcome, disk: yield* vm.save });
@@ -175,13 +175,13 @@ export const layer = RunnerRpcs.toLayer(
 
     return RunnerRpcs.of({
       getModels: () => catalog.models,
-      run: ({ id, execution }) =>
-        Stream.callback<ExecutionEvent>((queue) =>
+      run: ({ id, request }) =>
+        Stream.callback<RunUpdate>((queue) =>
           Effect.gen(function* () {
             const running: Running = {
-              execution,
-              inputs: new Map(execution.inputs.map((input) => [input.id, input])),
-              files: new Map(Object.entries(execution.files)),
+              request,
+              messages: new Map(request.messages.map((message) => [message.id, message])),
+              files: new Map(Object.entries(request.files)),
               signal: yield* Queue.unbounded<Signal>(),
               lock: yield* Semaphore.make(1),
               attempt: null,
@@ -192,7 +192,7 @@ export const layer = RunnerRpcs.toLayer(
                 if (executions.get(id) === running) executions.delete(id);
               }),
             );
-            const emit = (event: ExecutionEvent) => Queue.offer(queue, event).pipe(Effect.asVoid);
+            const emit = (event: RunUpdate) => Queue.offer(queue, event).pipe(Effect.asVoid);
             yield* emit({ _tag: "heartbeat" }).pipe(
               Effect.repeat(Schedule.spaced("15 seconds")),
               Effect.forkScoped,
@@ -213,13 +213,13 @@ export const layer = RunnerRpcs.toLayer(
             yield* Queue.end(queue);
           }),
         ),
-      send: ({ id, input, files }) =>
+      send: ({ id, message, files }) =>
         Effect.suspend(() => {
           const running = executions.get(id);
-          if (running === undefined || running.inputs.has(input.id)) return Effect.void;
+          if (running === undefined || running.messages.has(message.id)) return Effect.void;
           for (const [path, content] of Object.entries(files)) running.files.set(path, content);
-          running.inputs.set(input.id, input);
-          return Queue.offer(running.signal, "inputs").pipe(Effect.asVoid);
+          running.messages.set(message.id, message);
+          return Queue.offer(running.signal, "messages").pipe(Effect.asVoid);
         }),
       answer: ({ id, sessionId, formId, answer, files }) =>
         onAttempt(id, (running, attempt) =>
@@ -243,17 +243,17 @@ export const layer = RunnerRpcs.toLayer(
             .cancel({ sessionID: sessionId, formID: formId })
             .pipe(Effect.mapError(() => new QuestionGone())),
         ),
-      cancel: ({ id, inputId }) =>
+      cancel: ({ id, messageId }) =>
         Effect.suspend(() => {
           const running = executions.get(id);
           if (running === undefined) return Effect.void;
           return running.lock.withPermit(
             Effect.gen(function* () {
-              running.inputs.set(inputId, null);
+              running.messages.set(messageId, null);
               const current = running.attempt;
-              if (current === null || !current.sent.has(inputId)) return;
+              if (current === null || !current.sent.has(messageId)) return;
               yield* current.client.session.inbox
-                .cancel({ sessionID: running.execution.root, inboxID: inputId })
+                .cancel({ sessionID: running.request.root, inboxID: messageId })
                 .pipe(Effect.ignore);
             }),
           );
