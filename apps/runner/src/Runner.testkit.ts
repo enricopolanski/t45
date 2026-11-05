@@ -47,7 +47,6 @@ export const layerConfig = Layer.succeed(
     host: "127.0.0.1",
     port: 0,
     token: Redacted.make("secret-token"),
-    image: "t45-agent:test",
     openCodeKey: Redacted.make("sk-test"),
   }),
 );

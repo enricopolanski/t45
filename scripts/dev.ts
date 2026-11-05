@@ -153,7 +153,6 @@ export const runDev = Effect.fnUntraced(function* (
     env.T45_RUNNER_HOST = "127.0.0.1";
     env.T45_RUNNER_PORT = String(ports.runner);
     env.T45_RUNNER_TOKEN = token;
-    env.T45_RUNNER_IMAGE = "t45-agent:dev";
     env.RUNNER_URL = `http://127.0.0.1:${ports.runner}`;
     env.RUNNER_TOKEN = token;
   } else {

@@ -24,6 +24,9 @@ import { Sandbox, SandboxError } from "./Sandbox.ts";
 
 type Agent = Execution["agent"];
 
+/** Built by `image/build-local.sh`. */
+const IMAGE = "t45-agent:dev";
+
 const GUEST_PORT = 4096;
 
 const LIMITS = { cpus: 2, memoryMib: 2048, diskMib: 4096 };
@@ -234,7 +237,7 @@ const make = Effect.gen(function* () {
         sdk("create", () =>
           // The port keeps one runner's VMs apart from another's on the same machine.
           Microvm.builder(`vm-${config.port}-${id}`)
-            .image(config.image)
+            .image(IMAGE)
             .pullPolicy("if-missing")
             .user("agent")
             .security("restricted")
