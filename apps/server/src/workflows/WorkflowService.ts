@@ -1,7 +1,7 @@
 import type { Workflows } from "@t45/contracts/resources/Workflows";
 import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
-import type { SessionMessage } from "@opencode/client/effect";
+import type { SessionMessage } from "@opencode/schema/session-message";
 import type { Task } from "@t45/contracts/models/Task";
 import { TaskService, type StepHooks } from "../tasks/TaskService.ts";
 import { canWorkSteps } from "@t45/contracts/models/Agent";
@@ -70,7 +70,6 @@ import * as Schema from "effect/Schema";
 
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
-import { textOf } from "../opencode/OpenCode2Client.ts";
 import { UserRepository } from "../org/UserRepository.ts";
 import { NotificationRepository } from "./NotificationRepository.ts";
 import { TicketRepository } from "./TicketRepository.ts";
@@ -120,6 +119,9 @@ const decodeReply = Schema.decodeUnknownOption(
   ),
 );
 const decodeCall = Schema.decodeUnknownOption(StepToolCall);
+
+const textOf = (content: SessionMessage.ToolStateCompleted["content"]) =>
+  content.flatMap((part) => (part.type === "text" && part.text ? [part.text] : [])).join("\n");
 
 const callOf = (part: SessionMessage.AssistantTool) => {
   const tool = STEP_TOOL_NAMES.find((name) => name === part.name);
@@ -1310,17 +1312,17 @@ const make = Effect.gen(function* () {
     });
   });
   const taskHooks: StepHooks = {
-    prepare: (task, part, read) =>
+    prepare: (task, part, generated) =>
       Effect.gen(function* () {
         const parsed = callOf(part);
         if (parsed === null) return null;
         let attachmentId: AttachmentId | null = null;
         const file = parsed.attached;
-        if (file !== null && /^\.t45\/attached\/[0-9a-f-]{36}$/u.test(file.file)) {
+        if (file !== null) {
           const loaded = yield* loadTaskStep(task).pipe(Effect.option);
           if (Option.isNone(loaded)) return null;
-          const bytes = yield* read(file.file);
-          if (bytes !== null) {
+          const bytes = generated.get(file.file);
+          if (bytes !== undefined) {
             const stored = yield* files
               .store({
                 name: file.name,
@@ -1395,7 +1397,7 @@ const make = Effect.gen(function* () {
       }),
   };
 
-  yield* tasks.consume(taskHooks).pipe(Effect.forkScoped);
+  yield* tasks.consume(taskHooks);
 
   const memberCommand = <I extends { readonly stepId: string }, A, E>(
     mutate: (work: Work, step: Step, actorId: string, input: I) => Effect.Effect<A, E>,

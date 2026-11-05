@@ -1,4 +1,4 @@
-import type { SessionMessage } from "@opencode/client/effect";
+import type { SessionMessage } from "@opencode/schema/session-message";
 import { ChatId, InputId, Refused, type InputPayload } from "@t45/contracts/models/Chat";
 import type { Task, Trigger, Outcome, TaskState } from "@t45/contracts/models/Task";
 import { NotFound } from "@t45/contracts/resources/errors";
@@ -6,7 +6,6 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { ChatRepository } from "../chats/ChatRepository.ts";
@@ -18,7 +17,7 @@ export interface StepHooks {
   readonly prepare: (
     task: Task,
     part: SessionMessage.AssistantTool,
-    read: (path: string) => Effect.Effect<Uint8Array | null>,
+    generated: ReadonlyMap<string, Uint8Array>,
   ) => Effect.Effect<{ readonly apply: Effect.Effect<TaskState | null> } | null>;
   readonly changed: (task: Task) => Effect.Effect<void>;
 }
@@ -64,7 +63,7 @@ const make = Effect.gen(function* () {
   const saved = (
     chatId: ChatId,
     messages: ReadonlyArray<SessionMessage.Info>,
-    read: Parameters<StepHooks["prepare"]>[2],
+    generated: Parameters<StepHooks["prepare"]>[2],
     step: StepHooks,
   ) =>
     Effect.gen(function* () {
@@ -86,7 +85,10 @@ const make = Effect.gen(function* () {
       const prepared = yield* Effect.forEach(
         calls.filter((call) => !recorded.has(call.key)),
         (call) =>
-          Effect.map(step.prepare(initial, call.part, read), (effect) => ({ ...call, effect })),
+          Effect.map(step.prepare(initial, call.part, generated), (effect) => ({
+            ...call,
+            effect,
+          })),
       );
       yield* transaction(
         Effect.gen(function* () {
@@ -159,33 +161,29 @@ const make = Effect.gen(function* () {
       if (task !== null && !repeated) yield* prepareInput(task);
     }, transaction),
     consume: (steps: StepHooks) =>
-      chats.runs.pipe(
-        Stream.runForEach((run) =>
-          run((result) => {
-            const { chatId } = result;
-            if (result.type === "messages")
-              return saved(chatId, result.messages, result.read, steps);
-            return transaction(
-              Effect.gen(function* () {
-                const task = yield* get(chatId);
-                if (task?.state.type !== "active" || !(yield* canRun(task))) return;
-                const outcome: Outcome =
-                  result.status === null && task.trigger.type !== "step"
-                    ? { type: "succeeded" }
-                    : {
-                        type: "failed",
-                        reason:
-                          result.status === null
-                            ? "The agent ended without submitting its work."
-                            : "The agent invocation failed.",
-                      };
-                const changed = yield* transition(task, { type: "settled", outcome });
-                if (changed !== null) yield* steps.changed(changed);
-              }),
-            );
-          }).pipe(Effect.forkScoped, Effect.asVoid),
-        ),
-      ),
+      chats.consume((result) => {
+        const { chatId } = result;
+        if (result.type === "messages")
+          return saved(chatId, result.messages, result.generated, steps);
+        return transaction(
+          Effect.gen(function* () {
+            const task = yield* get(chatId);
+            if (task?.state.type !== "active" || !(yield* canRun(task))) return;
+            const outcome: Outcome =
+              result.status === null && task.trigger.type !== "step"
+                ? { type: "succeeded" }
+                : {
+                    type: "failed",
+                    reason:
+                      result.status === null
+                        ? "The agent ended without submitting its work."
+                        : "The agent invocation failed.",
+                  };
+            const changed = yield* transition(task, { type: "settled", outcome });
+            if (changed !== null) yield* steps.changed(changed);
+          }),
+        );
+      }),
   };
 });
 

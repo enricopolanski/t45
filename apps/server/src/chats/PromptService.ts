@@ -1,6 +1,5 @@
-/** Formats inputs and form answers for OpenCode on the runner. */
-import type { Form } from "@opencode/client/effect";
-import type { ChatAttachment } from "@t45/contracts/models/Attachment";
+import type { Form } from "@opencode/schema/form";
+import type { AttachmentId, ChatAttachment } from "@t45/contracts/models/Attachment";
 import {
   type ChatContextId,
   type ChatContextKind,
@@ -11,12 +10,14 @@ import {
   collectComposerContextReferences,
   replaceComposerContextReferences,
 } from "@t45/core/composerContextReferences";
+import { WORK_DIRECTORY } from "@t45/contracts/resources/Runner";
 import * as Schema from "effect/Schema";
 
-import { attachmentPath } from "../attachments/AttachmentRepository.ts";
-import { ATTACHMENTS_FOLDER, WORK_DIRECTORY } from "../opencode/OpenCode2Client.ts";
+/** Where an execution's VM keeps a file sent to its chat, under /work. */
+export const attachmentFile = (id: AttachmentId) => `attachments/${id}`;
 
-const ATTACHMENTS_DIRECTORY = `${WORK_DIRECTORY}/${ATTACHMENTS_FOLDER}`;
+const attachedAt = (id: AttachmentId) => `${WORK_DIRECTORY}/${attachmentFile(id)}`;
+
 const CONTEXT_ENVELOPE_TAG = "t45_context";
 const CONTEXT_ENTRY_TAG = "context";
 const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
@@ -43,7 +44,7 @@ export function formatAnswers(input: {
   for (const [key, attachments] of Object.entries(input.attachmentsByField)) {
     const references = attachments.map(
       (attachment) =>
-        `Attached ${attachment.type} ${quoteReference(attachment.name)}: ${quoteReference(attachmentPath(ATTACHMENTS_DIRECTORY, attachment.id))}`,
+        `Attached ${attachment.type} ${quoteReference(attachment.name)}: ${quoteReference(attachedAt(attachment.id))}`,
     );
     if (references.length === 0) continue;
     const answer = answers.get(key);
@@ -121,7 +122,7 @@ function formatEnvelopeEntry(
 function appendAttachmentPaths(text: string, attachments: ReadonlyArray<ChatAttachment>) {
   const references = attachments.map(
     (attachment) =>
-      `[Attached ${attachment.type} "${attachment.name}" is saved at: ${attachmentPath(ATTACHMENTS_DIRECTORY, attachment.id)}]`,
+      `[Attached ${attachment.type} "${attachment.name}" is saved at: ${attachedAt(attachment.id)}]`,
   );
   return [text, ...references].filter((part) => part !== "").join("\n\n");
 }

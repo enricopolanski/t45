@@ -4,7 +4,9 @@
  * server's state folder. The questions a running execution's VM is waiting on are kept in memory,
  * since they go with the VM.
  */
-import { Form, Session, SessionMessage } from "@opencode/client/effect";
+import { Form } from "@opencode/schema/form";
+import { Session } from "@opencode/schema/session";
+import { SessionMessage } from "@opencode/schema/session-message";
 import type * as Statement from "effect/sql/Statement";
 import { ChatOrigin, Task, TaskState, Trigger } from "@t45/contracts/models/Task";
 import type { Agent } from "@t45/contracts/models/Agent";
@@ -80,13 +82,11 @@ const makeOrigins = Effect.gen(function* () {
         sql`json_extract(trigger, '$.ticketId') = ${reference.ticketId} AND json_extract(trigger, '$.stepId') = ${reference.stepId}`,
       ),
     recordedCalls: (chatId: ChatId, keys: ReadonlyArray<string>) =>
-      keys.length === 0
-        ? Effect.succeed(new Set<string>())
-        : sql<{ readonly key: string }>`SELECT call_key AS key FROM task_calls
+      sql<{ readonly key: string }>`SELECT call_key AS key FROM task_calls
         WHERE chat_id = ${chatId} AND ${sql.in("call_key", keys)}`.pipe(
-            Effect.map((rows) => new Set(rows.map((row) => row.key))),
-            Effect.orDie,
-          ),
+        Effect.map((rows) => new Set(rows.map((row) => row.key))),
+        Effect.orDie,
+      ),
     recordCall: (chatId: ChatId, key: string) =>
       sql`INSERT INTO task_calls (chat_id, call_key) VALUES (${chatId}, ${key})
       ON CONFLICT DO NOTHING RETURNING call_key`.pipe(
@@ -123,22 +123,6 @@ const MessageJson = Schema.fromJsonString(SessionMessage.Info);
 const encodeMessage = Schema.encodeSync(MessageJson);
 const decodeMessage = Schema.decodeEffect(MessageJson);
 
-/**
- * Whether OpenCode finished writing the message, by its own rule: an assistant once completed, a
- * shell or compaction once it stopped running, anything else once it exists.
- */
-export const isSettled = (message: SessionMessage.Info) => {
-  switch (message.type) {
-    case "assistant":
-      return message.time.completed !== undefined;
-    case "shell":
-    case "compaction":
-      return message.status !== "running";
-    default:
-      return true;
-  }
-};
-
 /** Where chats' workspace tarballs are kept, under the server's state folder. */
 const WORKSPACES_DIRECTORY = "chat-workspaces";
 
@@ -171,7 +155,6 @@ const make = Effect.gen(function* () {
   const pendingInputs = (chatId: ChatId) =>
     Effect.gen(function* () {
       const all = yield* inputs(chatId);
-      if (all.length === 0) return all;
       const ids = all.map((input) => inputMessageId(chatId, input.inputId));
       const stored = new Set(
         (yield* sql<{ readonly id: string }>`SELECT message_id AS id FROM chat_messages
@@ -225,11 +208,10 @@ const make = Effect.gen(function* () {
      * Moves a chat whose execution is owed to `status`, and its latest activity to `at` when
      * given; false when nothing changed, as for a chat a stop already ended.
      */
-    setStatus: (chatId: ChatId, status: ChatStatus | null, at: string | null) =>
+    setStatus: (chatId: ChatId, status: Exclude<ChatStatus, "running"> | null, at: string | null) =>
       sql<{ readonly id: string }>`UPDATE chats SET status = ${status},
           updated_at = COALESCE(${at}, updated_at)
         WHERE id = ${chatId} AND status = 'running'
-          AND (status IS NOT ${status} OR ${at} IS NOT NULL)
         RETURNING id`.pipe(
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
@@ -252,8 +234,6 @@ const make = Effect.gen(function* () {
             yield* sql`DELETE FROM chat_messages WHERE chat_id = ${chatId}`;
             yield* sql`DELETE FROM chat_sessions WHERE chat_id = ${chatId}`;
             yield* sql`DELETE FROM chat_inputs WHERE chat_id = ${chatId}`;
-            yield* sql`UPDATE chats SET status = NULL WHERE id = ${chatId}`;
-            questions.delete(chatId);
           }),
         )
         .pipe(Effect.orDie),
@@ -371,12 +351,10 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
     messages: (chatId: ChatId, sessionId: string, messageIds: ReadonlyArray<string>) =>
-      messageIds.length === 0
-        ? Effect.succeed([])
-        : sql<MessageRow>`SELECT ${messageColumns} FROM chat_messages
-            WHERE chat_id = ${chatId} AND session_id = ${sessionId}
-              AND ${sql.in("message_id", messageIds)}
-            ORDER BY ordinal`.pipe(Effect.orDie),
+      sql<MessageRow>`SELECT ${messageColumns} FROM chat_messages
+        WHERE chat_id = ${chatId} AND session_id = ${sessionId}
+          AND ${sql.in("message_id", messageIds)}
+        ORDER BY ordinal`.pipe(Effect.orDie),
     page: (chatId: ChatId, sessionId: string, beforeOrdinal: number | null, limit: number) =>
       sql<MessageRow>`SELECT ${messageColumns}
         FROM chat_messages

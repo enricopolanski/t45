@@ -3,29 +3,25 @@ import * as NotificationRepository from "../workflows/NotificationRepository.ts"
 import * as UserRepository from "../org/UserRepository.ts";
 import { AutomationId } from "@t45/contracts/models/Automation";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import type { Session } from "@opencode/client/effect";
+import type { Session } from "@opencode/schema/session";
 import { Agent } from "@t45/contracts/models/Agent";
 import { STEP_TOOLS_MCP } from "@t45/core/agentTools";
 import { ChatId, type Refused } from "@t45/contracts/models/Chat";
 
 import type { ChatEvent, ChatMessage } from "@t45/contracts/resources/Chats";
 import type { NotFound } from "@t45/contracts/resources/errors";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as HttpClient from "effect/http/HttpClient";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as SkillRepository from "../agents/SkillRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
 import * as ServerConfig from "../config.ts";
-import * as OpenCode2Client from "../opencode/OpenCode2Client.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
-import * as FakeOpenCode from "../runner/FakeOpenCode.testkit.ts";
 import * as FakeRunner from "../runner/FakeRunner.testkit.ts";
 import { inputMessageId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
@@ -39,17 +35,6 @@ import { ServerActivation } from "../serverActivation.ts";
 
 export const testChatId = (n: number) =>
   ChatId.make(`00000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
-
-/** The runner chats' VMs start on; tests script it and read what it got. */
-export const runner = FakeRunner.makeFakeRunner();
-/** The OpenCode servers in those VMs, which the runner's starts and removals wipe. */
-export const openCode = FakeOpenCode.makeFakeOpenCode(runner);
-
-/** Back to a healthy runner with no VMs. */
-export const resetFakes = () => {
-  FakeRunner.reset(runner);
-  FakeOpenCode.reset(openCode);
-};
 
 const layerPersistence = Layer.mergeAll(
   ChatRepository.layer,
@@ -71,10 +56,7 @@ const layerPersistence = Layer.mergeAll(
 export const layer = WorkflowService.layer.pipe(
   Layer.provideMerge(TaskService.layer),
   Layer.provideMerge(ChatService.layer),
-  Layer.provideMerge(FakeRunner.layer(runner)),
-  Layer.provideMerge(Layer.succeed(HttpClient.HttpClient, FakeOpenCode.httpClient(openCode))),
-  // The fake VMs' streams send no heartbeats, so a test can move the clock past any silence.
-  Layer.provideMerge(Layer.succeed(OpenCode2Client.SilentStreamTimeout, Duration.infinity)),
+  Layer.provideMerge(FakeRunner.layer),
   Layer.provideMerge(layerPersistence),
 );
 
@@ -189,6 +171,10 @@ export const showing =
 
 export const isSnapshot = (event: ChatEvent): event is Extract<ChatEvent, { _tag: "snapshot" }> =>
   event._tag === "snapshot";
+
+/** The chat's execution ended: its status is no longer running. */
+export const isEnded = (event: ChatEvent): event is Extract<ChatEvent, { _tag: "chat" }> =>
+  event._tag === "chat" && event.chat.status !== "running";
 
 export const texts = (event: { readonly messages: ReadonlyArray<ChatMessage> }) =>
   event.messages.flatMap((each) =>

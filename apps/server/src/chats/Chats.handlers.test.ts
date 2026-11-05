@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
-import { Form, SessionMessage } from "@opencode/client/effect";
+import { Form } from "@opencode/schema/form";
+import { SessionMessage } from "@opencode/schema/session-message";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import { type Role } from "@t45/contracts/models/User";

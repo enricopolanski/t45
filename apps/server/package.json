@@ -11,8 +11,7 @@
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",
     "@effect/sql-sqlite-node": "catalog:",
-    "@opencode/client": "catalog:",
-    "@opencode/protocol": "catalog:",
+    "@opencode/schema": "catalog:",
     "effect": "catalog:",
     "jose": "catalog:"
   },

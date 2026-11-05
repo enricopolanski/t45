@@ -1,11 +1,11 @@
 # TODO
 
-## Agent tool files: stop reading `dist/runtime` from `RunnerService`
+## Agent tool files: stop reading `dist/runtime` from `ChatExecutions`
 
-`RunnerService` reads `dist/runtime` at layer construction and dies (`Effect.orDie`) when it's missing. `ChatService` provides `RunnerService.layer`, so every test that builds chats needs a built server: without `dist`, `vp test run src/chats/ChatService.test.ts` fails 13/13 and `src/agent-tools/step-tools.test.ts` fails 2/2. The `test` task hides it with `dependsOn: build:bundle`, which focused `vp test run <files>` skips (missing or stale tools), and `vp pack`'s `clean: true` wipes `dist/client` of a built server running from the same checkout.
+`ChatExecutions` reads `dist/runtime` at construction and dies (`Effect.orDie`) when it's missing. `ChatService` builds it, so every test that builds chats needs a built server: without `dist`, `vp test run src/chats/ChatService.test.ts` fails 13/13 and `src/agent-tools/step-tools.test.ts` fails 2/2. The `test` task hides it with `dependsOn: build:bundle`, which focused `vp test run <files>` skips (missing or stale tools), and `vp pack`'s `clean: true` wipes `dist/client` of a built server running from the same checkout.
 
 - [ ] Add an `AgentToolFiles` Effect service (`Record<path, source>`): the live layer reads `new URL("./runtime/", import.meta.url)`, the test layer provides `{}` or a fixed map.
-- [ ] Make `RunnerService` depend on it; drop the `import.meta.filename.endsWith(".ts") ? "../../dist/runtime" : "runtime"` branch, which is test-only now that `dev` runs `dist/bin.mjs`.
+- [ ] Make `ChatExecutions` depend on it; drop the `import.meta.filename.endsWith(".ts") ? "../../dist/runtime" : "runtime"` branch, which is test-only now that `dev` runs `dist/bin.mjs`.
 - [ ] Remove `dependsOn: build:bundle` from the server `test` task.
 - [ ] Have `step-tools.test.ts` and `workflow-tools.test.ts` pack the tools into a temp dir themselves (as `scripts/build.test.ts` does) instead of copying the repo's `dist/runtime`; keep testing the built artifact, since the VM has no `node_modules`.
 - [ ] Inject only the tools' own files: `chunkFileNames: "runtime/[name]-[hash].mjs"` routes every chunk shared with `bin.ts` into `runtime/`, and the `.mjs` glob ships all of them (today a 994 KB `AgentTools-*.mjs` that `bin.mjs` imports too, on every boot). Use an explicit entry list or a chunk-name function keyed on tool-reachable modules.

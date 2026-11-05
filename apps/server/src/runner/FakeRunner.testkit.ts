@@ -1,141 +1,195 @@
-import { RunConfig } from "@t45/contracts/resources/RunnerVms";
-import * as ConfigProvider from "effect/ConfigProvider";
+import { Form } from "@opencode/schema/form";
+import { Session } from "@opencode/schema/session";
+import { SessionMessage } from "@opencode/schema/session-message";
+import {
+  type Execution,
+  type ExecutionEvent,
+  type ExecutionInput,
+  RunnerRpcs,
+} from "@t45/contracts/resources/Runner";
+import type * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import type * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import type * as Rpc from "effect/rpc/Rpc";
+import type * as RpcGroup from "effect/rpc/RpcGroup";
+import * as RpcTest from "effect/rpc/RpcTest";
 
-/** Scripted runner HTTP responses and receipts for T45's execution tests. */
-export interface FakeRunner {
-  /** Set to refuse every VM start with this reason. */
-  refuse: string | null;
-  /** Each VM start T45 asked for, by chat id, refused ones included. */
-  readonly starts: Array<string>;
-  /** Set while the runner, and the VMs behind it, can't be reached. */
-  down: boolean;
-  /** VMs running, by chat id, with what each was started with. */
-  readonly chats: Map<string, RunConfig>;
-  /** Told of each VM T45 removes, for `removed`. */
-  readonly removals: Set<(chatId: string) => void>;
-  /** Files put into running VMs, by `<chatId>:<path>`. */
-  readonly chatFiles: Map<string, Uint8Array>;
-  /** Each running VM's `/work` tarball, as T45 put it back or a test scripts the agent's work. */
-  readonly workspaces: Map<string, Uint8Array>;
-  /** Where VMs' OpenCode servers answer, such as a local stand-in. */
-  chatUrl: string;
+import { RunnerService } from "./RunnerService.ts";
+
+type RunnerRpc = RpcGroup.Rpcs<typeof RunnerRpcs>;
+type Payload<Tag extends RunnerRpc["_tag"]> = Rpc.Payload<Rpc.ExtractTag<RunnerRpc, Tag>>;
+
+interface Run {
+  readonly execution: Execution;
+  readonly inputs: Array<ExecutionInput>;
+  readonly events: Queue.Queue<ExecutionEvent, Cause.Done>;
+  readonly ended: Deferred.Deferred<void>;
 }
 
-export const makeFakeRunner = (): FakeRunner => ({
-  refuse: null,
-  starts: [],
-  down: false,
-  chats: new Map(),
-  removals: new Set(),
-  chatFiles: new Map(),
-  workspaces: new Map(),
-  chatUrl: "http://127.0.0.1:9",
-});
+const NOW = 1_790_000_000_000;
+const decodeSession = Schema.decodeUnknownSync(Session.Info);
+const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Info);
 
-/** Back to a fresh, healthy runner with no VMs, for the next test. */
-export const reset = (runner: FakeRunner) => {
-  Object.assign(runner, makeFakeRunner());
-};
+/** A runner at the contract's level: tests script what its runs emit and read what T45 sent it. */
+const make = () => {
+  const running = new Map<string, Run>();
+  let next = 1;
 
-/** Waits until the chat has no VM: at once when none runs, otherwise until T45 removes it. */
-export const removed = (runner: FakeRunner, chatId: string) =>
-  Effect.suspend(() =>
-    !runner.chats.has(chatId)
-      ? Effect.void
-      : Effect.callback<void>((resume) => {
-          const told = (removed: string) => {
-            if (removed !== chatId) return;
-            runner.removals.delete(told);
-            resume(Effect.void);
-          };
-          runner.removals.add(told);
-          return Effect.sync(() => runner.removals.delete(told));
-        }),
-  );
+  const runOf = (id: string) => {
+    const run = running.get(id);
+    if (run === undefined) throw new Error(`No run for ${id}.`);
+    return run;
+  };
+  const emit = (run: Run, event: ExecutionEvent) => void Queue.offerUnsafe(run.events, event);
+  const write = (run: Run, message: unknown) =>
+    emit(run, {
+      _tag: "messages",
+      sessionId: run.execution.root,
+      messages: [decodeMessage(message)],
+    });
+  const deliver = (run: Run, input: ExecutionInput) => {
+    if (!fake.hold) write(run, { ...input, type: "user", time: { created: NOW } });
+  };
+  /** As in a new VM: the root session, then each input the agent takes. */
+  const begin = (run: Run) => {
+    const { root, title } = run.execution;
+    const info = decodeSession({
+      id: root,
+      title,
+      projectID: "global",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: NOW, updated: NOW },
+      location: { directory: "/work" },
+    });
+    emit(run, { _tag: "sessions", sessions: [info] });
+    for (const input of run.inputs) deliver(run, input);
+  };
 
-const decodeRunConfig = Schema.decodeUnknownSync(
-  Schema.fromJsonString(Schema.toCodecJson(RunConfig)),
-);
-const json = (value: unknown, status = 200) =>
-  new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
-const refused = (reason: string) => json({ _tag: "RunnerRefusedError", reason }, 422);
-const noContent = () => new Response(null, { status: 204 });
-
-/** A VM's start or removal leaves nothing of what it held. */
-const forget = (runner: FakeRunner, chatId: string) => {
-  runner.workspaces.delete(chatId);
-  for (const key of runner.chatFiles.keys()) {
-    if (key.startsWith(`${chatId}:`)) runner.chatFiles.delete(key);
-  }
-};
-
-/** Answers one runner request; a VM's start always replaces the VM the chat had. */
-export const respond = (
-  runner: FakeRunner,
-  request: HttpClientRequest.HttpClientRequest,
-  url: URL,
-) => {
-  if (request.headers.authorization !== "Bearer runner-token") {
-    throw new Error("The fixture expects T45's runner bearer token.");
-  }
-  const matched = /^\/chats\/([^/]+)(?:\/(files|workspace))?$/u.exec(url.pathname);
-  const chatId = decodeURIComponent(matched?.[1] ?? "");
-  const part = matched?.[2];
-  const operation =
-    matched === null
-      ? null
-      : part === "files"
-        ? request.method === "PUT"
-          ? "putChatFile"
-          : null
-        : part === "workspace"
-          ? request.method === "GET"
-            ? "getChatWorkspace"
-            : request.method === "PUT"
-              ? "putChatWorkspace"
-              : null
-          : request.method === "PUT"
-            ? "startChat"
-            : request.method === "DELETE"
-              ? "removeChat"
-              : null;
-  if (operation === null) {
-    throw new Error(`Unscripted runner request: ${request.method} ${url.pathname}`);
-  }
-  if (operation === "startChat") runner.starts.push(chatId);
-  if (runner.down) return json({ error: "down" }, 503);
-  const bytes = request.body._tag === "Uint8Array" ? request.body.body : new Uint8Array();
-  switch (operation) {
-    case "startChat":
-      if (runner.refuse !== null) return refused(runner.refuse);
-      forget(runner, chatId);
-      runner.chats.set(chatId, decodeRunConfig(new TextDecoder().decode(bytes)));
-      return noContent();
-    case "putChatFile":
-      runner.chatFiles.set(`${chatId}:${url.searchParams.get("path")}`, bytes);
-      return noContent();
-    case "getChatWorkspace":
-      return new Response(new Uint8Array(runner.workspaces.get(chatId) ?? []), {
-        headers: { "content-type": "application/octet-stream" },
+  const fake = {
+    /** Set to keep inputs from the agent: they stay pending. */
+    hold: false,
+    /** Set to fail each run with this reason. */
+    refuse: null as string | null,
+    /** Every run T45 asked for, refused ones included. */
+    runs: [] as Array<Payload<"run">>,
+    sends: [] as Array<Payload<"send">>,
+    answers: [] as Array<Payload<"answer">>,
+    cancels: [] as Array<Payload<"cancel">>,
+    emit: (id: string, event: ExecutionEvent) => emit(runOf(id), event),
+    /** The agent writes a reply in the root, unfinished while `streaming`. Returns its id. */
+    reply: (
+      id: string,
+      text: string,
+      options: { readonly streaming?: boolean; readonly parts?: number } = {},
+    ) => {
+      const messageId = `msg_a${String(next++)}`;
+      write(runOf(id), {
+        id: messageId,
+        type: "assistant",
+        agent: "build",
+        model: { providerID: "opencode-go", id: "test-model" },
+        content: Array.from({ length: options.parts ?? 1 }, () => ({ type: "text", text })),
+        time: options.streaming === true ? { created: NOW } : { created: NOW, completed: NOW },
       });
-    case "putChatWorkspace":
-      runner.workspaces.set(chatId, bytes);
-      return noContent();
-    case "removeChat":
-      runner.chats.delete(chatId);
-      forget(runner, chatId);
-      for (const told of runner.removals) told(chatId);
-      return noContent();
-  }
+      return messageId;
+    },
+    /** The agent asks a question in the root. Returns its form's id. */
+    ask: (id: string) => {
+      const run = runOf(id);
+      const form = Form.Info.make({
+        id: Form.ID.make(`frm_${String(next++)}`),
+        sessionID: run.execution.root,
+        title: "Which year?",
+        fields: [{ key: "year", type: "string" }],
+      });
+      emit(run, { _tag: "questions", forms: [form] });
+      return form.id;
+    },
+    /** The run's VM was lost: it starts over in a new one. */
+    restart: (id: string) => {
+      const run = runOf(id);
+      emit(run, { _tag: "restarted" });
+      begin(run);
+    },
+    finish: (
+      id: string,
+      {
+        outcome = null,
+        workspace = new Uint8Array(),
+      }: { readonly outcome?: "failed" | null; readonly workspace?: Uint8Array } = {},
+    ) => {
+      const run = runOf(id);
+      emit(run, { _tag: "finished", outcome, workspace });
+      Queue.endUnsafe(run.events);
+    },
+    /** Waits until the chat's run call ended: at once when none runs. */
+    ended: (id: string) =>
+      Effect.suspend(() => {
+        const run = running.get(id);
+        return run === undefined ? Effect.void : Deferred.await(run.ended);
+      }),
+  };
+
+  const handlers = RunnerRpcs.of({
+    getModels: () => Effect.succeed([]),
+    run: (payload) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          fake.runs.push(payload);
+          if (fake.refuse !== null) {
+            return Stream.die(fake.refuse);
+          }
+          const run: Run = {
+            execution: payload.execution,
+            inputs: [...payload.execution.inputs],
+            events: yield* Queue.unbounded<ExecutionEvent, Cause.Done>(),
+            ended: yield* Deferred.make<void>(),
+          };
+          running.set(payload.id, run);
+          begin(run);
+          return Stream.fromQueue(run.events).pipe(
+            Stream.ensuring(
+              Effect.suspend(() => {
+                if (running.get(payload.id) === run) running.delete(payload.id);
+                return Deferred.succeed(run.ended, undefined);
+              }),
+            ),
+          );
+        }),
+      ),
+    send: (payload) =>
+      Effect.sync(() => {
+        fake.sends.push(payload);
+        const run = running.get(payload.id);
+        if (run === undefined) return;
+        run.inputs.push(payload.input);
+        deliver(run, payload.input);
+      }),
+    answer: (payload) => Effect.sync(() => void fake.answers.push(payload)),
+    dismiss: () => Effect.void,
+    cancel: (payload) => Effect.sync(() => void fake.cancels.push(payload)),
+  });
+
+  return { fake, handlers };
 };
 
-/** Points RunnerService at the fake runner. */
-export const layer = (runner: FakeRunner) =>
-  ConfigProvider.layer(
-    ConfigProvider.fromEnv({
-      env: { RUNNER_URL: runner.chatUrl, RUNNER_TOKEN: "runner-token" },
-    }),
-  );
+export class FakeRunner extends Context.Service<FakeRunner, ReturnType<typeof make>["fake"]>()(
+  "t45/runner/FakeRunner.testkit/FakeRunner",
+) {}
+
+/** The fake as the RunnerService, over an in-memory RPC client. */
+export const layer = Layer.unwrap(
+  Effect.sync(() => {
+    const { fake, handlers } = make();
+    return Layer.effect(RunnerService, RpcTest.makeClient(RunnerRpcs)).pipe(
+      Layer.provide(RunnerRpcs.toLayer(handlers)),
+      Layer.merge(Layer.succeed(FakeRunner, fake)),
+    );
+  }),
+);

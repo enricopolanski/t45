@@ -1,12 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
-import * as OpenCode2Client from "./OpenCode2Client.ts";
+import * as OpenCode from "./OpenCode.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -22,7 +23,10 @@ const serving = (events: ReadonlyArray<unknown>) =>
     ),
   );
 
-const connect = OpenCode2Client.connect({ baseUrl: "http://127.0.0.1:4096", password: "secret" });
+const connect = OpenCode.connect({
+  url: "http://127.0.0.1:4096",
+  password: Redacted.make("secret"),
+});
 
 /** Sends `events`, then keeps the connection open without another byte, like a frozen server. */
 const servingThenSilent = (events: ReadonlyArray<unknown>) =>
@@ -44,7 +48,7 @@ const servingThenSilent = (events: ReadonlyArray<unknown>) =>
     ),
   );
 
-describe("OpenCode2Client events", () => {
+describe("OpenCode events", () => {
   it.effect("ends a stream that stops sending anything, even heartbeats", () =>
     Effect.gen(function* () {
       const { events } = yield* connect.pipe(
@@ -82,20 +86,17 @@ describe("OpenCode2Client events", () => {
   );
 });
 
-describe("OpenCode2Client files", () => {
-  it.effect("readFile returns the file's bytes as they are", () =>
+describe("OpenCode files", () => {
+  it.effect("readFile returns the file's bytes as they are, asking with the VM's password", () =>
     Effect.gen(function* () {
       const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0xff, 0xfe, 0x00, 0x80]);
-      const asked: Array<string> = [];
-      const { readFile } = yield* OpenCode2Client.connect({
-        baseUrl: "http://runner.test/chats/chat-1/opencode",
-        password: "secret",
-      }).pipe(
+      const asked: Array<[string, string | undefined]> = [];
+      const { readFile } = yield* connect.pipe(
         Effect.provideService(
           HttpClient.HttpClient,
           HttpClient.make((request, url) =>
             Effect.sync(() => {
-              asked.push(url.pathname);
+              asked.push([url.pathname, request.headers.authorization]);
               return HttpClientResponse.fromWeb(
                 request,
                 new Response(bytes, { headers: { "content-type": "application/octet-stream" } }),
@@ -105,17 +106,17 @@ describe("OpenCode2Client files", () => {
         ),
       );
       const read = yield* readFile(".t45/attached/report (2).pdf");
-      assert.deepStrictEqual([...(read ?? [])], [...bytes]);
+      assert.deepStrictEqual([...read], [...bytes]);
       assert.deepStrictEqual(asked, [
-        "/chats/chat-1/opencode/api/fs/read/.t45/attached/report%20(2).pdf",
+        ["/api/fs/read/.t45/attached/report%20(2).pdf", `Basic ${btoa("opencode:secret")}`],
       ]);
     }),
   );
 });
 
-describe("OpenCode2Client answers", () => {
+describe("OpenCode answers", () => {
   const CHUNK = 1024 * 1024;
-  const CAP_CHUNKS = OpenCode2Client.RESPONSE_MAX_BYTES / CHUNK;
+  const CAP_CHUNKS = 64;
 
   /** A server whose session list doesn't end, as one an agent rewrote could send. */
   const endless = () => {
@@ -141,7 +142,7 @@ describe("OpenCode2Client answers", () => {
     return { client, served };
   };
 
-  it.effect("stops reading an answer larger than T45 holds, and fails the call", () =>
+  it.effect("stops reading an answer larger than the runner reads, and fails the call", () =>
     Effect.gen(function* () {
       const server = endless();
       const { client } = yield* connect.pipe(

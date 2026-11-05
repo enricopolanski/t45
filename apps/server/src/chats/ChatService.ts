@@ -1,4 +1,5 @@
-import { Session, SessionMessage } from "@opencode/client/effect";
+import { Session } from "@opencode/schema/session";
+import { SessionMessage } from "@opencode/schema/session-message";
 import { canChatWithMembers } from "@t45/contracts/models/Agent";
 import { limitRefusal } from "@t45/contracts/models/Attachment";
 import {
@@ -25,10 +26,10 @@ import {
   type Chats,
 } from "@t45/contracts/resources/Chats";
 import { NotFound } from "@t45/contracts/resources/errors";
+import { isSettled } from "@t45/contracts/resources/Runner";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import type * as Rpc from "effect/rpc/Rpc";
@@ -37,11 +38,12 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
-import * as PromptService from "../runner/PromptService.ts";
-import { type ChatVm, RunnerService } from "../runner/RunnerService.ts";
+import { RunnerService } from "../runner/RunnerService.ts";
 import * as ChatEvents from "./ChatEvents.ts";
-import { rootSessionId } from "./ChatIds.ts";
+import * as ChatExecutions from "./ChatExecutions.ts";
+import { inputMessageId, rootSessionId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
+import * as PromptService from "./PromptService.ts";
 
 import { replaceComposerContextReferences } from "@t45/core/composerContextReferences";
 import * as Cause from "effect/Cause";
@@ -75,7 +77,6 @@ const refuse = (reason: Refused["reason"]) => new Refused({ reason });
 const notFound = () => new NotFound();
 const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 const encodePayload = Schema.encodeSync(Schema.fromJsonString(InputPayload));
-const isRefused = Schema.is(Refused);
 
 const PAGE_MESSAGES = 50;
 const PAGE_BYTES = 512 * 1024;
@@ -117,7 +118,7 @@ const readMessage = (
     );
     return {
       sessionId: Session.ID.make(sessionId),
-      state: ChatRepository.isSettled(message) ? "settled" : "live",
+      state: isSettled(message) ? "settled" : "live",
       isTruncated: flag.cut,
       message,
     } satisfies ChatMessage;
@@ -143,13 +144,17 @@ const make = Effect.gen(function* () {
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "posted" | "deleted") =>
     changes.publish({ kind, chatId });
   const scope = yield* Effect.scope;
-  const processInputs = (chatId: ChatId) =>
-    Effect.flatMap(origins.get(chatId), (origin) =>
-      runner.processInputs(chatId, { questions: origin?.kind === "conversation" }),
-    );
+  const executions = yield* ChatExecutions.make;
   /** Members see the input, and execution takes it, once the post commits. */
-  const announce = (chatId: ChatId) =>
-    sql.afterCommit(publish(chatId, "posted").pipe(Effect.andThen(processInputs(chatId))));
+  const announce = (chatId: ChatId, posted: ChatExecutions.Posted) =>
+    sql.afterCommit(
+      publish(chatId, "posted").pipe(Effect.andThen(executions.deliver(chatId, posted))),
+    );
+  /** Refuses when the runner didn't answer. */
+  const unavailable = (chatId: ChatId) => (error: unknown) =>
+    Effect.logWarning("The runner refused a chat's request", { chatId, error }).pipe(
+      Effect.andThen(refuse("unavailable")),
+    );
 
   const post = Effect.fnUntraced(function* (post: Post) {
     const chat = yield* repository.get(post.chatId);
@@ -191,37 +196,19 @@ const make = Effect.gen(function* () {
         titleFromText(plainText, post.input.attachments),
       );
     }
-    yield* announce(post.chatId);
+    yield* announce(post.chatId, { inputId: post.inputId, payload: post.input });
   }, transaction);
 
-  /**
-   * Ends the chat's execution once the caller's transaction commits. Recorded as interrupted at
-   * once, so a server start doesn't run it again; the stop itself runs on its own fiber, since the
-   * caller may be processing the execution's results.
-   */
+  /** Recorded as interrupted at once, so a server start doesn't run it again. */
   const requestStop = Effect.fnUntraced(function* (chatId: ChatId) {
     if (!(yield* repository.setStatus(chatId, "interrupted", null))) return;
-    yield* sql.afterCommit(publish(chatId, "chat"));
-    yield* sql.afterCommit(runner.stop(chatId).pipe(Effect.forkIn(scope), Effect.asVoid));
+    yield* sql.afterCommit(publish(chatId, "chat").pipe(Effect.andThen(executions.stop(chatId))));
   }, transaction);
-
-  /** Runs `use` on the chat's running VM; none when no execution runs. */
-  const onVm = <A, E>(chatId: ChatId, use: (vm: ChatVm) => Effect.Effect<A, E>) =>
-    runner.withVm(chatId, use).pipe(
-      Effect.catchCause((cause): Effect.Effect<Option.Option<A>, Refused> => {
-        if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
-        const error = Cause.findErrorOption(cause);
-        if (Option.isSome(error) && isRefused(error.value)) return error.value;
-        return Effect.logWarning("A chat's VM refused a request", { chatId, cause }).pipe(
-          Effect.andThen(refuse("unavailable")),
-        );
-      }),
-    );
 
   /** Stops what runs for a deleted chat, then removes its files, workspace and copy. */
   const cleanup = (chatId: ChatId) =>
     Effect.gen(function* () {
-      yield* runner.stop(chatId);
+      yield* executions.stop(chatId);
       yield* attachments.release(chatId);
       yield* repository.deleteWorkspace(chatId);
       yield* repository.finishDelete(chatId);
@@ -354,14 +341,14 @@ const make = Effect.gen(function* () {
 
   yield* forkParked(
     Effect.gen(function* () {
-      for (const chatId of yield* repository.owed) yield* processInputs(chatId);
+      for (const chatId of yield* repository.owed) yield* executions.deliver(chatId);
     }),
   );
 
   return {
     post,
     requestStop,
-    runs: runner.runs,
+    consume: executions.consume,
     access,
     subscribe: (member: Member) =>
       Stream.unwrap(
@@ -529,17 +516,14 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const chat = yield* commandChat(member, input.chatId);
         if ((yield* repository.input(chat.id, input.inputId)) === null) return yield* notFound();
-        const cancelled = yield* runner.cancel(chat.id, input.inputId).pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.interrupt
-              : Effect.logWarning("A chat's VM refused a cancel", {
-                  chatId: chat.id,
-                  cause,
-                }).pipe(Effect.andThen(refuse("unavailable"))),
-          ),
-        );
-        if (!cancelled) return yield* refuse("already_taken");
+        const pending = yield* repository.pendingInputs(chat.id);
+        if (!pending.some((each) => each.inputId === input.inputId)) {
+          return yield* refuse("already_taken");
+        }
+        yield* runner
+          .cancel({ id: chat.id, inputId: inputMessageId(chat.id, input.inputId) })
+          .pipe(Effect.catchTags({ RpcClientError: unavailable(chat.id) }));
+        yield* repository.deleteInput(chat.id, input.inputId);
         yield* publish(chat.id, "inputs");
       }),
 
@@ -571,45 +555,40 @@ const make = Effect.gen(function* () {
           answers: input.answers,
           attachmentsByField: Object.fromEntries(files),
         });
-        const answered = yield* onVm(chat.id, (vm) =>
-          vm.putFiles(sent.map((file) => file.id)).pipe(
-            Effect.andThen(
-              vm.client.session.form.reply({
-                sessionID: input.sessionId,
-                formID: input.formId,
-                answer,
-              }),
-            ),
+        yield* runner
+          .answer({
+            id: chat.id,
+            sessionId: input.sessionId,
+            formId: input.formId,
+            answer,
+            files: yield* executions.filesOf(sent.map((file) => file.id)),
+          })
+          .pipe(
             Effect.catchTags({
-              FormNotFoundError: () => refuse("question_gone"),
-              FormAlreadySettledError: () => refuse("question_gone"),
-              SessionNotFoundError: () => refuse("question_gone"),
-              FormInvalidAnswerError: () => refuse("answer_invalid"),
+              QuestionGone: () => refuse("question_gone"),
+              AnswerInvalid: () => refuse("answer_invalid"),
+              RpcClientError: unavailable(chat.id),
             }),
-          ),
-        );
-        if (Option.isNone(answered)) return yield* refuse("question_gone");
+          );
       }),
 
     dismiss: (input: Payload<"chats.dismiss">, member: Member) =>
       Effect.gen(function* () {
         const chat = yield* commandChat(member, input.chatId);
-        const dismissed = yield* onVm(chat.id, (vm) =>
-          vm.client.session.form.cancel({ sessionID: input.sessionId, formID: input.formId }).pipe(
+        yield* runner
+          .dismiss({ id: chat.id, sessionId: input.sessionId, formId: input.formId })
+          .pipe(
             Effect.catchTags({
-              FormNotFoundError: () => refuse("question_gone"),
-              FormAlreadySettledError: () => refuse("question_gone"),
-              SessionNotFoundError: () => refuse("question_gone"),
+              QuestionGone: () => refuse("question_gone"),
+              RpcClientError: unavailable(chat.id),
             }),
-          ),
-        );
-        if (Option.isNone(dismissed)) return yield* refuse("question_gone");
+          );
       }),
 
     stop: (input: Payload<"chats.stop">, member: Member) =>
       Effect.gen(function* () {
         const chat = yield* commandChat(member, input.chatId);
-        yield* runner.stop(chat.id);
+        yield* requestStop(chat.id);
       }),
 
     rename: (input: Payload<"chats.rename">, member: Member) =>
@@ -639,7 +618,4 @@ export class ChatService extends Context.Service<ChatService, Effect.Success<typ
     return layer;
   }
 }
-const layer = Layer.effect(ChatService, make).pipe(
-  Layer.provideMerge(RunnerService.layer),
-  Layer.provideMerge(ChatEvents.layer),
-);
+const layer = Layer.effect(ChatService, make).pipe(Layer.provideMerge(ChatEvents.layer));

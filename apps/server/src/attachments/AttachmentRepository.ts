@@ -55,7 +55,7 @@ const displayFileName = (name: string) =>
 const storedFileId = (entry: string) =>
   [entry, entry.replace(/\.part$/u, "")].find((id) => isAttachmentId(id));
 
-export function attachmentPath(attachmentsDir: string, attachmentId: AttachmentId): string {
+function attachmentPath(attachmentsDir: string, attachmentId: AttachmentId): string {
   return NodePath.resolve(attachmentsDir, attachmentId);
 }
 

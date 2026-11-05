@@ -1,0 +1,111 @@
+import { Form } from "@opencode/schema/form";
+import { Session } from "@opencode/schema/session";
+import { SessionInbox } from "@opencode/schema/session-inbox";
+import { SessionMessage } from "@opencode/schema/session-message";
+import * as Rpc from "effect/rpc/Rpc";
+import * as RpcGroup from "effect/rpc/RpcGroup";
+import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
+
+import { Agent, AgentModel, AGENT_SETUP_PATHS } from "../models/Agent.ts";
+import { FilesByPath } from "../models/primitives.ts";
+import { Skill } from "../models/Skill.ts";
+
+export const WORK_DIRECTORY = "/work";
+
+/** Files the agent's tools leave here, under /work, reach T45 as `file` events. */
+export const GENERATED_FILES = ".t45/attached";
+
+/** Files by their path under /work. */
+const Files = Schema.Record(Schema.String, Schema.Uint8Array);
+
+export const ExecutionInput = Schema.Struct({
+  id: SessionMessage.ID,
+  ...Struct.pick(SessionInbox.UserPayload.fields, ["text", "metadata"]),
+});
+export type ExecutionInput = typeof ExecutionInput.Type;
+
+export const Execution = Schema.Struct({
+  agent: Schema.Struct({
+    ...Struct.pick(Agent.fields, ["instructions", "model", "mcpServers", "permissions"]),
+    files: FilesByPath(AGENT_SETUP_PATHS),
+    skills: Schema.Array(
+      Schema.Struct(Struct.pick(Skill.fields, ["name", "description", "content", "files"])),
+    ),
+  }),
+  root: Session.ID,
+  title: Schema.String,
+  questions: Schema.Boolean,
+  /** Parents before their children. */
+  conversation: Schema.Array(
+    Schema.Struct({ info: Session.Info, messages: Schema.Array(SessionMessage.Info) }),
+  ),
+  workspace: Schema.NullOr(Schema.Uint8Array),
+  files: Files,
+  inputs: Schema.Array(ExecutionInput),
+});
+export type Execution = typeof Execution.Type;
+
+export const ExecutionEvent = Schema.Union([
+  /** The root and every session under it, parents first. */
+  Schema.TaggedStruct("sessions", { sessions: Schema.Array(Session.Info) }),
+  Schema.TaggedStruct("messages", {
+    sessionId: Session.ID,
+    messages: Schema.Array(SessionMessage.Info),
+  }),
+  Schema.TaggedStruct("delta", {
+    sessionId: Session.ID,
+    messageId: SessionMessage.ID,
+    ordinal: Schema.Int,
+    kind: Schema.Literals(["text", "reasoning"]),
+    delta: Schema.String,
+  }),
+  Schema.TaggedStruct("questions", { forms: Schema.Array(Form.Info) }),
+  /** Before the messages that name it. */
+  Schema.TaggedStruct("file", { path: Schema.String, content: Schema.Uint8Array }),
+  /** The VM was lost: everything since the run started is void, and a new VM starts over. */
+  Schema.TaggedStruct("restarted", {}),
+  /** Keeps the call's connection from going idle while the agent waits. */
+  Schema.TaggedStruct("heartbeat", {}),
+  Schema.TaggedStruct("finished", {
+    outcome: Schema.NullOr(Schema.Literal("failed")),
+    workspace: Schema.Uint8Array,
+  }),
+]);
+export type ExecutionEvent = typeof ExecutionEvent.Type;
+
+/** Whether OpenCode finished writing the message. */
+export const isSettled = (message: SessionMessage.Info) => {
+  switch (message.type) {
+    case "assistant":
+      return message.time.completed !== undefined;
+    case "shell":
+    case "compaction":
+      return message.status !== "running";
+    default:
+      return true;
+  }
+};
+
+export class QuestionGone extends Schema.TaggedError<QuestionGone>()("QuestionGone", {}) {}
+
+export class AnswerInvalid extends Schema.TaggedError<AnswerInvalid>()("AnswerInvalid", {}) {}
+
+const question = { id: Schema.String, sessionId: Session.ID, formId: Form.ID };
+
+/** One execution per `id` at a time; it lasts as long as its `run` call. */
+export const RunnerRpcs = RpcGroup.make(
+  Rpc.make("getModels", { success: Schema.Array(AgentModel) }),
+  Rpc.make("run", {
+    payload: { id: Schema.String, execution: Execution },
+    success: ExecutionEvent,
+    stream: true,
+  }),
+  Rpc.make("send", { payload: { id: Schema.String, input: ExecutionInput, files: Files } }),
+  Rpc.make("answer", {
+    payload: { ...question, answer: Form.Answer, files: Files },
+    error: Schema.Union([QuestionGone, AnswerInvalid]),
+  }),
+  Rpc.make("dismiss", { payload: question, error: QuestionGone }),
+  Rpc.make("cancel", { payload: { id: Schema.String, inputId: SessionMessage.ID } }),
+);

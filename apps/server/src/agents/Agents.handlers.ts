@@ -24,8 +24,9 @@ export const layer = Agents.middleware(Authorization).toLayer(
           () => new NotFound(),
         ),
       );
+    const models = runner.getModels().pipe(Effect.timeout("20 seconds"));
     const requireOfferedModel = (model: string) =>
-      runner.models.pipe(
+      models.pipe(
         Effect.orElseSucceed(() => []),
         Effect.flatMap((offered) =>
           offered.some((entry) => entry.slug === model)
@@ -48,12 +49,9 @@ export const layer = Agents.middleware(Authorization).toLayer(
     return Agents.of({
       "agents.list": () => agents.list,
       "agents.listModels": () =>
-        runner.models.pipe(
+        models.pipe(
           Effect.map((models) => ({ models, reason: null })),
-          Effect.catchTags({
-            RunnerUnavailableError: (error) =>
-              Effect.succeed({ models: [], reason: error.message }),
-          }),
+          Effect.orElseSucceed(() => ({ models: [], reason: "The runner did not answer." })),
         ),
       "agents.get": ({ agentId }) => find(agentId),
       "agents.archive": ({ agentId }) =>

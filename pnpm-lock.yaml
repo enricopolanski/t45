@@ -102,6 +102,9 @@ importers:
       '@opencode/client':
         specifier: 'catalog:'
         version: 2.1.4(effect@4.0.6)
+      '@opencode/protocol':
+        specifier: 'catalog:'
+        version: 2.1.4
       '@opencode/schema':
         specifier: 'catalog:'
         version: 2.1.4
@@ -136,10 +139,7 @@ importers:
       '@effect/sql-sqlite-node':
         specifier: 4.0.6
         version: 4.0.6(effect@4.0.6)
-      '@opencode/client':
-        specifier: 'catalog:'
-        version: 2.1.4(effect@4.0.6)
-      '@opencode/protocol':
+      '@opencode/schema':
         specifier: 'catalog:'
         version: 2.1.4
       effect:

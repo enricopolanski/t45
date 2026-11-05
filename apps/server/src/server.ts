@@ -1,5 +1,6 @@
 import { ChatService } from "./chats/ChatService.ts";
 import { TaskService } from "./tasks/TaskService.ts";
+import { RunnerService } from "./runner/RunnerService.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeHttp from "node:http";
 
@@ -72,6 +73,7 @@ const layerWorkflowRepositories = Layer.mergeAll(
 );
 
 const layerChatServices = ChatService.layer.pipe(
+  Layer.provideMerge(RunnerService.layer),
   Layer.provideMerge(layerWorkflowRepositories),
   Layer.provideMerge(layerStore),
 );

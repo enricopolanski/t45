@@ -12,6 +12,7 @@
   "dependencies": {
     "@effect/platform-node": "catalog:",
     "@opencode/client": "catalog:",
+    "@opencode/protocol": "catalog:",
     "@opencode/schema": "catalog:",
     "@t45/contracts": "workspace:*",
     "effect": "catalog:",
