@@ -35,13 +35,10 @@ import * as Stream from "effect/Stream";
 
 import * as SandboxManager from "./SandboxManager.ts";
 
-const READ_BATCH = "150 millis";
-
 const RESTART = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("30 seconds")]);
 
 const PAGE = 200;
 
-/** Where the step tools leave the files that go out as `file` updates. */
 const GENERATED_FILES = ".t45/attached";
 
 /**
@@ -489,7 +486,7 @@ export const layer = RunnerRpcs.toLayer(
             }
           }
           yield* running.wake.await;
-          yield* Effect.sleep(READ_BATCH);
+          yield* Effect.sleep("150 millis");
           yield* running.wake.close;
         }
       }).pipe(
