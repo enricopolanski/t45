@@ -2,7 +2,7 @@
 
 ## The design as implemented
 
-[Chats](../internals/chats.md) and [sandboxed chats](../internals/sandboxed-chats.md) describe it. T45 asks the runner to `execute` the chat with everything it starts from and keeps what the stream returns; the runner owns the VM, OpenCode, restore, input delivery, capture, completion and restarts after a lost VM.
+[Chats](../internals/chats.md) and [sandboxed chats](../internals/sandboxed-chats.md) describe it. T45 asks the runner to `execute` the chat with everything it starts from and keeps what the stream returns; the runner owns the VM, OpenCode, restore, input delivery, reading, completion and restarts after a lost VM.
 
 ## Changed shape, worth knowing
 
@@ -20,6 +20,6 @@
 1. Discarded and re-sent inputs repeat workflow side effects (step tools), because the tool-call ids are new. Deferred in `todo.md`.
 2. A refused input's row is deleted at once, but its note is saved uncommitted. If that execution then doesn't finish, the note is discarded too, and the input disappears with no explanation.
 3. The retry while the runner is out of reach (`RpcClientError` in `ChatExecutions.ts`) has no test: the in-memory RPC client can't produce that error.
-4. A crash or shutdown between saving a disk and committing its output leaves the disk ahead: OpenCode then answers the re-sent inputs with an empty turn each, and the next capture brings the discarded turns back. A pointer column flipped in the commit would close it.
+4. A crash or shutdown between saving a disk and committing its output leaves the disk ahead: OpenCode then answers the re-sent inputs with an empty turn each, and the next execution reads the discarded turns back. A pointer column flipped in the commit would close it.
 5. A saved disk only grows: ext4 keeps a deleted file's bytes, so the archive doesn't shrink after the agent deletes, up to the disk's fixed size. `fstrim` in the guest before removal is untested.
 6. The runner's host now needs `mkfs.ext4` and GNU tar, which macOS lacks by default.
