@@ -9,7 +9,12 @@ export class AgentModel extends Schema.Opaque<AgentModel>()(
 
 const McpServerName = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/));
 
-export const AGENT_SETUP_PATHS = ["AGENTS.md", "opencode.json", "attachments"] as const;
+export const AGENT_SETUP_PATHS = [
+  "AGENTS.md",
+  "opencode.json",
+  "attachments",
+  ".opencode/skills",
+] as const;
 
 /**
  * An `Agent` is a reusable recipe (instructions, skills, configuration, etc) for work carried by LLMs.

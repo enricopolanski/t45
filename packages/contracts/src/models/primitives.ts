@@ -24,33 +24,20 @@ export const Title = TrimmedNonEmptyString.check(Schema.isMaxLength(200));
 
 export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-/**
- * File names of letters, digits, `.`, `_` and `-`, each starting with a letter or digit, joined by
- * `/`. No whitespace, no `.` or `..`, no hidden files.
- */
-const RelativePath = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$/),
-);
-
-const isInside = (path: string, folder: string) => path.startsWith(`${folder}/`);
-
-/**
- * Files by path, as written into a folder: none at or inside a `reserved` path, which the runner
- * writes itself, and none inside another file.
- */
+/** Relative file paths that cannot collide with the runner's generated files and folders. */
 export const FilesByPath = (reserved: ReadonlyArray<string>) =>
   Schema.Record(Schema.String, Schema.String).check(
-    Schema.isPropertyNames(RelativePath),
     Schema.makeFilter(
-      (files: { readonly [path: string]: string }) => {
-        const paths = Object.keys(files);
-        return paths.every(
+      (files: Readonly<Record<string, string>>) =>
+        Object.keys(files).every(
           (path) =>
-            !reserved.some((taken) => path === taken || isInside(path, taken)) &&
-            !paths.some((other) => isInside(path, other)),
-        );
-      },
-      { expected: `files outside ${reserved.join(", ")} and outside one another` },
+            path.split("/").every((part) => part !== "" && part !== "." && part !== "..") &&
+            !reserved.some(
+              (taken) =>
+                path === taken || path.startsWith(`${taken}/`) || taken.startsWith(`${path}/`),
+            ),
+        ),
+      { expected: `relative file paths outside ${reserved.join(", ")}` },
     ),
   );
 

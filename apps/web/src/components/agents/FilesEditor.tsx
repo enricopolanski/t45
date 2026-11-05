@@ -97,7 +97,6 @@ export function FilesEditor({
               aria-label="File path"
               placeholder="Path, such as scripts/extract.py"
               required
-              pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}(/[A-Za-z0-9][A-Za-z0-9._\-]{0,63})*"
               value={file.path}
               onChange={(event) => edit({ path: event.target.value })}
             />
