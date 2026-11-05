@@ -1,8 +1,9 @@
 // The step tools inside a chat's VM: a stdio MCP server, `step` to OpenCode, that admins give the
 // agents that work steps. It checks the shared input contract: T45 reads each call
 // and its reply back from the chat, checks it as it applies it, and answers a refused one with a
-// message in the chat. An attach is a snapshot of the file under .t45/attached in the working
-// folder, which T45 reads by the name the reply gives.
+// message in the chat. OpenCode starts it in the agent's working folder, which its paths are
+// relative to. An attach is a snapshot of the file under .t45/attached, which T45 reads by the
+// name the reply gives.
 // @effect-diagnostics nodeBuiltinImport:off cryptoRandomUUID:off
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -14,7 +15,6 @@ import * as Schema from "effect/Schema";
 import { refuse, serve } from "./mcp-stdio.ts";
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-const WORK = process.env.T45_WORK_DIR ?? "/work";
 
 const APPLIED =
   "T45 applies the call to the step and answers one it refuses with a message in this chat.";
@@ -35,18 +35,18 @@ const descriptions: Record<StepToolCall["tool"], string> = {
 const attach = (path: string) => {
   let target: string;
   try {
-    target = NodeFS.realpathSync(NodePath.resolve(WORK, path));
+    target = NodeFS.realpathSync(path);
   } catch {
     refuse(`No file at ${path}.`);
   }
-  if (!target.startsWith(`${NodeFS.realpathSync(WORK)}/`))
+  if (!target.startsWith(`${NodeFS.realpathSync(".")}/`))
     refuse("The file must be in your working folder.");
   const info = NodeFS.statSync(target);
   if (!info.isFile() || info.size > MAX_ATTACHMENT_BYTES) refuse("Attach a file of at most 25 MB.");
   // A random name can't meet an earlier snapshot, even after the VM restarts.
   const file = `.t45/attached/${NodeCrypto.randomUUID()}`;
-  NodeFS.mkdirSync(`${WORK}/.t45/attached`, { recursive: true });
-  NodeFS.copyFileSync(target, `${WORK}/${file}`);
+  NodeFS.mkdirSync(".t45/attached", { recursive: true });
+  NodeFS.copyFileSync(target, file);
   return { name: NodePath.basename(target), file };
 };
 

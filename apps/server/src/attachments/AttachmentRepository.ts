@@ -108,8 +108,6 @@ export class AttachmentRepository extends Context.Service<
       files: ReadonlyArray<ChatAttachment>,
       from: string | null,
     ) => Effect.Effect<void, Refused>;
-    /** The ids of the files sent to the chat. */
-    readonly boundTo: (chatId: ChatId) => Effect.Effect<ReadonlyArray<AttachmentId>>;
     readonly chatsHolding: (id: AttachmentId) => Effect.Effect<ReadonlyArray<ChatId>>;
     readonly claimForStep: (input: {
       readonly id: AttachmentId;
@@ -290,13 +288,6 @@ const make = Effect.gen(function* () {
         ids.map((id) => ({ chat_id: chatId, attachment_id: id })),
       )} ON CONFLICT DO NOTHING`.pipe(Effect.orDie);
     }),
-
-    boundTo: (chatId) =>
-      sql<{ readonly id: AttachmentId }>`SELECT attachment_id AS id FROM chat_attachments
-        WHERE chat_id = ${chatId} ORDER BY attachment_id`.pipe(
-        Effect.map((rows) => rows.map((row) => row.id)),
-        Effect.orDie,
-      ),
 
     chatsHolding: (id) =>
       sql<{ readonly chatId: ChatId }>`SELECT chat_id AS "chatId" FROM chat_attachments

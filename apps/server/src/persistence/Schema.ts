@@ -160,8 +160,8 @@ const statements = [
   `CREATE INDEX workflow_notifications_user ON workflow_notifications(user_id, read_at, created_at)`,
 
   // Chats with agents. T45 keeps a chat's inputs, the OpenCode sessions and messages its
-  // executions wrote, and the agent's /work as of the last finished execution, a tarball named after
-  // the chat in the server's chat workspace folder. `status` is `running` while an execution is
+  // executions wrote, and the VM disk the last finished execution left, a file named after the chat
+  // in the server's chat disks folder. `status` is `running` while an execution is
   // owed, which a server start runs again. `updated_at` is the chat's latest activity.
   // A deleted chat stays as a tombstone so its id never comes back.
   `CREATE TABLE chats (
@@ -195,8 +195,7 @@ const statements = [
       PRIMARY KEY (chat_id, session_id)
     )`,
   // Every message of a session, encoded as OpenCode returned it. `ordinal` is the session's order,
-  // which native ids don't give. `committed` once its execution finished, and imported into every
-  // later execution.
+  // which native ids don't give. `committed` once its execution finished, as its saved disk has it.
   `CREATE TABLE chat_messages (
       chat_id TEXT NOT NULL,
       session_id TEXT NOT NULL,

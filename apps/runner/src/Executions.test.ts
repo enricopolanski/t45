@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { type Session, SessionMessage } from "@opencode/client/effect";
+import { SessionMessage } from "@opencode/client/effect";
 import type { Execution, ExecutionEvent } from "@t45/contracts/resources/Runner";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -20,7 +20,6 @@ const second = { id: SessionMessage.ID.make("msg_input2"), text: "Email it." };
 const attachment = { "attachments/w2.txt": new Uint8Array([4, 2]) };
 const MODEL = { providerID: "opencode-go", id: "test-model" };
 const ALLOW = { action: "*", resource: "*", effect: "allow" };
-const NO_QUESTIONS = { action: "question", resource: "*", effect: "deny" };
 
 const setup = Effect.all({ runner: Fixture.Runner, vms: FakeOpenCode.Vms });
 
@@ -56,21 +55,7 @@ const asking =
   (event: ExecutionEvent): event is Extract<ExecutionEvent, { _tag: "questions" }> =>
     event._tag === "questions" && event.forms.length === count;
 
-/** What T45 keeps of a run: its last sessions, each with its messages as last seen. */
-const saved = (events: Iterable<ExecutionEvent>): Execution["conversation"] => {
-  let sessions: ReadonlyArray<Session.Info> = [];
-  const messages = new Map<string, Map<string, SessionMessage.Info>>();
-  for (const event of events) {
-    if (event._tag === "sessions") sessions = event.sessions;
-    if (event._tag !== "messages") continue;
-    const kept = messages.get(event.sessionId) ?? new Map();
-    for (const message of event.messages) kept.set(message.id, message);
-    messages.set(event.sessionId, kept);
-  }
-  return sessions.map((info) => ({ info, messages: [...(messages.get(info.id)?.values() ?? [])] }));
-};
-
-/** A finished first run whose agent waited on a background subagent; returns what T45 saved. */
+/** A finished first run whose agent waited on a background subagent; returns the disk it saved. */
 const converse = Effect.gen(function* () {
   const { runner, vms } = yield* setup;
   const run = yield* runner
@@ -80,24 +65,19 @@ const converse = Effect.gen(function* () {
   const child = FakeOpenCode.backgroundSubagent(vms, ID);
   FakeOpenCode.reportSubagent(vms, ID, child);
   FakeOpenCode.finishTurn(vms, ID);
-  const conversation = saved(yield* Fiber.join(run));
-  const messages = conversation[0]?.messages.map((message) => message.id) ?? [];
-  return { conversation, child, messages };
+  const finished = (yield* Fiber.join(run)).find(is("finished"));
+  assert.isDefined(finished);
+  const messages = FakeOpenCode.root(vms, ID).items.map((item) => item.id);
+  return { disk: finished.disk, child, messages };
 });
 
 it.live(
-  "runs in a fresh VM set up from the agent, streams the agent's work and finishes with /work, then removes the VM",
+  "runs in a fresh VM on a new disk set up from the agent, streams the agent's work, then saves the disk and finishes with it",
   () =>
     Effect.gen(function* () {
       const { vms } = yield* setup;
       const input = { ...first, metadata: { t45: { attachments: [] } } };
-      const before = new Uint8Array([1, 1]);
-      const after = new Uint8Array([7, 7, 7]);
-      const execution = Fixture.execution({
-        workspace: before,
-        files: attachment,
-        inputs: [input],
-      });
+      const execution = Fixture.execution({ files: attachment, inputs: [input] });
       const events = yield* start(execution);
       const { sessions } = yield* next(events, is("sessions"));
       assert.deepEqual(
@@ -107,8 +87,7 @@ it.live(
       yield* next(events, showing(input.id));
       const vm = FakeOpenCode.vm(vms, ID);
       const root = FakeOpenCode.root(vms, ID);
-      assert.deepEqual(vm.agent, execution.agent);
-      assert.deepEqual(vm.workspace, before);
+      assert.deepEqual([vm.agent, vm.booted], [execution.agent, null]);
       assert.deepEqual(Object.fromEntries(vm.files), attachment);
       assert.deepEqual([root.info.model, root.info.permissions], [MODEL, [ALLOW]]);
       assert.deepEqual(vms.prompts, [{ ...input, delivery: "queue" }]);
@@ -128,42 +107,30 @@ it.live(
         delta: "Fil",
       });
 
-      vm.workspace = after;
       const reply = FakeOpenCode.answerText(vms, ID, "Filed.");
       FakeOpenCode.finishTurn(vms, ID);
       yield* next(events, showing(reply));
-      assert.deepEqual(yield* next(events, is("finished")), {
-        _tag: "finished",
-        outcome: null,
-        workspace: after,
-      });
-      yield* FakeOpenCode.removed(vms, ID);
+      const finished = yield* next(events, is("finished"));
+      assert.strictEqual(vm.state, "removed");
+      assert.deepEqual([finished.outcome, finished.disk], [null, vm.saved]);
     }).pipe(Effect.provide(Fixture.layer)),
 );
 
 it.live(
-  "a follow-up imports the saved conversation parents first, prompts only its inputs, and ends failed with the root's turn",
+  "a follow-up boots on the saved disk, switches its root to the agent's model, prompts only its inputs, and ends failed with the root's turn",
   () =>
     Effect.gen(function* () {
       const { vms } = yield* setup;
-      const { conversation, child, messages } = yield* converse;
-      const events = yield* start(
-        Fixture.execution({
-          conversation,
-          title: "Receipts, sent",
-          questions: false,
-          inputs: [second],
-        }),
-      );
+      const { disk, child, messages } = yield* converse;
+      const agent = { ...Fixture.execution().agent, model: "opencode-go/other-model" };
+      const events = yield* start(Fixture.execution({ agent, disk, inputs: [second] }));
       yield* next(events, showing(second.id));
-      const [root, subagent] = FakeOpenCode.vm(vms, ID).sessions;
+      const vm = FakeOpenCode.vm(vms, ID);
+      const [root, subagent] = vm.sessions;
+      assert.deepEqual(vm.booted, disk);
       assert.deepEqual(
-        [root?.id, root?.info.title, root?.info.model, root?.info.permissions],
-        [ROOT, "Receipts, sent", MODEL, [ALLOW, NO_QUESTIONS]],
-      );
-      assert.deepEqual(
-        [subagent?.id, subagent?.info.parentID, subagent?.info.title, subagent?.info.permissions],
-        [child, ROOT, "Research", [ALLOW, NO_QUESTIONS]],
+        [root?.id, root?.info.model, subagent?.id, subagent?.info.parentID],
+        [ROOT, { providerID: "opencode-go", id: "other-model" }, child, ROOT],
       );
       assert.deepEqual(
         root?.items.map((item) => item.id),
@@ -179,12 +146,12 @@ it.live(
 );
 
 it.live.each(["crash", "hang"] as const)(
-  "a VM lost to a %s starts over in a new VM, which imports and prompts again, and finishes",
+  "a VM lost to a %s starts over in a new VM on the same disk, which prompts again, and finishes",
   (loss) =>
     Effect.gen(function* () {
       const { vms } = yield* setup;
-      const { conversation, messages } = yield* converse;
-      const events = yield* start(Fixture.execution({ conversation, inputs: [second] }));
+      const { disk, messages } = yield* converse;
+      const events = yield* start(Fixture.execution({ disk, inputs: [second] }));
       yield* next(events, showing(second.id));
       if (loss === "crash") FakeOpenCode.crash(vms, ID);
       else {
@@ -194,6 +161,7 @@ it.live.each(["crash", "hang"] as const)(
       yield* next(events, is("restarted"));
       yield* next(events, showing(second.id));
       assert.lengthOf(vms.started, 3);
+      assert.deepEqual(FakeOpenCode.vm(vms, ID).booted, disk);
       assert.deepEqual(
         FakeOpenCode.root(vms, ID).items.map((item) => item.id),
         [...messages, second.id],

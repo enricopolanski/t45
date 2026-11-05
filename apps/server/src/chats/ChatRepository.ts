@@ -1,6 +1,6 @@
 /**
  * What T45 stores for its chats: the chats, the inputs sent to them, the OpenCode sessions and
- * messages their executions wrote, and the agent's saved workspace, whose tarball is a file in the
+ * messages their executions wrote, and the VM disk the last finished one left, a file in the
  * server's state folder. The questions a running execution's VM is waiting on are kept in memory,
  * since they go with the VM.
  */
@@ -119,20 +119,18 @@ const encodePayload = Schema.encodeSync(Schema.fromJsonString(InputPayload));
 const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow));
 const encodeSessionInfo = Schema.encodeSync(Schema.fromJsonString(Session.Info));
 
-const MessageJson = Schema.fromJsonString(SessionMessage.Info);
-const encodeMessage = Schema.encodeSync(MessageJson);
-const decodeMessage = Schema.decodeEffect(MessageJson);
+const encodeMessage = Schema.encodeSync(Schema.fromJsonString(SessionMessage.Info));
 
-/** Where chats' workspace tarballs are kept, under the server's state folder. */
-const WORKSPACES_DIRECTORY = "chat-workspaces";
+/** Where chats' disks are kept, under the server's state folder. */
+const DISKS_DIRECTORY = "chat-disks";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const stateDir = yield* ServerConfig.stateDir;
-  const workspacesDir = path.join(stateDir, WORKSPACES_DIRECTORY);
-  const workspaceFile = (chatId: ChatId) => path.join(workspacesDir, `${chatId}.tar.gz`);
+  const disksDir = path.join(stateDir, DISKS_DIRECTORY);
+  const diskFile = (chatId: ChatId) => path.join(disksDir, `${chatId}.tgz`);
 
   const origins = yield* makeOrigins;
   const chatColumns = sql.literal(CHAT_COLUMNS);
@@ -295,19 +293,12 @@ const make = Effect.gen(function* () {
           }),
         )
         .pipe(Effect.orDie),
-    /** Keeps what a finished execution wrote, which every later execution imports. */
+    /** Keeps what a finished execution wrote, as its saved disk has it. */
     commit: (chatId: ChatId) =>
       Effect.gen(function* () {
         yield* sql`UPDATE chat_messages SET committed = 1 WHERE chat_id = ${chatId}`;
         yield* sql`UPDATE chat_sessions SET committed = 1 WHERE chat_id = ${chatId}`;
       }).pipe(Effect.orDie),
-    /** A session's messages, in order, as an execution imports them. */
-    history: (chatId: ChatId, sessionId: string) =>
-      sql<{ readonly json: string }>`SELECT json FROM chat_messages
-        WHERE chat_id = ${chatId} AND session_id = ${sessionId} ORDER BY ordinal`.pipe(
-        Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeMessage(row.json))),
-        Effect.orDie,
-      ),
     /**
      * Writes messages OpenCode returned for a session, each new one after the ones it has;
      * `inputsTaken` when one is an input's user message, which takes it out of the pending ones.
@@ -382,22 +373,22 @@ const make = Effect.gen(function* () {
         return changed;
       }),
 
-    readWorkspace: (chatId: ChatId) =>
-      fileSystem.readFile(workspaceFile(chatId)).pipe(
+    readDisk: (chatId: ChatId) =>
+      fileSystem.readFile(diskFile(chatId)).pipe(
         Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
         Effect.orDie,
       ),
-    saveWorkspace: (chatId: ChatId, content: Uint8Array) =>
+    saveDisk: (chatId: ChatId, content: Uint8Array) =>
       Effect.gen(function* () {
-        const target = workspaceFile(chatId);
-        yield* fileSystem.makeDirectory(workspacesDir, { recursive: true });
+        const target = diskFile(chatId);
+        yield* fileSystem.makeDirectory(disksDir, { recursive: true });
         // Written beside it first, so a save cut short leaves the last good one.
         yield* fileSystem.writeFile(`${target}.part`, content);
         yield* fileSystem.rename(`${target}.part`, target);
       }).pipe(Effect.orDie),
-    deleteWorkspace: (chatId: ChatId) =>
+    deleteDisk: (chatId: ChatId) =>
       Effect.gen(function* () {
-        const target = workspaceFile(chatId);
+        const target = diskFile(chatId);
         yield* fileSystem.remove(target, { force: true });
         yield* fileSystem.remove(`${target}.part`, { force: true });
       }).pipe(Effect.orDie),

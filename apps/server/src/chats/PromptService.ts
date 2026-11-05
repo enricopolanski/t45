@@ -10,13 +10,10 @@ import {
   collectComposerContextReferences,
   replaceComposerContextReferences,
 } from "@t45/core/composerContextReferences";
-import { WORK_DIRECTORY } from "@t45/contracts/resources/Runner";
 import * as Schema from "effect/Schema";
 
-/** Where an execution's VM keeps a file sent to its chat, under /work. */
+/** Where a file sent to a chat is, relative to the agent's working folder. */
 export const attachmentFile = (id: AttachmentId) => `attachments/${id}`;
-
-const attachedAt = (id: AttachmentId) => `${WORK_DIRECTORY}/${attachmentFile(id)}`;
 
 const CONTEXT_ENVELOPE_TAG = "t45_context";
 const CONTEXT_ENTRY_TAG = "context";
@@ -44,7 +41,7 @@ export function formatAnswers(input: {
   for (const [key, attachments] of Object.entries(input.attachmentsByField)) {
     const references = attachments.map(
       (attachment) =>
-        `Attached ${attachment.type} ${quoteReference(attachment.name)}: ${quoteReference(attachedAt(attachment.id))}`,
+        `Attached ${attachment.type} ${quoteReference(attachment.name)}: ${quoteReference(attachmentFile(attachment.id))}`,
     );
     if (references.length === 0) continue;
     const answer = answers.get(key);
@@ -122,7 +119,7 @@ function formatEnvelopeEntry(
 function appendAttachmentPaths(text: string, attachments: ReadonlyArray<ChatAttachment>) {
   const references = attachments.map(
     (attachment) =>
-      `[Attached ${attachment.type} "${attachment.name}" is saved at: ${attachedAt(attachment.id)}]`,
+      `[Attached ${attachment.type} "${attachment.name}" is saved at: ${attachmentFile(attachment.id)}]`,
   );
   return [text, ...references].filter((part) => part !== "").join("\n\n");
 }

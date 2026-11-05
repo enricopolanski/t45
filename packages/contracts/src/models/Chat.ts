@@ -10,8 +10,8 @@ import { NonNegativeInt, StringId, Title, TrimmedNonEmptyString } from "./primit
 
 /**
  * Chats with agents. T45 keeps the inputs a chat is sent, the OpenCode sessions and messages its
- * executions wrote, in OpenCode's own shapes, and the agent's workspace. Each execution runs in a
- * new VM that gets the workspace and conversation back, and is removed once the execution ends.
+ * executions wrote, in OpenCode's own shapes, and the VM disk the last finished one left. Each
+ * execution runs in a new VM booted on that disk, removed once the execution ends.
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;

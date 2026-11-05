@@ -11,12 +11,12 @@ import {
  */
 export const WORKFLOW_DRAFTING_MCP = {
   name: WORKFLOW_DRAFTING_MCP_NAME,
-  server: { type: "local", command: ["node", "/work/runtime/workflow-tools.mjs"], codemode: false },
+  server: { type: "local", command: ["node", "runtime/workflow-tools.mjs"], codemode: false },
 } as const satisfies { readonly name: string; readonly server: Agent["mcpServers"][string] };
 
 export const STEP_TOOLS_MCP = {
   name: STEP_TOOLS_MCP_NAME,
-  server: { type: "local", command: ["node", "/work/runtime/step-tools.mjs"], codemode: false },
+  server: { type: "local", command: ["node", "runtime/step-tools.mjs"], codemode: false },
 } as const satisfies { readonly name: string; readonly server: Agent["mcpServers"][string] };
 
 export const hasT45Tools = (servers: Agent["mcpServers"]) =>

@@ -205,12 +205,12 @@ const make = Effect.gen(function* () {
     yield* sql.afterCommit(publish(chatId, "chat").pipe(Effect.andThen(executions.stop(chatId))));
   }, transaction);
 
-  /** Stops what runs for a deleted chat, then removes its files, workspace and copy. */
+  /** Stops what runs for a deleted chat, then removes its files, disk and copy. */
   const cleanup = (chatId: ChatId) =>
     Effect.gen(function* () {
       yield* executions.stop(chatId);
       yield* attachments.release(chatId);
-      yield* repository.deleteWorkspace(chatId);
+      yield* repository.deleteDisk(chatId);
       yield* repository.finishDelete(chatId);
     }).pipe(
       Effect.catchCause((cause) =>

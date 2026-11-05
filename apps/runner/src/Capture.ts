@@ -1,11 +1,6 @@
 import { type Form, Session, SessionMessage } from "@opencode/client/effect";
 import type { OpenCodeEvent } from "@opencode/protocol/groups/event";
-import {
-  type ExecutionEvent,
-  GENERATED_FILES,
-  isSettled,
-  WORK_DIRECTORY,
-} from "@t45/contracts/resources/Runner";
+import { type ExecutionEvent, isSettled } from "@t45/contracts/resources/Runner";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -21,6 +16,9 @@ export class StreamEndedError extends Schema.TaggedError<StreamEndedError>()(
 ) {}
 
 const PAGE = 200;
+
+/** Where the step tools leave the files T45 gets as `file` events. */
+const GENERATED_FILES = ".t45/attached";
 
 /** Sessions to read again, with the messages events named. */
 interface Marks {
@@ -152,7 +150,7 @@ export const make = Effect.fnUntraced(function* ({
   /** The agent may remove a file before it is read, which leaves it out. */
   const sendGenerated = Effect.gen(function* () {
     const listed = yield* client.file
-      .list({ location: { directory: WORK_DIRECTORY }, path: GENERATED_FILES })
+      .list({ path: GENERATED_FILES })
       .pipe(Effect.catchTags({ FileNotFoundError: () => Effect.succeed({ data: [] }) }));
     for (const entry of listed.data) {
       if (entry.type !== "file" || generated.has(entry.path)) continue;
@@ -262,7 +260,7 @@ export const make = Effect.fnUntraced(function* ({
     /** By OpenCode's own account: nothing running or waiting, every background subagent reported. */
     idle: Effect.gen(function* () {
       if (Object.keys(yield* client.session.active()).length > 0) return false;
-      const shells = yield* client.shell.list({ location: { directory: WORK_DIRECTORY } });
+      const shells = yield* client.shell.list({});
       if (shells.data.some((shell) => shell.status === "running")) return false;
       for (const sessionId of known) {
         const inbox = yield* client.session.inbox.list({ sessionID: Session.ID.make(sessionId) });

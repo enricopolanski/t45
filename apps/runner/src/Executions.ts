@@ -1,4 +1,4 @@
-import { AbsolutePath, Location, Model, type OpenCodeClient } from "@opencode/client/effect";
+import { Model, type OpenCodeClient } from "@opencode/client/effect";
 import {
   AnswerInvalid,
   type Execution,
@@ -6,7 +6,6 @@ import {
   type ExecutionInput,
   QuestionGone,
   RunnerRpcs,
-  WORK_DIRECTORY,
 } from "@t45/contracts/resources/Runner";
 import * as Effect from "effect/Effect";
 import * as HttpClient from "effect/http/HttpClient";
@@ -20,13 +19,11 @@ import * as Stream from "effect/Stream";
 import * as Capture from "./Capture.ts";
 import { ModelCatalog } from "./ModelCatalog.ts";
 import * as OpenCode from "./OpenCode.ts";
-import { Sandbox } from "./Sandbox.ts";
+import { Sandbox, type Vm } from "./Sandbox.ts";
 
 const CAPTURE_BATCH = "150 millis";
 
 const RESTART = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("30 seconds")]);
-
-const location = Location.PublicRef.make({ directory: AbsolutePath.make(WORK_DIRECTORY) });
 
 type Signal = "inputs" | "events" | "ended";
 
@@ -37,7 +34,7 @@ interface Running {
   readonly files: Map<string, Uint8Array>;
   readonly signal: Queue.Queue<Signal>;
   readonly lock: Semaphore.Semaphore;
-  /** The current one, once the conversation is in its VM. */
+  /** The current one, once its root is in its VM. */
   attempt: Attempt | null;
 }
 
@@ -62,16 +59,16 @@ export const layer = RunnerRpcs.toLayer(
     const httpClient = yield* HttpClient.HttpClient;
     const executions = new Map<string, Running>();
 
-    /** From a new VM, removed when it ends, until OpenCode is done; fails when the VM is lost. */
-    const attempt = Effect.fnUntraced(function* (
+    /** Until OpenCode is done with every input; returns the root's outcome, and fails when the VM is lost. */
+    const converse = Effect.fnUntraced(function* (
       id: string,
+      vm: Vm,
       running: Running,
       emit: (event: ExecutionEvent) => Effect.Effect<void>,
     ) {
       const { execution } = running;
       const root = execution.root;
       yield* Queue.clear(running.signal);
-      const vm = yield* sandbox.start(id, execution.agent);
       const opencode = yield* OpenCode.connect(vm).pipe(
         Effect.provideService(HttpClient.HttpClient, httpClient),
       );
@@ -84,7 +81,6 @@ export const layer = RunnerRpcs.toLayer(
         ended: Queue.offer(running.signal, "ended"),
       });
 
-      if (execution.workspace !== null) yield* vm.unpack(execution.workspace);
       const written = new Set<string>();
       /** One the sandbox refuses is skipped. */
       const putFiles = Effect.forEach(
@@ -101,18 +97,16 @@ export const layer = RunnerRpcs.toLayer(
         { discard: true },
       );
       yield* putFiles;
+      const model = Model.Ref.parse(execution.agent.model);
       const permissions = OpenCode.sessionRules(execution.questions);
-      const rootInfo = { title: execution.title, model: Model.Ref.parse(execution.agent.model) };
-      if (!execution.conversation.some(({ info }) => info.id === root)) {
-        yield* client.session.create({ id: root, ...rootInfo, location, permissions });
-      }
-      for (const { info, messages } of execution.conversation) {
-        yield* client.session.import({
-          info: { ...info, permissions, ...(info.id === root ? rootInfo : {}) },
-          messages,
-          location,
-        });
-      }
+      // A root the disk kept comes back as it is.
+      yield* client.session.create({
+        id: root,
+        title: execution.title,
+        model,
+        permissions,
+      });
+      yield* client.session.switchModel({ sessionID: root, model });
       const sent = new Set<string>();
       running.attempt = { client, sent, putFiles };
       yield* Effect.addFinalizer(() =>
@@ -146,11 +140,7 @@ export const layer = RunnerRpcs.toLayer(
           yield* capture.all;
           if (yield* done) {
             const info = yield* client.session.get({ sessionID: root });
-            return yield* emit({
-              _tag: "finished",
-              outcome: info.outcome === "failed" ? "failed" : null,
-              workspace: yield* vm.pack,
-            });
+            return info.outcome === "failed" ? ("failed" as const) : null;
           }
         }
         const first = yield* Queue.take(running.signal);
@@ -158,6 +148,18 @@ export const layer = RunnerRpcs.toLayer(
         const signals = new Set([first, ...(yield* Queue.clear(running.signal))]);
         if (signals.has("ended")) return yield* new Capture.StreamEndedError();
       }
+    });
+
+    /** In a new VM, removed when it ends, whose disk is saved once OpenCode is done. */
+    const attempt = Effect.fnUntraced(function* (
+      id: string,
+      running: Running,
+      emit: (event: ExecutionEvent) => Effect.Effect<void>,
+    ) {
+      const { agent, disk } = running.execution;
+      const vm = yield* sandbox.start(id, agent, disk);
+      const outcome = yield* Effect.scoped(converse(id, vm, running, emit));
+      yield* emit({ _tag: "finished", outcome, disk: yield* vm.save });
     });
 
     /** A question goes with its VM, so there is none without an attempt. */

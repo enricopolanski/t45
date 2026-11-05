@@ -25,8 +25,8 @@ describe("PromptService", () => {
         text: "Review these.",
         attachments: [document, image],
       }),
-      'Review these.\n\n[Attached file "spec.pdf" is saved at: /work/attachments/00000000-0000-4000-8000-000000000001.pdf]\n' +
-        '\n[Attached image "diagram.png" is saved at: /work/attachments/00000000-0000-4000-8000-000000000002.png]',
+      'Review these.\n\n[Attached file "spec.pdf" is saved at: attachments/00000000-0000-4000-8000-000000000001.pdf]\n' +
+        '\n[Attached image "diagram.png" is saved at: attachments/00000000-0000-4000-8000-000000000002.png]',
     );
   });
 
@@ -40,7 +40,7 @@ describe("PromptService", () => {
       q: [
         "First",
         "Second",
-        'Attached file "spec \\"final\\".pdf": "/work/attachments/00000000-0000-4000-8000-000000000001.pdf"',
+        'Attached file "spec \\"final\\".pdf": "attachments/00000000-0000-4000-8000-000000000001.pdf"',
       ],
       other: "No file",
     });

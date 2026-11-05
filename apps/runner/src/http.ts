@@ -27,4 +27,4 @@ export const layer = Layer.unwrap(
       }),
     );
   }),
-).pipe(Layer.provide(RpcSerialization.layerNdjson));
+).pipe(Layer.provide(RpcSerialization.layerNdjsonWith({ maxBufferSize: "unbounded" })));

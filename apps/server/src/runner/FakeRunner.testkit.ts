@@ -121,11 +121,11 @@ const make = () => {
       id: string,
       {
         outcome = null,
-        workspace = new Uint8Array(),
-      }: { readonly outcome?: "failed" | null; readonly workspace?: Uint8Array } = {},
+        disk = new Uint8Array(),
+      }: { readonly outcome?: "failed" | null; readonly disk?: Uint8Array } = {},
     ) => {
       const run = runOf(id);
-      emit(run, { _tag: "finished", outcome, workspace });
+      emit(run, { _tag: "finished", outcome, disk });
       Queue.endUnsafe(run.events);
     },
     /** Waits until the chat's run call ended: at once when none runs. */

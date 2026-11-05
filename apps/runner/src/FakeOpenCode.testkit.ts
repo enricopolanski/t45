@@ -1,7 +1,7 @@
 /**
  * Scripted VMs: a fake `Sandbox`, and an `HttpClient` that answers each VM's OpenCode at its url as
- * the real client expects. No OpenCode server or agent runs, and imports are kept as the runner sent
- * them, so the fixture can't repair the runner's mistakes.
+ * the real client expects. No OpenCode server or agent runs; a saved disk carries a VM's files and
+ * sessions to the VM that boots on it.
  */
 import { Form } from "@opencode/client/effect";
 import type { Execution } from "@t45/contracts/resources/Runner";
@@ -23,7 +23,7 @@ type Json = Record<string, unknown>;
 
 interface FakeSession {
   readonly id: string;
-  /** As the runner created or imported it. */
+  /** As the runner created it. */
   readonly info: Json;
   /** Encoded as OpenCode sends them. */
   readonly items: Array<Json>;
@@ -42,10 +42,10 @@ interface Vm {
   readonly agent: Execution["agent"];
   /** A lost or removed VM's OpenCode stops answering. */
   state: "up" | "lost" | "removed";
+  readonly booted: Uint8Array | null;
+  saved: Uint8Array | null;
   /** /work by path. */
   readonly files: Map<string, Uint8Array>;
-  /** What unpack put back and pack returns. */
-  workspace: Uint8Array;
   /** The root first. */
   readonly sessions: Array<FakeSession>;
   readonly shells: Array<Json>;
@@ -384,21 +384,11 @@ const answer = (
     return json({ data: target.sessions.map(sessionInfo), cursor: {} });
   }
   if (route === "POST /api/session") {
+    const stored = target.sessions.find((each) => each.id === body.id);
+    if (stored !== undefined) return json({ data: sessionInfo(stored) });
     const created = newSession(body);
     target.sessions.push(created);
     return json({ data: sessionInfo(created) });
-  }
-  if (route === "POST /api/experimental/session/import") {
-    const imported = newSession(body.info as Json, body.messages as Array<Json>);
-    if (target.sessions.some((each) => each.id === imported.id)) {
-      return json({ _tag: "ConflictError", message: "Session exists." }, 409);
-    }
-    const parentID = imported.info.parentID;
-    if (typeof parentID === "string" && !target.sessions.some((each) => each.id === parentID)) {
-      return notFound(parentID);
-    }
-    target.sessions.push(imported);
-    return json({ data: sessionInfo(imported) });
   }
   const matched = /^\/api\/session\/([^/]+)(\/.*)?$/u.exec(path);
   if (matched === null) throw new Error(`Unscripted OpenCode request: ${route}`);
@@ -407,6 +397,10 @@ const answer = (
   const session = target.sessions.find((each) => each.id === sessionID);
   if (session === undefined) return notFound(sessionID);
   if (rest === "GET ") return json({ data: sessionInfo(session) });
+  if (rest === "POST /model") {
+    session.info.model = body.model;
+    return noContent();
+  }
   if (rest === "POST /prompt") {
     const { id, text, metadata, delivery } = body;
     const entry = {
@@ -479,31 +473,50 @@ const httpClient = (fake: Fake) =>
     }),
   );
 
+interface Disk {
+  readonly files: ReadonlyArray<readonly [string, ReadonlyArray<number>]>;
+  readonly sessions: ReadonlyArray<{ readonly info: Json; readonly items: Array<Json> }>;
+}
+
+const saveDisk = (booted: Vm) => {
+  const disk: Disk = {
+    files: [...booted.files].map(([path, content]) => [path, [...content]]),
+    sessions: booted.sessions.map(({ info, items }) => ({ info, items })),
+  };
+  return new TextEncoder().encode(encodeJson(disk));
+};
+
+const remove = (fake: Fake, booted: Vm) => {
+  booted.state = "removed";
+  closeStreams(booted);
+  changed(fake);
+};
+
 const sandbox = (fake: Fake) =>
   Sandbox.of({
-    start: (id, agent) =>
+    start: (id, agent, disk) =>
       Effect.acquireRelease(
         Effect.sync(() => {
+          const restored =
+            disk === null ? null : (decodeJson(new TextDecoder().decode(disk)) as Disk);
           const booted: Vm = {
             id,
             url: `http://vm${fake.started.length + 1}.test`,
             agent,
+            booted: disk,
+            saved: null,
             state: "up",
-            files: new Map(),
-            workspace: new Uint8Array(),
-            sessions: [],
+            files: new Map(
+              restored?.files.map(([path, content]) => [path, new Uint8Array(content)]),
+            ),
+            sessions: restored?.sessions.map(({ info, items }) => newSession(info, items)) ?? [],
             shells: [],
             streams: new Set(),
           };
           fake.started.push(booted);
           return booted;
         }),
-        (booted) =>
-          Effect.sync(() => {
-            booted.state = "removed";
-            closeStreams(booted);
-            changed(fake);
-          }),
+        (booted) => Effect.sync(() => remove(fake, booted)),
       ).pipe(
         Effect.tap(() => fake.starting),
         Effect.map((booted) => ({
@@ -511,11 +524,11 @@ const sandbox = (fake: Fake) =>
           password: Redacted.make("vm-password"),
           write: (path: string, content: Uint8Array) =>
             Effect.sync(() => void booted.files.set(path, content)),
-          pack: Effect.sync(() => booted.workspace),
-          unpack: (tarball: Uint8Array) =>
-            Effect.sync(() => {
-              booted.workspace = tarball;
-            }),
+          save: Effect.sync(() => {
+            remove(fake, booted);
+            booted.saved = saveDisk(booted);
+            return booted.saved;
+          }),
         })),
       ),
   });

@@ -29,7 +29,7 @@ const layer = Layer.unwrap(
           transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(token)),
         }),
       ),
-      Layer.provide(RpcSerialization.layerNdjson),
+      Layer.provide(RpcSerialization.layerNdjsonWith({ maxBufferSize: "unbounded" })),
     );
   }),
 );

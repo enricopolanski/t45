@@ -58,8 +58,8 @@ interface Owner {
 
 /**
  * One execution at a time per chat while it is owed one. It starts from the agent's current setup,
- * the conversation and /work as the last finished execution left them, and the inputs the agent
- * hasn't taken; what an execution that doesn't finish wrote is discarded.
+ * the disk the last finished execution left, and the inputs the agent hasn't taken; what an
+ * execution that doesn't finish wrote is discarded.
  */
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -111,13 +111,13 @@ export const make = Effect.gen(function* () {
     });
 
   /** Commits what a finished execution wrote; the chat stays owed while an input is pending. */
-  const end = (chatId: ChatId, receive: Receive, status: "failed" | null, workspace?: Uint8Array) =>
+  const end = (chatId: ChatId, receive: Receive, status: "failed" | null, disk?: Uint8Array) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
           if ((yield* repository.get(chatId))?.status !== "running") return;
-          if (workspace !== undefined) {
-            yield* repository.saveWorkspace(chatId, workspace);
+          if (disk !== undefined) {
+            yield* repository.saveDisk(chatId, disk);
             yield* repository.commit(chatId);
             if ((yield* repository.pendingInputs(chatId)).length > 0) return;
           }
@@ -132,6 +132,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const agent = (yield* agents.get(chat.agentId))!;
       const origin = yield* repository.origins.get(chat.id);
+      const inputs = yield* repository.pendingInputs(chat.id);
       return {
         agent: {
           ...Struct.pick(agent, ["instructions", "model", "mcpServers", "permissions"]),
@@ -143,14 +144,11 @@ export const make = Effect.gen(function* () {
         root: rootSessionId(chat.id),
         title: titleOf(chat),
         questions: origin?.kind === "conversation",
-        conversation: yield* Effect.forEach(yield* repository.sessions(chat.id), (session) =>
-          repository
-            .history(chat.id, session.sessionId)
-            .pipe(Effect.map((messages) => ({ info: session.info, messages }))),
+        disk: yield* repository.readDisk(chat.id),
+        files: yield* filesOf(
+          inputs.flatMap((input) => input.payload.attachments.map((file) => file.id)),
         ),
-        workspace: yield* repository.readWorkspace(chat.id),
-        inputs: (yield* repository.pendingInputs(chat.id)).map((input) => inputOf(chat.id, input)),
-        files: yield* filesOf(yield* attachments.boundTo(chat.id)),
+        inputs: inputs.map((input) => inputOf(chat.id, input)),
       } satisfies Execution;
     });
 
@@ -232,7 +230,7 @@ export const make = Effect.gen(function* () {
           case "restarted":
             return Effect.sync(() => generated.clear()).pipe(Effect.andThen(discard(chatId)));
           case "finished":
-            return end(chatId, receive, event.outcome, event.workspace);
+            return end(chatId, receive, event.outcome, event.disk);
         }
       };
       yield* runner.run({ id: chatId, execution }).pipe(Stream.runForEach(handle));

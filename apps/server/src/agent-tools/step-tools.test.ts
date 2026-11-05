@@ -34,9 +34,8 @@ const session = (calls: ReadonlyArray<readonly [string, unknown]>) => {
     .map((message) => JSON.stringify(message))
     .join("\n");
   const run = NodeChildProcess.spawnSync("node", [tool], {
-    cwd: root,
+    cwd: work,
     input: `${input}\n`,
-    env: { ...process.env, T45_WORK_DIR: work },
     encoding: "utf8",
   });
   if (run.error) throw run.error;

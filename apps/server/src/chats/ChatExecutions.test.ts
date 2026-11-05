@@ -17,8 +17,8 @@ import { ChatService } from "./ChatService.ts";
 import * as Fixture from "./Chats.testkit.ts";
 
 const alice = { userId: "user-alice", role: "member" } as const;
-/** What the agent leaves in /work. */
-const work = new Uint8Array([7, 7, 7]);
+/** The disk an execution leaves. */
+const disk = new Uint8Array([7, 7, 7]);
 
 const asking = (event: ChatEvent): event is Extract<ChatEvent, { _tag: "questions" }> =>
   event._tag === "questions" && event.questions.length === 1;
@@ -56,12 +56,12 @@ const setup = Effect.gen(function* () {
     deliver,
     send: (inputId: string, text: string) =>
       chats.send({ chatId, inputId, text, attachments: [] }, alice),
-    /** Runs an input through an execution in which the agent replies and leaves `work`; returns the reply's id. */
+    /** Runs an input through an execution in which the agent replies and leaves `disk`; returns the reply's id. */
     converse: (inputId: string, text: string) =>
       Effect.gen(function* () {
         yield* deliver(inputId, text);
         const reply = runner.reply(chatId, `Done: ${text}`);
-        runner.finish(chatId, { workspace: work });
+        runner.finish(chatId, { disk });
         assert.isNull(yield* ended);
         return reply;
       }),
@@ -80,7 +80,7 @@ const upload = Effect.gen(function* () {
 
 describe("a chat's execution", () => {
   it.effect(
-    "runs a send with the agent's setup and the chat's files, shows members the agent's work, then saves /work",
+    "runs a send with the agent's setup and the input's files, shows members the agent's work, then saves the disk",
     () =>
       Effect.gen(function* () {
         const { runner, chats, chatId, agentId, root, repository, events, ended } = yield* setup;
@@ -107,10 +107,9 @@ describe("a chat's execution", () => {
           skills: [],
         });
         assert.deepEqual(
-          [execution.root, execution.title, execution.questions, execution.workspace],
+          [execution.root, execution.title, execution.questions, execution.disk],
           [root, chatId, true, null],
         );
-        assert.deepEqual(execution.conversation, []);
         assert.deepEqual(execution.files, { [`attachments/${file.id}`]: new Uint8Array([4, 2]) });
         assert.deepEqual(
           execution.inputs.map(({ id, metadata }) => ({ id, metadata })),
@@ -141,29 +140,22 @@ describe("a chat's execution", () => {
           Fixture.texts(yield* Fixture.next(events, Fixture.showing(reply, "settled"))),
           ["Filed."],
         );
-        runner.finish(chatId, { workspace: work });
+        runner.finish(chatId, { disk });
         assert.isNull(yield* ended);
-        assert.deepEqual(yield* repository.readWorkspace(chatId), work);
+        assert.deepEqual(yield* repository.readDisk(chatId), disk);
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
   it.effect(
-    "runs a follow-up with the saved /work and the committed conversation, sending only the new input, and ends with the run's outcome",
+    "runs a follow-up on the saved disk, sending only the new input, and ends with the run's outcome",
     () =>
       Effect.gen(function* () {
-        const { runner, chatId, root, ended, deliver, converse } = yield* setup;
-        const reply = yield* converse("input-1", "Sum the receipts.");
+        const { runner, chatId, ended, deliver, converse } = yield* setup;
+        yield* converse("input-1", "Sum the receipts.");
 
         yield* deliver("input-2", "Email it.");
         const { execution } = runner.runs[1]!;
-        assert.deepEqual(execution.workspace, work);
-        assert.deepEqual(
-          execution.conversation.map(({ info, messages }) => [
-            info.id,
-            messages.map((message) => message.id),
-          ]),
-          [[root, [inputMessageId(chatId, "input-1"), reply]]],
-        );
+        assert.deepEqual(execution.disk, disk);
         assert.deepEqual(
           execution.inputs.map((input) => input.id),
           messageIds(chatId, "input-2"),
@@ -282,7 +274,7 @@ describe("a chat's execution", () => {
       );
       const year = String(answered?.answer["year"]);
       assert.include(year, "2025");
-      assert.include(year, `/work/attachments/${file.id}`);
+      assert.include(year, `attachments/${file.id}`);
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 });

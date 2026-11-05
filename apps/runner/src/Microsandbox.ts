@@ -1,23 +1,19 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { OpenCode } from "@opencode/client/effect";
 import { Config } from "@opencode/schema/config";
-import { AGENT_SETUP_PATHS } from "@t45/contracts/models/Agent";
 import type { Execution } from "@t45/contracts/resources/Runner";
-import * as Bytes from "effect/Bytes";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Schedule from "effect/Schedule";
 import { HttpClient, HttpClientRequest } from "effect/http";
-import {
-  type ExecHandle,
-  type NetworkBuilder,
-  NetworkPolicy,
-  Sandbox as Microvm,
-} from "microsandbox";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { type NetworkBuilder, NetworkPolicy, Sandbox as Microvm } from "microsandbox";
 
 import * as RunnerConfig from "./RunnerConfig.ts";
 import { Sandbox, SandboxError } from "./Sandbox.ts";
@@ -30,6 +26,13 @@ const IMAGE = "t45-agent:dev";
 const GUEST_PORT = 4096;
 
 const LIMITS = { cpus: 2, memoryMib: 2048, diskMib: 4096 };
+
+/** The VM's writable layer, an ext4 file on the host, and the archive it travels in. */
+const DISK = "disk.raw";
+const ARCHIVE = "disk.tgz";
+
+/** Written again at every start, or left by the step tools for the last execution. */
+const STALE = ["/work/.opencode/skills", "/work/runtime", "/work/.t45"];
 
 /** The SDK types its network setter loosely; this is what it hands the callback. */
 type NetworkSettings = InstanceType<typeof NetworkBuilder>;
@@ -98,29 +101,17 @@ const writeInto = (vm: Microvm, relative: string, content: string | Uint8Array) 
   );
 };
 
-const WORKSPACE_EXCLUDES = [
-  "--anchored",
-  ...AGENT_SETUP_PATHS.map((path) => `--exclude=./${path}`),
-  "--exclude=./.opencode/skills",
-  "--exclude=./.t45",
-  "--exclude=./runtime",
-  "--no-anchored",
-  "--exclude=node_modules",
-  "--exclude=.venv",
-  "--exclude=__pycache__",
-  "--exclude=.cache",
-];
-
-const WORKSPACE_INSTRUCTIONS = `Only /work survives when this sandbox stops, without attachments/ and caches such as node_modules, .venv, __pycache__ and .cache.`;
-
 const writeAgentSetup = Effect.fn("Microsandbox.writeAgentSetup")(function* (
   vm: Microvm,
   agent: Agent,
 ) {
-  const instructions = [agent.instructions, WORKSPACE_INSTRUCTIONS]
-    .filter((text) => text.trim() !== "")
-    .join("\n\n");
-  yield* writeInto(vm, "AGENTS.md", instructions);
+  const cleared = yield* sdk("setup", () =>
+    vm.execWith("rm", (exec) => exec.args(["-rf", ...STALE]).user("root")),
+  );
+  if (!cleared.success) {
+    return yield* new SandboxError({ operation: "setup", cause: cleared.stderr() });
+  }
+  yield* writeInto(vm, "AGENTS.md", agent.instructions);
   for (const [path, content] of Object.entries(agent.files)) {
     yield* writeInto(vm, path, content);
   }
@@ -133,35 +124,6 @@ const writeAgentSetup = Effect.fn("Microsandbox.writeAgentSetup")(function* (
   yield* writeInto(vm, "opencode.json", encodeOpenCodeConfig(openCodeConfig(agent)));
 });
 
-const WORKSPACE_TAR_MILLIS = 90_000;
-
-/** GNU tar exits 1 for a file that changed while it was read, which still packs. */
-const readTarball = (exec: ExecHandle) =>
-  Effect.gen(function* () {
-    const chunks: Array<Uint8Array> = [];
-    let errors = "";
-    let code: number | undefined;
-    while (true) {
-      const event = yield* sdk("pack", () => exec.recv());
-      if (event === null) break;
-      if (event.kind === "stdout") {
-        chunks.push(event.data);
-      } else if (event.kind === "stderr") {
-        errors = (errors + new TextDecoder().decode(event.data)).slice(-2000);
-      } else if (event.kind === "exited") {
-        code = event.code;
-      }
-    }
-    code ??= (yield* sdk("pack", () => exec.wait())).code;
-    if (code > 1) {
-      return yield* new SandboxError({
-        operation: "pack",
-        cause: new Error(`tar exited with ${code}: ${errors}`),
-      });
-    }
-    return Bytes.concat(chunks);
-  });
-
 const freePort = NodeSocketServer.make({ host: "127.0.0.1", port: 0 }).pipe(
   Effect.map(({ address }) => (address._tag === "UnixPathAddress" ? 0 : address.port)),
   Effect.scoped,
@@ -173,6 +135,38 @@ const make = Effect.gen(function* () {
   const openCodeKey = yield* RunnerConfig.openCodeKey;
   const httpClient = yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+
+  const onHost = (command: string, args: ReadonlyArray<string>) =>
+    spawner.exitCode(ChildProcess.make(command, args, { stderr: "inherit" })).pipe(
+      Effect.filterOrFail(
+        (code) => code === 0,
+        (code) => new SandboxError({ operation: command, cause: `It exited with ${code}.` }),
+      ),
+    );
+
+  /** A sparse file the VM's scope removes after the VM: the saved disk, or a new one. */
+  const prepareDisk = (saved: Uint8Array | null) =>
+    Effect.gen(function* () {
+      // Not /tmp, which is often memory.
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ directory: "/var/tmp" });
+      const file = path.join(directory, DISK);
+      const archive = path.join(directory, ARCHIVE);
+      if (saved === null) {
+        const lazy = ["-E", "lazy_itable_init=1,lazy_journal_init=1"];
+        yield* onHost("mkfs.ext4", ["-q", "-m", "0", ...lazy, file, `${LIMITS.diskMib + 512}M`]);
+      } else {
+        yield* fileSystem.writeFile(archive, saved);
+        yield* onHost("tar", ["-xzf", archive, "-C", directory]);
+      }
+      const save = onHost("tar", ["-cSzf", archive, "-C", directory, DISK]).pipe(
+        Effect.andThen(fileSystem.readFile(archive)),
+        Effect.mapError((cause) => new SandboxError({ operation: "save", cause })),
+      );
+      return { file, save };
+    }).pipe(Effect.mapError((cause) => new SandboxError({ operation: "disk", cause })));
 
   /** OpenCode answers before its MCP servers connect, and a turn started then finds no tools. */
   const serve = Effect.fn("Microsandbox.serve")(function* (
@@ -232,27 +226,31 @@ const make = Effect.gen(function* () {
   });
 
   return Sandbox.of({
-    start: Effect.fn("Microsandbox.start")(function* (id, agent) {
+    start: Effect.fn("Microsandbox.start")(function* (id, agent, saved) {
       const hostPort = yield* freePort;
-      const vm = yield* Effect.acquireRelease(
-        sdk("create", () =>
-          // The port keeps one runner's VMs apart from another's on the same machine.
-          Microvm.builder(`vm-${port}-${id}`)
-            .image(IMAGE)
-            .pullPolicy("if-missing")
-            .user("agent")
-            .security("restricted")
-            .cpus(LIMITS.cpus)
-            .memory(LIMITS.memoryMib)
-            .rootDisk(LIMITS.diskMib + 512)
-            // Removed by microsandbox once it stops, including when this runner dies.
-            .ephemeral(true)
-            .replace()
-            .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort))
-            .create(),
-        ),
-        (vm) =>
-          sdk("remove", () => vm.destroy()).pipe(
+      const disk = yield* prepareDisk(saved);
+      const { vm, remove } = yield* Effect.acquireRelease(
+        Effect.gen(function* () {
+          const vm = yield* sdk("create", () =>
+            // The port keeps one runner's VMs apart from another's on the same machine.
+            Microvm.builder(`vm-${port}-${id}`)
+              .image(IMAGE)
+              .pullPolicy("if-missing")
+              .user("agent")
+              .security("restricted")
+              .cpus(LIMITS.cpus)
+              .memory(LIMITS.memoryMib)
+              .rootDisk((root) => root.disk(disk.file).format("raw").fstype("ext4"))
+              // Removed by microsandbox once it stops, including when this runner dies.
+              .ephemeral(true)
+              .replace()
+              .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort))
+              .create(),
+          );
+          return { vm, remove: yield* Effect.cached(sdk("remove", () => vm.destroy())) };
+        }),
+        ({ remove }) =>
+          remove.pipe(
             Effect.catch((error) => Effect.logWarning("Removing a VM failed", { id, error })),
           ),
       );
@@ -260,45 +258,8 @@ const make = Effect.gen(function* () {
       return {
         ...(yield* serve(vm, hostPort, agent)),
         write: (path, content) => writeInto(vm, path, content),
-        pack: sdk("pack", () =>
-          vm.execStreamWith("tar", (exec) =>
-            exec
-              // A file the agent can't read is left out, not a reason to save nothing.
-              .args([
-                "-czf",
-                "-",
-                "-C",
-                "/work",
-                "--ignore-failed-read",
-                ...WORKSPACE_EXCLUDES,
-                ".",
-              ])
-              .user("agent")
-              .timeout(WORKSPACE_TAR_MILLIS),
-          ),
-        ).pipe(Effect.flatMap(readTarball)),
-        unpack: (tarball) =>
-          Effect.gen(function* () {
-            const fs = vm.fs();
-            // Named so nothing in the VM can put a file or link there first.
-            const upload = `/tmp/t45-workspace-${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}.tgz`;
-            yield* sdk("unpack", () => fs.write(upload, tarball));
-            // As the agent: GNU tar leaves out members that would land outside /work.
-            const output = yield* sdk("unpack", () =>
-              vm.execWith("tar", (exec) =>
-                exec
-                  .args(["-xzf", upload, "-C", "/work", "--skip-old-files"])
-                  .user("agent")
-                  .timeout(WORKSPACE_TAR_MILLIS),
-              ),
-            ).pipe(Effect.ensuring(sdk("unpack", () => fs.remove(upload)).pipe(Effect.ignore)));
-            if (!output.success) {
-              return yield* new SandboxError({
-                operation: "unpack",
-                cause: new Error(`tar exited with ${output.code}: ${output.stderr().slice(-2000)}`),
-              });
-            }
-          }),
+        // Only a removed VM has flushed its disk.
+        save: remove.pipe(Effect.andThen(disk.save)),
       };
     }),
   });

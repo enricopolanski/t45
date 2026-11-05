@@ -11,11 +11,6 @@ import { Agent, AgentModel, AGENT_SETUP_PATHS } from "../models/Agent.ts";
 import { FilesByPath } from "../models/primitives.ts";
 import { Skill } from "../models/Skill.ts";
 
-export const WORK_DIRECTORY = "/work";
-
-/** Files the agent's tools leave here, under /work, reach T45 as `file` events. */
-export const GENERATED_FILES = ".t45/attached";
-
 /** Files by their path under /work. */
 const Files = Schema.Record(Schema.String, Schema.Uint8Array);
 
@@ -36,11 +31,9 @@ export const Execution = Schema.Struct({
   root: Session.ID,
   title: Schema.String,
   questions: Schema.Boolean,
-  /** Parents before their children. */
-  conversation: Schema.Array(
-    Schema.Struct({ info: Session.Info, messages: Schema.Array(SessionMessage.Info) }),
-  ),
-  workspace: Schema.NullOr(Schema.Uint8Array),
+  /** The disk the last finished execution left, conversation included; null for a new chat. */
+  disk: Schema.NullOr(Schema.Uint8Array),
+  /** The inputs' files. */
   files: Files,
   inputs: Schema.Array(ExecutionInput),
 });
@@ -69,7 +62,7 @@ export const ExecutionEvent = Schema.Union([
   Schema.TaggedStruct("heartbeat", {}),
   Schema.TaggedStruct("finished", {
     outcome: Schema.NullOr(Schema.Literal("failed")),
-    workspace: Schema.Uint8Array,
+    disk: Schema.Uint8Array,
   }),
 ]);
 export type ExecutionEvent = typeof ExecutionEvent.Type;
