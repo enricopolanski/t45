@@ -45,7 +45,7 @@ const servingThenSilent = (events: ReadonlyArray<unknown>) =>
   );
 
 describe("OpenCode2Client events", () => {
-  it.effect("fails a stream that stops sending anything, even heartbeats", () =>
+  it.effect("ends a stream that stops sending anything, even heartbeats", () =>
     Effect.gen(function* () {
       const { events } = yield* connect.pipe(
         Effect.provideService(
@@ -53,12 +53,11 @@ describe("OpenCode2Client events", () => {
           servingThenSilent([{ id: "evt_1", type: "server.connected", data: {} }]),
         ),
       );
-      const drained = yield* (yield* events).pipe(Stream.runDrain, Effect.flip, Effect.forkChild);
+      const drained = yield* events.pipe(Stream.runCount, Effect.forkChild);
       // Let the first frame arrive and the timer start before the clock moves.
       for (let i = 0; i < 20; i++) yield* Effect.yieldNow;
       yield* TestClock.adjust("46 seconds");
-      const failure = yield* Fiber.join(drained);
-      assert.strictEqual(failure._tag, "OpenCode2SilentStreamError");
+      assert.strictEqual(yield* Fiber.join(drained), 1);
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
@@ -77,7 +76,7 @@ describe("OpenCode2Client events", () => {
           ]),
         ),
       );
-      const failure = yield* (yield* events).pipe(Stream.runDrain, Effect.flip);
+      const failure = yield* events.pipe(Stream.runDrain, Effect.flip);
       assert.strictEqual(failure._tag, "SchemaError");
     }),
   );
@@ -119,7 +118,7 @@ describe("OpenCode2Client answers", () => {
   const CAP_CHUNKS = OpenCode2Client.RESPONSE_MAX_BYTES / CHUNK;
 
   /** A server whose session list doesn't end, as one an agent rewrote could send. */
-  const endless = (headers: Record<string, string> = {}) => {
+  const endless = () => {
     const served = { chunks: 0 };
     const client = HttpClient.make((request) =>
       Effect.sync(() => {
@@ -134,7 +133,7 @@ describe("OpenCode2Client answers", () => {
                 else controller.enqueue(chunk);
               },
             }),
-            { headers: { "content-type": "application/json", ...headers } },
+            { headers: { "content-type": "application/json" } },
           ),
         );
       }),
@@ -151,18 +150,6 @@ describe("OpenCode2Client answers", () => {
       const failure = yield* client.session.list().pipe(Effect.flip);
       assert.strictEqual(failure._tag, "ClientError");
       assert.isAtMost(server.served.chunks, CAP_CHUNKS + 2);
-    }),
-  );
-
-  it.effect("refuses an answer that says it is too large before reading it", () =>
-    Effect.gen(function* () {
-      const server = endless({ "content-length": String(OpenCode2Client.RESPONSE_MAX_BYTES + 1) });
-      const { client } = yield* connect.pipe(
-        Effect.provideService(HttpClient.HttpClient, server.client),
-      );
-      const failure = yield* client.session.list().pipe(Effect.flip);
-      assert.include(failure._tag === "ClientError" ? String(failure.cause) : "", "larger than");
-      assert.isAtMost(server.served.chunks, 1);
     }),
   );
 });

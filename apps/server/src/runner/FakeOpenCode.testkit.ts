@@ -46,8 +46,6 @@ export interface FakeOpenCode {
   readonly sessions: Map<string, FakeSession>;
   /** Subagents' sessions, by session id. */
   readonly subagents: Map<string, FakeSession>;
-  /** Prompt texts whose next send finds the VM's server not answering. */
-  readonly unansweredPrompts: Set<string>;
   /** The messages T45 prompted with, in order, across every VM. */
   readonly prompts: Array<{
     readonly chatId: string;
@@ -59,8 +57,6 @@ export interface FakeOpenCode {
   readonly promptListeners: Set<(id: string) => void>;
   /** The latest import of each session, by `<chatId>:<session id>`: the ids of its messages. */
   readonly imports: Map<string, ReadonlyArray<string>>;
-  /** Files in VMs, by `<chatId>:<path relative to /work>`. */
-  readonly files: Map<string, Uint8Array>;
   /** Answers T45 gave forms, by `<chatId>:<form id>`. */
   readonly formReplies: Map<string, Json>;
   /** Shells each VM lists, by chat id. */
@@ -78,11 +74,9 @@ export interface FakeOpenCode {
 export const makeFakeOpenCode = (runner: FakeRunner): FakeOpenCode => ({
   sessions: new Map(),
   subagents: new Map(),
-  unansweredPrompts: new Set(),
   prompts: [],
   promptListeners: new Set(),
   imports: new Map(),
-  files: new Map(),
   formReplies: new Map(),
   shells: new Map(),
   dead: new Set(),
@@ -97,13 +91,10 @@ export const reset = (fake: FakeOpenCode) => {
   Object.assign(fake, makeFakeOpenCode(fake.runner));
 };
 
-/** A chat VM's session: its root, or the subagent's session `sessionId`. */
-const chatSession = (fake: FakeOpenCode, chatId: string, sessionId?: string) => {
-  const session =
-    sessionId === undefined ? fake.sessions.get(chatId) : fake.subagents.get(sessionId);
-  if (session === undefined || session.chatId !== chatId) {
-    throw new Error(`no session ${sessionId ?? "root"} in ${chatId}`);
-  }
+/** A chat VM's root session. */
+const chatSession = (fake: FakeOpenCode, chatId: string) => {
+  const session = fake.sessions.get(chatId);
+  if (session === undefined) throw new Error(`no root session in ${chatId}`);
   return session;
 };
 
@@ -133,12 +124,9 @@ const write = (fake: FakeOpenCode, session: FakeSession, item: Json) => {
   return String(item.id);
 };
 
-/**
- * A chat's agent asks a question in its root session, or the subagent's `sessionId`, and
- * OpenCode announces it. Returns the form's id.
- */
-export const ask = (fake: FakeOpenCode, chatId: string, sessionId?: string) => {
-  const session = chatSession(fake, chatId, sessionId);
+/** A chat's agent asks a question in its root session, and OpenCode announces it. Returns the form's id. */
+export const ask = (fake: FakeOpenCode, chatId: string) => {
+  const session = chatSession(fake, chatId);
   const id = nextId(fake, "frm_");
   session.forms.push(id);
   emit(fake, chatId, "form.created", { form: formInfo(session.id, id) });
@@ -201,22 +189,20 @@ export const reportSubagent = (fake: FakeOpenCode, chatId: string, child: string
 };
 
 /**
- * A chat's agent writes an answer in its root session, or in the subagent's session `sessionId`,
- * as `parts` text parts (one by default); one still `streaming` has no completion yet. Returns the
- * message's id.
+ * A chat's agent writes an answer in its root session, as `parts` text parts (one by default); one
+ * still `streaming` has no completion yet. Returns the message's id.
  */
 export const answerText = (
   fake: FakeOpenCode,
   chatId: string,
   text: string,
   options: {
-    readonly sessionId?: string;
     readonly streaming?: boolean;
     readonly parts?: number;
   } = {},
 ) => {
   const at = NOW + fake.next * 1000;
-  return write(fake, chatSession(fake, chatId, options.sessionId), {
+  return write(fake, chatSession(fake, chatId), {
     id: nextId(fake, "msg_a"),
     type: "assistant",
     agent: "build",
@@ -357,16 +343,13 @@ const closeStreams = (fake: FakeOpenCode, chatId: string) => {
   fake.streams.delete(chatId);
 };
 
-/** Everything the VM held goes: its streams, sessions, shells and files. */
+/** Everything the VM held goes: its streams, sessions and shells. */
 const wipe = (fake: FakeOpenCode, chatId: string) => {
   closeStreams(fake, chatId);
   fake.sessions.delete(chatId);
   fake.shells.delete(chatId);
   for (const [id, session] of fake.subagents) {
     if (session.chatId === chatId) fake.subagents.delete(id);
-  }
-  for (const key of fake.files.keys()) {
-    if (key.startsWith(`${chatId}:`)) fake.files.delete(key);
   }
 };
 
@@ -462,10 +445,7 @@ const answer = (
   if (method === "GET" && path === "/api/event") return openStream(fake, chatId);
   const read = /^\/api\/fs\/read\/(.+)$/u.exec(path);
   if (method === "GET" && read !== null) {
-    const content = fake.files.get(`${chatId}:${decodeURIComponent(read[1] ?? "")}`);
-    return content === undefined
-      ? json({ _tag: "FileNotFoundError", path: read[1], message: "No such file." }, 404)
-      : new Response(content, { headers: { "content-type": "application/octet-stream" } });
+    return json({ _tag: "FileNotFoundError", path: read[1], message: "No such file." }, 404);
   }
   if (method === "GET" && path === "/api/shell") {
     return json({ location: { directory: "/work" }, data: fake.shells.get(chatId) ?? [] });
@@ -537,9 +517,6 @@ const answer = (
       ...(body.metadata === undefined ? {} : { metadata: body.metadata }),
     });
     for (const told of fake.promptListeners) told(id);
-    if (fake.unansweredPrompts.delete(text)) {
-      return json({ error: "The chat's OpenCode did not answer." }, 502);
-    }
     const entry = {
       id,
       sessionID,
@@ -576,17 +553,13 @@ const answer = (
     return json({ data: session.forms.map((id) => formInfo(sessionID, id)) });
   }
   const form = /^\/form\/([^/]+)(\/reply)?$/u.exec(rest);
-  if (form !== null && (method === "POST" ? form[2] !== undefined : method === "DELETE")) {
+  if (form !== null && method === "POST" && form[2] !== undefined) {
     const formId = form[1] ?? "";
     const at = session.forms.indexOf(formId);
     if (at < 0) return json({ _tag: "FormNotFoundError", id: formId, message: "No form." }, 404);
     session.forms.splice(at, 1);
-    if (method === "POST") {
-      fake.formReplies.set(`${chatId}:${formId}`, body.answer as Json);
-      emit(fake, chatId, "form.replied", { id: formId, sessionID, answer: body.answer });
-    } else {
-      emit(fake, chatId, "form.cancelled", { id: formId, sessionID });
-    }
+    fake.formReplies.set(`${chatId}:${formId}`, body.answer as Json);
+    emit(fake, chatId, "form.replied", { id: formId, sessionID, answer: body.answer });
     return noContent();
   }
   throw new Error(`Unscripted OpenCode request: ${method} ${path}`);

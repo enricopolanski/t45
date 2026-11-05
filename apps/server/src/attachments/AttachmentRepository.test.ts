@@ -134,11 +134,7 @@ describe("AttachmentRepository", () => {
       );
       assert.deepEqual(yield* files.get(file.id), file);
       assert.deepEqual(yield* storedFiles, [file.id]);
-      const path = files.path(file.id);
-      assert.deepEqual(
-        path === null ? null : NodeFS.readFileSync(path),
-        Buffer.from([1, 2, 3, 4, 5, 6]),
-      );
+      assert.deepEqual(NodeFS.readFileSync(files.path(file.id)), Buffer.from([1, 2, 3, 4, 5, 6]));
     }).pipe(Effect.provide(Attachments.layer)),
   );
 

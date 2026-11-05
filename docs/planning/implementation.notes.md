@@ -3,7 +3,7 @@
 ## The design as implemented
 
 - T45 keeps three things per chat: its inputs, the conversation its executions wrote (OpenCode sessions and messages), and `/work` as of the last finished execution (a tarball).
-- A chat has at most one execution at a time, and only while its `chats.status` is `running` or `waiting`. A post sets `running`, and a server start reruns those chats after removing every VM the runner lists.
+- A chat has at most one execution at a time, and only while its `chats.status` is `running`. A post sets `running`, and a server start reruns those chats.
 - An execution:
   1. drops any uncommitted output;
   2. starts a fresh VM (`startChat`);
@@ -27,7 +27,7 @@
   - restore notes and the resume prompt;
   - the `lost` message state;
   - `chats.compact`;
-  - the runner's connection counting and 45-minute idle backstop: only T45 removes VMs, and leftovers stay until its next start.
+  - the runner's connection counting and 45-minute idle backstop: only T45 removes VMs, and leftovers stay until their chat's next execution or the runner restarts.
 
 ## Open, needs your decision
 

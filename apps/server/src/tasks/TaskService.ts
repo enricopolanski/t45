@@ -167,7 +167,6 @@ const make = Effect.gen(function* () {
               return saved(chatId, result.messages, result.read, steps);
             return transaction(
               Effect.gen(function* () {
-                if (result.status === "interrupted") return;
                 const task = yield* get(chatId);
                 if (task?.state.type !== "active" || !(yield* canRun(task))) return;
                 const outcome: Outcome =

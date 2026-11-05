@@ -1,4 +1,3 @@
-import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -48,18 +47,23 @@ it.effect("Every start boots a new VM, which takes requests until T45 removes it
   }).pipe(Effect.provide(layer));
 });
 
-it.effect("A VM that fails to start is removed and refused, and the next start boots anew", () => {
-  const { chats, layer } = withTable();
-  return Effect.gen(function* () {
-    chats.failStart = true;
-    assert.strictEqual(yield* refusal(start("chat-1")), "The chat's sandbox could not start.");
-    assert.deepStrictEqual([...chats.vms], []);
-    assert.isFalse(yield* reachable("chat-1"));
-    chats.failStart = false;
-    yield* start("chat-1");
-    assert.isTrue(yield* reachable("chat-1"));
-  }).pipe(Effect.provide(layer));
-});
+it.effect(
+  "A VM that fails to start is refused and left for T45 to remove, and the next start boots anew",
+  () => {
+    const { chats, layer } = withTable();
+    return Effect.gen(function* () {
+      const table = yield* ChatTable.ChatTable;
+      chats.failStart = true;
+      assert.strictEqual(yield* refusal(start("chat-1")), "The chat's sandbox could not start.");
+      assert.isFalse(yield* reachable("chat-1"));
+      yield* table.remove("chat-1");
+      assert.deepStrictEqual([...chats.vms], []);
+      chats.failStart = false;
+      yield* start("chat-1");
+      assert.isTrue(yield* reachable("chat-1"));
+    }).pipe(Effect.provide(layer));
+  },
+);
 
 it.effect(
   "A start T45 stops waiting for still finishes, and T45's remove then removes its VM",
@@ -101,46 +105,17 @@ it.effect("A VM that could not be removed is removed when T45 asks again", () =>
   }).pipe(Effect.provide(layer));
 });
 
-it.effect("Files go only into a running chat, up to an attachment's size", () => {
+it.effect("Files go only into a running chat", () => {
   const { chats, layer } = withTable();
   return Effect.gen(function* () {
     const table = yield* ChatTable.ChatTable;
     const stored = "attachments/0f8e4a52-6c1d-4b7e-9a3f-2d5c8b1e7a40.txt";
     const file = (content: Uint8Array) => ({ chatId: "chat-1", path: stored, content });
     const text = new TextEncoder().encode("CU");
-    assert.strictEqual(yield* refusal(table.writeFile(file(text))), "The chat isn't running.");
+    assert.strictEqual(yield* refusal(table.writeFile(file(text))), "The file could not be added.");
     yield* start("chat-1");
     yield* table.writeFile(file(text));
     assert.strictEqual(new TextDecoder().decode(chats.files.get(`chat-1:${stored}`)), "CU");
-    yield* table.writeFile(file(new Uint8Array(ATTACHMENT_MAX_FILE_BYTES)));
-    assert.strictEqual(
-      yield* refusal(table.writeFile(file(new Uint8Array(ATTACHMENT_MAX_FILE_BYTES + 1)))),
-      "The file is too large.",
-    );
-  }).pipe(Effect.provide(layer));
-});
-
-it.effect("A file goes nowhere but a stored attachment's name under attachments/", () => {
-  const { chats, layer } = withTable();
-  return Effect.gen(function* () {
-    const table = yield* ChatTable.ChatTable;
-    const stored = "attachments/0f8e4a52-6c1d-4b7e-9a3f-2d5c8b1e7a40.pdf";
-    const write = (path: string) =>
-      table.writeFile({ chatId: "chat-1", path, content: new TextEncoder().encode("CU") });
-    yield* start("chat-1");
-    for (const path of [
-      "AGENTS.md",
-      "opencode.json",
-      ".opencode/skills/report/SKILL.md",
-      "attachments/cu.txt",
-      "attachments/../AGENTS.md",
-      "attachments/0f8e4a52-6c1d-4b7e-9a3f-2d5c8b1e7a40.pdf/../../AGENTS.md",
-      `/work/${stored}`,
-    ]) {
-      assert.strictEqual(yield* refusal(write(path)), "Files go only under attachments/.");
-    }
-    yield* write(stored);
-    assert.deepStrictEqual([...chats.files.keys()], [`chat-1:${stored}`]);
   }).pipe(Effect.provide(layer));
 });
 
@@ -149,10 +124,13 @@ it.effect("A running chat's workspace is saved and restored", () => {
   return Effect.gen(function* () {
     const table = yield* ChatTable.ChatTable;
     const tarball = new TextEncoder().encode("tarball");
-    assert.strictEqual(yield* refusal(table.readWorkspace("chat-1")), "The chat isn't running.");
+    assert.strictEqual(
+      yield* refusal(table.readWorkspace("chat-1")),
+      "The workspace could not be saved.",
+    );
     assert.strictEqual(
       yield* refusal(table.writeWorkspace({ chatId: "chat-1", content: tarball })),
-      "The chat isn't running.",
+      "The workspace could not be restored.",
     );
     yield* start("chat-1");
     yield* table.writeWorkspace({ chatId: "chat-1", content: tarball });

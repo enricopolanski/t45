@@ -8,7 +8,7 @@ import * as HttpApiSchema from "effect/http-api/HttpApiSchema";
 
 import { Agent, AgentModel, AGENT_SETUP_PATHS } from "../models/Agent.ts";
 import { FilesByPath, TrimmedNonEmptyString } from "../models/primitives.ts";
-import { Name as SkillName, Skill } from "../models/Skill.ts";
+import { Skill } from "../models/Skill.ts";
 
 /** VM operations between T45 and the runner. The server owns the association to chats. */
 
@@ -23,13 +23,7 @@ export class RunConfig extends Schema.Opaque<RunConfig>()(
       ...Struct.pick(Agent.fields, ["instructions", "mcpServers", "permissions"]),
       /** Includes application-supplied runtime files, which aren't editable agent files. */
       files: FilesByPath(AGENT_SETUP_PATHS),
-      skills: Schema.Record(Schema.String, SkillSnapshot).check(
-        Schema.isPropertyNames(SkillName),
-        Schema.makeFilter(
-          (skills) => Object.entries(skills).every(([name, skill]) => name === skill.name),
-          { expected: "skill keys matching their names" },
-        ),
-      ),
+      skills: Schema.Array(SkillSnapshot),
     }),
   }),
 ) {}
@@ -38,7 +32,7 @@ export class RunConfig extends Schema.Opaque<RunConfig>()(
 const RunnerFileContent = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array());
 
 /** An opaque VM identifier; its association to chats stays on T45. */
-const VmId = TrimmedNonEmptyString.check(Schema.isPattern(/^[^/?#\s]{1,200}$/u));
+const VmId = TrimmedNonEmptyString.check(Schema.isPattern(/^[^/?#\s]{1,100}$/u));
 
 export class RunnerUnauthorizedError extends Schema.TaggedError<RunnerUnauthorizedError>()(
   "RunnerUnauthorizedError",

@@ -13,6 +13,7 @@ import {
   type SessionMessage,
 } from "@opencode/client/effect";
 import { OpenCodeEvent } from "@opencode/protocol/groups/event";
+import type * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -25,16 +26,6 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
-
-/** The server sent nothing, not even a heartbeat, for `SilentStreamTimeout`. */
-class OpenCode2SilentStreamError extends Schema.TaggedError<OpenCode2SilentStreamError>()(
-  "OpenCode2SilentStreamError",
-  {},
-) {
-  override get message(): string {
-    return "The OpenCode server stopped sending events.";
-  }
-}
 
 /** Where a VM's files live, and where its OpenCode sessions are located. */
 export const WORK_DIRECTORY = "/work";
@@ -54,13 +45,8 @@ export const sessionRules = (policy: {
   ...(policy.questions ? [] : [{ action: "question", resource: "*", effect: "deny" } as const]),
 ];
 
-/**
- * The model OpenCode should run for a `provider/model` slug, or undefined for
- * any other slug: sending none would run OpenCode's default while T45 records
- * the agent's model.
- */
-export const modelRef = (model: string) =>
-  Option.getOrUndefined(Option.liftThrowable(Model.Ref.parse)(model.trim()));
+/** The model OpenCode should run for an agent's `provider/model` slug. */
+export const modelRef = (model: string) => Model.Ref.parse(model);
 
 /** The text parts of a tool's content, joined. */
 export const textOf = (content: SessionMessage.ToolStateCompleted["content"]) =>
@@ -122,28 +108,21 @@ export const sessionsUnder = <
 };
 
 /**
- * An OpenCode 2 client plus its `/api/event` stream, read with a silence
- * timeout. The server runs the same OpenCode release as `@opencode/protocol`,
- * so a frame that does not decode fails the stream. `events` succeeds once the server accepted the subscription: the stream is
- * volatile, so callers subscribe before they start work whose events they need.
+ * An OpenCode 2 client plus its `/api/event` stream, which ends when it goes silent. The server
+ * runs the same OpenCode release as `@opencode/protocol`, so a frame that does not decode fails
+ * the stream. The stream is volatile, so callers wait for its `server.connected` before they
+ * start work whose events they need.
  */
 export interface OpenCode2Api {
   readonly client: OpenCodeClient;
-  readonly events: Effect.Effect<
-    Stream.Stream<
-      OpenCodeEvent,
-      | HttpClientError.HttpClientError
-      | Sse.Retry
-      | Sse.SseError
-      | Schema.SchemaError
-      | OpenCode2SilentStreamError
-    >,
-    HttpClientError.HttpClientError
+  readonly events: Stream.Stream<
+    OpenCodeEvent,
+    HttpClientError.HttpClientError | Sse.Retry | Sse.SseError | Schema.SchemaError
   >;
-  /** A file's bytes, relative to the server's folder; null when the read times out. */
+  /** A file's bytes, relative to the server's folder. */
   readonly readFile: (
     path: string,
-  ) => Effect.Effect<Uint8Array | null, HttpClientError.HttpClientError>;
+  ) => Effect.Effect<Uint8Array, HttpClientError.HttpClientError | Cause.TimeoutError>;
 }
 
 /**
@@ -184,7 +163,6 @@ const capResponses = (client: HttpClient.HttpClient, maxBytes: number) =>
             description: `The answer is larger than ${maxBytes} bytes.`,
           }),
         });
-      if (Number(response.headers["content-length"]) > maxBytes) return Effect.fail(tooLarge());
       if (BODYLESS.has(response.status)) return Effect.succeed(response);
       let size = 0;
       const body = response.stream.pipe(
@@ -211,15 +189,13 @@ const readEvents = (httpClient: HttpClient.HttpClient, silence: Duration.Duratio
     Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.map((response) =>
       response.stream.pipe(
-        Stream.timeoutOrElse({
-          duration: silence,
-          orElse: () => Stream.fail(new OpenCode2SilentStreamError()),
-        }),
+        Stream.timeout(silence),
         Stream.decodeText,
         Stream.pipeThroughChannel(Sse.decode()),
         Stream.mapEffect((frame) => decodeEvent(frame.data)),
       ),
     ),
+    Stream.unwrap,
   );
 
 /** Connects to the OpenCode 2 server at `baseUrl` through the `HttpClient` in context. */
@@ -248,8 +224,7 @@ export const connect = Effect.fnUntraced(function* (input: {
         Effect.flatMap(HttpClientResponse.filterStatusOk),
         Effect.flatMap((response) => response.arrayBuffer),
         Effect.map((buffer) => new Uint8Array(buffer)),
-        Effect.timeoutOption(READ_FILE_TIMEOUT),
-        Effect.map(Option.getOrNull),
+        Effect.timeout(READ_FILE_TIMEOUT),
       ),
   };
   return api;

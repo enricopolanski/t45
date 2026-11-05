@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Form } from "@opencode/client/effect";
-import type { ChatEvent, ChatSummary } from "@t45/contracts/resources/Chats";
+import type { ChatEvent } from "@t45/contracts/resources/Chats";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -23,14 +23,9 @@ const alice = { userId: "user-alice", role: "member" } as const;
 /** What the agent leaves in its VM's /work. */
 const work = new Uint8Array([7, 7, 7]);
 
-const hasStatus =
-  (status: ChatSummary["status"]) =>
-  (event: ChatEvent): event is Extract<ChatEvent, { _tag: "chat" }> =>
-    event._tag === "chat" && event.chat.status === status;
-
-/** The chat's execution ended: its status is no longer running or waiting. */
+/** The chat's execution ended: its status is no longer running. */
 const isEnded = (event: ChatEvent): event is Extract<ChatEvent, { _tag: "chat" }> =>
-  event._tag === "chat" && event.chat.status !== "running" && event.chat.status !== "waiting";
+  event._tag === "chat" && event.chat.status !== "running";
 
 const asking =
   (count: number) =>
@@ -255,77 +250,45 @@ describe("a chat's execution", () => {
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
-  it.live(
-    "cancels a queued input by taking it back from the VM, and refuses one OpenCode delivered",
-    () =>
-      Effect.gen(function* () {
-        const { chats, chatId, repository, send, deliver } = yield* setup;
-        yield* deliver("input-1", "Sort the files.");
-        FakeOpenCode.hold(openCode, chatId, true);
-        yield* send("input-2", "Then zip them.");
-        yield* FakeOpenCode.prompted(openCode, inputMessageId(chatId, "input-2"));
-        yield* chats.cancel({ chatId, inputId: "input-2" }, alice);
-        assert.deepEqual(openCode.sessions.get(chatId)?.inbox, []);
-
-        yield* send("input-3", "Then mail them.");
-        yield* FakeOpenCode.prompted(openCode, inputMessageId(chatId, "input-3"));
-        // The agent's turn ends and OpenCode delivers input-3 before T45 reads it.
-        FakeOpenCode.hold(openCode, chatId, false);
-        assert.equal(
-          yield* chats
-            .cancel({ chatId, inputId: "input-3" }, alice)
-            .pipe(Effect.flip, Effect.map(Fixture.failureOf)),
-          "already_taken",
-        );
-        assert.deepEqual(
-          (yield* repository.inputs(chatId)).map((input) => input.inputId),
-          ["input-1", "input-3"],
-        );
-      }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
+  it.live("cancels a queued input by taking it back from the VM", () =>
+    Effect.gen(function* () {
+      const { chats, chatId, send, deliver } = yield* setup;
+      yield* deliver("input-1", "Sort the files.");
+      FakeOpenCode.hold(openCode, chatId, true);
+      yield* send("input-2", "Then zip them.");
+      yield* FakeOpenCode.prompted(openCode, inputMessageId(chatId, "input-2"));
+      yield* chats.cancel({ chatId, inputId: "input-2" }, alice);
+      assert.deepEqual(openCode.sessions.get(chatId)?.inbox, []);
+    }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
-  it.live(
-    "waits on a question and answers it in the VM with its files, and no answer reaches a chat without a VM",
-    () =>
-      Effect.gen(function* () {
-        const { chats, chatId, root, repository, events, ended, deliver } = yield* setup;
-        yield* deliver("input-1", "File my taxes.");
-        const formId = Form.ID.make(FakeOpenCode.ask(openCode, chatId));
-        yield* Fixture.next(events, asking(1));
-        yield* Fixture.next(events, hasStatus("waiting"));
+  it.live("waits on a question and answers it in the VM with its files", () =>
+    Effect.gen(function* () {
+      const { chats, chatId, root, events, ended, deliver } = yield* setup;
+      yield* deliver("input-1", "File my taxes.");
+      const formId = Form.ID.make(FakeOpenCode.ask(openCode, chatId));
+      yield* Fixture.next(events, asking(1));
 
-        const file = yield* upload;
-        const answer = (attachments: Record<string, ReadonlyArray<typeof file>>) =>
-          chats.answer(
-            { chatId, sessionId: root, formId, answers: { year: "2025" }, attachments },
-            alice,
-          );
-        yield* answer({ year: [file] });
-        const answered = String(openCode.formReplies.get(`${chatId}:${formId}`)?.year);
-        assert.include(answered, "2025");
-        assert.include(answered, `/work/attachments/${file.id}`);
-        assert.deepEqual(
-          runner.chatFiles.get(`${chatId}:attachments/${file.id}`),
-          new Uint8Array([4, 2]),
+      const file = yield* upload;
+      const answer = (attachments: Record<string, ReadonlyArray<typeof file>>) =>
+        chats.answer(
+          { chatId, sessionId: root, formId, answers: { year: "2025" }, attachments },
+          alice,
         );
-        yield* Fixture.next(events, asking(0));
-        yield* Fixture.next(events, hasStatus("running"));
+      yield* answer({ year: [file] });
+      const answered = String(openCode.formReplies.get(`${chatId}:${formId}`)?.year);
+      assert.include(answered, "2025");
+      assert.include(answered, `/work/attachments/${file.id}`);
+      assert.deepEqual(
+        runner.chatFiles.get(`${chatId}:attachments/${file.id}`),
+        new Uint8Array([4, 2]),
+      );
+      yield* Fixture.next(events, asking(0));
 
-        FakeOpenCode.finishTurn(openCode, chatId);
-        assert.isNull(yield* ended);
-        yield* FakeRunner.removed(runner, chatId);
-        const form = { id: formId, sessionID: root, title: "Which year?" };
-        yield* repository.setQuestions(
-          chatId,
-          [Form.Info.make({ ...form, fields: [{ key: "year", type: "string" }] })],
-          DateTime.formatIso(yield* DateTime.now),
-        );
-        assert.equal(
-          yield* answer({}).pipe(Effect.flip, Effect.map(Fixture.failureOf)),
-          "question_gone",
-        );
-        assert.deepEqual(runner.starts, [chatId]);
-      }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
+      FakeOpenCode.finishTurn(openCode, chatId);
+      assert.isNull(yield* ended);
+      yield* FakeRunner.removed(runner, chatId);
+    }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
   it.live.each(["a shell runs", "a background subagent hasn't reported"] as const)(

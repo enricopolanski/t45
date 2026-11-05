@@ -3,14 +3,12 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 
-import { ChatSandbox, type ChatServer, type Health, SandboxError } from "./ChatSandbox.ts";
+import { ChatSandbox, type ChatServer, SandboxError } from "./ChatSandbox.ts";
 import { ModelCatalog } from "./ModelCatalog.ts";
 import { RunnerConfig } from "./RunnerConfig.ts";
 
 /** VMs in memory: tests see which chats started and which VMs exist. */
 interface FakeChats {
-  /** Set to stop VMs from running, as on a host without KVM. */
-  health: Health;
   /** Each start is a new VM. */
   readonly started: Array<string>;
   /** The chats whose VM exists: booted, even when its start then failed, and not yet removed. */
@@ -27,7 +25,6 @@ interface FakeChats {
 }
 
 export const makeFakeChats = (): FakeChats => ({
-  health: { isAvailable: true, reason: null },
   started: [],
   vms: new Set(),
   files: new Map(),
@@ -40,6 +37,10 @@ export const makeFakeChats = (): FakeChats => ({
 const failure = (operation: string) =>
   new SandboxError({ operation, cause: new Error(`${operation} failed`) });
 
+/** As in the runner, only a VM that is up takes files and gives or takes its workspace. */
+const held = <A>(chats: FakeChats, chatId: string, operation: string, use: () => A) =>
+  chats.vms.has(chatId) ? Effect.sync(use) : Effect.fail(failure(operation));
+
 /** Every chat's server is `server`, such as a local stand-in for OpenCode. */
 export const layerFakeChats = (
   chats: FakeChats,
@@ -48,7 +49,6 @@ export const layerFakeChats = (
   Layer.succeed(
     ChatSandbox,
     ChatSandbox.of({
-      health: Effect.sync(() => chats.health),
       start: ({ chatId }) =>
         Effect.gen(function* () {
           chats.started.push(chatId);
@@ -58,16 +58,15 @@ export const layerFakeChats = (
           return server;
         }),
       write: ({ chatId, path, content }) =>
-        Effect.sync(() => void chats.files.set(`${chatId}:${path}`, content)),
+        held(chats, chatId, "write", () => void chats.files.set(`${chatId}:${path}`, content)),
       packWorkspace: (chatId) =>
-        Effect.sync(() => chats.workspaces.get(chatId) ?? new Uint8Array()),
+        held(chats, chatId, "pack", () => chats.workspaces.get(chatId) ?? new Uint8Array()),
       unpackWorkspace: ({ chatId, content }) =>
-        Effect.sync(() => void chats.workspaces.set(chatId, content)),
+        held(chats, chatId, "unpack", () => void chats.workspaces.set(chatId, content)),
       remove: (chatId) =>
         chats.failRemove
           ? Effect.fail(failure("remove"))
           : Effect.sync(() => void chats.vms.delete(chatId)),
-      sweep: Effect.void,
     }),
   );
 
@@ -76,7 +75,7 @@ export const chat = (): RunConfig => ({
   agent: {
     instructions: "Be brief.",
     files: {},
-    skills: {},
+    skills: [],
     mcpServers: {},
     permissions: { network: "provider" },
   },

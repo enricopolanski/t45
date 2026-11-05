@@ -117,7 +117,7 @@ const readMessage = (
     );
     return {
       sessionId: Session.ID.make(sessionId),
-      state: row.state,
+      state: ChatRepository.isSettled(message) ? "settled" : "live",
       isTruncated: flag.cut,
       message,
     } satisfies ChatMessage;
@@ -175,8 +175,6 @@ const make = Effect.gen(function* () {
         if (encodePayload(sent.payload) !== payloadJson) {
           return yield* refuse("input_conflict");
         }
-        const pending = yield* repository.pendingInputs(post.chatId);
-        if (pending.some((input) => input.inputId === post.inputId)) yield* announce(post.chatId);
         return;
       }
     }
@@ -231,7 +229,7 @@ const make = Effect.gen(function* () {
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.interrupt
-          : Effect.logWarning("Cleaning up a deleted chat failed; the next start tries again", {
+          : Effect.logWarning("Cleaning up a deleted chat failed", {
               chatId,
               cause,
             }),
@@ -354,7 +352,6 @@ const make = Effect.gen(function* () {
       };
     });
 
-  for (const chatId of yield* repository.pendingDeletes) yield* cleanup(chatId);
   yield* forkParked(
     Effect.gen(function* () {
       for (const chatId of yield* repository.owed) yield* processInputs(chatId);
@@ -625,7 +622,7 @@ const make = Effect.gen(function* () {
 
     delete: Effect.fnUntraced(function* (input: Payload<"chats.delete">, member: Member) {
       const chat = yield* commandChat(member, input.chatId);
-      if (!(yield* repository.markDeleted(chat.id, yield* nowIso))) return;
+      yield* repository.markDeleted(chat.id, yield* nowIso);
       yield* sql.afterCommit(
         publish(chat.id, "deleted").pipe(
           Effect.andThen(cleanup(chat.id).pipe(Effect.forkIn(scope))),

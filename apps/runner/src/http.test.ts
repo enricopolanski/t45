@@ -87,7 +87,7 @@ const api = (chatUrl = "http://127.0.0.1:9") => {
       // Failure cases log warnings on purpose; keep them out of the test output.
       Layer.provideMerge(Logger.layer([])),
     ),
-    { disableLogger: true, routerConfig: RunnerHttp.routerConfig },
+    { disableLogger: true },
   );
   const call = (
     path: string,
@@ -111,43 +111,6 @@ it.effect("Only T45's token reaches the runner", () =>
     const runner = api();
     assert.strictEqual((yield* runner.call("/models", {}, "wrong")).status, 401);
     assert.strictEqual((yield* runner.call("/models")).status, 200);
-    yield* runner.dispose;
-  }),
-);
-
-it.effect("A runner that can't run sandboxes refuses VMs, saying why", () =>
-  Effect.gen(function* () {
-    const runner = api();
-    const json = (response: Response) => Effect.promise(() => response.json());
-    const start = (chatId: string) =>
-      runner
-        .call(`/chats/${chatId}`, { method: "PUT", body: encodeChat(Fixture.chat()) })
-        .pipe(Effect.flatMap(json));
-    runner.chats.health = { isAvailable: false, reason: "No KVM on this host." };
-    assert.deepStrictEqual(yield* start("chat-1"), {
-      _tag: "RunnerRefusedError",
-      reason: "No KVM on this host.",
-    });
-    runner.chats.health = { isAvailable: false, reason: null };
-    assert.deepStrictEqual(yield* start("chat-2"), {
-      _tag: "RunnerRefusedError",
-      reason: "The runner can't run sandboxes.",
-    });
-    assert.deepStrictEqual(runner.chats.started, []);
-    yield* runner.dispose;
-  }),
-);
-
-it.effect("A 150-character VM id starts its VM instead of a 404", () =>
-  Effect.gen(function* () {
-    const runner = api();
-    const vmId = "a".repeat(150);
-    const response = yield* runner.call(`/chats/${vmId}`, {
-      method: "PUT",
-      body: encodeChat(Fixture.chat()),
-    });
-    assert.strictEqual(response.status, 204);
-    assert.deepStrictEqual(runner.chats.started, [vmId]);
     yield* runner.dispose;
   }),
 );

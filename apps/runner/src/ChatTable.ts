@@ -3,7 +3,6 @@
  * it when the execution ends; the runner removes VMs only when T45 asks. T45 saves the VM's /work
  * when the execution finishes and puts it back at the next execution's start.
  */
-import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
 import { type RunConfig, RunnerRefusedError } from "@t45/contracts/resources/RunnerVms";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -16,9 +15,7 @@ import { ChatSandbox, type ChatServer, type SandboxError } from "./ChatSandbox.t
 interface Chat {
   readonly chatId: string;
   readonly lock: Semaphore.Semaphore;
-  /** Booting, serving, or stopped and gone. */
-  state: "starting" | "running" | "stopped";
-  /** The running VM's server. */
+  /** The running VM's server; null while it boots or once it is gone. */
   server: ChatServer | null;
 }
 
@@ -32,10 +29,7 @@ export class ChatTable extends Context.Service<
     }) => Effect.Effect<void, RunnerRefusedError>;
     /** The running chat's server; none when it isn't running. */
     readonly server: (chatId: string) => Effect.Effect<Option.Option<ChatServer>>;
-    /**
-     * Puts a file in the running chat's VM; refuses one too large, one at any path but a stored
-     * attachment's under `attachments/`, and when the chat doesn't run.
-     */
+    /** Puts a file in the running chat's VM; refuses when the chat doesn't run. */
     readonly writeFile: (input: {
       readonly chatId: string;
       readonly path: string;
@@ -52,8 +46,6 @@ export class ChatTable extends Context.Service<
     readonly remove: (chatId: string) => Effect.Effect<void, SandboxError>;
   }
 >()("@t45/runner/ChatTable") {}
-
-const ATTACHMENT_PATH = /^attachments\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/u;
 
 /** Refuses with `reason` when the sandbox fails, logging why as `what`. */
 const refuseOnSandboxError =
@@ -74,53 +66,26 @@ const make = Effect.gen(function* () {
     const entry: Chat = {
       chatId,
       lock: yield* Semaphore.make(1),
-      state: "stopped",
       server: null,
     };
     chats.set(chatId, entry);
     return entry;
   });
 
-  /** The running chat's entry; refused when it isn't running. */
-  const runningEntry = (chatId: string) =>
-    Effect.gen(function* () {
-      const entry = chats.get(chatId);
-      if (entry === undefined || entry.state !== "running") {
-        return yield* new RunnerRefusedError({ reason: "The chat isn't running." });
-      }
-      return entry;
-    });
-
-  /** Lets go of the entry's VM, removing it, since it keeps nothing. */
-  const release = (entry: Chat) =>
-    Effect.suspend(() => {
-      entry.state = "stopped";
-      entry.server = null;
-      return sandboxes.remove(entry.chatId).pipe(
-        Effect.catchTags({
-          SandboxError: (error) => Effect.logWarning("Letting a VM go failed", error),
-        }),
-      );
-    });
-
   return ChatTable.of({
     start: ({ chatId, chat }) =>
       Effect.gen(function* () {
         const entry = yield* entryFor(chatId);
         // The start finishes even when T45 drops the request, so a remove T45 sends next waits for
-        // it and removes the VM it made; one that fails to start is let go at once, since it may be
-        // booted.
+        // it and removes the VM it made; T45 removes one that failed to start the same way.
         yield* entry.lock.withPermit(
           Effect.sync(() => {
-            entry.state = "starting";
             entry.server = null;
           }).pipe(
             Effect.andThen(sandboxes.start({ chatId, chat })),
             Effect.map((server) => {
               entry.server = server;
-              entry.state = "running";
             }),
-            Effect.tapError(() => release(entry)),
             Effect.uninterruptible,
             refuseOnSandboxError(
               "Starting a chat's VM failed",
@@ -132,64 +97,43 @@ const make = Effect.gen(function* () {
     server: (chatId) =>
       Effect.sync(() => {
         const entry = chats.get(chatId);
-        return entry?.state === "running" ? Option.fromNullishOr(entry.server) : Option.none();
+        return Option.fromNullishOr(entry?.server);
       }),
-    writeFile: ({ chatId, path, content }) =>
-      Effect.gen(function* () {
-        if (content.byteLength > ATTACHMENT_MAX_FILE_BYTES) {
-          return yield* new RunnerRefusedError({ reason: "The file is too large." });
-        }
-        if (!ATTACHMENT_PATH.test(path)) {
-          return yield* new RunnerRefusedError({ reason: "Files go only under attachments/." });
-        }
-        yield* runningEntry(chatId);
-        yield* sandboxes
-          .write({ chatId, path, content })
-          .pipe(
-            refuseOnSandboxError(
-              "Writing a file into a chat's VM failed",
-              "The file could not be added.",
-            ),
-          );
-      }),
+    writeFile: (input) =>
+      sandboxes
+        .write(input)
+        .pipe(
+          refuseOnSandboxError(
+            "Writing a file into a chat's VM failed",
+            "The file could not be added.",
+          ),
+        ),
     readWorkspace: (chatId) =>
-      Effect.gen(function* () {
-        yield* runningEntry(chatId);
-        return yield* sandboxes
-          .packWorkspace(chatId)
-          .pipe(
-            refuseOnSandboxError(
-              "Packing a chat's workspace failed",
-              "The workspace could not be saved.",
-            ),
-          );
-      }),
+      sandboxes
+        .packWorkspace(chatId)
+        .pipe(
+          refuseOnSandboxError(
+            "Packing a chat's workspace failed",
+            "The workspace could not be saved.",
+          ),
+        ),
     writeWorkspace: ({ chatId, content }) =>
-      Effect.gen(function* () {
-        yield* runningEntry(chatId);
-        yield* sandboxes
-          .unpackWorkspace({ chatId, content })
-          .pipe(
-            refuseOnSandboxError(
-              "Unpacking a chat's workspace failed",
-              "The workspace could not be restored.",
-            ),
-          );
-      }),
+      sandboxes
+        .unpackWorkspace({ chatId, content })
+        .pipe(
+          refuseOnSandboxError(
+            "Unpacking a chat's workspace failed",
+            "The workspace could not be restored.",
+          ),
+        ),
     remove: (chatId) =>
       Effect.gen(function* () {
         const entry = chats.get(chatId);
-        const remove = sandboxes
-          .remove(chatId)
-          .pipe(
-            Effect.tapError((error) => Effect.logWarning("Removing a chat's VM failed", error)),
-          );
-        if (entry === undefined) return yield* remove;
+        if (entry === undefined) return;
         yield* entry.lock.withPermit(
           Effect.gen(function* () {
-            entry.state = "stopped";
             entry.server = null;
-            yield* remove;
+            yield* sandboxes.remove(chatId);
             chats.delete(chatId);
           }),
         );

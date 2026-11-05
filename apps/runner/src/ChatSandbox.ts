@@ -24,16 +24,9 @@ export interface ChatServer {
   readonly password: Redacted.Redacted;
 }
 
-/** Whether VMs can run now, and why not. */
-export interface Health {
-  readonly isAvailable: boolean;
-  readonly reason: string | null;
-}
-
 export class ChatSandbox extends Context.Service<
   ChatSandbox,
   {
-    readonly health: Effect.Effect<Health>;
     /** Starts a new VM from `chat`, replacing any left of it, and its OpenCode server. */
     readonly start: (input: {
       readonly chatId: string;
@@ -57,7 +50,5 @@ export class ChatSandbox extends Context.Service<
     }) => Effect.Effect<void, SandboxError>;
     /** Stops the VM and deletes it with its disk. */
     readonly remove: (chatId: string) => Effect.Effect<void, SandboxError>;
-    /** Clears what an earlier process of this runner left: its VMs are removed. */
-    readonly sweep: Effect.Effect<void, SandboxError>;
   }
 >()("@t45/runner/ChatSandbox") {}

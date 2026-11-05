@@ -161,19 +161,17 @@ const statements = [
 
   // Chats with agents. T45 keeps a chat's inputs, the OpenCode sessions and messages its
   // executions wrote, and the agent's /work as of the last finished execution, a tarball named after
-  // the chat in the server's chat workspace folder. `status` is `running` or `waiting` while an
-  // execution is owed, which a server start runs again. `updated_at` is the chat's latest activity.
-  // A deleted chat stays as a tombstone so its id never comes back, `cleanup_pending` until its
-  // files and copy are gone.
+  // the chat in the server's chat workspace folder. `status` is `running` while an execution is
+  // owed, which a server start runs again. `updated_at` is the chat's latest activity.
+  // A deleted chat stays as a tombstone so its id never comes back.
   `CREATE TABLE chats (
       id TEXT PRIMARY KEY NOT NULL,
       agent_id TEXT NOT NULL REFERENCES agents(id),
       title TEXT,
-      status TEXT CHECK (status IN ('running', 'waiting', 'failed', 'interrupted')),
+      status TEXT CHECK (status IN ('running', 'failed', 'interrupted')),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      deleted_at TEXT,
-      cleanup_pending INTEGER NOT NULL DEFAULT 0
+      deleted_at TEXT
     )`,
   `CREATE TABLE chat_origins (
       chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(id),
@@ -197,15 +195,13 @@ const statements = [
       PRIMARY KEY (chat_id, session_id)
     )`,
   // Every message of a session, encoded as OpenCode returned it. `ordinal` is the session's order,
-  // which native ids don't give. `live` while OpenCode still writes it, `settled` once finished;
-  // `committed` once its execution finished, and imported into every later execution.
+  // which native ids don't give. `committed` once its execution finished, and imported into every
+  // later execution.
   `CREATE TABLE chat_messages (
       chat_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
       message_id TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('live', 'settled')),
       json TEXT NOT NULL,
       committed INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (chat_id, session_id, message_id),
@@ -222,15 +218,6 @@ const statements = [
       created_at TEXT NOT NULL,
       PRIMARY KEY (chat_id, input_id),
       UNIQUE (chat_id, ordinal)
-    )`,
-  // The questions the chat's agents asked and nobody answered yet, as the running VM lists them.
-  `CREATE TABLE chat_questions (
-      chat_id TEXT NOT NULL REFERENCES chats(id),
-      session_id TEXT NOT NULL,
-      form_id TEXT NOT NULL,
-      form_json TEXT NOT NULL,
-      asked_at TEXT NOT NULL,
-      PRIMARY KEY (chat_id, session_id, form_id)
     )`,
 
   `CREATE TABLE attachments (

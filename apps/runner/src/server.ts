@@ -1,7 +1,4 @@
-/*
- * The runner process: its HTTP API and chat proxy over the chat table and microsandbox. On start
- * it clears the VMs an earlier process left.
- */
+/** The runner process: its HTTP API and chat proxy over the chat table and microsandbox. */
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeHttp from "node:http";
 
@@ -14,7 +11,6 @@ import { FetchHttpClient, HttpRouter } from "effect/http";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as ChatProxy from "./chatProxy.ts";
-import { ChatSandbox } from "./ChatSandbox.ts";
 import * as ChatTable from "./ChatTable.ts";
 import * as RunnerHttp from "./http.ts";
 import * as MicrosandboxChats from "./MicrosandboxChats.ts";
@@ -39,22 +35,7 @@ const layerHttpServer = Layer.unwrap(
   }),
 );
 
-/** Clears the VMs an earlier process of this runner left. */
-const layerHousekeeping = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const sandboxes = yield* ChatSandbox;
-    yield* sandboxes.sweep.pipe(
-      Effect.catchTags({
-        SandboxError: (error) => Effect.logWarning("Clearing old VMs failed", error),
-      }),
-    );
-  }),
-);
-
-export const layer = Layer.mergeAll(
-  HttpRouter.serve(layerRoutes, { routerConfig: RunnerHttp.routerConfig }),
-  layerHousekeeping,
-).pipe(
+export const layer = HttpRouter.serve(layerRoutes).pipe(
   Layer.provideMerge(ChatTable.layer),
   Layer.provideMerge(ModelCatalog.layer),
   Layer.provideMerge(MicrosandboxChats.layer),

@@ -7,8 +7,6 @@ import type { ChatMessage } from "@t45/contracts/resources/Chats";
 import type { NotFound } from "@t45/contracts/resources/errors";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as FileSystem from "effect/FileSystem";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -250,30 +248,19 @@ describe("chats", () => {
     }).pipe(Effect.provide(Fixture.layerStore)),
   );
 
-  it.effect(
-    "deletes a chat for everyone at once, then its files and copy, with the runner down",
-    () =>
-      Effect.gen(function* () {
-        const { chats, agentId } = yield* setup;
-        Fixture.runner.down = true;
-        const chatId = testChatId(1);
-        const files = yield* AttachmentRepository;
-        const sent = yield* upload(alice.userId);
-        yield* chats.send(
-          { chatId, agentId, inputId: "input-1", text: "File it.", attachments: [sent] },
-          alice,
-        );
-        yield* chats.delete({ chatId }, alice);
-        assert.deepEqual(yield* listed(chats, alice), []);
-
-        // The next start finishes the delete at the latest.
-        yield* Layer.build(Layer.fresh(ChatService.layer));
-        const sql = yield* SqlClient.SqlClient;
-        const fileSystem = yield* FileSystem.FileSystem;
-        assert.isFalse(yield* fileSystem.exists(files.path(sent.id) ?? ""));
-        assert.deepEqual(yield* sql`SELECT input_id FROM chat_inputs`, []);
-        assert.deepEqual(yield* sql`SELECT cleanup_pending FROM chats`, [{ cleanup_pending: 0 }]);
-      }).pipe(Effect.provide(Fixture.layer)),
+  it.effect("deletes a chat for everyone at once", () =>
+    Effect.gen(function* () {
+      const { chats, agentId } = yield* setup;
+      Fixture.runner.down = true;
+      const chatId = testChatId(1);
+      const sent = yield* upload(alice.userId);
+      yield* chats.send(
+        { chatId, agentId, inputId: "input-1", text: "File it.", attachments: [sent] },
+        alice,
+      );
+      yield* chats.delete({ chatId }, alice);
+      assert.deepEqual(yield* listed(chats, alice), []);
+    }).pipe(Effect.provide(Fixture.layer)),
   );
 
   it.effect(
@@ -296,18 +283,14 @@ describe("chats", () => {
         );
         const sessionId = rootSessionId(taxes);
         const formId = Form.ID.make("frm_year");
-        yield* repository.setQuestions(
-          taxes,
-          [
-            Form.Info.make({
-              id: formId,
-              sessionID: sessionId,
-              title: "Which year?",
-              fields: [{ key: "year", type: "string" }],
-            }),
-          ],
-          "2026-10-23T09:00:00.000Z",
-        );
+        yield* repository.setQuestions(taxes, [
+          Form.Info.make({
+            id: formId,
+            sessionID: sessionId,
+            title: "Which year?",
+            fields: [{ key: "year", type: "string" }],
+          }),
+        ]);
 
         for (const file of [bobs, mine]) {
           assert.deepEqual(

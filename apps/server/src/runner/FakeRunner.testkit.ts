@@ -6,8 +6,6 @@ import * as Schema from "effect/Schema";
 
 /** Scripted runner HTTP responses and receipts for T45's execution tests. */
 export interface FakeRunner {
-  /** The models it offers agents. */
-  models: ReadonlyArray<{ readonly slug: string; readonly name: string }>;
   /** Set to refuse every VM start with this reason. */
   refuse: string | null;
   /** Each VM start T45 asked for, by chat id, refused ones included. */
@@ -27,7 +25,6 @@ export interface FakeRunner {
 }
 
 export const makeFakeRunner = (): FakeRunner => ({
-  models: [{ slug: "opencode-go/test-model", name: "test-model" }],
   refuse: null,
   starts: [],
   down: false,
@@ -88,38 +85,30 @@ export const respond = (
   const chatId = decodeURIComponent(matched?.[1] ?? "");
   const part = matched?.[2];
   const operation =
-    request.method === "GET" && url.pathname === "/models"
-      ? "models"
-      : matched === null
-        ? null
-        : part === "files"
-          ? request.method === "PUT"
-            ? "putChatFile"
-            : null
-          : part === "workspace"
-            ? request.method === "GET"
-              ? "getChatWorkspace"
-              : request.method === "PUT"
-                ? "putChatWorkspace"
-                : null
+    matched === null
+      ? null
+      : part === "files"
+        ? request.method === "PUT"
+          ? "putChatFile"
+          : null
+        : part === "workspace"
+          ? request.method === "GET"
+            ? "getChatWorkspace"
             : request.method === "PUT"
-              ? "startChat"
-              : request.method === "DELETE"
-                ? "removeChat"
-                : null;
+              ? "putChatWorkspace"
+              : null
+          : request.method === "PUT"
+            ? "startChat"
+            : request.method === "DELETE"
+              ? "removeChat"
+              : null;
   if (operation === null) {
     throw new Error(`Unscripted runner request: ${request.method} ${url.pathname}`);
   }
   if (operation === "startChat") runner.starts.push(chatId);
   if (runner.down) return json({ error: "down" }, 503);
-  // A VM's files and /work exist only while it runs.
-  if (part !== undefined && !runner.chats.has(chatId)) {
-    return refused("The chat's sandbox isn't running.");
-  }
   const bytes = request.body._tag === "Uint8Array" ? request.body.body : new Uint8Array();
   switch (operation) {
-    case "models":
-      return json({ models: runner.models });
     case "startChat":
       if (runner.refuse !== null) return refused(runner.refuse);
       forget(runner, chatId);

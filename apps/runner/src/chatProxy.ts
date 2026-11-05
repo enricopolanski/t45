@@ -40,9 +40,8 @@ const forwardable = (headers: Readonly<Record<string, string>>) =>
     Object.entries(headers).filter(([name]) => !HOP_HEADERS.has(name.toLowerCase())),
   );
 
-/** Whether the request carries the runner's token, as a bearer or as an OpenCode password. */
+/** Whether the request carries the runner's token as its OpenCode password. */
 const carriesToken = (authorization: string | undefined, token: Redacted.Redacted) =>
-  authorization === `Bearer ${Redacted.value(token)}` ||
   authorization === `Basic ${Base64.encode(`opencode:${Redacted.value(token)}`)}`;
 
 const json = (status: number, message: string) =>
@@ -72,13 +71,12 @@ const forward = (services: {
     if (chatId === undefined) return json(404, "No such chat.");
     const marker = "/opencode";
     const at = request.url.indexOf(marker, request.url.indexOf("/chats/"));
-    const rest = request.url.slice(at + marker.length);
-    const path = rest === "" || rest.startsWith("?") ? `/${rest}` : rest;
+    const path = request.url.slice(at + marker.length);
 
     const server = yield* table.server(chatId);
     if (Option.isNone(server)) return json(503, "The chat isn't running.");
     return yield* Effect.gen(function* () {
-      const hasBody = request.method !== "GET" && request.method !== "HEAD";
+      const hasBody = request.method !== "GET";
       const body = hasBody
         ? new Uint8Array(
             yield* request.arrayBuffer.pipe(Effect.orElseSucceed(() => new ArrayBuffer(0))),
@@ -101,7 +99,7 @@ const forward = (services: {
       if (Option.isNone(response)) return json(502, "The chat's OpenCode did not answer.");
       const status = response.value.status;
       const headers = forwardable(response.value.headers);
-      if (request.method === "HEAD" || BODYLESS.has(status)) {
+      if (BODYLESS.has(status)) {
         return HttpServerResponse.empty({ status, headers });
       }
       return HttpServerResponse.stream(response.value.stream, { status, headers });

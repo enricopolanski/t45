@@ -27,7 +27,7 @@ export const InputId = TrimmedNonEmptyString.check(
 export type InputId = typeof InputId.Type;
 
 /** What a chat is doing; null when it is idle. */
-export const ChatStatus = Schema.Literals(["running", "waiting", "failed", "interrupted"]);
+export const ChatStatus = Schema.Literals(["running", "failed", "interrupted"]);
 export type ChatStatus = typeof ChatStatus.Type;
 
 export class Chat extends Schema.Opaque<Chat>()(

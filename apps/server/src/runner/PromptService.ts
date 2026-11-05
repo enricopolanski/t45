@@ -6,7 +6,6 @@ import {
   type ChatContextKind,
   type ChatContextRecord,
   type InputPayload,
-  MESSAGE_MAX_INPUT_CHARS,
 } from "@t45/contracts/models/Chat";
 import {
   collectComposerContextReferences,
@@ -42,14 +41,10 @@ export function formatAnswers(input: {
 }): Form.Answer {
   const answers = new Map(Object.entries(input.answers));
   for (const [key, attachments] of Object.entries(input.attachmentsByField)) {
-    const references = attachments.flatMap((attachment) => {
-      const path = attachmentPath(ATTACHMENTS_DIRECTORY, attachment.id);
-      return path === null
-        ? []
-        : [
-            `Attached ${attachment.type} ${quoteReference(attachment.name)}: ${quoteReference(path)}`,
-          ];
-    });
+    const references = attachments.map(
+      (attachment) =>
+        `Attached ${attachment.type} ${quoteReference(attachment.name)}: ${quoteReference(attachmentPath(ATTACHMENTS_DIRECTORY, attachment.id))}`,
+    );
     if (references.length === 0) continue;
     const answer = answers.get(key);
     const text = references.join("\n");
@@ -69,11 +64,7 @@ export function formatAnswers(input: {
 function expandContextReferences(text: string, records: ReadonlyArray<ChatContextRecord>) {
   const occurrences = collectComposerContextReferences(text);
   if (occurrences.length === 0) return text;
-  const recordsById = new Map<ChatContextId, ChatContextRecord | undefined>();
-  for (const record of records) {
-    // Even callers that bypass the wire schema must not silently select an ambiguous payload.
-    recordsById.set(record.contextId, recordsById.has(record.contextId) ? undefined : record);
-  }
+  const recordsById = new Map(records.map((record) => [record.contextId, record]));
   const body = replaceComposerContextReferences(text, (occurrence) =>
     formatContextMarker(
       recordsById.get(occurrence.contextId)?.kind ?? occurrence.kind,
@@ -126,15 +117,11 @@ function formatEnvelopeEntry(
   return `${open}>\n${escapeContextText(body)}\n</${CONTEXT_ENTRY_TAG}>`;
 }
 
-/** Only attachment references that fit the input limit are appended. */
+/** Names where the VM keeps each attached file, after the text. */
 function appendAttachmentPaths(text: string, attachments: ReadonlyArray<ChatAttachment>) {
-  let result = text;
-  for (const attachment of attachments) {
-    const path = attachmentPath(ATTACHMENTS_DIRECTORY, attachment.id);
-    if (path === null) continue;
-    const reference = `[Attached ${attachment.type} "${attachment.name}" is saved at: ${path}]`;
-    const candidate = result ? `${result}\n\n${reference}` : reference;
-    if (candidate.length <= MESSAGE_MAX_INPUT_CHARS) result = candidate;
-  }
-  return result;
+  const references = attachments.map(
+    (attachment) =>
+      `[Attached ${attachment.type} "${attachment.name}" is saved at: ${attachmentPath(ATTACHMENTS_DIRECTORY, attachment.id)}]`,
+  );
+  return [text, ...references].filter((part) => part !== "").join("\n\n");
 }

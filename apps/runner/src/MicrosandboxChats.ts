@@ -17,20 +17,12 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Hex from "effect/encoding/Hex";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
-import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Schedule from "effect/Schedule";
 import { HttpClient, HttpClientRequest } from "effect/http";
-import {
-  type ExecHandle,
-  type NetworkBuilder,
-  NetworkPolicy,
-  Sandbox,
-  type SandboxHandle,
-  SandboxNotFoundError,
-} from "microsandbox";
+import { type ExecHandle, type NetworkBuilder, NetworkPolicy, Sandbox } from "microsandbox";
 
 import { ChatSandbox, SandboxError } from "./ChatSandbox.ts";
 import { RunnerConfig } from "./RunnerConfig.ts";
@@ -41,20 +33,6 @@ const GUEST_PORT = 4096;
 
 /** What a chat's VM gets: its CPUs and memory, and room for the chat's files. */
 const CHAT_LIMITS = { cpus: 2, memoryMib: 2048, diskMib: 4096 };
-
-/** Sandboxes this runner made, so a restart can find them. */
-const LABEL = "t45-runner";
-/**
- * The port of the runner that made a sandbox. Several runners can share a machine, as dev
- * checkouts do, and no two listen on one port, so each sweeps only what it left behind.
- */
-const RUNNER_PORT_LABEL = "t45-runner-port";
-
-/** The labels marking a sandbox as this runner's. */
-const runnerLabels = (config: RunnerConfig["Service"]) => ({
-  [LABEL]: "chat",
-  [RUNNER_PORT_LABEL]: String(config.port),
-});
 
 /** The SDK types its network setter loosely; this is what it hands the callback. */
 type NetworkSettings = InstanceType<typeof NetworkBuilder>;
@@ -111,12 +89,11 @@ const skillMarkdown = (skill: SkillSnapshot) =>
 
 /** opencode.json as OpenCode reads it. */
 type OpenCodeConfig = typeof Config.Info.Encoded;
-
-/** Checked against OpenCode's schema as it is written, so a VM never boots on one it refuses. */
-const encodeOpenCodeConfig = Schema.encodeEffect(
+const encodeOpenCodeConfig = Schema.encodeSync(
   Schema.fromJsonString(Schema.toEncoded(Config.Info)),
 );
 
+/** Checked against OpenCode's schema as it is written, so a VM never boots on one it refuses. */
 /** The VM's MCP servers, with fetching only on an open network. */
 const openCodeConfig = (chat: RunConfig): OpenCodeConfig => {
   const fetching = chat.agent.permissions.network === "provider" ? "deny" : "allow";
@@ -178,19 +155,13 @@ const writeAgentSetup = Effect.fn("MicrosandboxChats.writeAgentSetup")(function*
   for (const [path, content] of Object.entries(chat.agent.files)) {
     yield* writeInto(sandbox, path, content);
   }
-  for (const [name, skill] of Object.entries(chat.agent.skills)) {
-    yield* writeInto(sandbox, `.opencode/skills/${name}/SKILL.md`, skillMarkdown(skill));
+  for (const skill of chat.agent.skills) {
+    yield* writeInto(sandbox, `.opencode/skills/${skill.name}/SKILL.md`, skillMarkdown(skill));
     for (const [path, content] of Object.entries(skill.files)) {
-      yield* writeInto(sandbox, `.opencode/skills/${name}/${path}`, content);
+      yield* writeInto(sandbox, `.opencode/skills/${skill.name}/${path}`, content);
     }
   }
-  yield* writeInto(
-    sandbox,
-    "opencode.json",
-    yield* encodeOpenCodeConfig(openCodeConfig(chat)).pipe(
-      Effect.mapError((cause) => new SandboxError({ operation: "writeAgentSetup", cause })),
-    ),
-  );
+  yield* writeInto(sandbox, "opencode.json", encodeOpenCodeConfig(openCodeConfig(chat)));
 });
 
 /** How long packing or unpacking a workspace may take in the VM. */
@@ -236,7 +207,6 @@ const freePort = NodeSocketServer.make({ host: "127.0.0.1", port: 0 }).pipe(
 const make = Effect.gen(function* () {
   const config = yield* RunnerConfig;
   const httpClient = yield* HttpClient.HttpClient;
-  const fileSystem = yield* FileSystem.FileSystem;
   const crypto = yield* Crypto.Crypto;
   /**
    * VM names are short and plain whatever the chat id; the hash keeps them apart, and keeps one
@@ -249,18 +219,6 @@ const make = Effect.gen(function* () {
     );
   /** The VMs this process started; held so it can stop them, and so they live as long as it. */
   const started = new Map<string, Sandbox>();
-
-  /**
-   * The VM as the database holds it, or null when there is none; a failed lookup fails, so it is
-   * never taken for a missing VM.
-   */
-  const find = (name: string) =>
-    sdk("get", () => Sandbox.get(name)).pipe(
-      Effect.catchIf(
-        (error) => error.cause instanceof SandboxNotFoundError,
-        () => Effect.succeed(null),
-      ),
-    );
 
   /** The running VM this process started for the chat. */
   const held = (chatId: string, operation: string) =>
@@ -286,11 +244,14 @@ const make = Effect.gen(function* () {
         .cpus(CHAT_LIMITS.cpus)
         .memory(CHAT_LIMITS.memoryMib)
         .rootDisk(CHAT_LIMITS.diskMib + 512)
-        .labels(runnerLabels(config))
+        // Removed by microsandbox once it stops, including when this runner dies.
+        .ephemeral(true)
         .replace()
         .network(sandboxNetwork(config, chat.agent.permissions.network, hostPort))
         .create(),
     );
+    // Held from here, so a VM whose setup fails is still removed.
+    started.set(name, sandbox);
     yield* writeAgentSetup(sandbox, chat);
     return { sandbox, hostPort };
   });
@@ -352,28 +313,18 @@ const make = Effect.gen(function* () {
     return { url, password };
   });
 
-  /** Stops the named VM and deletes it with its disk. */
+  /** Stops the named VM this process holds and deletes it with its disk. */
   const removeNamed = Effect.fn("MicrosandboxChats.remove")(function* (name: string) {
+    const sandbox = started.get(name);
+    if (sandbox === undefined) return;
+    yield* sdk("remove", () => sandbox.destroy());
     started.delete(name);
-    const handle = yield* find(name);
-    if (handle !== null) yield* sdk("remove", () => handle.destroy());
   });
 
   return ChatSandbox.of({
-    health: Effect.gen(function* () {
-      const kvm = yield* fileSystem.access("/dev/kvm", { readable: true, writable: true }).pipe(
-        Effect.as(true),
-        Effect.orElseSucceed(() => false),
-      );
-      return kvm
-        ? { isAvailable: true, reason: null }
-        : { isAvailable: false, reason: "The runner can't use KVM, so it can't run sandboxes." };
-    }),
     start: Effect.fn("MicrosandboxChats.start")(function* ({ chatId, chat }) {
       const name = yield* sandboxName(chatId);
-      yield* removeNamed(name);
       const { sandbox, hostPort } = yield* create(name, chat);
-      started.set(name, sandbox);
       return yield* serve(sandbox, hostPort, chat);
     }),
     write: ({ chatId, path, content }) =>
@@ -381,28 +332,24 @@ const make = Effect.gen(function* () {
     packWorkspace: (chatId) =>
       Effect.gen(function* () {
         const sandbox = yield* held(chatId, "pack");
-        return yield* Effect.acquireUseRelease(
-          sdk("pack", () =>
-            sandbox.execStreamWith("tar", (exec) =>
-              exec
-                // A file the agent can't read is left out, not a reason to save nothing.
-                .args([
-                  "-czf",
-                  "-",
-                  "-C",
-                  "/work",
-                  "--ignore-failed-read",
-                  ...WORKSPACE_EXCLUDES,
-                  ".",
-                ])
-                .user("agent")
-                .timeout(WORKSPACE_TAR_MILLIS),
-            ),
+        const exec = yield* sdk("pack", () =>
+          sandbox.execStreamWith("tar", (exec) =>
+            exec
+              // A file the agent can't read is left out, not a reason to save nothing.
+              .args([
+                "-czf",
+                "-",
+                "-C",
+                "/work",
+                "--ignore-failed-read",
+                ...WORKSPACE_EXCLUDES,
+                ".",
+              ])
+              .user("agent")
+              .timeout(WORKSPACE_TAR_MILLIS),
           ),
-          (exec) => readTarball(exec),
-          // Stops a tar that is still writing, as when the save is interrupted.
-          (exec) => sdk("pack", () => exec.kill()).pipe(Effect.ignore),
         );
+        return yield* readTarball(exec);
       }),
     unpackWorkspace: ({ chatId, content }) =>
       Effect.gen(function* () {
@@ -429,28 +376,6 @@ const make = Effect.gen(function* () {
         }
       }),
     remove: (chatId) => Effect.flatMap(sandboxName(chatId), removeNamed),
-    sweep: Effect.gen(function* () {
-      const handles: Array<SandboxHandle> = [];
-      let cursor: string | undefined;
-      do {
-        const after = cursor;
-        const page = yield* sdk("sweep", () =>
-          Sandbox.listWith((list) => {
-            const labelled = list.labels(runnerLabels(config));
-            return after === undefined ? labelled : labelled.cursor(after);
-          }),
-        );
-        handles.push(...page.sandboxes);
-        cursor = page.nextCursor;
-      } while (cursor !== undefined);
-      for (const handle of handles) {
-        yield* sdk("sweep", () => handle.destroy()).pipe(
-          Effect.catchTags({
-            SandboxError: (error) => Effect.logWarning("Clearing an old VM failed", error),
-          }),
-        );
-      }
-    }),
   });
 });
 

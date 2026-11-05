@@ -26,7 +26,7 @@ import type * as Statement from "effect/sql/Statement";
 import * as ServerConfig from "../config.ts";
 
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const isAttachmentId = Schema.is(AttachmentId);
+export const isAttachmentId = Schema.is(AttachmentId);
 
 /** An image upload's stored extension, by its (schema-checked) mime type. */
 const IMAGE_ATTACHMENT_EXTENSIONS = {
@@ -55,8 +55,8 @@ const displayFileName = (name: string) =>
 const storedFileId = (entry: string) =>
   [entry, entry.replace(/\.part$/u, "")].find((id) => isAttachmentId(id));
 
-export function attachmentPath(attachmentsDir: string, attachmentId: string): string | null {
-  return isAttachmentId(attachmentId) ? NodePath.resolve(attachmentsDir, attachmentId) : null;
+export function attachmentPath(attachmentsDir: string, attachmentId: AttachmentId): string {
+  return NodePath.resolve(attachmentsDir, attachmentId);
 }
 
 /** Images render inline; every other stored extension downloads. */
@@ -120,7 +120,7 @@ export class AttachmentRepository extends Context.Service<
     readonly detach: (id: AttachmentId) => Effect.Effect<void>;
     readonly release: (chatId: ChatId) => Effect.Effect<void>;
     readonly sweep: Effect.Effect<void>;
-    readonly path: (id: AttachmentId) => string | null;
+    readonly path: (id: AttachmentId) => string;
   }
 >()("t45/attachments/AttachmentRepository") {}
 
@@ -150,13 +150,15 @@ const make = Effect.gen(function* () {
   const get: AttachmentRepository["Service"]["get"] = (id) =>
     select(sql`id = ${id}`).pipe(Effect.map(([attachment]) => attachment ?? null));
 
-  const removeBytes = (id: string) => {
+  const removeBytes = (id: AttachmentId) => {
     const path = attachmentPath(attachmentsDir, id);
-    return path === null
-      ? Effect.void
-      : Effect.forEach([path, `${path}.part`], (each) => fileSystem.remove(each, { force: true }), {
-          discard: true,
-        }).pipe(Effect.orDie);
+    return Effect.forEach(
+      [path, `${path}.part`],
+      (each) => fileSystem.remove(each, { force: true }),
+      {
+        discard: true,
+      },
+    ).pipe(Effect.orDie);
   };
 
   const upload: AttachmentRepository["Service"]["upload"] = Effect.fnUntraced(

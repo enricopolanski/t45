@@ -148,7 +148,7 @@ type ExecutionResult = { readonly chatId: ChatId } & (
       readonly messages: ReadonlyArray<SessionMessage.Info>;
       readonly read: (path: string) => Effect.Effect<Uint8Array | null>;
     }
-  | { readonly type: "ended"; readonly status: "failed" | "interrupted" | null }
+  | { readonly type: "ended"; readonly status: "failed" | null }
 );
 type Receive = (result: ExecutionResult) => Effect.Effect<void>;
 type Run = (receive: Receive) => Effect.Effect<void>;
@@ -158,9 +158,6 @@ class StreamEndedError extends Schema.TaggedError<StreamEndedError>()("StreamEnd
 
 /** Batches events this long before reading what they changed. */
 const CAPTURE_BATCH = "150 millis";
-const CONNECT_TIMEOUT = "60 seconds";
-/** How long an answer, dismissal or cancel waits for the VM. */
-const VM_TIMEOUT = "1 minute";
 /** Messages per page when capture reads a session. */
 const CAPTURE_PAGE = 200;
 
@@ -295,12 +292,10 @@ const make = Effect.gen(function* () {
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "questions") =>
     changes.publish({ kind, chatId });
 
-  /** Puts a sent file under the VM's `attachments/`; one the server or VM can't take is skipped. */
+  /** Puts a sent file under the VM's `attachments/`; one the runner refuses is skipped. */
   const putFile = (chatId: ChatId, attachmentId: string) =>
     Effect.gen(function* () {
-      const source = files.path(attachmentId);
-      if (source === null) return;
-      const content = yield* fileSystem.readFile(source);
+      const content = yield* fileSystem.readFile(files.path(attachmentId)).pipe(Effect.orDie);
       yield* runner.putChatFile({
         chatId,
         path: `${OpenCode2Client.ATTACHMENTS_FOLDER}/${attachmentId}`,
@@ -308,11 +303,6 @@ const make = Effect.gen(function* () {
       });
     }).pipe(
       Effect.catchTags({
-        PlatformError: (error) =>
-          Effect.logWarning("A chat's attachment is missing on the server", {
-            attachmentId,
-            cause: error,
-          }),
         RunnerRefusedError: (error) =>
           Effect.logWarning("The runner refused a chat's attachment", {
             attachmentId,
@@ -332,7 +322,7 @@ const make = Effect.gen(function* () {
   /** Checks new inputs and commits the conversation and its task outcome together. */
   const end = (
     chatId: ChatId,
-    status: "failed" | "interrupted" | null,
+    status: "failed" | null,
     receive: Receive,
     completion?: { readonly sent: ReadonlySet<string>; readonly workspace: Uint8Array },
   ) =>
@@ -368,7 +358,7 @@ const make = Effect.gen(function* () {
     execution.sent.clear();
     yield* Queue.clear(execution.signal);
     const chat = yield* repository.get(chatId);
-    if (chat?.status !== "running" && chat?.status !== "waiting") return;
+    if (chat?.status !== "running") return;
     const agent = yield* agents.get(chat.agentId).pipe(
       Effect.filterOrFail(
         (agent) => agent !== null,
@@ -381,11 +371,8 @@ const make = Effect.gen(function* () {
       agent: {
         ...Struct.pick(agent, ["instructions", "mcpServers", "permissions"]),
         files: { ...agent.files, ...(hasT45Tools(agent.mcpServers) ? toolFiles : {}) },
-        skills: Object.fromEntries(
-          skills.map((skill) => [
-            skill.name,
-            Struct.pick(skill, ["name", "description", "content", "files"]),
-          ]),
+        skills: skills.map((skill) =>
+          Struct.pick(skill, ["name", "description", "content", "files"]),
         ),
       },
     } satisfies RunConfig;
@@ -419,7 +406,7 @@ const make = Effect.gen(function* () {
     let marks = noMarks();
     let notified = false;
     const connected = yield* Deferred.make<void, StreamEndedError>();
-    yield* (yield* api.events).pipe(
+    yield* api.events.pipe(
       Stream.runForEach((event) => {
         if (event.type === "server.connected") return Deferred.succeed(connected, undefined);
         if (event.type === "session.text.delta" || event.type === "session.reasoning.delta") {
@@ -447,9 +434,7 @@ const make = Effect.gen(function* () {
       Effect.andThen(Queue.offer(execution.signal, "ended")),
       Effect.forkScoped,
     );
-    yield* Deferred.await(connected).pipe(
-      Effect.timeoutOrElse({ duration: CONNECT_TIMEOUT, orElse: () => new StreamEndedError() }),
-    );
+    yield* Deferred.await(connected);
 
     const workspace = yield* repository.readWorkspace(chatId);
     if (workspace !== null) {
@@ -459,26 +444,19 @@ const make = Effect.gen(function* () {
     yield* Effect.forEach(yield* files.boundTo(chatId), (id) => putFile(chatId, id), {
       discard: true,
     });
-    // The conversation as the last finished execution left it, parents before their children.
-    const model = OpenCode2Client.modelRef(agent.model);
-    const rootInfo = { title: titleOf(chat), ...(model === undefined ? {} : { model }) };
+    const rootInfo = { title: titleOf(chat), model: OpenCode2Client.modelRef(agent.model) };
     const permissions = OpenCode2Client.sessionRules({
       questions: execution.questions,
     });
-    const stored = (yield* repository.sessions(chatId)).map((session) => ({
-      ...session,
-      id: session.sessionId,
-      parentID: session.parentSessionId,
-    }));
-    if (!stored.some((session) => session.id === root)) {
+    // The conversation as the last finished execution left it: root first and every parent before
+    // its children, as readTree saved them.
+    const stored = yield* repository.sessions(chatId);
+    if (!stored.some((session) => session.sessionId === root)) {
       yield* client.session.create({ id: root, ...rootInfo, location, permissions });
     }
-    for (const session of [
-      ...stored.filter((session) => session.id === root),
-      ...OpenCode2Client.sessionsUnder(root, stored),
-    ]) {
+    for (const session of stored) {
       yield* client.session.import({
-        info: { ...session.info, permissions, ...(session.id === root ? rootInfo : {}) },
+        info: { ...session.info, permissions, ...(session.sessionId === root ? rootInfo : {}) },
         messages: yield* repository.history(chatId, session.sessionId),
         location,
       });
@@ -608,27 +586,16 @@ const make = Effect.gen(function* () {
           sessionId,
           messageIds: saved.messageIds,
         });
-      }).pipe(
-        Effect.catchTags({
-          // A subagent's session removed inside the VM keeps what capture saw of it.
-          SessionNotFoundError: (error) =>
-            sessionId === root ? Effect.fail(error) : Effect.sync(() => known.delete(sessionId)),
-        }),
-      );
+      });
 
     const readForms = Effect.gen(function* () {
       const forms: Array<Form.Info> = [];
       for (const sessionId of known) {
-        const listed = yield* client.session.form
-          .list({ sessionID: sessionId })
-          .pipe(Effect.catchTags({ SessionNotFoundError: () => Effect.succeed([]) }));
-        forms.push(...listed);
+        forms.push(...(yield* client.session.form.list({ sessionID: sessionId })));
       }
-      if (yield* repository.setQuestions(chatId, forms, yield* nowIso)) {
+      if (yield* repository.setQuestions(chatId, forms)) {
         yield* publish(chatId, "questions");
       }
-      const status = forms.length > 0 ? "waiting" : "running";
-      if (yield* repository.setStatus(chatId, status, null)) yield* publish(chatId, "chat");
     });
 
     const capture = (marked: Marks) =>
@@ -654,9 +621,7 @@ const make = Effect.gen(function* () {
       });
       if (shells.data.some((shell) => shell.status === "running")) return false;
       for (const sessionId of known) {
-        const inbox = yield* client.session.inbox
-          .list({ sessionID: Session.ID.make(sessionId) })
-          .pipe(Effect.catchTags({ SessionNotFoundError: () => Effect.succeed([]) }));
+        const inbox = yield* client.session.inbox.list({ sessionID: Session.ID.make(sessionId) });
         if (inbox.length > 0) return false;
       }
       return [...launches].every(([child, ids]) => (reports.get(child)?.size ?? 0) >= ids.size);
@@ -681,12 +646,7 @@ const make = Effect.gen(function* () {
      */
     const finish = Effect.gen(function* () {
       const info = yield* client.session.get({ sessionID: root });
-      const status =
-        info.outcome === "failed"
-          ? ("failed" as const)
-          : info.outcome === "interrupted"
-            ? ("interrupted" as const)
-            : null;
+      const status = info.outcome === "failed" ? ("failed" as const) : null;
       const content = yield* runner.getChatWorkspace(chatId);
       return yield* end(chatId, status, receive, { sent: execution.sent, workspace: content });
     });
@@ -778,8 +738,7 @@ const make = Effect.gen(function* () {
               yield* release(chatId, execution);
               // An input saved as the execution ended needs a new one.
               const chat = yield* repository.get(chatId);
-              if (chat?.status === "running" || chat?.status === "waiting")
-                yield* processInputs(chatId, execution);
+              if (chat?.status === "running") yield* processInputs(chatId, execution);
             }).pipe(
               Effect.ensuring(release(chatId, execution)),
               Effect.tapCause((cause) =>
@@ -814,15 +773,12 @@ const make = Effect.gen(function* () {
         if (yield* repository.setStatus(chatId, "interrupted", null)) {
           yield* publish(chatId, "chat");
         }
-        yield* publish(chatId, "inputs");
       }),
     /** Runs `use` on the VM of the chat's running execution; none when nothing runs. */
     withVm: <A, E>(chatId: ChatId, use: (vm: ChatVm) => Effect.Effect<A, E>) =>
       Effect.suspend(() => {
         const vm = executions.get(chatId)?.vm ?? null;
-        return vm === null
-          ? Effect.succeedNone
-          : use(vm).pipe(Effect.asSome, Effect.timeout(VM_TIMEOUT));
+        return vm === null ? Effect.succeedNone : use(vm).pipe(Effect.asSome);
       }),
     /**
      * Cancels an input the agent hasn't taken, taking it back from the running VM; false when the
@@ -837,19 +793,15 @@ const make = Effect.gen(function* () {
           const execution = executions.get(chatId);
           const vm = execution?.vm ?? null;
           if (vm !== null && execution?.sent.has(inputId) === true) {
-            const id = inputMessageId(chatId, inputId);
-            yield* vm.client.session.inbox.cancel({ sessionID: vm.root, inboxID: id });
-            const taken = yield* vm.client.session.message
-              .get({ sessionID: vm.root, messageID: id })
-              .pipe(
-                Effect.as(true),
-                Effect.catchTags({ MessageNotFoundError: () => Effect.succeed(false) }),
-              );
-            if (taken) return false;
+            yield* vm.client.session.inbox.cancel({
+              sessionID: vm.root,
+              inboxID: inputMessageId(chatId, inputId),
+            });
           }
-          return yield* repository.deletePending(chatId, inputId);
+          yield* repository.deleteInput(chatId, inputId);
+          return true;
         }),
-      ).pipe(Effect.timeout(VM_TIMEOUT)),
+      ),
   };
 });
 

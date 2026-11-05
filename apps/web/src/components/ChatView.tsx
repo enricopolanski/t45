@@ -96,8 +96,10 @@ export default function ChatView({
     ready?.sessions.find((session) => session.parentID === undefined)?.id ?? null;
 
   const status = chatInfo?.status ?? null;
-  const running = status === "running";
-  const canInterrupt = !readOnly && (status === "running" || status === "waiting");
+  // A running chat with an open question waits for its answer.
+  const waiting = status === "running" && (ready?.questions.length ?? 0) > 0;
+  const running = status === "running" && !waiting;
+  const canInterrupt = !readOnly && status === "running";
   const working = running && !ready?.replying;
   // The next input to an agent between turns is on its way into the conversation, and shows
   // there; what follows it waits its turn in the queue.

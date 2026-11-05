@@ -1,13 +1,12 @@
 /*
  * HTTP surface for the runner, which only T45 calls with the shared bearer token.
  *
- * Handlers stay thin: they call the chat table, sandbox or model catalog and answer with the
+ * Handlers stay thin: they call the chat table or model catalog and answer with the
  * contract's errors.
  */
 import {
   RunnerAuth,
   RunnerHttpApi,
-  RunnerRefusedError,
   RunnerUnauthorizedError,
 } from "@t45/contracts/resources/RunnerVms";
 import * as Effect from "effect/Effect";
@@ -16,12 +15,9 @@ import * as Redacted from "effect/Redacted";
 import { HttpServerRequest } from "effect/http";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
-import { ChatSandbox } from "./ChatSandbox.ts";
 import { ChatTable } from "./ChatTable.ts";
 import { ModelCatalog } from "./ModelCatalog.ts";
 import { RunnerConfig } from "./RunnerConfig.ts";
-
-export const routerConfig = { maxParamLength: 512 } as const;
 
 export const layerAuth = Layer.effect(
   RunnerAuth,
@@ -44,7 +40,6 @@ export const layer = HttpApiBuilder.group(
   Effect.fnUntraced(function* (handlers) {
     const chats = yield* ChatTable;
     const catalog = yield* ModelCatalog;
-    const sandboxes = yield* ChatSandbox;
 
     return handlers
       .handle(
@@ -56,12 +51,6 @@ export const layer = HttpApiBuilder.group(
       .handle(
         "startChat",
         Effect.fn("runner.startChat")(function* (args) {
-          const health = yield* sandboxes.health;
-          if (!health.isAvailable) {
-            return yield* new RunnerRefusedError({
-              reason: health.reason ?? "The runner can't run sandboxes.",
-            });
-          }
           yield* chats.start({ chatId: args.params.vmId, chat: args.payload });
         }),
       )
