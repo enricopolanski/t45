@@ -18,15 +18,11 @@ export const stateDir = Config.schema(Schema.NonEmptyString, "DATA_DIR").pipe(
 export const dbPath = stateDir.pipe(Config.map((dir) => NodePath.join(dir, "statev2.sqlite")));
 export const attachmentsDir = stateDir.pipe(Config.map((dir) => NodePath.join(dir, "attachments")));
 
-export const layerTest = (baseDirOrPrefix: string | { readonly prefix: string }) =>
+export const layerTest = (prefix: string) =>
   ConfigProvider.layer(
     Effect.gen(function* () {
-      const baseDir =
-        typeof baseDirOrPrefix === "string"
-          ? baseDirOrPrefix
-          : yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
-              prefix: baseDirOrPrefix.prefix,
-            });
+      const filesystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* filesystem.makeTempDirectoryScoped({ prefix });
       return ConfigProvider.fromUnknown({
         LOG_LEVEL: "Error",
         PORT: 0,

@@ -225,7 +225,7 @@ describe("UserService", () => {
         ),
         Layer.provideMerge(UserRepository.layer),
         Layer.provideMerge(SqlitePersistence.layerTest),
-        Layer.provide(ServerConfig.layerTest({ prefix: "t3-user-auth-" })),
+        Layer.provide(ServerConfig.layerTest("t3-user-auth-")),
       );
 
     /** The identity as an earlier sign-in registered it, with `changes` made since. */
@@ -380,7 +380,7 @@ describe("UserService", () => {
         ),
         Layer.provideMerge(UserRepository.layer),
         Layer.provideMerge(SqlitePersistence.layerTest),
-        Layer.provide(ServerConfig.layerTest({ prefix: stateDirPrefix })),
+        Layer.provide(ServerConfig.layerTest(stateDirPrefix)),
       );
 
     it.effect("authenticates a token with the user's current role and state", () =>
@@ -534,7 +534,7 @@ describe("UserService", () => {
       const layer = Layer.effect(UserService, UserService.make).pipe(
         Layer.provide(layerIdentityProvider),
         Layer.provideMerge(layerUsers),
-        Layer.provide(ServerConfig.layerTest({ prefix: "t3-members-test-" })),
+        Layer.provide(ServerConfig.layerTest("t3-members-test-")),
         Layer.provideMerge(SqlitePersistence.layerTest),
       );
       return { layer };
@@ -914,7 +914,7 @@ describe("UserService", () => {
       },
     };
 
-    const layerConfig = ServerConfig.layerTest({ prefix: "t3-auth-http-test-" });
+    const layerConfig = ServerConfig.layerTest("t3-auth-http-test-");
 
     const layerServices = Layer.effect(UserService, UserService.make).pipe(
       Layer.provide(Layer.succeed(Authentication.IdentityProvider, identityProvider)),
@@ -1104,7 +1104,7 @@ describe("UserService", () => {
       ),
       Layer.provideMerge(UserRepository.layer),
       Layer.provideMerge(SqlitePersistence.layerTest),
-      Layer.provide(ServerConfig.layerTest({ prefix: "t3-users-handlers-" })),
+      Layer.provide(ServerConfig.layerTest("t3-users-handlers-")),
     );
 
     const insertUser = (id: string, role: "admin" | "member") =>
