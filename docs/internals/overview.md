@@ -8,7 +8,7 @@ OpenCode executes; T45 keeps what must outlive a VM. A chat's inputs, the sessio
 
 OpenCode is the only agent runtime. Chats store and send its shapes as they are, imported from `@opencode/*`, rather than translating them into a model of T45's own. See [provider constraints](./providers.md).
 
-The web app holds its transport and the domain state it syncs (`apps/web/src/rpc` and `state`) next to its UI. See [connection runtime](./connection-runtime.md) and [remote architecture](./remote.md).
+The web app holds its transport and the domain state it syncs (`apps/web/src/rpc` and `state`) next to its UI. See [RPC client](../../apps/web/src/rpc/api.ts) and [remote architecture](./remote.md).
 
 The [`RpcApi` RPC group](../../packages/contracts/src/resources/RpcApi.ts), served over `POST /api/rpc` with streams sent as ndjson, is the boundary between client and server; sign-in, attachment bytes, avatars, traces and webhooks are plain HTTP routes beside it. Streams send the state a client needs, so a client viewing one chat does not pay for every chat's history. Being signed in does not authorize every call: each is authorized on its own. See [server auth](./server-auth.md).
 
