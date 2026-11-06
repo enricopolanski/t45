@@ -2,7 +2,7 @@
 
 No agent runs on T45. Every execution of a chat runs in its own new VM on the runner (`apps/runner`); T45 keeps the chat's inputs, its conversation and the VM disk its last finished execution left, and hands the disk and the inputs the agent hasn't taken to the runner with every `execute` call, which boots a new VM on the disk and sends it the inputs. T45 never talks to OpenCode, and the VM has no route to T45. [Chats](./chats.md) explains executions, how they restore and how they end.
 
-T45 sends its tools with every execution as agent files under `/work/runtime`; the directory is reserved from editable agent files and cleared at every start, and the image carries no T45 code.
+T45 sends its tools with each execution of an agent that has one of its MCP servers enabled; the runner writes them to `/opt/t45`, outside the agent's `/work`, so they never land in its project, and clears them at every start. The image carries no T45 code.
 
 ## Workflow effects cross the boundary as native tool calls
 

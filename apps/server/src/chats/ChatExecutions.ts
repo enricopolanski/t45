@@ -1,4 +1,5 @@
 import type { SessionMessage } from "@opencode/schema/session-message";
+import { STEP_TOOLS_MCP_NAME, WORKFLOW_DRAFTING_MCP_NAME } from "@t45/contracts/models/Agent";
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import { type Chat, type ChatId, type Input, titleOf } from "@t45/contracts/models/Chat";
 import { InputMetadata } from "@t45/contracts/resources/Chats";
@@ -78,7 +79,7 @@ export const make = Effect.gen(function* () {
         (file) =>
           fileSystem
             .readFileString(path.join(runtime, file))
-            .pipe(Effect.map((source) => [`runtime/${file}`, source] as const)),
+            .pipe(Effect.map((source) => [file, source] as const)),
       ),
     ),
     Effect.map((files) => Object.fromEntries(files)),
@@ -130,8 +131,14 @@ export const make = Effect.gen(function* () {
       const inputs = yield* repository.pendingInputs(chat.id);
       return {
         agent: {
-          ...Struct.pick(agent, ["instructions", "model", "mcpServers", "permissions"]),
-          files: { ...agent.files, ...toolFiles },
+          ...Struct.pick(agent, ["instructions", "model", "mcpServers", "permissions", "files"]),
+          tools: Object.entries(agent.mcpServers).some(
+            ([name, server]) =>
+              [STEP_TOOLS_MCP_NAME, WORKFLOW_DRAFTING_MCP_NAME].includes(name) &&
+              server.disabled !== true,
+          )
+            ? toolFiles
+            : {},
           skills: (yield* skills.listForAgent(agent.id)).map((skill) =>
             Struct.pick(skill, ["name", "description", "content", "files"]),
           ),

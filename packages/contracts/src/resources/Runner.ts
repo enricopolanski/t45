@@ -24,6 +24,8 @@ export const ExecutionRequest = Schema.Struct({
   agent: Schema.Struct({
     ...Struct.pick(Agent.fields, ["instructions", "model", "mcpServers", "permissions"]),
     files: FilesByPath(AGENT_SETUP_PATHS),
+    /** T45's tools by file name, for `T45_TOOLS_DIR`; none for agents without its servers. */
+    tools: Schema.Record(Schema.String, Schema.String),
     skills: Schema.Array(
       Schema.Struct(Struct.pick(Skill.fields, ["name", "description", "content", "files"])),
     ),

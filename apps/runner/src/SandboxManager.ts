@@ -1,5 +1,6 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { Config as OpenCodeConfig } from "@opencode/schema/config";
+import { T45_TOOLS_DIR } from "@t45/contracts/models/Agent";
 import type { ExecutionRequest } from "@t45/contracts/resources/Runner";
 import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
@@ -35,7 +36,7 @@ const DISK = "disk.raw";
 const ARCHIVE = "disk.tgz";
 
 /** Written again at every start, or left by the step tools for the last execution. */
-const STALE = ["/work/.opencode/skills", "/work/runtime", "/work/.t45"];
+const STALE = ["/work/.opencode/skills", "/work/.t45", T45_TOOLS_DIR];
 
 /** Where the step tools leave the files they generate for T45. */
 const GENERATED = "/work/.t45/attached";
@@ -99,8 +100,7 @@ const openCodeConfig = (agent: Agent): typeof OpenCodeConfig.Info.Encoded => {
 };
 
 /** As root, making its folders. */
-const writeInto = (vm: Microvm, relative: string, content: string | Uint8Array) => {
-  const target = `/work/${relative}`;
+const write = (vm: Microvm, target: string, content: string | Uint8Array) => {
   const fs = vm.fs();
   return sdk("mkdir", () => fs.mkdir(target.slice(0, target.lastIndexOf("/")))).pipe(
     Effect.andThen(sdk("write", () => fs.write(target, content))),
@@ -117,17 +117,20 @@ const writeAgentSetup = Effect.fn("SandboxManager.writeAgentSetup")(function* (
   if (!cleared.success) {
     return yield* new SandboxError({ operation: "setup", cause: cleared.stderr() });
   }
-  yield* writeInto(vm, "AGENTS.md", agent.instructions);
+  yield* write(vm, "/work/AGENTS.md", agent.instructions);
   for (const [path, content] of Object.entries(agent.files)) {
-    yield* writeInto(vm, path, content);
+    yield* write(vm, `/work/${path}`, content);
+  }
+  for (const [name, source] of Object.entries(agent.tools)) {
+    yield* write(vm, `${T45_TOOLS_DIR}/${name}`, source);
   }
   for (const skill of agent.skills) {
-    yield* writeInto(vm, `.opencode/skills/${skill.name}/SKILL.md`, skillMarkdown(skill));
+    yield* write(vm, `/work/.opencode/skills/${skill.name}/SKILL.md`, skillMarkdown(skill));
     for (const [path, content] of Object.entries(skill.files)) {
-      yield* writeInto(vm, `.opencode/skills/${skill.name}/${path}`, content);
+      yield* write(vm, `/work/.opencode/skills/${skill.name}/${path}`, content);
     }
   }
-  yield* writeInto(vm, "opencode.json", encodeOpenCodeConfig(openCodeConfig(agent)));
+  yield* write(vm, "/work/opencode.json", encodeOpenCodeConfig(openCodeConfig(agent)));
 });
 
 const freePort = NodeSocketServer.make({ host: "127.0.0.1", port: 0 }).pipe(
@@ -229,7 +232,7 @@ export const start = Effect.fn("SandboxManager.start")(function* (
   return {
     port: hostPort,
     password,
-    write: (path: string, content: Uint8Array) => writeInto(vm, path, content),
+    write: (path: string, content: Uint8Array) => write(vm, `/work/${path}`, content),
     /** The files in GENERATED it hasn't returned yet, each by its path under /work. */
     readNewGenerated: Effect.gen(function* () {
       const fs = vm.fs();

@@ -4,11 +4,33 @@
  * place: the fingerprint of the statements changes, and a database created by other statements is
  * refused at startup.
  */
+import { Agent } from "@t45/contracts/models/Agent";
+import { WORKFLOW_DRAFTING_MCP } from "@t45/core/agentTools";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+
+// Defaults apply only to fresh databases; later changes belong to the organization.
+const workflowDesigner = {
+  id: "workflow-designer",
+  name: "Workflow designer",
+  instructions: `Help the member design a reusable workflow. Clarify the process and expected outputs,
+then use the workflow draft tool to propose a complete blueprint. Submit the complete draft for revisions.
+Explain that the member saves the blueprint, then configures and publishes a workflow from it.`,
+  model: "opencode-go/deepseek-v4.1-flash",
+  files: {},
+  skills: [],
+  mcpServers: { [WORKFLOW_DRAFTING_MCP.name]: WORKFLOW_DRAFTING_MCP.server },
+  permissions: { network: "provider" },
+  isConversational: true,
+  status: "active",
+} satisfies Omit<Agent, "createdAt" | "updatedAt">;
+
+const encodeFiles = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.files));
+const encodeMcpServers = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.mcpServers));
 
 // The organization's users and sessions, agents and automations, workflows, chats, and files.
 const statements = [
@@ -269,6 +291,20 @@ export const setupSchema = Effect.fnUntraced(function* () {
         for (const statement of statements) {
           yield* sql.unsafe(statement);
         }
+        const at = DateTime.formatIso(yield* DateTime.now);
+        yield* sql`INSERT INTO agents ${sql.insert({
+          id: workflowDesigner.id,
+          name: workflowDesigner.name,
+          instructions: workflowDesigner.instructions,
+          model: workflowDesigner.model,
+          files: yield* encodeFiles(workflowDesigner.files),
+          mcp_servers: yield* encodeMcpServers(workflowDesigner.mcpServers),
+          network: workflowDesigner.permissions.network,
+          is_conversational: Number(workflowDesigner.isConversational),
+          status: workflowDesigner.status,
+          created_at: at,
+          updated_at: at,
+        })}`;
         yield* sql`CREATE TABLE schema_fingerprint (fingerprint TEXT NOT NULL)`;
         yield* sql`INSERT INTO schema_fingerprint (fingerprint) VALUES (${fingerprint})`;
       }),

@@ -25,7 +25,7 @@ export class Agent extends Schema.Opaque<Agent>()(
     name: TrimmedNonEmptyString,
     instructions: Schema.String,
     model: TrimmedNonEmptyString,
-    files: FilesByPath([...AGENT_SETUP_PATHS, "runtime"]),
+    files: FilesByPath(AGENT_SETUP_PATHS),
     skills: Schema.Array(StringId),
     mcpServers: Schema.Record(Schema.String, Schema.toEncoded(ConfigMCP.Server)).check(
       Schema.isPropertyNames(McpServerName),
@@ -42,6 +42,9 @@ export class Agent extends Schema.Opaque<Agent>()(
 /** Names identify the built-in capabilities an agent is configured to use. */
 export const WORKFLOW_DRAFTING_MCP_NAME = "workflows";
 export const STEP_TOOLS_MCP_NAME = "step";
+
+/** Where the runner writes T45's tools in the VM, outside the agent's /work. */
+export const T45_TOOLS_DIR = "/opt/t45";
 
 export const canChatWithMembers = (agent: Pick<Agent, "status" | "isConversational">) =>
   agent.status === "active" && agent.isConversational;
