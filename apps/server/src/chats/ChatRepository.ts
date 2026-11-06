@@ -151,16 +151,13 @@ const make = Effect.gen(function* () {
     );
   /** The chat's inputs whose user message isn't stored: what its next execution sends. */
   const pendingInputs = (chatId: ChatId) =>
-    Effect.gen(function* () {
-      const all = yield* inputs(chatId);
-      const ids = all.map((input) => inputMessageId(chatId, input.inputId));
-      const stored = new Set(
-        (yield* sql<{ readonly id: string }>`SELECT message_id AS id FROM chat_messages
-          WHERE chat_id = ${chatId} AND session_id = ${rootSessionId(chatId)}
-            AND ${sql.in("message_id", ids)}`.pipe(Effect.orDie)).map((row) => row.id),
-      );
-      return all.filter((input) => !stored.has(inputMessageId(chatId, input.inputId)));
-    });
+    sql`SELECT ${inputColumns} FROM chat_inputs AS input
+      WHERE input.chat_id = ${chatId} AND NOT EXISTS (
+        SELECT 1 FROM chat_messages AS message
+        WHERE message.chat_id = input.chat_id
+          AND message.session_id = ${rootSessionId(chatId)}
+          AND message.message_id = ${inputMessageId(chatId, "")} || input.input_id
+      ) ORDER BY input.ordinal`.pipe(Effect.orDie, Effect.flatMap(inputsOf));
 
   const get = (chatId: ChatId) =>
     sql`SELECT ${chatColumns} FROM chats WHERE id = ${chatId} AND deleted_at IS NULL`.pipe(

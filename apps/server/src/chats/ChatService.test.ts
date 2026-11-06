@@ -498,11 +498,14 @@ describe("chats", () => {
         yield* changes.publish({
           kind: "delta",
           chatId,
-          sessionId: rootSessionId(chatId),
-          messageId: "msg_streaming",
-          ordinal: 0,
-          part: "text",
-          delta: "x",
+          event: {
+            _tag: "delta",
+            sessionId: rootSessionId(chatId),
+            messageId: SessionMessage.ID.make("msg_streaming"),
+            ordinal: 0,
+            kind: "text",
+            delta: "x",
+          },
         });
       }
       yield* chats.rename({ chatId, title: "Taxes" }, alice);

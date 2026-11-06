@@ -62,7 +62,7 @@ export class Refused extends Schema.TaggedError<Refused>()("AgentRefused", {
       case "name_taken":
         return "Another agent already has that name.";
       case "model_unavailable":
-        return "The runner doesn't offer that model now. Choose another, or try again once it answers.";
+        return "OpenCode Go doesn't offer that model now. Choose another, or try again once it answers.";
       case "skill_not_found":
         return "That skill no longer exists.";
     }

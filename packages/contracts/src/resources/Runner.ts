@@ -40,7 +40,6 @@ export const ExecutionRequest = Schema.Struct({
 export type ExecutionRequest = typeof ExecutionRequest.Type;
 
 export const ExecutionUpdate = Schema.Union([
-  /** The root and every session under it, parents first. */
   Schema.TaggedStruct("sessions", { sessions: Schema.Array(Session.Info) }),
   Schema.TaggedStruct("messages", {
     sessionId: Session.ID,

@@ -1,6 +1,7 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
-import { Config } from "@opencode/schema/config";
+import { Config as OpenCodeConfig } from "@opencode/schema/config";
 import type { ExecutionRequest } from "@t45/contracts/resources/Runner";
+import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
@@ -10,8 +11,6 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { type NetworkBuilder, NetworkPolicy, Sandbox as Microvm } from "microsandbox";
-
-import * as RunnerConfig from "./RunnerConfig.ts";
 
 type Agent = ExecutionRequest["agent"];
 
@@ -37,6 +36,9 @@ const ARCHIVE = "disk.tgz";
 
 /** Written again at every start, or left by the step tools for the last execution. */
 const STALE = ["/work/.opencode/skills", "/work/runtime", "/work/.t45"];
+
+/** Where the step tools leave the files they generate for T45. */
+const GENERATED = "/work/.t45/attached";
 
 /** The SDK types its network setter loosely; this is what it hands the callback. */
 type NetworkSettings = InstanceType<typeof NetworkBuilder>;
@@ -81,10 +83,10 @@ const skillMarkdown = (skill: Agent["skills"][number]) =>
 
 /** Encoded through OpenCode's schema, so a VM never boots on a config it refuses. */
 const encodeOpenCodeConfig = Schema.encodeSync(
-  Schema.fromJsonString(Schema.toEncoded(Config.Info)),
+  Schema.fromJsonString(Schema.toEncoded(OpenCodeConfig.Info)),
 );
 
-const openCodeConfig = (agent: Agent): typeof Config.Info.Encoded => {
+const openCodeConfig = (agent: Agent): typeof OpenCodeConfig.Info.Encoded => {
   const fetching = agent.permissions.network === "provider" ? "deny" : "allow";
   return {
     $schema: "https://opencode.ai/config.json",
@@ -143,8 +145,11 @@ export const start = Effect.fn("SandboxManager.start")(function* (
   agent: Agent,
   saved: Uint8Array | null,
 ) {
-  const runnerPort = yield* RunnerConfig.port;
-  const openCodeKey = yield* RunnerConfig.openCodeKey;
+  const runnerPort = yield* Config.Port("T45_RUNNER_PORT");
+  const openCodeKey = yield* Config.schema(
+    Schema.Redacted(Schema.NonEmptyString),
+    "OPENCODE_API_KEY",
+  );
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -220,10 +225,25 @@ export const start = Effect.fn("SandboxManager.start")(function* (
         .env("OPENCODE_PASSWORD", Redacted.value(password)),
     ),
   );
+  const returned = new Set<string>();
   return {
     port: hostPort,
     password,
     write: (path: string, content: Uint8Array) => writeInto(vm, path, content),
+    /** The files in GENERATED it hasn't returned yet, each by its path under /work. */
+    readNewGenerated: Effect.gen(function* () {
+      const fs = vm.fs();
+      // The step tools make it as the agent, who couldn't write into one made here as root.
+      if (!(yield* sdk("exists", () => fs.exists(GENERATED)))) return [];
+      const files: Array<{ path: string; content: Uint8Array }> = [];
+      for (const entry of yield* sdk("list", () => fs.list(GENERATED))) {
+        if (entry.kind !== "file" || returned.has(entry.path)) continue;
+        returned.add(entry.path);
+        const content = yield* sdk("read", () => fs.read(entry.path));
+        files.push({ path: entry.path.slice("/work/".length), content });
+      }
+      return files;
+    }),
     // Only a removed VM has flushed its disk.
     save: remove.pipe(Effect.andThen(disk.save)),
   };

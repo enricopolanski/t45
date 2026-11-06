@@ -379,8 +379,9 @@ const make = Effect.gen(function* () {
           const changed = yield* changes.subscribe(
             (change) =>
               change.chatId === input.chatId &&
-              ((change.kind !== "messages" && change.kind !== "delta") ||
-                change.sessionId === requested),
+              (change.kind === "messages"
+                ? change.sessionId === requested
+                : change.kind !== "delta" || change.event.sessionId === requested),
           );
           const chat = yield* memberChat(member, input.chatId);
           const sessionId = yield* sessionOf(chat, requested);
@@ -426,16 +427,7 @@ const make = Effect.gen(function* () {
                   ),
                 );
               case "delta":
-                return Effect.succeed([
-                  {
-                    _tag: "delta",
-                    sessionId: Session.ID.make(change.sessionId),
-                    messageId: SessionMessage.ID.make(change.messageId),
-                    ordinal: change.ordinal,
-                    kind: change.part,
-                    delta: change.delta,
-                  },
-                ]);
+                return Effect.succeed([change.event]);
               case "inputs":
                 return inputsOf(chat.id).pipe(Effect.map((inputs) => [{ _tag: "inputs", inputs }]));
               case "posted":

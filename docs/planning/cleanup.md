@@ -11,7 +11,8 @@ Each entry names the file and what could change. Delete an entry once it is done
 ## apps/server/src/chats, opencode
 
 - `apps/server/src/chats/ChatExecutions.ts` — tool-file discovery still scans `dist/runtime` at service construction, branches on the source filename and reads every `.mjs` chunk even when no chat uses T45 tools. Supply built tool assets explicitly from an entry manifest, keeping execution persistence independent of directory scanning without adding another service hierarchy; this is also recorded in `todo.md`.
-- `apps/server/src/chats/ChatService.ts` — `open` reads a `messages` change's rows when it sends the change, not when the worker published it, so on a slow link a copy can reach the browser after deltas that streamed before the copy was read, and show their text twice until the next copy. Send the copy the reconcile read with the change instead.
+- `apps/server/src/chats/ChatService.ts` — `open` reads a `messages` change's rows when it sends the change, not when the worker published it, so on a slow link a copy can reach the browser after deltas that streamed before the copy was read, and show their text twice until the next copy. Sending the rows with the change alone isn't enough: `open` subscribes before reading its snapshot, so a buffered older row would land after a newer snapshot; order snapshot and changes together.
+- `apps/server/src/chats/ChatRepository.ts` — `inputs` is only read by three tests (ChatService, webhook, AutomationService) now that `pendingInputs` is one query; drop it once they observe stored inputs another way.
 - `apps/server/src/chats/ChatService.ts` — a later input no longer checks the chat's agent, so archiving an agent only stops new chats with it, and members keep writing in their existing ones. Decide whether those chats should freeze again, with the composer saying why.
 - `apps/runner/src/ExecutionOrchestrator.ts` — every session gets permission rules allowing everything but questions for working agents, and OpenCode merges session rules after the agent's and takes the last match (`.repos/opencode/packages/core/src/permission.ts`), so they override the `webfetch`/`websearch` deny the runner writes into `opencode.json` on the provider-only network; only the network policy still stops them. Send the deny with the session rules for those chats, or drop the session rules.
 - `apps/runner/src/ExecutionOrchestrator.ts` — there is no per-chat storage quota: only the disk is capped, not the messages and attachments T45 keeps.
@@ -22,12 +23,11 @@ Each entry names the file and what could change. Delete an entry once it is done
 
 ## apps/runner
 
-- `apps/runner/src/ExecutionOrchestrator.ts` — `createOpencodeClient` bolts a `file.read` onto the generated client with `Object.defineProperty` because `@opencode/client` adapts `fs.list` and `fs.find` but not `fs.read`. Add `file.read` to the client's generator upstream and drop the patch.
+- `apps/runner/src/ExecutionOrchestrator.ts` — the reader keeps per-session cursors, unfinished sets and the message ids events name (`PendingReads`) to read only what changed. Rereading every session whole per event batch would drop that bookkeeping, but each pass would then re-send the whole conversation through the unbounded output queue and upsert every message; measure `saveMessages` and the transfer on long chats before choosing it.
 - `apps/runner/src/ExecutionOrchestrator.ts` — nothing tests the execution logic since the scripted OpenCode fake went, and a fake would need the seam provided by the removed `SandboxManager` service.
 - `apps/runner/src/ExecutionOrchestrator.ts` — `Stream.callback` creates an unbounded output queue before the RPC transport's bounded queue, so messages, file events and heartbeats can accumulate while T45 consumes them slowly. Give output a bounded buffering policy that preserves durable event order and stream backpressure without adding another acknowledgement protocol.
 - `apps/runner/src/ExecutionOrchestrator.ts` — the runner doesn't check the path or size of a file T45 puts in a VM; review whether it should.
 - `apps/runner/src/ExecutionOrchestrator.ts` — the runner has no cap on VMs running at once (the env caps and `RunnerBusyError` were removed). When capacity matters, have the runner compute what it can take from its own resources and tell T45 when it can't start another VM, instead of hardcoded counts.
-- `apps/runner/src/SandboxManager.ts` — agent files are written into `/work` beside what every boot writes itself (`AGENTS.md`, `opencode.json`, `attachments/`, `.opencode/skills/`), and `agents.create`/`agents.update` no longer refuse those paths. Have the runner place agent files where they can't collide.
 
 ## apps/server/src/org
 

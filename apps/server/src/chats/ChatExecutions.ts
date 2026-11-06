@@ -204,15 +204,7 @@ export const make = Effect.gen(function* () {
               });
             });
           case "delta":
-            return changes.publish({
-              chatId,
-              kind: "delta",
-              sessionId: event.sessionId,
-              messageId: event.messageId,
-              ordinal: event.ordinal,
-              part: event.kind,
-              delta: event.delta,
-            });
+            return changes.publish({ chatId, kind: "delta", event });
           case "questions":
             return repository
               .setQuestions(chatId, event.forms)

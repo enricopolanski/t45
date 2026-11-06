@@ -8,6 +8,7 @@
  * Past that, what the stream holds becomes one `missed`, and it reads everything again.
  */
 import type { ChatId } from "@t45/contracts/models/Chat";
+import type { ExecutionUpdate } from "@t45/contracts/resources/Runner";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -25,14 +26,7 @@ export type ChatChange = {
       readonly sessionId: string;
       readonly messageIds: ReadonlyArray<string>;
     }
-  | {
-      readonly kind: "delta";
-      readonly sessionId: string;
-      readonly messageId: string;
-      readonly ordinal: number;
-      readonly part: "text" | "reasoning";
-      readonly delta: string;
-    }
+  | { readonly kind: "delta"; readonly event: Extract<ExecutionUpdate, { _tag: "delta" }> }
   | { readonly kind: "inputs" }
   | { readonly kind: "questions" }
   /** What an execution that didn't finish wrote was dropped, with its questions. */

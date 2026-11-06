@@ -49,7 +49,7 @@ const statements = [
   // Named agents, their skills and automations, and the workflows people and agents work
   // through.
   // Named agents are organization-wide. Every agent works in a sandbox of its own, and its model
-  // is an OpenCode `provider/model` slug the runner offers. Admins choose which agents members can
+  // is a `provider/model` slug OpenCode Go offers. Admins choose which agents members can
   // chat with, and which of those draft workflows.
   `CREATE TABLE agents (
       id TEXT PRIMARY KEY NOT NULL,
@@ -183,8 +183,8 @@ const statements = [
     )`,
   `CREATE INDEX origins_owner ON chat_origins(owner_user_id) WHERE owner_user_id IS NOT NULL`,
   `CREATE INDEX origins_step ON chat_origins(json_extract(trigger, '$.ticketId'), json_extract(trigger, '$.stepId')) WHERE trigger IS NOT NULL`,
-  // A chat's OpenCode sessions: its root and the subagents' sessions under it, keyed by chat so one
-  // VM can't reach another chat's copy. `info_json` is the session as OpenCode last returned it.
+  // A chat's OpenCode sessions, every session of its VM, keyed by chat so one VM can't reach
+  // another chat's copy. `info_json` is the session as OpenCode last returned it.
   // `committed` once an execution that wrote it finished; the next execution drops what isn't.
   `CREATE TABLE chat_sessions (
       chat_id TEXT NOT NULL REFERENCES chats(id),

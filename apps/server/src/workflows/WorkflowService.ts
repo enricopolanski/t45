@@ -109,14 +109,8 @@ const INPUT_REFUSED = "its input doesn't fit the tool";
 
 const ATTACH_UNREAD = "T45 couldn't read the file; attach it again";
 
-const decodeReply = Schema.decodeUnknownOption(
-  Schema.fromJsonString(
-    Schema.Struct({
-      ok: Schema.Literal(true),
-      name: Schema.optionalKey(Schema.String),
-      file: Schema.optionalKey(Schema.String),
-    }),
-  ),
+const decodeAttachReply = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ name: Schema.String, file: Schema.String })),
 );
 const decodeCall = Schema.decodeUnknownOption(StepToolCall);
 
@@ -126,14 +120,12 @@ const textOf = (content: SessionMessage.ToolStateCompleted["content"]) =>
 const callOf = (part: SessionMessage.AssistantTool) => {
   const tool = STEP_TOOL_NAMES.find((name) => name === part.name);
   if (tool === undefined || part.state.status !== "completed") return null;
-  const reply = Option.getOrNull(decodeReply(textOf(part.state.content)));
-  if (reply === null) return null;
   return {
     tool,
     call: Option.getOrNull(decodeCall({ tool, input: part.state.input })),
     attached:
-      reply.name !== undefined && reply.file !== undefined
-        ? { name: reply.name, file: reply.file }
+      tool === "step_attach"
+        ? Option.getOrNull(decodeAttachReply(textOf(part.state.content)))
         : null,
   };
 };

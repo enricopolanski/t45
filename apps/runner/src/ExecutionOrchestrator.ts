@@ -11,7 +11,6 @@ import {
 import * as Effect from "effect/Effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
-import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import type * as Redacted from "effect/Redacted";
@@ -42,21 +41,15 @@ const createOpencodeClient = Effect.fnUntraced(function* (
   const client = yield* OpenCode.make({ baseUrl: url }).pipe(
     Effect.provideService(HttpClient.HttpClient, httpClient),
   );
-  // The generated client leaves out `fs.read`
-  const read = (path: string) =>
-    httpClient.get(`${url}/api/fs/read/${path.split("/").map(encodeURIComponent).join("/")}`).pipe(
-      Effect.flatMap(HttpClientResponse.filterStatusOk),
-      Effect.flatMap((response) => response.arrayBuffer),
-      Effect.map((buffer) => new Uint8Array(buffer)),
-      Effect.timeout("60 seconds"),
-    );
-  Object.defineProperty(client.file, "read", { value: read });
 
   yield* client.server
     .info()
     .pipe(Effect.retry(Schedule.spaced("250 millis")), Effect.timeout("1 minute"));
   // OpenCode answers before its MCP servers connect, and a turn started then finds no tools.
-  const servers = Object.keys(agent.mcpServers);
+  // A disabled server never connects.
+  const servers = Object.entries(agent.mcpServers)
+    .filter(([, server]) => server.disabled !== true)
+    .map(([name]) => name);
   if (servers.length > 0) {
     yield* client.mcp.list().pipe(
       Effect.filterOrFail(({ data }) =>
@@ -68,7 +61,7 @@ const createOpencodeClient = Effect.fnUntraced(function* (
       Effect.timeout("1 minute"),
     );
   }
-  return client as typeof client & { readonly file: { readonly read: typeof read } };
+  return client;
 });
 
 type OpencodeClient = Effect.Success<ReturnType<typeof createOpencodeClient>>;
@@ -132,34 +125,18 @@ class PendingReads {
   }
 }
 
-/** The sessions under `root`, each after its parent; the agent controls parents, so a cycle can't repeat one. */
-const sessionsUnder = (root: Session.ID, sessions: ReadonlyArray<Session.Info>) => {
-  const children = Map.groupBy(sessions, (session) => session.parentID);
-  const under: Array<Session.Info> = [];
-  const seen = new Set([root]);
-  const parents = [root];
-  for (const parent of parents) {
-    for (const child of children.get(parent) ?? []) {
-      if (seen.has(child.id)) continue;
-      seen.add(child.id);
-      under.push(child);
-      parents.push(child.id);
-    }
-  }
-  return under;
-};
-
 /**
- * Turns the events' hints into authoritative emits: the root's session tree, each session's new or
+ * Turns the events' hints into authoritative emits: the chat's sessions, each session's new or
  * changed messages with the files the agent generated, and the open questions. It remembers what
  * it read so a pass only emits what changed, and tells when OpenCode has finished everything.
  */
 const createOpencodeReader = (
   client: OpencodeClient,
+  readNewGenerated: Effect.Success<ReturnType<typeof SandboxManager.start>>["readNewGenerated"],
   rootId: Session.ID,
   emit: (event: ExecutionUpdate) => Effect.Effect<void>,
 ) => {
-  /** The root and the subagent sessions under it, as last listed. */
+  /** The root and every session listed since. */
   const known = new Set<string>([rootId]);
   /** Where paging each session's messages stood after the last read. */
   const cursors = new Map<string, string>();
@@ -171,30 +148,16 @@ const createOpencodeReader = (
   const reports = new Map<string, Set<string>>();
   const add = (map: Map<string, Set<string>>, child: string, id: string) =>
     map.set(child, (map.get(child) ?? new Set()).add(id));
-  /** Generated files already sent. */
-  const generated = new Set<string>();
 
-  const readTree = Effect.gen(function* () {
+  /** A VM is one chat's, so every session in it is the chat's. */
+  const readSessionList = Effect.gen(function* () {
     // Without a cap on `limit`, one answer holds every session.
-    const { data: all } = yield* client.session.list({
+    const { data: sessions } = yield* client.session.list({
       order: "asc",
       limit: Number.MAX_SAFE_INTEGER,
     });
-    const sessions = [...all.filter((info) => info.id === rootId), ...sessionsUnder(rootId, all)];
     for (const info of sessions) known.add(info.id);
     yield* emit({ _tag: "sessions", sessions });
-  });
-
-  const emitGenerated = Effect.gen(function* () {
-    const listed = yield* client.file
-      .list({ path: ".t45/attached" })
-      .pipe(Effect.catchTags({ FileNotFoundError: () => Effect.succeed({ data: [] }) }));
-    for (const entry of listed.data) {
-      if (entry.type !== "file" || generated.has(entry.path)) continue;
-      generated.add(entry.path);
-      const content = yield* client.file.read(entry.path);
-      yield* emit({ _tag: "file", path: entry.path, content });
-    }
   });
 
   /** Pages forward from where the last pass stood, and reads again what may have changed. */
@@ -245,7 +208,7 @@ const createOpencodeReader = (
         if (typeof child === "string") add(reports, child, message.id);
       }
     }
-    yield* emitGenerated;
+    for (const file of yield* readNewGenerated) yield* emit({ _tag: "file", ...file });
     yield* emit({ _tag: "messages", sessionId: sessionID, messages });
   });
 
@@ -272,7 +235,7 @@ const createOpencodeReader = (
     return [...launches].every(([child, ids]) => (reports.get(child)?.size ?? 0) >= ids.size);
   });
 
-  return { known: known as ReadonlySet<string>, readTree, readSession, readForms, isDone };
+  return { known: known as ReadonlySet<string>, readSessionList, readSession, readForms, isDone };
 };
 
 export const layer = RunnerRpcs.toLayer(
@@ -306,7 +269,7 @@ export const layer = RunnerRpcs.toLayer(
 
       const eventsStream = opencodeClient.event.subscribe();
 
-      const reader = createOpencodeReader(opencodeClient, rootId, emit);
+      const reader = createOpencodeReader(opencodeClient, sandbox.readNewGenerated, rootId, emit);
       let pendingReads = new PendingReads(true, true);
 
       const writeFiles = (files: ExecutionRequest["files"]) =>
@@ -353,7 +316,7 @@ export const layer = RunnerRpcs.toLayer(
               (sessionId) => !reader.known.has(sessionId),
             )
           )
-            yield* reader.readTree;
+            yield* reader.readSessionList;
           for (const [sessionId, touched] of pendingReads.messagesToRead) {
             if (reader.known.has(sessionId)) yield* reader.readSession(sessionId, touched);
           }
@@ -361,7 +324,7 @@ export const layer = RunnerRpcs.toLayer(
           pendingReads = new PendingReads();
           if (yield* reader.isDone) {
             // Events naming OpenCode's last writes can arrive late.
-            yield* reader.readTree;
+            yield* reader.readSessionList;
             for (const sessionId of reader.known) yield* reader.readSession(sessionId, new Set());
             yield* reader.readForms;
             if (yield* reader.isDone) {

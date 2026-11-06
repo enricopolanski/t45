@@ -217,7 +217,6 @@ function SkillPicker({
   );
 }
 
-/** Picks an agent's model from what the runner offers. */
 function ModelPicker({
   models,
   value,
@@ -226,12 +225,12 @@ function ModelPicker({
   readonly value: string | null;
 }) {
   if (models.reason !== null) {
-    return <ErrorText text={`The runner can't list its models: ${models.reason}`} />;
+    return <ErrorText text={`T45 can't list the models: ${models.reason}`} />;
   }
   return (
     <Select name="model" required defaultValue={value}>
       <SelectTrigger>
-        <SelectValue placeholder="Model the runner offers">
+        <SelectValue placeholder="Choose a model">
           {(slug: string) => models.models.find((model) => model.slug === slug)?.name ?? slug}
         </SelectValue>
       </SelectTrigger>
@@ -276,7 +275,7 @@ function AgentForm({
         const form = new FormData(event.currentTarget);
         const model = form.get("model") ?? agent?.model;
         if (typeof model !== "string" || model === "") {
-          setError("Choose a model the runner offers.");
+          setError("Choose a model.");
         } else if (new Set(servers.map((server) => server.name)).size < servers.length) {
           setError("Give each MCP server its own name.");
         } else {
