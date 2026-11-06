@@ -13,7 +13,7 @@ import type { Agent } from "@t45/contracts/models/Agent";
 import {
   Chat,
   type ChatId,
-  type ChatStatus,
+  ChatStatus,
   Input,
   type InputId,
   InputPayload,
@@ -47,6 +47,14 @@ export interface MessageRow {
 const decodeOrigin = Schema.decodeUnknownEffect(Schema.fromJsonString(ChatOrigin));
 const encodeTrigger = Schema.encodeSync(Schema.fromJsonString(Trigger));
 const encodeState = Schema.encodeSync(Schema.fromJsonString(TaskState));
+const decodeTaskRows = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      task: Schema.fromJsonString(Task),
+      chatStatus: Schema.NullOr(Schema.Union([ChatStatus, Schema.Literal("deleted")])),
+    }),
+  ),
+);
 
 const makeOrigins = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -60,10 +68,6 @@ const makeOrigins = Effect.gen(function* () {
     );
   const get = (chatId: ChatId) =>
     select(sql`chat_id = ${chatId}`).pipe(Effect.map((rows) => rows[0] ?? null));
-  const tasks = (where: Statement.Fragment) =>
-    select(sql`trigger IS NOT NULL AND ${where}`).pipe(
-      Effect.map((rows) => rows.filter((row): row is Task => row.kind === "task")),
-    );
   return {
     get,
     insert: (origin: ChatOrigin) =>
@@ -78,8 +82,17 @@ const makeOrigins = Effect.gen(function* () {
       sql`UPDATE chat_origins SET state = ${encodeState(state)}
       WHERE chat_id = ${chatId} AND trigger IS NOT NULL`.pipe(Effect.asVoid, Effect.orDie),
     listByTrigger: (reference: { readonly ticketId: string; readonly stepId: string }) =>
-      tasks(
-        sql`json_extract(trigger, '$.ticketId') = ${reference.ticketId} AND json_extract(trigger, '$.stepId') = ${reference.stepId}`,
+      sql`SELECT json_object('kind', 'task', 'chatId', o.chat_id,
+          'trigger', json(o.trigger), 'state', json(o.state)) AS task,
+          CASE WHEN c.deleted_at IS NOT NULL THEN 'deleted' ELSE c.status END AS "chatStatus"
+        FROM chat_origins o JOIN chats c ON c.id = o.chat_id
+        WHERE o.trigger IS NOT NULL
+          AND json_extract(o.trigger, '$.ticketId') = ${reference.ticketId}
+          AND json_extract(o.trigger, '$.stepId') = ${reference.stepId}
+        ORDER BY c.created_at, c.id`.pipe(
+        Effect.flatMap(decodeTaskRows),
+        Effect.map((rows) => rows.map(({ task, chatStatus }) => ({ ...task, chatStatus }))),
+        Effect.orDie,
       ),
     recordedCalls: (chatId: ChatId, keys: ReadonlyArray<string>) =>
       sql<{ readonly key: string }>`SELECT call_key AS key FROM task_calls

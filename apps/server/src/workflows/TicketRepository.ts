@@ -2,7 +2,9 @@ import { Comment, Ticket } from "@t45/contracts/models/Workflow";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 const Row = Schema.Struct({
@@ -22,6 +24,10 @@ const IS_OPEN = `json_extract(t.status, '$.type') = 'open'`;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const changes = yield* PubSub.unbounded<string | undefined>();
+  // A ticket or workflow ID targets its views; omitting it invalidates every view.
+  const publishChange = (id?: string) =>
+    sql.afterCommit(PubSub.publish(changes, id).pipe(Effect.asVoid));
   const read = (where: string, params: ReadonlyArray<string>) =>
     sql
       .unsafe(`SELECT ${COLUMNS} FROM tickets t WHERE ${where}`, [...params])
@@ -29,6 +35,22 @@ const make = Effect.gen(function* () {
   const first = Effect.map(([ticket]: ReadonlyArray<Ticket>) => ticket ?? null);
 
   return {
+    publishChange,
+    watch: <A, E, R>(ticket: Pick<Ticket, "id" | "workflowId">, read: Effect.Effect<A, E, R>) =>
+      Stream.unwrap(
+        Effect.map(PubSub.subscribe(changes), (events) =>
+          Stream.concat(
+            Stream.fromEffect(read),
+            Stream.fromSubscription(events).pipe(
+              Stream.chunks,
+              Stream.filter((ids) =>
+                ids.some((id) => id === undefined || id === ticket.id || id === ticket.workflowId),
+              ),
+              Stream.mapEffect(() => read),
+            ),
+          ),
+        ),
+      ),
     transaction: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       sql.withTransaction(effect).pipe(Effect.catchTags({ SqlError: Effect.die })),
     get: (id: string) => read("t.id = ?", [id]).pipe(first),
@@ -58,6 +80,7 @@ const make = Effect.gen(function* () {
               steps, created_at)
             VALUES (${row.id}, ${row.workflowId}, ${row.title}, ${row.description},
               ${row.dueDate}, ${row.status}, ${row.steps}, ${row.createdAt})`;
+        yield* publishChange(ticket.id);
       }).pipe(Effect.orDie),
     update: (ticket: Ticket) =>
       Effect.gen(function* () {
@@ -65,6 +88,7 @@ const make = Effect.gen(function* () {
         yield* sql`UPDATE tickets SET title = ${row.title}, description = ${row.description},
               due_date = ${row.dueDate}, status = ${row.status}, steps = ${row.steps}
             WHERE id = ${row.id}`;
+        yield* publishChange(ticket.id);
       }).pipe(Effect.orDie),
     comments: (stepId: string) =>
       sql`SELECT id, author_id AS "author", body, created_at AS "createdAt",
@@ -80,6 +104,7 @@ const make = Effect.gen(function* () {
               created_at)
             VALUES (${row.id}, ${ticketId}, ${row.stepId}, ${row.author}, ${row.body},
               ${row.createdAt})`;
+        yield* publishChange(ticketId);
       }).pipe(Effect.orDie),
   };
 });

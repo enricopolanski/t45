@@ -61,12 +61,14 @@ import type { AssignmentSection, AssignmentView } from "@t45/contracts/resources
 import { NotFound } from "@t45/contracts/resources/errors";
 import type { NotificationView } from "@t45/contracts/resources/Notifications";
 import type { FieldView, TicketSummaryView } from "@t45/contracts/resources/Workflows";
+import { StepView } from "@t45/contracts/resources/Workflows";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
@@ -110,6 +112,7 @@ const decodeAttachReply = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ name: Schema.String, file: Schema.String })),
 );
 const decodeCall = Schema.decodeUnknownOption(StepToolCall);
+const sameStepView = Schema.toEquivalence(StepView);
 
 const textOf = (content: SessionMessage.ToolStateCompleted["content"]) =>
   content.flatMap((part) => (part.type === "text" && part.text ? [part.text] : [])).join("\n");
@@ -734,11 +737,11 @@ const make = Effect.gen(function* () {
       ...changes,
     };
     yield* definitions.update(next);
-    if (changes.steps !== undefined) {
-      for (const workflow of running) {
-        for (const ticket of yield* tickets.listOpen(workflow.id)) {
-          yield* moveOntoSteps({ workflow, definition: next, ticket }, actorId);
-        }
+    for (const workflow of running) {
+      yield* tickets.publishChange(workflow.id);
+      if (changes.steps === undefined) continue;
+      for (const ticket of yield* tickets.listOpen(workflow.id)) {
+        yield* moveOntoSteps({ workflow, definition: next, ticket }, actorId);
       }
     }
   }, transaction);
@@ -794,6 +797,7 @@ const make = Effect.gen(function* () {
       ...changes,
       adminUserIds,
     });
+    yield* tickets.publishChange(workflow.id);
   }, transaction);
 
   const deleteInstance = Effect.fnUntraced(function* (actorId: string, workflowId: string) {
@@ -882,11 +886,12 @@ const make = Effect.gen(function* () {
     yield* save(work);
   }, transaction);
 
-  const getStep = Effect.fnUntraced(function* (actorId: string, stepId: string) {
-    const { work, step } = yield* loadStep(stepId);
+  const getStep = Effect.fnUntraced(function* (actorId: string, ticketId: string, stepId: string) {
+    const work = yield* loadTicket(ticketId);
+    const step = stepIn(work, stepId);
     const actor = yield* actorOf(actorId);
-    if (!canViewTicket(actor, work.workflow, work.ticket)) return yield* new NotFound();
-    yield* notifications.markReadForStep({ userId: actorId, stepId, at: yield* DateTime.now });
+    if (step === null || !canViewTicket(actor, work.workflow, work.ticket))
+      return yield* new NotFound();
     const parents = ancestorSteps(work.ticket, step).toReversed();
     return {
       ticket: work.ticket,
@@ -916,7 +921,27 @@ const make = Effect.gen(function* () {
       })),
       comments: yield* tickets.comments(step.id),
       files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
-      tasks: yield* stepTasks(work, step),
+      tasks: (yield* stepTasks(work, step)).map(({ chatId, state, chatStatus }) => {
+        let statusLabel =
+          chatStatus === "running"
+            ? "Running"
+            : chatStatus === "failed"
+              ? "Failed"
+              : chatStatus === "interrupted"
+                ? step.status.type === "blocked"
+                  ? "Paused"
+                  : "Stopped"
+                : "Not running";
+        if (state.type === "submitted") {
+          statusLabel = chatStatus === "running" ? "Submitted · finishing" : "Submitted";
+        } else if (state.type === "settled") {
+          statusLabel =
+            state.outcome.type === "succeeded"
+              ? "Approved"
+              : `${state.outcome.type === "failed" ? "Failed" : "Cancelled"}: ${state.outcome.reason}`;
+        }
+        return { chatId, canOpenChat: chatStatus !== "deleted", statusLabel };
+      }),
     };
   });
 
@@ -1105,7 +1130,7 @@ const make = Effect.gen(function* () {
     if (claimed.sizeBytes === 0) {
       return yield* new WorkflowRefused({ reason: "invalid_attachment" });
     }
-    if (fieldKey === null) return;
+    if (fieldKey === null) return yield* tickets.publishChange(work.ticket.id);
     const updated = { ...step, values: { ...step.values, [fieldKey]: claimed.id } };
     putStep(work, updated);
     yield* refreshReadiness(work, updated);
@@ -1131,6 +1156,7 @@ const make = Effect.gen(function* () {
       yield* save(work);
     }
     yield* files.detach(file.id);
+    if (file.fieldKey === null) yield* tickets.publishChange(work.ticket.id);
   }, transaction);
 
   const listAssignments = Effect.fnUntraced(function* (actorId: string) {
@@ -1439,7 +1465,12 @@ const make = Effect.gen(function* () {
     cancelTicket,
     reopenTicket,
     setTicketDueDate,
-    getStep,
+    watchStep: (actorId: string, stepId: string) =>
+      Stream.unwrap(
+        Effect.map(found(tickets.getByStepId(stepId)), (ticket) =>
+          tickets.watch(ticket, getStep(actorId, ticket.id, stepId)),
+        ),
+      ).pipe(Stream.changesWith(sameStepView)),
     setStepField: memberCommand(setField),
     markStepDone,
     approveStep,

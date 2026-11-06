@@ -6,10 +6,12 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { ChatRepository } from "../chats/ChatRepository.ts";
 import { ChatService } from "../chats/ChatService.ts";
+import { ChatEvents } from "../chats/ChatEvents.ts";
 import { TicketRepository } from "../workflows/TicketRepository.ts";
 import { isActionable } from "@t45/contracts/models/Workflow";
 
@@ -41,6 +43,26 @@ const make = Effect.gen(function* () {
         () => new NotFound(),
       ),
     );
+  const changes = yield* (yield* ChatEvents).subscribe(
+    (change) => change.kind === "chat" || change.kind === "posted" || change.kind === "deleted",
+  );
+  yield* changes.pipe(
+    Stream.runForEach((change) =>
+      Effect.gen(function* () {
+        if (change.kind === "missed") return yield* tickets.publishChange();
+        const task = yield* get(change.chatId);
+        if (task?.trigger.type === "step") yield* tickets.publishChange(task.trigger.ticketId);
+      }).pipe(
+        Effect.catchDefect((cause) =>
+          Effect.logWarning("Forwarding a chat change to step views failed", {
+            change,
+            cause,
+          }).pipe(Effect.andThen(tickets.publishChange())),
+        ),
+      ),
+    ),
+    Effect.forkScoped,
+  );
   const canRun = (task: Task) =>
     Effect.gen(function* () {
       if (task.trigger.type !== "step") return true;
@@ -58,6 +80,7 @@ const make = Effect.gen(function* () {
     if (task.state.type === "settled") return null;
     if (state.type === "settled") yield* chats.requestStop(task.chatId);
     yield* origins.setState(task.chatId, state);
+    if (task.trigger.type === "step") yield* tickets.publishChange(task.trigger.ticketId);
     return { ...task, state };
   });
   const saved = (

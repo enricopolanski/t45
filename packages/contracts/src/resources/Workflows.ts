@@ -1,4 +1,4 @@
-import { Task } from "../models/Task.ts";
+import { ChatId } from "../models/Chat.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
@@ -126,7 +126,13 @@ export const StepView = Schema.Struct({
   subSteps: Schema.Array(Schema.Struct({ ...StepSummaryView.fields, name: TrimmedNonEmptyString })),
   comments: Schema.Array(Comment),
   files: Schema.Array(StepFileView),
-  tasks: Schema.Array(Task),
+  tasks: Schema.Array(
+    Schema.Struct({
+      chatId: ChatId,
+      canOpenChat: Schema.Boolean,
+      statusLabel: Schema.String,
+    }),
+  ),
 });
 export type StepView = typeof StepView.Type;
 
@@ -224,7 +230,7 @@ export const Workflows = RpcGroup.make(
     payload: { ...ticket, dueDate: Ticket.fields.dueDate },
     error: WorkflowErrors,
   }),
-  Rpc.make("getStep", { payload: step, success: StepView, error: WorkflowErrors }),
+  Rpc.make("watchStep", { payload: step, success: StepView, error: WorkflowErrors, stream: true }),
   Rpc.make("setStepField", {
     payload: { ...step, fieldKey: TrimmedNonEmptyString, value: Schema.Json },
     error: WorkflowErrors,

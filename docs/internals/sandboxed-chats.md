@@ -12,6 +12,8 @@ Each native message/part key is checked before attachment preparation and record
 
 The consumer and execution share a fiber, so stops cancel result handling directly, without an acknowledgement protocol, and nothing it needs lives in the VM. Chat and task completion commit together. Task and workflow commands save inputs and request stops after commit; a stop is only a request, so result handling never waits on its own execution.
 
+A task's state is independent of its chat's execution: blocking leaves the task active, and submission does not imply the execution has finished.
+
 ## Fail closed
 
 The server doesn't start without `RUNNER_URL` and `RUNNER_TOKEN`, and the runner doesn't start without any of its settings, among them `OPENCODE_API_KEY`, the OpenCode Go key every VM's model runs on. A VM the sandbox refuses, because it could not start (as without KVM), fails the chat, and with it a step's agent work; the reason goes to the runner's log. Nothing falls back to T45. A runner out of reach fails the execution (see [Chats](./chats.md)); neither the server nor the runner retries it.

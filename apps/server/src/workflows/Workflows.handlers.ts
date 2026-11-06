@@ -1,6 +1,7 @@
 import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
 import { Workflows } from "@t45/contracts/resources/Workflows";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 
 import { WorkflowService } from "./WorkflowService.ts";
 
@@ -33,7 +34,8 @@ export const layer = Workflows.middleware(Authorization).toLayer(
         asViewer((id) => workflows.reopenTicket(id, ticketId)),
       "workflows.setTicketDueDate": (input) =>
         asViewer((id) => workflows.setTicketDueDate(id, input)),
-      "workflows.getStep": ({ stepId }) => asViewer((id) => workflows.getStep(id, stepId)),
+      "workflows.watchStep": ({ stepId }) =>
+        Stream.unwrap(Effect.map(CurrentUser, (user) => workflows.watchStep(user.userId, stepId))),
       "workflows.setStepField": (input) => asViewer((id) => workflows.setStepField(id, input)),
       "workflows.markStepDone": ({ stepId }) =>
         asViewer((id) => workflows.markStepDone(id, stepId)),

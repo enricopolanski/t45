@@ -1,10 +1,13 @@
 import { generateId } from "@t45/contracts/models/primitives";
-import type { StepAutomation } from "@t45/contracts/models/Workflow";
+import { StepAutomation } from "@t45/contracts/models/Workflow";
+import * as Schema from "effect/Schema";
 import { useState } from "react";
 
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { ActorPicker } from "./ActorPicker";
+
+const areAutomationsEqual = Schema.toEquivalence(Schema.Array(StepAutomation));
 
 export function StepAutomationsEditor({
   entries,
@@ -17,7 +20,7 @@ export function StepAutomationsEditor({
 }) {
   const [source, setSource] = useState(entries);
   const [draft, setDraft] = useState(entries);
-  if (source !== entries) {
+  if (!areAutomationsEqual(source, entries)) {
     setSource(entries);
     setDraft(entries);
   }
@@ -65,7 +68,9 @@ export function StepAutomationsEditor({
         </Button>
         <Button
           size="sm"
-          disabled={busy || draft === entries || draft.some((entry) => !entry.agentId)}
+          disabled={
+            busy || areAutomationsEqual(draft, entries) || draft.some((entry) => !entry.agentId)
+          }
           onClick={() => onSave(draft)}
         >
           Save automations
