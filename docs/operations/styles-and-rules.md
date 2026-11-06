@@ -2,6 +2,10 @@
 
 These rules apply when writing or reviewing T45 code.
 
+## Merging pull requests
+
+Squash pull requests into one commit on the target branch by default; use another merge strategy only when explicitly requested.
+
 ## Architecture
 
 Models in `packages/contracts/src/models` describe application entities such as users and agents, and represent data as it makes sense to the domain; they do not bend to make storage or transport easier.
