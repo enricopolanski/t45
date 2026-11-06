@@ -14,7 +14,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter } from "effect/http";
 
-import { ServerActivation } from "../serverActivation.ts";
 import { UserService } from "../org/UserService.ts";
 import { SessionInvalidError } from "../auth/Authentication.ts";
 import * as Fixture from "../chats/Chats.testkit.ts";
@@ -134,7 +133,6 @@ describe("attachment routes", () => {
   const layerContext = layerAuth.pipe(
     Layer.provideMerge(Fixture.layer),
     Layer.provideMerge(layerFileResponse),
-    Layer.provide(Layer.succeed(ServerActivation, Effect.never)),
   );
 
   type RequestOptions = { method?: string; body?: string; session?: string };

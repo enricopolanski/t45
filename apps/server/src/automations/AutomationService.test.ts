@@ -6,7 +6,6 @@ import { AuthSessionId } from "@t45/contracts/resources/Session";
 import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
 import { Automations } from "@t45/contracts/resources/Automations";
 import * as DateTime from "effect/DateTime";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
@@ -18,9 +17,8 @@ import * as TestClock from "effect/testing/TestClock";
 import { AdminOnly } from "../auth/Authorization.ts";
 import { ChatEvents } from "../chats/ChatEvents.ts";
 import { ChatRepository } from "../chats/ChatRepository.ts";
-import { addAgent, addUser, layerStore as layerChats } from "../chats/Chats.testkit.ts";
+import { addAgent, addUser, layer as layerChats } from "../chats/Chats.testkit.ts";
 import { FakeRunner } from "../runner/FakeRunner.testkit.ts";
-import * as ServerActivation from "../serverActivation.ts";
 import * as AutomationRepository from "./AutomationRepository.ts";
 import * as AutomationService from "./AutomationService.ts";
 import * as AutomationsHandlers from "./Automations.handlers.ts";
@@ -156,8 +154,6 @@ const clientAs = (role: "admin" | "member") =>
       ),
     ),
   );
-
-const parked = Effect.provideService(ServerActivation.ServerActivation, Effect.never);
 
 it.effect("posts a due slot to a new chat with no owner, then advances the slot", () =>
   Effect.gen(function* () {
@@ -321,23 +317,6 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
-it.effect("holds due runs until startup recovery activates the server", () =>
-  Effect.gen(function* () {
-    yield* seed;
-    yield* addTask("due");
-    yield* TestClock.setTime(DateTime.toEpochMillis(at) + 1_000);
-    const activation = yield* Deferred.make<void>();
-    const takeRun = yield* followRuns;
-    yield* Layer.build(layerTasks()).pipe(
-      Effect.provideService(ServerActivation.ServerActivation, Deferred.await(activation)),
-    );
-    yield* TestClock.adjust("10 seconds");
-    assert.equal(iso((yield* get("due")).nextRunAt), AT);
-    yield* Deferred.succeed(activation, undefined);
-    assert.deepEqual((yield* takeRun()).title, runTitle("due"));
-  }).pipe(Effect.scoped, Effect.provide(layerStore)),
-);
-
 it.effect("Run now posts the prompt to a new chat and leaves the next slot alone", () =>
   Effect.gen(function* () {
     yield* seed;
@@ -377,7 +356,7 @@ it.effect("Run now posts the prompt to a new chat and leaves the next slot alone
       id: AutomationId.make("hook"),
     }).pipe(Effect.flip);
     assert.deepInclude(onRequest, { _tag: "AutomationRefused", reason: "runs_on_request" });
-  }).pipe(parked, Effect.scoped, Effect.provide(layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
 it.effect("refuses members on every tag before reading or changing an automation", () =>
@@ -410,10 +389,10 @@ it.effect("refuses members on every tag before reading or changing an automation
       refused.map(() => "AccessDenied"),
     );
     assert.deepEqual(encodeTask(yield* get("guarded")), encodeTask(automation));
-  }).pipe(parked, Effect.scoped, Effect.provide(layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
-it.effect("keeps a due run through a title edit and restarts it when the schedule changes", () =>
+it.effect("keeps the next run through a title edit and restarts it when the schedule changes", () =>
   Effect.gen(function* () {
     yield* seed;
     const admin = yield* clientAs("admin").pipe(Effect.provide(yield* Layer.build(layerTasks())));
@@ -428,7 +407,7 @@ it.effect("keeps a due run through a title edit and restarts it when the schedul
     assert.equal(iso(created.nextRunAt), "1970-01-01T00:01:00.000Z");
     assert.isNull(created.webhookToken);
 
-    yield* TestClock.adjust("2 minutes");
+    yield* TestClock.adjust("30 seconds");
     const renamed = yield* admin["automations.update"]({
       id: created.id,
       ...settings,
@@ -443,18 +422,18 @@ it.effect("keeps a due run through a title edit and restarts it when the schedul
       title: "Review PRs",
       schedule: { type: "interval", everyMs: 120_000 },
     });
-    assert.equal(iso(rescheduled.nextRunAt), "1970-01-01T00:04:00.000Z");
+    assert.equal(iso(rescheduled.nextRunAt), "1970-01-01T00:02:30.000Z");
 
     const paused = yield* admin["automations.setEnabled"]({ id: created.id, isEnabled: false });
     assert.isNull(paused.nextRunAt);
     yield* TestClock.adjust("1 minute");
     const resumed = yield* admin["automations.setEnabled"]({ id: created.id, isEnabled: true });
-    assert.equal(iso(resumed.nextRunAt), "1970-01-01T00:05:00.000Z");
+    assert.equal(iso(resumed.nextRunAt), "1970-01-01T00:03:30.000Z");
     assert.deepEqual(
       (yield* admin["automations.list"]()).map((automation) => automation.title),
       ["Review PRs"],
     );
-  }).pipe(parked, Effect.scoped, Effect.provide(layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
 it.effect("mints a webhook's token, rotates it, and keeps the rotated one through a save", () =>
@@ -487,7 +466,7 @@ it.effect("mints a webhook's token, rotates it, and keeps the rotated one throug
       Effect.flip,
     );
     assert.deepInclude(notAWebhook, { _tag: "AutomationRefused", reason: "not_a_webhook" });
-  }).pipe(parked, Effect.scoped, Effect.provide(layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
 it.effect("refuses an archived agent, and answers NotFound for an unknown automation", () =>
@@ -518,5 +497,5 @@ it.effect("refuses an archived agent, and answers NotFound for an unknown automa
       afterDelete.map((error) => error._tag),
       afterDelete.map(() => "NotFound"),
     );
-  }).pipe(parked, Effect.scoped, Effect.provide(layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );

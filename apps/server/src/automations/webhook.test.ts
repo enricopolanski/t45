@@ -10,7 +10,7 @@ import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 
 import { ChatRepository } from "../chats/ChatRepository.ts";
-import { addAgent, addUser, layerStore as layerChats } from "../chats/Chats.testkit.ts";
+import { addAgent, addUser, layer as layerChats } from "../chats/Chats.testkit.ts";
 import { FakeRunner } from "../runner/FakeRunner.testkit.ts";
 import * as AutomationRepository from "./AutomationRepository.ts";
 import * as AutomationService from "./AutomationService.ts";

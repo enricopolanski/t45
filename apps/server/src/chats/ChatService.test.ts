@@ -245,7 +245,7 @@ describe("chats", () => {
         [yield* titleOf(2), (yield* repository.get(taskId))?.title],
         ["Image: shot.png", "Inbox digest"],
       );
-    }).pipe(Effect.provide(Fixture.layerStore)),
+    }).pipe(Effect.provide(Fixture.layer)),
   );
 
   it.effect("deletes a chat for everyone at once", () =>
@@ -375,7 +375,7 @@ describe("chats", () => {
         assert.deepEqual(yield* sql`SELECT chat_id, attachment_id FROM chat_attachments`, [
           { chat_id: kept, attachment_id: mine.id },
         ]);
-      }).pipe(Effect.provide(Fixture.layerStore)),
+      }).pipe(Effect.provide(Fixture.layer)),
   );
 
   it.effect(
@@ -445,7 +445,7 @@ describe("chats", () => {
           [yield* outcomeOf(postTo(3, "Other.")), yield* outcomeOf(postTo(4, "Other."))],
           ["ok", "ok"],
         );
-      }).pipe(Effect.scoped, Effect.provide(Fixture.layerStore)),
+      }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
   it.effect(
@@ -478,7 +478,7 @@ describe("chats", () => {
           (yield* repository.pendingInputs(chatId)).map((input) => input.inputId),
           ["plain"],
         );
-      }).pipe(Effect.provide(Fixture.layerStore)),
+      }).pipe(Effect.provide(Fixture.layer)),
   );
 
   it.effect("sends a stream that fell far behind a fresh snapshot instead of what it missed", () =>

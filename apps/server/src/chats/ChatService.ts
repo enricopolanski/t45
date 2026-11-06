@@ -51,7 +51,6 @@ import * as DateTime from "effect/DateTime";
 import { isInvolved } from "@t45/contracts/models/Workflow";
 import { TicketRepository } from "../workflows/TicketRepository.ts";
 import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
-import { forkParked } from "../serverActivation.ts";
 
 export interface Member {
   readonly userId: StringId;
@@ -339,11 +338,7 @@ const make = Effect.gen(function* () {
       };
     });
 
-  yield* forkParked(
-    Effect.gen(function* () {
-      for (const chatId of yield* repository.owed) yield* executions.deliver(chatId);
-    }),
-  );
+  for (const chatId of yield* repository.owed) yield* executions.deliver(chatId);
 
   return {
     post,

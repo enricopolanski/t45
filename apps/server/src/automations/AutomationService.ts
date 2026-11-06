@@ -19,7 +19,6 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { forkParked } from "../serverActivation.ts";
 import * as AutomationRepository from "./AutomationRepository.ts";
 import {
   constantTimeEquals,
@@ -119,9 +118,8 @@ const make = Effect.gen(function* () {
     ),
     logFailure("Automation pass failed"),
   );
-  // Parked until the server is ready. The next pass is spaced from the end
-  // of the last one, so passes never overlap.
-  yield* forkParked(pass.pipe(Effect.repeat(Schedule.spaced("5 seconds"))));
+  // The next pass is spaced from the end of the last one, so passes never overlap.
+  yield* Effect.forkScoped(pass.pipe(Effect.repeat(Schedule.spaced("5 seconds"))));
 
   /**
    * A one-minute window counting every request with a valid token, including

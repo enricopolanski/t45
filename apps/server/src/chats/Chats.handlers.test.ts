@@ -110,7 +110,7 @@ it.effect("answers NotFound for another person's chat, even for admins", () =>
       const client = yield* clientFor(userId, role);
       assert.deepStrictEqual(yield* refusalsFor(client, aliceChat), allNotFound);
     }
-  }).pipe(Effect.scoped, Effect.provide(Fixture.layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
 );
 
 it.effect("answers NotFound for a deleted chat, even to its owner", () =>
@@ -119,7 +119,7 @@ it.effect("answers NotFound for a deleted chat, even to its owner", () =>
     yield* (yield* ChatRepository).markDeleted(aliceChat, "2026-10-23T09:00:00.000Z");
     const client = yield* clientFor("user-alice", "member");
     assert.deepStrictEqual(yield* refusalsFor(client, aliceChat), allNotFound);
-  }).pipe(Effect.scoped, Effect.provide(Fixture.layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
 );
 
 it.effect("lets admins reach automation's chats, which members don't find", () =>
@@ -131,5 +131,5 @@ it.effect("lets admins reach automation's chats, which members don't find", () =
     const admin = yield* clientFor("admin01", "admin");
     yield* admin["chats.rename"]({ chatId: automation, title: "Nightly" });
     assert.equal((yield* (yield* ChatRepository).get(automation))?.title, "Nightly");
-  }).pipe(Effect.scoped, Effect.provide(Fixture.layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
 );

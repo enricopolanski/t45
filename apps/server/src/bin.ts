@@ -4,7 +4,6 @@ import * as NodeHttp from "node:http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -30,7 +29,6 @@ import * as UserRepository from "./org/UserRepository.ts";
 import { UserService } from "./org/UserService.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { RunnerService } from "./runner/RunnerService.ts";
-import * as ServerActivation from "./serverActivation.ts";
 import { TaskService } from "./tasks/TaskService.ts";
 import * as NotificationRepository from "./workflows/NotificationRepository.ts";
 import * as TicketRepository from "./workflows/TicketRepository.ts";
@@ -87,18 +85,11 @@ const layerMakeServer = Layer.unwrap(
     const port = yield* ServerConfig.port;
     const logLevel = yield* ServerConfig.logLevel;
     const logRequests = yield* ServerConfig.logRequests;
-    const activation = yield* Deferred.make<void>();
 
     const layerRoutes = HttpRouter.serve(layerMakeRoutes, {
       disableLogger: !logRequests,
       routerConfig: { maxParamLength: 512 },
-    }).pipe(
-      Layer.tap(() =>
-        Deferred.succeed(activation, undefined).pipe(
-          Effect.andThen(Effect.logInfo("T45 server is ready", { host, port })),
-        ),
-      ),
-    );
+    }).pipe(Layer.tap(() => Effect.logInfo("T45 server is ready", { host, port })));
     return layerRoutes.pipe(
       Layer.provideMerge(
         NodeHttpServer.layer(() => NodeHttp.createServer(), {
@@ -108,7 +99,6 @@ const layerMakeServer = Layer.unwrap(
         }),
       ),
       Layer.provideMerge(layerRuntimeDependencies),
-      Layer.provide(Layer.succeed(ServerActivation.ServerActivation, Deferred.await(activation))),
       Layer.provide(Logger.layer([Logger.consolePretty()])),
       Layer.provide(Layer.succeed(References.MinimumLogLevel, logLevel)),
       Layer.provideMerge(FetchHttpClient.layer),

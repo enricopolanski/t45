@@ -31,7 +31,6 @@ import * as WorkflowRepository from "../workflows/WorkflowRepository.ts";
 
 import { TaskService } from "../tasks/TaskService.ts";
 import * as WorkflowService from "../workflows/WorkflowService.ts";
-import { ServerActivation } from "../serverActivation.ts";
 
 export const testChatId = (n: number) =>
   ChatId.make(`00000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
@@ -59,9 +58,6 @@ export const layer = WorkflowService.layer.pipe(
   Layer.provideMerge(FakeRunner.layer),
   Layer.provideMerge(layerPersistence),
 );
-
-/** Chat commands over the same fixture, with background execution parked. */
-export const layerStore = layer.pipe(Layer.provide(Layer.succeed(ServerActivation, Effect.never)));
 
 const AT = "2026-10-23T09:00:00.000Z";
 
