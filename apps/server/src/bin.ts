@@ -38,16 +38,6 @@ import * as WorkflowDefinitionRepository from "./workflows/WorkflowDefinitionRep
 import * as WorkflowRepository from "./workflows/WorkflowRepository.ts";
 import * as WorkflowService from "./workflows/WorkflowService.ts";
 
-// Ids in paths can exceed find-my-way's 100-character default for one path segment.
-const HTTP_ROUTER_CONFIG = {
-  maxParamLength: 512,
-} as const;
-
-// Effect's default preemptive shutdown waits 20s before finalizing request scopes.
-// Held RPC streams are long-lived requests that a restart may cut: their clients
-// retry. Do not add an artificial drain before their finalizers get a chance to run.
-const HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS = 0;
-
 const layerStore = Layer.mergeAll(
   ChatRepository.layer,
   AttachmentRepository.layer,
@@ -101,7 +91,7 @@ const layerMakeServer = Layer.unwrap(
 
     const layerRoutes = HttpRouter.serve(layerMakeRoutes, {
       disableLogger: !logRequests,
-      routerConfig: HTTP_ROUTER_CONFIG,
+      routerConfig: { maxParamLength: 512 },
     }).pipe(
       Layer.tap(() =>
         Deferred.succeed(activation, undefined).pipe(
@@ -114,7 +104,7 @@ const layerMakeServer = Layer.unwrap(
         NodeHttpServer.layer(() => NodeHttp.createServer(), {
           host,
           port,
-          gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
+          gracefulShutdownTimeout: 0,
         }),
       ),
       Layer.provideMerge(layerRuntimeDependencies),
