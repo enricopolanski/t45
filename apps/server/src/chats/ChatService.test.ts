@@ -140,7 +140,7 @@ describe("chats", () => {
         const chatId = yield* startTask(quiet);
         yield* chats.send({ chatId, inputId: "steer-1", ...typed("Read it.") }, admin);
         assert.deepEqual(
-          (yield* repository.inputs(chatId)).map((input) => input.payload.text),
+          (yield* repository.pendingInputs(chatId)).map((input) => input.payload.text),
           ["Read the report.", "Read it."],
         );
       }).pipe(Effect.provide(Fixture.layer)),

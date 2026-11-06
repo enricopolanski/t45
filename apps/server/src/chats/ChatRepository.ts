@@ -144,11 +144,6 @@ const make = Effect.gen(function* () {
       .toSorted()
       .join("\n");
   const sessionColumns = sql.literal(SESSION_COLUMNS);
-  const inputs = (chatId: ChatId) =>
-    sql`SELECT ${inputColumns} FROM chat_inputs WHERE chat_id = ${chatId} ORDER BY ordinal`.pipe(
-      Effect.orDie,
-      Effect.flatMap(inputsOf),
-    );
   /** The chat's inputs whose user message isn't stored: what its next execution sends. */
   const pendingInputs = (chatId: ChatId) =>
     sql`SELECT ${inputColumns} FROM chat_inputs AS input
@@ -252,7 +247,6 @@ const make = Effect.gen(function* () {
         SELECT ${chatId}, ${input.inputId},
           COALESCE((SELECT MAX(ordinal) + 1 FROM chat_inputs WHERE chat_id = ${chatId}), 0),
           ${encodePayload(input.payload)}, ${input.at}`.pipe(Effect.asVoid, Effect.orDie),
-    inputs,
     pendingInputs,
     deleteInput: (chatId: ChatId, inputId: InputId) =>
       sql`DELETE FROM chat_inputs WHERE chat_id = ${chatId} AND input_id = ${inputId}`.pipe(

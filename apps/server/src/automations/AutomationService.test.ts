@@ -19,6 +19,7 @@ import { AdminOnly } from "../auth/Authorization.ts";
 import { ChatEvents } from "../chats/ChatEvents.ts";
 import { ChatRepository } from "../chats/ChatRepository.ts";
 import { addAgent, addUser, layerStore as layerChats } from "../chats/Chats.testkit.ts";
+import { FakeRunner } from "../runner/FakeRunner.testkit.ts";
 import * as ServerActivation from "../serverActivation.ts";
 import * as AutomationRepository from "./AutomationRepository.ts";
 import * as AutomationService from "./AutomationService.ts";
@@ -42,6 +43,8 @@ const runTitle = (automationId: string) => `Task ${automationId}`;
 const layerStore = AutomationRepository.layer.pipe(Layer.provideMerge(layerChats));
 
 const seed = Effect.gen(function* () {
+  // Inputs stay pending, so `runOf` reads every input a run got.
+  (yield* FakeRunner).hold = true;
   yield* addUser(ADMIN, "admin");
   yield* addAgent("Clerk", { chat: false });
   yield* addAgent("Retired", { status: "archived" });
@@ -104,7 +107,7 @@ const runOf = (chatId: ChatId) =>
   Effect.gen(function* () {
     const chats = yield* ChatRepository;
     const chat = yield* chats.get(chatId).pipe(Effect.flatMap(Effect.fromNullishOr), Effect.orDie);
-    const inputs = yield* chats.inputs(chatId);
+    const inputs = yield* chats.pendingInputs(chatId);
     return {
       origin: (yield* chats.origins.get(chatId))?.kind,
       agentId: chat.agentId,
