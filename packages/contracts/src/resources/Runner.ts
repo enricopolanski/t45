@@ -28,7 +28,7 @@ export const ExecutionRequest = Schema.Struct({
       Schema.Struct(Struct.pick(Skill.fields, ["name", "description", "content", "files"])),
     ),
   }),
-  root: Session.ID,
+  rootId: Session.ID,
   title: Schema.String,
   allowQuestions: Schema.Boolean,
   /** The disk the last finished execution left, conversation included; null for a new chat. */
@@ -82,20 +82,20 @@ export class QuestionGone extends Schema.TaggedError<QuestionGone>()("QuestionGo
 
 export class AnswerInvalid extends Schema.TaggedError<AnswerInvalid>()("AnswerInvalid", {}) {}
 
-const question = { id: Schema.String, sessionId: Session.ID, formId: Form.ID };
+const question = { rootId: Session.ID, sessionId: Session.ID, formId: Form.ID };
 
-/** One execution per `id` at a time; it lasts as long as its `execute` call. */
+/** One execution per root session at a time; it lasts as long as its `execute` call. */
 export const RunnerRpcs = RpcGroup.make(
   Rpc.make("execute", {
-    payload: { id: Schema.String, request: ExecutionRequest },
+    payload: ExecutionRequest,
     success: ExecutionUpdate,
     stream: true,
   }),
-  Rpc.make("send", { payload: { id: Schema.String, message: Message, files: Files } }),
+  Rpc.make("send", { payload: { rootId: Session.ID, message: Message, files: Files } }),
   Rpc.make("answer", {
     payload: { ...question, answer: Form.Answer, files: Files },
     error: Schema.Union([QuestionGone, AnswerInvalid]),
   }),
   Rpc.make("dismiss", { payload: question, error: QuestionGone }),
-  Rpc.make("cancel", { payload: { id: Schema.String, messageId: SessionMessage.ID } }),
+  Rpc.make("cancel", { payload: { rootId: Session.ID, messageId: SessionMessage.ID } }),
 );

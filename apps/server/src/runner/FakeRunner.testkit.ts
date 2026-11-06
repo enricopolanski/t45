@@ -19,6 +19,7 @@ import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcTest from "effect/rpc/RpcTest";
 
+import { rootSessionId } from "../chats/ChatIds.ts";
 import { RunnerService } from "./RunnerService.ts";
 
 type RunnerRpc = RpcGroup.Rpcs<typeof RunnerRpcs>;
@@ -40,9 +41,9 @@ const make = () => {
   const running = new Map<string, Execution>();
   let next = 1;
 
-  const executionOf = (id: string) => {
-    const execution = running.get(id);
-    if (execution === undefined) throw new Error(`No execution for ${id}.`);
+  const executionOf = (chatId: string) => {
+    const execution = running.get(rootSessionId(chatId));
+    if (execution === undefined) throw new Error(`No execution for ${chatId}.`);
     return execution;
   };
   const emit = (execution: Execution, event: ExecutionUpdate) =>
@@ -50,7 +51,7 @@ const make = () => {
   const write = (execution: Execution, message: unknown) =>
     emit(execution, {
       _tag: "messages",
-      sessionId: execution.request.root,
+      sessionId: execution.request.rootId,
       messages: [decodeMessage(message)],
     });
   const deliver = (execution: Execution, message: Message) => {
@@ -58,9 +59,9 @@ const make = () => {
   };
   /** As in a new VM: the root session, then each message the agent takes. */
   const begin = (execution: Execution) => {
-    const { root, title } = execution.request;
+    const { rootId, title } = execution.request;
     const info = decodeSession({
-      id: root,
+      id: rootId,
       title,
       projectID: "global",
       cost: 0,
@@ -105,7 +106,7 @@ const make = () => {
       const execution = executionOf(id);
       const form = Form.Info.make({
         id: Form.ID.make(`frm_${String(next++)}`),
-        sessionID: execution.request.root,
+        sessionID: execution.request.rootId,
         title: "Which year?",
         fields: [{ key: "year", type: "string" }],
       });
@@ -128,31 +129,31 @@ const make = () => {
     /** Waits until the chat's `execute` call ended: at once when none runs. */
     ended: (id: string) =>
       Effect.suspend(() => {
-        const execution = running.get(id);
+        const execution = running.get(rootSessionId(id));
         return execution === undefined ? Effect.void : Deferred.await(execution.ended);
       }),
   };
 
   const handlers = RunnerRpcs.of({
-    execute: (payload) =>
+    execute: (request) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          fake.executions.push(payload);
+          fake.executions.push(request);
           if (fake.refuse !== null) {
             return Stream.die(fake.refuse);
           }
           const execution: Execution = {
-            request: payload.request,
-            messages: [...payload.request.messages],
+            request,
+            messages: [...request.messages],
             events: yield* Queue.unbounded<ExecutionUpdate, Cause.Done>(),
             ended: yield* Deferred.make<void>(),
           };
-          running.set(payload.id, execution);
+          running.set(request.rootId, execution);
           begin(execution);
           return Stream.fromQueue(execution.events).pipe(
             Stream.ensuring(
               Effect.suspend(() => {
-                if (running.get(payload.id) === execution) running.delete(payload.id);
+                if (running.get(request.rootId) === execution) running.delete(request.rootId);
                 return Deferred.succeed(execution.ended, undefined);
               }),
             ),
@@ -162,7 +163,7 @@ const make = () => {
     send: (payload) =>
       Effect.sync(() => {
         fake.sends.push(payload);
-        const execution = running.get(payload.id);
+        const execution = running.get(payload.rootId);
         if (execution === undefined) return;
         execution.messages.push(payload.message);
         deliver(execution, payload.message);

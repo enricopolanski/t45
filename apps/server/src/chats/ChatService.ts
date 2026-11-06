@@ -521,7 +521,10 @@ const make = Effect.gen(function* () {
           return yield* refuse("already_taken");
         }
         yield* runner
-          .cancel({ id: chat.id, messageId: inputMessageId(chat.id, input.inputId) })
+          .cancel({
+            rootId: rootSessionId(chat.id),
+            messageId: inputMessageId(chat.id, input.inputId),
+          })
           .pipe(Effect.catchTags({ RpcClientError: unavailable(chat.id) }));
         yield* repository.deleteInput(chat.id, input.inputId);
         yield* publish(chat.id, "inputs");
@@ -557,7 +560,7 @@ const make = Effect.gen(function* () {
         });
         yield* runner
           .answer({
-            id: chat.id,
+            rootId: rootSessionId(chat.id),
             sessionId: input.sessionId,
             formId: input.formId,
             answer,
@@ -576,7 +579,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const chat = yield* commandChat(member, input.chatId);
         yield* runner
-          .dismiss({ id: chat.id, sessionId: input.sessionId, formId: input.formId })
+          .dismiss({
+            rootId: rootSessionId(chat.id),
+            sessionId: input.sessionId,
+            formId: input.formId,
+          })
           .pipe(
             Effect.catchTags({
               QuestionGone: () => refuse("question_gone"),

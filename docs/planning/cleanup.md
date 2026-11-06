@@ -7,7 +7,6 @@ Each entry names the file and what could change. Delete an entry once it is done
 ## apps/server/src/attachments
 
 - `apps/server/src/attachments/AttachmentRepository.ts` — the store keeps every file's bytes under the server's state directory (`attachmentsDir`). Add a cloud implementation that keeps them in an object-storage bucket behind the same service.
-- `apps/runner/src/ExecutionOrchestrator.ts` — `writeFiles` only logs when the sandbox refuses a file, but `PromptService` still names its path in the prompt and in answers, so the agent looks for a file that isn't in `/work/attachments`. Have it report what it put, and say in the prompt, or in a note for files re-put at restore, which files didn't arrive.
 
 ## apps/server/src/chats, opencode
 
@@ -18,13 +17,13 @@ Each entry names the file and what could change. Delete an entry once it is done
 - `apps/runner/src/ExecutionOrchestrator.ts` — there is no per-chat storage quota: only the disk is capped, not the messages and attachments T45 keeps.
 - `apps/runner/src/ExecutionOrchestrator.ts` — a subagent session the agent removes inside its VM stays in `known`, so `readForms`, `readSession` and `done` call OpenCode for it and get `SessionNotFoundError`, which fails the execution, though `docs/internals/chats.md` says a removed subagent keeps what the runner read of it.
 - `apps/server/src/chats/ChatService.ts` — `docs/internals/chats.md` says a delete cleanup cut short is finished at the next server start, but no startup path reads tombstoned chats.
-- `apps/runner/src/ExecutionOrchestrator.ts` — a generated file whose read fails is left out, so a VM lost between listing and reading `.t45/attached` still sends the messages naming it; the workflow hook refuses the attach with an input that is kept, and a later execution can send that refusal for a call its conversation doesn't contain.
 - `apps/runner/src/ExecutionOrchestrator.ts` — an input re-sent when a new input starts a chat after failure, or when server startup recovers a running chat, can repeat committed workflow side effects. Discarding output does not undo those effects, and newly generated tool-call IDs bypass the receipt ledger.
 - `apps/runner/src/ExecutionOrchestrator.ts` — nothing retries a VM whose removal failed, so it runs until its chat's next execution replaces it or the runner restarts.
 
 ## apps/runner
 
-- `apps/runner/src/ExecutionOrchestrator.ts` — nothing tests the execution logic since the scripted OpenCode fake went; `ExecutionOrchestrator.test.ts` covers `connect` alone, and a fake would need the seam provided by the removed `SandboxManager` service.
+- `apps/runner/src/ExecutionOrchestrator.ts` — `createOpencodeClient` bolts a `file.read` onto the generated client with `Object.defineProperty` because `@opencode/client` adapts `fs.list` and `fs.find` but not `fs.read`. Add `file.read` to the client's generator upstream and drop the patch.
+- `apps/runner/src/ExecutionOrchestrator.ts` — nothing tests the execution logic since the scripted OpenCode fake went, and a fake would need the seam provided by the removed `SandboxManager` service.
 - `apps/runner/src/ExecutionOrchestrator.ts` — `Stream.callback` creates an unbounded output queue before the RPC transport's bounded queue, so messages, file events and heartbeats can accumulate while T45 consumes them slowly. Give output a bounded buffering policy that preserves durable event order and stream backpressure without adding another acknowledgement protocol.
 - `apps/runner/src/ExecutionOrchestrator.ts` — the runner doesn't check the path or size of a file T45 puts in a VM; review whether it should.
 - `apps/runner/src/ExecutionOrchestrator.ts` — the runner has no cap on VMs running at once (the env caps and `RunnerBusyError` were removed). When capacity matters, have the runner compute what it can take from its own resources and tell T45 when it can't start another VM, instead of hardcoded counts.

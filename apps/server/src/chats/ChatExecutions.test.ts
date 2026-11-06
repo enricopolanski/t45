@@ -97,7 +97,7 @@ describe("a chat's execution", () => {
         );
         yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, "input-1"), "settled"));
 
-        const { request } = runner.executions[0]!;
+        const request = runner.executions[0]!;
         assert.deepEqual(request.agent, {
           instructions: "Use the policy.",
           model: "opencode-go/other-model",
@@ -107,7 +107,7 @@ describe("a chat's execution", () => {
           skills: [],
         });
         assert.deepEqual(
-          [request.root, request.title, request.allowQuestions, request.disk],
+          [request.rootId, request.title, request.allowQuestions, request.disk],
           [root, chatId, true, null],
         );
         assert.deepEqual(request.files, { [`attachments/${file.id}`]: new Uint8Array([4, 2]) });
@@ -154,7 +154,7 @@ describe("a chat's execution", () => {
         yield* converse("input-1", "Sum the receipts.");
 
         yield* deliver("input-2", "Email it.");
-        const { request } = runner.executions[1]!;
+        const request = runner.executions[1]!;
         assert.deepEqual(request.disk, disk);
         assert.deepEqual(
           request.messages.map((message) => message.id),
@@ -204,7 +204,7 @@ describe("a chat's execution", () => {
       runner.refuse = null;
       yield* deliver("input-2", "Still there?");
       assert.deepEqual(
-        runner.executions.map(({ request }) => request.messages.map((message) => message.id)),
+        runner.executions.map((request) => request.messages.map((message) => message.id)),
         [messageIds(chatId, "input-1"), messageIds(chatId, "input-1", "input-2")],
       );
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
@@ -231,7 +231,7 @@ describe("a chat's execution", () => {
 
         yield* deliver("input-2", "Zip them too.");
         assert.deepEqual(
-          runner.executions.at(-1)?.request.messages.map((message) => message.id),
+          runner.executions.at(-1)?.messages.map((message) => message.id),
           messageIds(chatId, "input-1", "input-2"),
         );
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
@@ -241,7 +241,7 @@ describe("a chat's execution", () => {
     "sends a follow-up to its execution, and cancels it by having the runner withdraw it",
     () =>
       Effect.gen(function* () {
-        const { runner, chats, chatId, repository, send, deliver } = yield* setup;
+        const { runner, chats, chatId, root, repository, send, deliver } = yield* setup;
         yield* deliver("input-1", "Sort the files.");
         runner.hold = true;
         yield* send("input-2", "Then zip them.");
@@ -252,7 +252,7 @@ describe("a chat's execution", () => {
 
         yield* chats.cancel({ chatId, inputId: "input-2" }, alice);
         assert.deepEqual(runner.cancels, [
-          { id: chatId, messageId: inputMessageId(chatId, "input-2") },
+          { rootId: root, messageId: inputMessageId(chatId, "input-2") },
         ]);
         assert.isNull(yield* repository.input(chatId, "input-2"));
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
@@ -278,8 +278,8 @@ describe("a chat's execution", () => {
       );
       const [answered] = runner.answers;
       assert.deepEqual(
-        [answered?.id, answered?.sessionId, answered?.formId, answered?.files],
-        [chatId, root, formId, { [`attachments/${file.id}`]: new Uint8Array([4, 2]) }],
+        [answered?.rootId, answered?.sessionId, answered?.formId, answered?.files],
+        [root, root, formId, { [`attachments/${file.id}`]: new Uint8Array([4, 2]) }],
       );
       const year = String(answered?.answer["year"]);
       assert.include(year, "2025");
@@ -312,8 +312,8 @@ describe("a server start", () => {
       const events = yield* Fixture.follow(chatId, alice).pipe(Effect.provide(started));
       yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, "input-1"), "settled"));
       assert.deepEqual(
-        runner.executions.map(({ id }) => id),
-        [chatId],
+        runner.executions.map(({ rootId }) => rootId),
+        [rootSessionId(chatId)],
       );
     }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );

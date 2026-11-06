@@ -118,15 +118,9 @@ importers:
         specifier: 0.7.8
         version: 0.7.8
     devDependencies:
-      '@effect/vitest':
-        specifier: 4.0.6
-        version: 4.0.6(patch_hash=05e5cd0bf557ad9b177d6f4959976f4d076bf8d81ac51a8ab87ad4b1c66f6c40)(@types/node@24.12.4)(@vitest/ui@5.0.1(vitest@5.0.1))(effect@4.0.6)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(tsx@4.23.15)(typescript@7.0.2)(unrun@0.2.39)(yaml@2.9.0)
       '@types/node':
         specifier: 24.12.4
         version: 24.12.4
-      vite-plus:
-        specifier: 1.0.0
-        version: 1.0.0(@types/node@24.12.4)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(tsx@4.23.15)(typescript@7.0.2)(unrun@0.2.39)(yaml@2.9.0)
 
   apps/server:
     dependencies:

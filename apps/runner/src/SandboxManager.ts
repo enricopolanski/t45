@@ -15,7 +15,7 @@ import * as RunnerConfig from "./RunnerConfig.ts";
 
 type Agent = ExecutionRequest["agent"];
 
-class SandboxError extends Schema.TaggedError<SandboxError>()("SandboxError", {
+export class SandboxError extends Schema.TaggedError<SandboxError>()("SandboxError", {
   operation: Schema.String,
   cause: Schema.Defect(),
 }) {
@@ -135,11 +135,14 @@ const freePort = NodeSocketServer.make({ host: "127.0.0.1", port: 0 }).pipe(
 );
 
 /**
- * Reads the runner's settings once, so a runner without them doesn't start, and makes `start`: a VM
- * on the disk, removed when its scope closes, with `opencode serve` launched in it for the agent.
- * OpenCode answers on the host's `port` with `password` once it has booted.
+ * A VM on the disk, removed when its scope closes, with `opencode serve` launched in it for the
+ * agent. OpenCode answers on the host's `port` with `password` once it has booted.
  */
-export const make = Effect.gen(function* () {
+export const start = Effect.fn("SandboxManager.start")(function* (
+  rootId: string,
+  agent: Agent,
+  saved: Uint8Array | null,
+) {
   const runnerPort = yield* RunnerConfig.port;
   const openCodeKey = yield* RunnerConfig.openCodeKey;
   const crypto = yield* Crypto.Crypto;
@@ -176,58 +179,52 @@ export const make = Effect.gen(function* () {
       return { file, save };
     }).pipe(Effect.mapError((cause) => new SandboxError({ operation: "disk", cause })));
 
-  return Effect.fn("SandboxManager.start")(function* (
-    id: string,
-    agent: Agent,
-    saved: Uint8Array | null,
-  ) {
-    const hostPort = yield* freePort;
-    const disk = yield* prepareDisk(saved);
-    const { vm, remove } = yield* Effect.acquireRelease(
-      Effect.gen(function* () {
-        const vm = yield* sdk("create", () =>
-          // The port keeps one runner's VMs apart from another's on the same machine.
-          Microvm.builder(`vm-${runnerPort}-${id}`)
-            .image(IMAGE)
-            .pullPolicy("if-missing")
-            .user("agent")
-            .security("restricted")
-            .cpus(LIMITS.cpus)
-            .memory(LIMITS.memoryMib)
-            .rootDisk((root) => root.disk(disk.file).format("raw").fstype("ext4"))
-            // Removed by microsandbox once it stops, including when this runner dies.
-            .ephemeral(true)
-            .replace()
-            .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort))
-            .create(),
-        );
-        return { vm, remove: yield* Effect.cached(sdk("remove", () => vm.destroy())) };
-      }),
-      ({ remove }) =>
-        remove.pipe(
-          Effect.catch((error) => Effect.logWarning("Removing a VM failed", { id, error })),
-        ),
-    );
-    yield* writeAgentSetup(vm, agent);
-    const password = Redacted.make(
-      Base64Url.encode(yield* crypto.randomBytes(24).pipe(Effect.orDie)),
-    );
-    yield* sdk("serve", () =>
-      vm.execDetachedWith("sh", (exec) =>
-        exec
-          .args([
-            "-c",
-            `cd /work && exec opencode serve --hostname 0.0.0.0 --port ${GUEST_PORT} >/tmp/opencode-serve.log 2>&1`,
-          ])
-          .env("OPENCODE_PASSWORD", Redacted.value(password)),
+  const hostPort = yield* freePort;
+  const disk = yield* prepareDisk(saved);
+  const { vm, remove } = yield* Effect.acquireRelease(
+    Effect.gen(function* () {
+      const vm = yield* sdk("create", () =>
+        // The port keeps one runner's VMs apart from another's on the same machine.
+        Microvm.builder(`vm-${runnerPort}-${rootId}`)
+          .image(IMAGE)
+          .pullPolicy("if-missing")
+          .user("agent")
+          .security("restricted")
+          .cpus(LIMITS.cpus)
+          .memory(LIMITS.memoryMib)
+          .rootDisk((root) => root.disk(disk.file).format("raw").fstype("ext4"))
+          // Removed by microsandbox once it stops, including when this runner dies.
+          .ephemeral(true)
+          .replace()
+          .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort))
+          .create(),
+      );
+      return { vm, remove: yield* Effect.cached(sdk("remove", () => vm.destroy())) };
+    }),
+    ({ remove }) =>
+      remove.pipe(
+        Effect.catch((error) => Effect.logWarning("Removing a VM failed", { rootId, error })),
       ),
-    );
-    return {
-      port: hostPort,
-      password,
-      write: (path: string, content: Uint8Array) => writeInto(vm, path, content),
-      // Only a removed VM has flushed its disk.
-      save: remove.pipe(Effect.andThen(disk.save)),
-    };
-  });
+  );
+  yield* writeAgentSetup(vm, agent);
+  const password = Redacted.make(
+    Base64Url.encode(yield* crypto.randomBytes(24).pipe(Effect.orDie)),
+  );
+  yield* sdk("serve", () =>
+    vm.execDetachedWith("sh", (exec) =>
+      exec
+        .args([
+          "-c",
+          `cd /work && exec opencode serve --hostname 0.0.0.0 --port ${GUEST_PORT} >/tmp/opencode-serve.log 2>&1`,
+        ])
+        .env("OPENCODE_PASSWORD", Redacted.value(password)),
+    ),
+  );
+  return {
+    port: hostPort,
+    password,
+    write: (path: string, content: Uint8Array) => writeInto(vm, path, content),
+    // Only a removed VM has flushed its disk.
+    save: remove.pipe(Effect.andThen(disk.save)),
+  };
 });

@@ -137,7 +137,7 @@ export const make = Effect.gen(function* () {
             Struct.pick(skill, ["name", "description", "content", "files"]),
           ),
         },
-        root: rootSessionId(chat.id),
+        rootId: rootSessionId(chat.id),
         title: titleOf(chat),
         allowQuestions: origin?.kind === "conversation",
         disk: yield* repository.readDisk(chat.id),
@@ -174,7 +174,7 @@ export const make = Effect.gen(function* () {
             return Effect.gen(function* () {
               let changed = false;
               for (const info of event.sessions) {
-                const parentSessionId = info.id === request.root ? null : (info.parentID ?? null);
+                const parentSessionId = info.id === request.rootId ? null : (info.parentID ?? null);
                 changed =
                   (yield* repository.putSession(chatId, {
                     sessionId: info.id,
@@ -227,7 +227,7 @@ export const make = Effect.gen(function* () {
             return end(chatId, receive, event.outcome, event.disk);
         }
       };
-      yield* runner.execute({ id: chatId, request }).pipe(Stream.runForEach(handle));
+      yield* runner.execute(request).pipe(Stream.runForEach(handle));
     }).pipe(
       Effect.catchCauseIf(
         (cause) => !Cause.hasInterruptsOnly(cause),
@@ -278,7 +278,7 @@ export const make = Effect.gen(function* () {
       if (posted === undefined) return Effect.void;
       return filesOf(posted.payload.attachments.map((file) => file.id)).pipe(
         Effect.flatMap((files) =>
-          runner.send({ id: chatId, message: messageOf(chatId, posted), files }),
+          runner.send({ rootId: rootSessionId(chatId), message: messageOf(chatId, posted), files }),
         ),
         Effect.catchTags({
           RpcClientError: (error) =>
