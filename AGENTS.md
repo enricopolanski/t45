@@ -4,6 +4,8 @@ T45 is a web app for collaborative working assisted by agents via workflows. You
 
 The T45 server serves the web app and keeps the chats, workflows and agents. Agents run in sandboxed microVMs on a separate runner service, never on the server's machine; the server does not edit code or run git.
 
+Before changing or reviewing code, read and follow [Styles and rules](docs/operations/styles-and-rules.md).
+
 ## Schema and dependencies
 
 - Never leave `pnpm-lock.yaml` out of sync with `package.json`; regenerate it with `CI= pnpm install --no-frozen-lockfile` instead of taking a side.
@@ -36,18 +38,12 @@ Commits use conventional, plain-language titles (`fix(web): new threads no longe
 
 TODO:
 
-## Taste
-
-- TODO:
-- Complexity lives at the OpenCode boundary, in the runner's `ExecutionOrchestrator.ts` for how an execution happens, `ChatExecutions.ts` for what T45 keeps of it, and `TaskService.ts` and workflow hooks for applying task receipts; T45 stores and sends OpenCode's own shapes, imported from `@opencode/*` and never declared again, and UI stays dumb.
-- Inferred types over annotations; no `any`. Comments describe how a thing is used.
-
 ## Documentation
 
 Most changes need no doc change; agents can read the code.
 
 - `docs/internals/`: decisions, cross-component constraints, and traps the source doesn't reveal. No feature catalogs, field lists, control-flow narration, or PR summaries. When a decision changes, rewrite the text instead of appending.
 - `docs/user/`: one concise section per major feature in the product's voice: what it does, how to start, anything unintuitive. No UI descriptions or contributor tooling.
-- `docs/operations/`: maintainer setup, release, and debugging procedures.
+- `docs/operations/`: development rules, maintainer setup, release, and debugging procedures.
 - Don't commit plans, research notes, or scratch files; a merged PR is the implementation record.
 - Don't hard-wrap Markdown: each paragraph and list item is one line.

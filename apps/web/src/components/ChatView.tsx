@@ -201,8 +201,8 @@ export default function ChatView({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the opened session is the trigger
   }, [openedSession]);
 
-  // A change of chat or of the composer's layout re-measures before the frame paints; the
-  // observer catches the rest.
+  // Measure height and resting state together before paint; mixing an old height with a new layout
+  // can shrink the timeline's inset and clamp its scroll.
   useLayoutEffect(() => {
     if (!composerOverlayElement) return;
     // A status bar in the composer's place never rests.

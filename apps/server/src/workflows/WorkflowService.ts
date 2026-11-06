@@ -785,6 +785,7 @@ const make = Effect.gen(function* () {
       if (assignment.responsible !== null) yield* requireValidPerson(assignment.responsible);
     }
     const listed = changes.adminUserIds ?? workflow.adminUserIds;
+    // Keep appointment order: responsibility falls back to the longest-serving active admin.
     const adminUserIds = [
       ...new Set([...workflow.adminUserIds.filter((id) => listed.includes(id)), ...listed]),
     ];

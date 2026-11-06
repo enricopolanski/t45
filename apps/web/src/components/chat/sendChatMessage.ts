@@ -16,6 +16,7 @@ import { toastManager } from "../ui/toast";
 
 export const sendsInFlight = new Set<ChatId>();
 
+// Kept outside ChatView: inlining this try/finally makes React Compiler skip the component.
 export async function sendChatMessage(send: {
   readonly chatId: ChatId;
   readonly agentId: Agent["id"] | null;

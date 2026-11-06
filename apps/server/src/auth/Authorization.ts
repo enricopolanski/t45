@@ -39,6 +39,8 @@ export const Authorization = {
       return AuthorizationMiddleware.of((effect, { rpc, headers }) =>
         RpcSchema.isStreamSchema(rpc.successSchema)
           ? Effect.gen(function* () {
+              // Held streams keep their initial authorization; subscribe before authenticating
+              // so a concurrent revocation cannot be missed.
               const revoked = yield* sessions.subscribeRevocations;
               const currentUser = yield* authenticate(headers);
               const revocation = PubSub.take(revoked).pipe(
