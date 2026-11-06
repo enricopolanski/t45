@@ -3,7 +3,6 @@ import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import { type Chat, type ChatId, type Input, titleOf } from "@t45/contracts/models/Chat";
 import { InputMetadata } from "@t45/contracts/resources/Chats";
 import type { ExecutionRequest, ExecutionUpdate } from "@t45/contracts/resources/Runner";
-import { hasT45Tools } from "@t45/core/agentTools";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -132,7 +131,7 @@ export const make = Effect.gen(function* () {
       return {
         agent: {
           ...Struct.pick(agent, ["instructions", "model", "mcpServers", "permissions"]),
-          files: { ...agent.files, ...(hasT45Tools(agent.mcpServers) ? toolFiles : {}) },
+          files: { ...agent.files, ...toolFiles },
           skills: (yield* skills.listForAgent(agent.id)).map((skill) =>
             Struct.pick(skill, ["name", "description", "content", "files"]),
           ),

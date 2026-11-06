@@ -18,8 +18,3 @@ export const STEP_TOOLS_MCP = {
   name: STEP_TOOLS_MCP_NAME,
   server: { type: "local", command: ["node", "runtime/step-tools.mjs"], codemode: false },
 } as const satisfies { readonly name: string; readonly server: Agent["mcpServers"][string] };
-
-export const hasT45Tools = (servers: Agent["mcpServers"]) =>
-  [STEP_TOOLS_MCP, WORKFLOW_DRAFTING_MCP].some(
-    ({ name }) => servers[name] !== undefined && servers[name].disabled !== true,
-  );

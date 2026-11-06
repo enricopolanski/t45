@@ -98,14 +98,15 @@ describe("a chat's execution", () => {
         yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, "input-1"), "settled"));
 
         const request = runner.executions[0]!;
-        assert.deepEqual(request.agent, {
+        const { files, ...agent } = request.agent;
+        assert.deepEqual(agent, {
           instructions: "Use the policy.",
           model: "opencode-go/other-model",
           mcpServers: { docs: { type: "remote", url: "https://docs.example" } },
           permissions: { network: "open" },
-          files: { "policy.md": "The policy." },
           skills: [],
         });
+        assert.strictEqual(files["policy.md"], "The policy.");
         assert.deepEqual(
           [request.rootId, request.title, request.allowQuestions, request.disk],
           [root, chatId, true, null],

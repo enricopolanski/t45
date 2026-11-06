@@ -41,8 +41,7 @@ export const FilesByPath = (reserved: ReadonlyArray<string>) =>
     ),
   );
 
-/** A plain string of 6–50 characters. */
-const StringIdSchema = Schema.String.check(Schema.isMinLength(6), Schema.isMaxLength(50));
+const StringIdSchema = Schema.String.check(Schema.isMinCodePoints(6), Schema.isMaxLength(50));
 const ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 
 /** Generates a 21-character URL-safe identifier. */
