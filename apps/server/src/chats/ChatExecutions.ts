@@ -119,6 +119,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           if ((yield* repository.get(chatId))?.status !== "running") return;
           if (disk !== undefined) {
+            // SQL rollback cannot undo this replacement; a failed commit can leave the disk ahead of the rows.
             yield* repository.saveDisk(chatId, disk);
             yield* repository.commit(chatId);
             if ((yield* repository.pendingInputs(chatId)).length > 0) return;
@@ -184,7 +185,7 @@ export const make = Effect.gen(function* () {
       )
       .pipe(Effect.orDie);
 
-  /** Any execution failure ends the chat `failed`; a new input can start another execution. */
+  /** No automatic retry: discarded chat output may already have caused workflow or external tool effects. */
   const execute = (chat: Chat, receive: Receive) =>
     Effect.gen(function* () {
       const chatId = chat.id;

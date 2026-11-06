@@ -1,6 +1,6 @@
 # Provider constraints
 
-OpenCode is the only agent runtime, and the runner drives it from one place: an execution ([chats](./chats.md)), which reaches the VM's OpenCode server through [`ExecutionOrchestrator.ts`](../../apps/runner/src/ExecutionOrchestrator.ts). A step's agent works in a chat like any other ([sandboxed chats](./sandboxed-chats.md)).
+OpenCode is the only agent runtime, and the runner drives it from one place: an execution ([execution contract](../../packages/contracts/src/resources/Runner.ts)), which reaches the VM's OpenCode server through [`ExecutionOrchestrator.ts`](../../apps/runner/src/ExecutionOrchestrator.ts). A step's agent works in a chat like any other ([sandboxed chats](./sandboxed-chats.md)).
 
 A chat names its agent, and the agent alone decides the model and the permissions; nothing past agent setup chooses or reads a model or provider.
 
@@ -12,7 +12,7 @@ Every session's rules allow every tool but one: the agent's sandbox is what conf
 
 ## Questions
 
-A question blocks its session and lives only in the VM that asked it. A chat keeps a copy of each pending form, since members read only from T45, but an answer goes to the VM that asked, and an execution that doesn't finish loses both ([chats](./chats.md#when-an-execution-is-done)). Only Conversations allow questions. Only a Conversation's execution allows questions; otherwise the runner's session rules deny OpenCode's `question` permission on the chat's root, whose subagents' sessions copy them, regardless of the agent's discovery flag; native subagents cannot ask questions either.
+A question blocks its session and lives only in the VM that asked it. A chat keeps a copy of each pending form, since members read only from T45, but an answer goes to the VM that asked, and an execution that doesn't finish loses both ([ExecutionOrchestrator.ts](../../apps/runner/src/ExecutionOrchestrator.ts)). Only Conversations allow questions. Only a Conversation's execution allows questions; otherwise the runner's session rules deny OpenCode's `question` permission on the chat's root, whose subagents' sessions copy them, regardless of the agent's discovery flag; native subagents cannot ask questions either.
 
 ## Attachments
 

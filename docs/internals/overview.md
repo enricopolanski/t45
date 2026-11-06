@@ -4,7 +4,7 @@ T45 keeps chats, workflows and agents on the server. The web client it serves co
 
 ## Ownership boundaries
 
-OpenCode executes; T45 keeps what must outlive a VM. A chat's inputs, the sessions and messages its finished executions wrote, and the VM disk the last one left live in T45's database and state directory; every execution boots a new VM on that disk, removed when it ends, so a chat survives every VM it runs in. A step's agent works in such a chat: the step keeps which chat it is, and T45 the keys of the tool calls it applied from it. The browser reads only from T45, never from a VM. See [chats](./chats.md) and [workflows](./workflows.md).
+OpenCode executes; T45 keeps what must outlive a VM. A chat's inputs, the sessions and messages its finished executions wrote, and the VM disk the last one left live in T45's database and state directory; every execution boots a new VM on that disk, removed when it ends, so a chat survives every VM it runs in. A step's agent works in such a chat: the step keeps which chat it is, and T45 the keys of the tool calls it applied from it. The browser reads only from T45, never from a VM. See [chat execution](../../apps/server/src/chats/ChatExecutions.ts) and [workflows](./workflows.md).
 
 OpenCode is the only agent runtime. Chats store and send its shapes as they are, imported from `@opencode/*`, rather than translating them into a model of T45's own. See [provider constraints](./providers.md).
 

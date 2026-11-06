@@ -1,6 +1,6 @@
 # Sandboxed chats
 
-No agent runs on T45. Every execution of a chat runs in its own new VM on the runner (`apps/runner`); T45 keeps the chat's inputs, its conversation and the VM disk its last finished execution left, and hands the disk and the inputs the agent hasn't taken to the runner with every `execute` call, which boots a new VM on the disk and sends it the inputs. T45 never talks to OpenCode, and the VM has no route to T45. [Chats](./chats.md) explains executions, how they restore and how they end.
+No agent runs on T45. Every execution of a chat runs in its own new VM on the runner (`apps/runner`); T45 keeps the chat's inputs, its conversation and the VM disk its last finished execution left, and hands the disk and the inputs the agent hasn't taken to the runner with every `execute` call, which boots a new VM on the disk and sends it the inputs. T45 never talks to OpenCode, and the VM has no route to T45. [ChatExecutions.ts](../../apps/server/src/chats/ChatExecutions.ts) owns execution recovery and completion.
 
 T45 sends its tools with each execution of an agent that has one of its MCP servers enabled; the runner writes them to `/opt/t45`, outside the agent's `/work`, so they never land in its project, and clears them at every start. The image carries no T45 code.
 
@@ -8,7 +8,7 @@ T45 sends its tools with each execution of an agent that has one of its MCP serv
 
 The step tools (`STEP_TOOLS_MCP`, `step-tools.mjs`) return receipts without mutating T45. A completed step tool call means the VM accepted it, since OpenCode records an MCP error reply as a failed call. If T45 refuses a receipt, the task fails with the tool name and reason, a comment records the failure on the step, and the responsible person is notified; settlement discards the task chat after its workflow effects and outcome commit.
 
-Each native message/part key is checked before attachment preparation and recorded in `task_calls` in the transaction applying its effect; an input sent again after a discard writes new keys, so a repeated call applies again (see [Chats](./chats.md#executions-and-tasks)). Receipts ignored after submission are consumed too. `submit_task` (`step_submit_task` in OpenCode) submits only that automation's contribution; the shared step still needs every automation submitted and every required field and substep complete before it becomes ready for approval. Readiness is checked on submission, field and file-field edits, child completion, definition and automation changes, and unblocking. Rejection continues those tasks and chats, approval settles them, and `step_give_up` fails only its task.
+Each native message/part key is checked before attachment preparation and recorded in `task_calls` in the transaction applying its effect; an input sent again after a discard writes new keys, so a repeated call applies again (see [TaskService.ts](../../apps/server/src/tasks/TaskService.ts)). Receipts ignored after submission are consumed too. `submit_task` (`step_submit_task` in OpenCode) submits only that automation's contribution; the shared step still needs every automation submitted and every required field and substep complete before it becomes ready for approval. Readiness is checked on submission, field and file-field edits, child completion, definition and automation changes, and unblocking. Rejection continues those tasks and chats, approval settles them, and `step_give_up` fails only its task.
 
 The consumer and execution share a fiber, so stops cancel result handling directly, without an acknowledgement protocol. Chat and task completion commit together. Task and workflow commands save inputs and request stops after commit; a stop is only a request, so result handling never waits on its own execution.
 
@@ -20,7 +20,7 @@ Instance tools wait for confirmed results in `.t45/replies`, using filesystem no
 
 ## Fail closed
 
-The server doesn't start without `RUNNER_URL` and `RUNNER_TOKEN`, and the runner doesn't start without any of its settings, among them `OPENCODE_API_KEY`, the OpenCode Go key every VM's model runs on. A VM the sandbox refuses, because it could not start (as without KVM), fails the chat, and with it a step's agent work; the reason goes to the runner's log. Nothing falls back to T45. A runner out of reach fails the execution (see [Chats](./chats.md)); neither the server nor the runner retries it.
+The server doesn't start without `RUNNER_URL` and `RUNNER_TOKEN`, and the runner doesn't start without any of its settings, among them `OPENCODE_API_KEY`, the OpenCode Go key every VM's model runs on. A VM the sandbox refuses, because it could not start (as without KVM), fails the chat, and with it a step's agent work; the reason goes to the runner's log. Nothing falls back to T45. A runner out of reach fails the execution (see [ChatExecutions.ts](../../apps/server/src/chats/ChatExecutions.ts)); neither the server nor the runner retries it.
 
 ## What a chat reaches
 
@@ -40,7 +40,7 @@ The server doesn't start without `RUNNER_URL` and `RUNNER_TOKEN`, and the runner
 
 ## Chats
 
-A chat names its agent (`agentId`); the agent alone sets the model and the permissions. The web obtains authorized chat targets from `chats.listTargets`: active conversational agents with the instance tools enabled need a workflow binding, regardless of the agent's ID; other conversational agents are ordinary targets. T45 keeps the chat and decides when it runs (see [Chats](./chats.md)); the runner runs the execution, and nothing in it outlives the VM but the disk a finished execution saved.
+A chat names its agent (`agentId`); the agent alone sets the model and the permissions. The web obtains authorized chat targets from `chats.listTargets`: active conversational agents with the instance tools enabled need a workflow binding, regardless of the agent's ID; other conversational agents are ordinary targets. T45 keeps the chat and decides when it runs (see [ChatExecutions.ts](../../apps/server/src/chats/ChatExecutions.ts)); the runner runs the execution, and nothing in it outlives the VM but the disk a finished execution saved.
 
 Starter agents are ordinary editable agents, created only with an empty database. Later starts neither overwrite their configuration nor recreate an archived agent; changes to their initial prompts or models affect only new installations and stay outside the schema fingerprint.
 
