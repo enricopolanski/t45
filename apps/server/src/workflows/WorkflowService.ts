@@ -38,7 +38,7 @@ import {
   rowIds,
   groupRows,
   resolveFieldPath,
-  carriedFields,
+  buildPreviousStepsFieldViews,
   isActionable,
   isLive,
   isAdmin,
@@ -144,7 +144,7 @@ const make = Effect.gen(function* () {
   const users = yield* UserRepository;
   const agents = yield* AgentRepository;
   const files = yield* AttachmentRepository;
-  const fieldTrees = (
+  const buildCurrentStepFieldViews = (
     fields: ReadonlyArray<StepField>,
     prefix: string,
     values: Step["values"],
@@ -157,7 +157,11 @@ const make = Effect.gen(function* () {
           field.type === "group"
             ? yield* Effect.forEach(groupRows(field, value), (rowId) =>
                 Effect.map(
-                  fieldTrees(field.fields, rowId === null ? path : `${path}.${rowId}`, values),
+                  buildCurrentStepFieldViews(
+                    field.fields,
+                    rowId === null ? path : `${path}.${rowId}`,
+                    values,
+                  ),
                   (children) => ({ id: rowId, fields: children }),
                 ),
               )
@@ -382,17 +386,17 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const brief = Effect.fnUntraced(function* (work: Work, step: Step) {
+  const buildTaskContext = Effect.fnUntraced(function* (work: Work, step: Step) {
     const definition = definitionOf(work, step);
     const containing = ancestorSteps(work.ticket, step);
     const root = containing.at(-1) ?? step;
     const inputs = [];
-    for (const { source, definition: from, field } of carriedFields(
+    for (const { source, definition: from, field } of buildPreviousStepsFieldViews(
       work.definition.steps,
       root.stepDefinitionId,
       work.ticket.steps,
     )) {
-      const [view] = yield* fieldTrees([field], "", source.values);
+      const [view] = yield* buildCurrentStepFieldViews([field], "", source.values);
       if (view !== undefined) inputs.push({ stepName: from.name, ...view });
     }
     return {
@@ -406,7 +410,7 @@ const make = Effect.gen(function* () {
         instructions: definitionOf(work, parent)?.instructions ?? "",
       })),
       inputs,
-      fields: yield* fieldsOf(work, step),
+      fields: yield* buildStepFieldViews(work, step),
       comments: (yield* tickets.comments(step.id)).map(({ author, body, createdAt }) => ({
         author,
         body,
@@ -418,52 +422,57 @@ const make = Effect.gen(function* () {
     };
   });
 
-  type AgentBrief = Effect.Success<ReturnType<typeof brief>>;
+  type AgentBrief = Effect.Success<ReturnType<typeof buildTaskContext>>;
 
-  const briefJson = (brief: AgentBrief) =>
+  const formatTaskContext = (brief: AgentBrief) =>
     ["```json", JSON.stringify(brief, null, 2), "```"].join("\n");
 
-  const target = (brief: AgentBrief) =>
+  const getTaskStepDescription = (brief: AgentBrief) =>
     brief.parents.length === 0
       ? `the step "${brief.stepName}"`
       : `the sub-step "${brief.stepName}" of ${brief.parents.map((parent) => `"${parent.name}"`).join(" › ")}`;
 
-  const paragraphs = (...parts: ReadonlyArray<string>) => parts.filter(Boolean).join("\n\n");
+  const joinParagraphs = (...parts: ReadonlyArray<string>) => parts.filter(Boolean).join("\n\n");
 
-  const assignedPrompt = (brief: AgentBrief) =>
-    paragraphs(
-      `You contribute to ${target(brief)} of "${brief.ticketTitle}" in the workflow "${brief.workflowName}". The step is below as JSON: its instructions, the fields of earlier steps it reads, its own fields, its comments and its files. That is all you can see of this ticket.`,
-      "Fill the step's fields with step_set_field, report progress or results with step_comment, and attach files with step_attach. When the work is complete, call step_done. If you cannot complete it, fill what you can, then call step_give_up with a note on what is missing and why: the responsible person can take over. Do not stop without calling one of them.",
+  const buildAssignmentPrompt = (brief: AgentBrief) =>
+    joinParagraphs(
+      `You contribute to ${getTaskStepDescription(brief)} of "${brief.ticketTitle}" in the workflow "${brief.workflowName}". The step is below as JSON: its instructions, the fields of earlier steps it reads, its own fields, its comments and its files. That is all you can see of this ticket.`,
+      "Fill the step's fields with step_set_field, report progress or results with step_comment, and attach files with step_attach. When your contribution is complete, comment on any remaining work and call step_submit_task. If you cannot complete your contribution, fill what you can, then call step_give_up with a note on what is missing and why: the responsible person can take over. Call one of them, then stop.",
       "You work in a folder of your own. Follow AGENTS.md if it is there.",
       brief.instructions.trim() ? `Instructions for this step:\n${brief.instructions.trim()}` : "",
-      briefJson(brief),
+      formatTaskContext(brief),
     );
 
-  const handBackPrompt = (brief: AgentBrief) =>
-    paragraphs(
-      `The step "${brief.stepName}" is back with you; its latest comments say why. Here it is as it stands now. Finish it and call step_done, or fill what you can and call step_give_up with a note on what is missing.`,
-      briefJson(brief),
+  const buildResumptionPrompt = (brief: AgentBrief) =>
+    joinParagraphs(
+      `Your contribution to the step "${brief.stepName}" is back with you; its latest comments say why. Here it is as it stands now. Finish your contribution, comment on any remaining work and call step_submit_task, or fill what you can and call step_give_up with a note on what is missing. Stop after calling either tool.`,
+      formatTaskContext(brief),
     );
 
-  const fieldFiles = (fields: ReadonlyArray<FieldView>): ReadonlyArray<string> =>
+  const buildFieldFileIds = (fields: ReadonlyArray<FieldView>): ReadonlyArray<string> =>
     fields.flatMap((field) =>
-      field.file === null ? field.rows.flatMap((row) => fieldFiles(row.fields)) : [field.file.id],
+      field.file === null
+        ? field.rows.flatMap((row) => buildFieldFileIds(row.fields))
+        : [field.file.id],
     );
 
-  const taskInput = Effect.fnUntraced(function* (
+  const buildTaskInput = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
     entry: StepAutomation,
     again = false,
   ) {
-    const full = yield* brief(work, step);
+    const full = yield* buildTaskContext(work, step);
     return {
-      text: paragraphs(
-        again ? handBackPrompt(full) : assignedPrompt(full),
-        `Your automation: ${entry.instructions}. Other automations may work on this step at the same time. step_done submits your work for review only once every required field and sub-step of the shared step is complete.`,
+      text: joinParagraphs(
+        again ? buildResumptionPrompt(full) : buildAssignmentPrompt(full),
+        `Your automation: ${entry.instructions}. Other people and automations may work on this step at the same time. step_submit_task submits only your contribution; do not wait for their work or unrelated fields and sub-steps to be complete.`,
       ),
       attachments: (yield* files.forIds([
-        ...new Set([...fieldFiles(full.inputs), ...full.attachments.map((file) => file.id)]),
+        ...new Set([
+          ...buildFieldFileIds([...full.inputs, ...full.fields]),
+          ...full.attachments.map((file) => file.id),
+        ]),
       ])).map(stepFileForChat),
     };
   });
@@ -504,7 +513,7 @@ const make = Effect.gen(function* () {
           entry.agentId,
           {
             title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
-            input: yield* taskInput(work, step, entry),
+            input: yield* buildTaskInput(work, step, entry),
           },
         )
         .pipe(Effect.catch((error) => taskFailed(work, step, entry.agentId, error.message)));
@@ -512,7 +521,7 @@ const make = Effect.gen(function* () {
   const continueEntry = (work: Work, step: Step, entry: StepAutomation, task: Task) =>
     Effect.gen(function* () {
       yield* tasks
-        .continue(task.chatId, yield* taskInput(work, step, entry, true))
+        .continue(task.chatId, yield* buildTaskInput(work, step, entry, true))
         .pipe(
           Effect.catch((error) =>
             settleTask(task.chatId, { type: "failed", reason: error.message }),
@@ -585,6 +594,8 @@ const make = Effect.gen(function* () {
       yield* DateTime.now,
     );
     work.ticket = completed.ticket;
+    const parent = stepIn(work, step.parentStepId);
+    if (parent !== null) yield* refreshReadiness(work, parent);
     if (completed.next === null) return;
     yield* enterStep(work, completed.next, null, step.assignee, actorId);
   });
@@ -653,12 +664,13 @@ const make = Effect.gen(function* () {
         reworked.push(working);
       }
     }
+    for (const step of work.ticket.steps) yield* refreshReadiness(work, step);
     yield* save(work);
     for (const step of reworked) yield* startWork(work, step, actorId, true);
   });
 
-  const fieldsOf = (work: Work, step: Step) =>
-    fieldTrees(definitionOf(work, step)?.fields ?? [], "", step.values);
+  const buildStepFieldViews = (work: Work, step: Step) =>
+    buildCurrentStepFieldViews(definitionOf(work, step)?.fields ?? [], "", step.values);
 
   const listInstances = Effect.fnUntraced(function* (actorId: string) {
     const actor = yield* actorOf(actorId);
@@ -889,7 +901,10 @@ const make = Effect.gen(function* () {
             return {
               step: other,
               name: nameOf(work, other),
-              fields: other.id === (parents[0]?.id ?? step.id) ? [] : yield* fieldsOf(work, other),
+              fields:
+                other.id === (parents[0]?.id ?? step.id)
+                  ? []
+                  : yield* buildStepFieldViews(work, other),
             };
           }),
       ),
@@ -897,7 +912,7 @@ const make = Effect.gen(function* () {
       definition: definitionOf(work, step),
       parents: parents.map((parent) => ({ id: parent.id, name: nameOf(work, parent) })),
       canOpenBoard: work.workflow.isPublic || oversees(actor, work.workflow),
-      fields: yield* fieldsOf(work, step),
+      fields: yield* buildStepFieldViews(work, step),
       subSteps: childSteps(work.ticket, work.definition.steps, step).map((child) => ({
         ...child,
         name: nameOf(work, child),
@@ -935,10 +950,12 @@ const make = Effect.gen(function* () {
     const others = Object.fromEntries(
       Object.entries(values).filter(([key]) => key !== input.fieldKey),
     );
-    putStep(work, {
+    const updated = {
       ...step,
       values: value === null ? others : { ...others, [input.fieldKey]: value },
-    });
+    };
+    putStep(work, updated);
+    yield* refreshReadiness(work, updated);
     yield* save(work);
   });
 
@@ -1042,9 +1059,12 @@ const make = Effect.gen(function* () {
     if (step.status.type !== "blocked") {
       return yield* new WorkflowRefused({ reason: "step_not_actionable" });
     }
-    putStep(work, { ...step, status: { type: "working", at: yield* DateTime.now } });
+    const unblocked: Step = { ...step, status: { type: "working", at: yield* DateTime.now } };
+    putStep(work, unblocked);
+    yield* refreshReadiness(work, unblocked);
     yield* save(work);
-    yield* startWork(work, stepIn(work, step.id)!, actorId);
+    const current = stepIn(work, step.id)!;
+    if (isActionable(current)) yield* startWork(work, current, actorId);
   }, transaction);
 
   const comment = (work: Work, step: Step, actorId: string, input: Payload<"commentOnStep">) =>
@@ -1089,7 +1109,9 @@ const make = Effect.gen(function* () {
       return yield* new WorkflowRefused({ reason: "invalid_attachment" });
     }
     if (fieldKey === null) return;
-    putStep(work, { ...step, values: { ...step.values, [fieldKey]: claimed.id } });
+    const updated = { ...step, values: { ...step.values, [fieldKey]: claimed.id } };
+    putStep(work, updated);
+    yield* refreshReadiness(work, updated);
     yield* save(work);
   });
 
@@ -1333,6 +1355,7 @@ const make = Effect.gen(function* () {
             const { work, step, entry } = loaded.value;
             if (work.ticket.status.type !== "open" || !isActionable(step)) return null;
             const call = parsed.call;
+            if (call?.tool === "step_submit_task") return { type: "submitted" } as const;
             if (call?.tool === "step_give_up")
               return {
                 type: "settled",
@@ -1340,8 +1363,7 @@ const make = Effect.gen(function* () {
               } as const;
             const execute = Effect.gen(function* () {
               if (call === null) return INPUT_REFUSED;
-              if (call.tool === "step_done") yield* requireComplete(work, step);
-              else if (call.tool === "step_set_field")
+              if (call.tool === "step_set_field")
                 yield* setField(work, step, entry.agentId, { stepId: step.id, ...call.input });
               else if (call.tool === "step_comment")
                 yield* comment(work, step, entry.agentId, { stepId: step.id, ...call.input });
@@ -1369,9 +1391,7 @@ const make = Effect.gen(function* () {
                   attachments: [],
                 })
                 .pipe(Effect.orDie);
-            return refusal === null && call?.tool === "step_done"
-              ? ({ type: "submitted" } as const)
-              : null;
+            return null;
           }),
         };
       }),

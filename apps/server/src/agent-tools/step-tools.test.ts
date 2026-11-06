@@ -58,11 +58,11 @@ it("takes every call without knowing the step, which T45 checks as it applies th
   const calls = [
     ["set_field", { fieldKey: "gross", value: "a lot" }],
     ["comment", { body: "Halfway there." }],
-    ["done", {}],
+    ["submit_task", {}],
     ["give_up", { note: "The scan is unreadable." }],
   ] as const;
   const { tools, answers } = session(calls);
-  expect(tools).toEqual(["set_field", "comment", "attach", "done", "give_up"]);
+  expect(tools).toEqual(["set_field", "comment", "attach", "submit_task", "give_up"]);
   expect(answers.map((answer) => JSON.parse(answer.text))).toEqual(calls.map(() => ({ ok: true })));
 });
 

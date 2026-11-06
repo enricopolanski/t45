@@ -1,10 +1,5 @@
 import { StepAutomationsEditor } from "../work/StepAutomationsEditor";
-import {
-  hasInitialWork,
-  type StepAutomation,
-  type StepDefinition,
-  type Workflow,
-} from "@t45/contracts/models/Workflow";
+import type { StepAutomation, StepDefinition, Workflow } from "@t45/contracts/models/Workflow";
 import { StringId } from "@t45/contracts/models/primitives";
 
 import type { WorkflowInstanceView } from "@t45/contracts/resources/Workflows";
@@ -194,9 +189,6 @@ export function WorkflowStepPeople({ detail, busy, run }: Editing) {
           return (
             <div key={step.id} className="flex flex-col gap-3 px-4 py-3">
               <p className="truncate text-sm font-medium">{name}</p>
-              {isFirst && !hasInitialWork(workflow, definition) && (
-                <ErrorText text="Tickets can start once the first step has an assignee or automation." />
-              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
                   <span className="text-xs font-medium text-muted-foreground">Assignee</span>
@@ -204,15 +196,14 @@ export function WorkflowStepPeople({ detail, busy, run }: Editing) {
                     aria-label={`${name} assignee`}
                     value={assignment?.assignee ?? null}
                     onChange={(assignee) => save(step.id, { assignee })}
-                    {...(isFirst
-                      ? {}
-                      : {
-                          noneLabel:
-                            parentName === null
-                              ? "Whoever did the step before"
-                              : "Whoever has the step it sits in",
-                          onClear: () => save(step.id, { assignee: null }),
-                        })}
+                    noneLabel={
+                      isFirst
+                        ? "Unassigned"
+                        : parentName === null
+                          ? "Whoever did the step before"
+                          : "Whoever has the step it sits in"
+                    }
+                    onClear={() => save(step.id, { assignee: null })}
                     placeholder="Choose an assignee"
                     disabled={busy}
                   />

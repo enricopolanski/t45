@@ -25,8 +25,8 @@ const descriptions: Record<StepToolCall["tool"], string> = {
     "Post a comment on the step assigned to you: progress, a question for the people on it, or your result.",
   step_attach:
     "Attach a file from your working folder to the step assigned to you, by its path relative to that folder. Give fieldKey to make it the value of a file field.",
-  step_done:
-    "Submit this task only once every required field of the step is filled and every sub-step is complete. The step waits for all its automations to submit before approval. When you cannot finish, call give_up instead. Stop after calling it.",
+  step_submit_task:
+    "Submit this task when your contribution is finished, even if other people or automations still have work on the step. Comment on any remaining work before submitting. This does not complete the shared step. When you cannot finish your contribution, call give_up instead. Stop after calling it.",
   step_give_up:
     "Fail this task when you cannot finish its contribution. Fill what you can first, then explain what is missing and why. The responsible person is notified; other tasks continue. Stop after calling it.",
 };

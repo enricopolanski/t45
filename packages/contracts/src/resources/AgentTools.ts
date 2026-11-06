@@ -35,7 +35,7 @@ export const StepToolCall = Schema.Union([
     tool: Schema.Literal("step_attach"),
     input: Schema.Struct({ path: Schema.String, fieldKey: Schema.optionalKey(Schema.String) }),
   }),
-  Schema.Struct({ tool: Schema.Literal("step_done"), input: Schema.Struct({}) }),
+  Schema.Struct({ tool: Schema.Literal("step_submit_task"), input: Schema.Struct({}) }),
   Schema.Struct({
     tool: Schema.Literal("step_give_up"),
     input: Schema.Struct({ note: TrimmedNonEmptyString }),

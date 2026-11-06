@@ -17,7 +17,7 @@ This inventory checks PR #4's three commits and 67 changed files against the cur
 | Live step updates and actual execution status             | Missing                    | A step subscription and execution information beyond the task's business state.                              |
 | Run, Stop and Run again on each automation                | Missing                    | Explicit commands, fresh attempts, and rerunning from pending approval.                                      |
 | Saving automation configuration without running it        | Missing                    | Saving still starts new or changed entries.                                                                  |
-| Finishing one automation independently of the shared step | Missing                    | `step_done` still requires the entire step to be complete.                                                   |
+| Finishing one automation independently of the shared step | Implemented                | `submit_task` submits only that task; shared readiness retains the completion checks.                        |
 | Failing a task on a refused workflow write                | Missing                    | Refusals still enqueue another agent input.                                                                  |
 | Passing the current step's file-field values to the agent | Missing                    | Inputs include earlier fields' files and loose attachments, but omit current fields' files.                  |
 | Keeping task conversations internal                       | Missing                    | Admins still see task chats; workflow participants can access step chats.                                    |
@@ -123,13 +123,13 @@ Current [setStepAutomations](../../apps/server/src/workflows/WorkflowService.ts)
 
 These changes should travel together: removing automatic execution on save without supplying Run would remove the existing way to start a newly configured entry. PR #4 still starts default automations when a ticket enters a step; its configuration change is not a switch to making every execution manual.
 
-## 9. `step_done` means “my contribution is finished”
+## 9. `submit_task` means “my contribution is finished”
 
 PR #4 lets an automation submit its contribution while other required fields or substeps remain unfinished. Shared approval readiness still requires the fields and substeps to be complete and every automation to have submitted.
 
-Current [WorkflowService.ts](../../apps/server/src/workflows/WorkflowService.ts) calls `requireComplete(work, step)` when processing `step_done`, and both the brief and [step-tools.ts](../../apps/server/src/agent-tools/step-tools.ts) tell the agent it must finish the whole shared step before submitting. An extraction automation can therefore finish its own work but cannot submit while a separate review or human contribution is outstanding.
+Implemented as `submit_task`, exposed by OpenCode as `step_submit_task`: [WorkflowService.ts](../../apps/server/src/workflows/WorkflowService.ts) submits the calling task without requiring the shared step to be complete, and both the brief and [step-tools.ts](../../apps/server/src/agent-tools/step-tools.ts) describe finishing only that automation's contribution. An extraction automation can submit while a separate review or human contribution is outstanding.
 
-The missing behavior is the separation of contribution completion from step completion. The shared approval guard already exists in current `refreshReadiness`; PR #4's named `stepReadyForApproval` mostly extracts that existing predicate. Restoring the behavior does not require creating another abstraction just to give that predicate a name. Tool instructions and server handling need to agree.
+The existing `refreshReadiness` keeps the shared approval guard and now also runs when fields or file fields change, a child completes, the definition changes, or a step is unblocked. Human completion and approval still require complete fields and substeps; task submission leaves the execution to finish normally.
 
 ## 10. Refused writes end the attempt
 
@@ -231,10 +231,10 @@ Before adopting this, establish whether agents actually need different installed
 
 **Files:** `apps/server/src/workflows/WorkflowService.ts`, `packages/contracts/src/models/Workflow.ts`, `apps/web/src/components/workflows/WorkflowPeople.tsx` and the existing workflow model tests.
 
-- [ ] B1. Include `fieldFiles(full.fields)` in `taskInput`'s existing deduplicated attachment list. Keep the existing handling of prior-step fields, nested/repeatable fields and loose attachments.
-- [ ] B2. Remove the `first_step_unassigned` refusal from `ticketStartRefusal`. Retain the checks for a real first step, an active workflow and an authorized actor.
-- [ ] B3. Remove the obsolete warning and allow clearing the first step's default assignee in the editor. Remove `hasInitialWork` and its refusal text once their callers are gone.
-- [ ] B4. Update the existing test that expects an organization admin to be refused solely because the first step is unassigned; retain its authorization and archived-workflow checks.
+- [x] B1. Include `fieldFiles(full.fields)` in `taskInput`'s existing deduplicated attachment list. Keep the existing handling of prior-step fields, nested/repeatable fields and loose attachments.
+- [x] B2. Remove the `first_step_unassigned` refusal from `ticketStartRefusal`. Retain the checks for a real first step, an active workflow and an authorized actor.
+- [x] B3. Remove the obsolete warning and allow clearing the first step's default assignee in the editor. Remove `hasInitialWork` and its refusal text once their callers are gone.
+- [x] B4. Update the existing test that expects an organization admin to be refused solely because the first step is unassigned; retain its other authorization assertions.
 
 **Done when:** a new or continued task receives a file currently stored in its step's file field; an overseer can start an unassigned ticket, while an unrelated member still cannot. No runner or RPC change is needed.
 
@@ -242,14 +242,14 @@ Before adopting this, establish whether agents actually need different installed
 
 **Files:** `apps/server/src/workflows/WorkflowService.ts`, `apps/server/src/tasks/TaskService.ts`, `apps/server/src/agent-tools/step-tools.ts`; execution files only if the C4 decision requires them.
 
-- [ ] C1. Handle `step_done` by submitting the active task without calling `requireComplete` on the shared step. Preserve required-field and substep checks for human completion and approval readiness.
-- [ ] C2. Update `assignedPrompt`, `taskInput`, `handBackPrompt` and the step tool descriptions together: finish this automation's contribution, explain remaining work in a comment, call `step_done`, and stop producing further work. Keep `step_give_up` for a contribution the agent cannot complete.
+- [x] C1. Rename `step_done` to `submit_task` (`step_submit_task` in OpenCode), submitting the active task without calling `requireComplete` on the shared step. Preserve required-field and substep checks for human completion and approval readiness.
+- [x] C2. Update `buildAssignmentPrompt`, `buildTaskInput`, `buildResumptionPrompt` and the step tool descriptions together: finish this automation's contribution, explain remaining work in a comment, call `step_submit_task`, and stop producing further work. Keep `step_give_up` for a contribution the agent cannot complete.
 - [ ] C3. Return a failed task outcome for a workflow receipt refusal, containing the tool name and refusal reason. Reuse `taskFailed` for the comment and notification. Delete `refusalPrompt` and the refusal-driven `tasks.continue` path; retain the existing receipt ledger and attachment preparation outside the transaction.
-- [ ] C4. Settle the execution-completion choice described below before adding a stop on submission. Preserve submission as a business state even if the agent's final turn is still ending.
-- [ ] C5. Recompute the existing approval predicate when the remaining shared work becomes complete, including a human filling the last required field or approving the final substep after all automations submitted. Keep this in the existing workflow mutation paths. Without it, independent contribution submission can leave a complete step waiting for another unrelated event to become ready.
-- [ ] C6. Preserve rejection and blocking behavior: rejection continues the submitted tasks with a fresh brief; blocking pauses active work; explicit cancellation settles it. Additional receipts after a task submits remain consumed without applying more workflow writes.
+- [x] C4. Keep the normal execution finish described below. Preserve submission as a business state even if the agent's final turn is still ending.
+- [x] C5. Recompute the existing approval predicate when the remaining shared work becomes complete, including a human filling the last required field or approving the final substep after all automations submitted. Keep this in the existing workflow mutation paths. Without it, independent contribution submission can leave a complete step waiting for another unrelated event to become ready.
+- [x] C6. Preserve rejection and blocking behavior: rejection continues the submitted tasks with a fresh brief; blocking pauses active work; explicit cancellation settles it. Additional receipts after a task submits remain consumed without applying more workflow writes.
 
-**C4 recommendation:** keep the current normal execution finish for the first implementation: `step_done` submits the task, later receipts cannot change the step, and the VM is saved and removed when OpenCode finishes. This is the smallest implementation and preserves the saved conversation and workspace for rejection. It deliberately leaves PR #4's immediate submission-triggered termination unported, including the case where background work keeps the execution alive; record that as an explicit tradeoff, not as completed parity.
+**C4 decision:** keep the current normal execution finish for the first implementation: `step_submit_task` submits the task, later receipts cannot change the step, and the VM is saved and removed when OpenCode finishes. This is the smallest implementation and preserves the saved conversation and workspace for rejection. It deliberately leaves PR #4's immediate submission-triggered termination unported, including the case where background work keeps the execution alive; record that as an explicit tradeoff, not as completed parity.
 
 If immediate termination is required, first demonstrate a generic runner finish operation that stops native work, captures final state and follows the existing disk-save/`finished` path. Exercise rejection and continuation from that disk before adopting it. Ordinary `requestStop` currently discards output and is therefore unsuitable for successful submission; adding workflow-tool detection to the runner would also put the policy in the wrong place. This alternative is a separate lifecycle change, not an extra condition hidden in `transition`.
 

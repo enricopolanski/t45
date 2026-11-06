@@ -250,7 +250,6 @@ const REFUSALS = {
   last_admin: "A workflow needs at least one active admin.",
   not_overseer: "Only the workflow's responsible and admins can do that.",
   cannot_start_ticket: "You can't start tickets in this workflow.",
-  first_step_unassigned: "Assign the first step before starting a ticket.",
   not_step_responsible: "Only the step's responsible can do that.",
   workflow_archived: "This workflow is archived.",
   ticket_not_open: "This ticket is no longer open.",
@@ -331,7 +330,7 @@ const fieldsComplete = (fields: ReadonlyArray<StepField>, values: Values, prefix
     );
   });
 
-export const carriedFields = (
+export const buildPreviousStepsFieldViews = (
   steps: ReadonlyArray<StepDefinition>,
   rootId: string,
   reached: ReadonlyArray<Step>,
@@ -380,14 +379,6 @@ export const isInvolved = (actor: WorkflowActor, workflow: Workflow, ticket: Tic
 
 export const canViewTicket = (actor: WorkflowActor, workflow: Workflow, ticket: Ticket) =>
   workflow.isPublic || isInvolved(actor, workflow, ticket);
-
-export const hasInitialWork = (workflow: Workflow, definition: WorkflowDefinition) => {
-  const first = definition.steps[0];
-  const assignment = first === undefined ? undefined : workflow.defaultAssignments[first.id];
-  return (
-    assignment !== undefined && (assignment.assignee !== null || assignment.automations.length > 0)
-  );
-};
 
 /** A workflow must retain an active admin when its administrators change. */
 export const lastAdminRefusal = (activeAdminIds: ReadonlyArray<string>) =>
@@ -522,7 +513,6 @@ export const ticketStartRefusal = (
   const first = definition.steps[0];
   if (first === undefined) return "no_steps";
   if (workflow.isArchived) return "workflow_archived";
-  if (!hasInitialWork(workflow, definition)) return "first_step_unassigned";
   return workflow.defaultAssignments[first.id]?.assignee === actor.id || oversees(actor, workflow)
     ? null
     : "cannot_start_ticket";
