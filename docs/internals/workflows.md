@@ -1,6 +1,6 @@
 # Workflows
 
-The model and its rules are specified in [`workflows.feature`](../planning/workflows/workflows.feature). This page holds what the source doesn't make obvious.
+The original [workflow scenarios](../planning/workflows/workflows.feature) include deferred and superseded behavior; the models and commands define the current rules. This page holds what the source doesn't make obvious.
 
 ## One service, four repositories
 
@@ -48,12 +48,12 @@ A sub-step is a step with a `parentStepId`, so it reuses everything a step has: 
 
 There is one page per ticket, and its URL is a step (`/my-work/$stepId`): every way in (My work, the board, notifications, sub-steps) already has a step, and the step view is where visibility is decided. The view carries the ticket's details, the other top-level steps and the open step's children.
 
-An agent's brief carries the filled fields of the steps before its step (for a sub-step, before the step it sits in); which ones is not configurable, `carriedFields` decides it.
+An agent's task input includes its current step's fields and the filled fields of earlier top-level steps (for a sub-step, those before its top-level parent), with the files those fields reference and the current step's loose attachments. Previous steps' comments and loose attachments are not carried forward.
 
 ## Several automations can work one step
 
-A human assignee and automation entries are independent. Entries have stable identities, so a step can run several tasks concurrently, including several for the same agent. Automations share the step's fields, comments and attachments. Entry edits cancel unfinished work before starting replacements; settled attempts remain history. Workflow defaults affect future steps; current steps keep their own entries.
+A human assignee and automation entries are independent. Entries have stable identities, so a step can run several tasks concurrently, including several for the same agent. Automations share the step's fields, comments and attachments. Saving entry changes cancels changed unfinished work without starting replacements; Run starts a fresh attempt, and entering a step still starts its defaults. Workflow defaults affect future steps; current steps keep their own entries. Settled outcomes remain, while their internal chat storage is removed.
 
-The step stores no chat or task ids. TaskService finds tasks by ticket, step and automation entry. Each task may submit only once the shared step’s required fields and substeps are complete; all entries must submit before automatic approval readiness. Approval settles success; whole-step rejection continues the same tasks and chats. A stopped task stays active, blocking a step stops its active tasks, and unblocking continues them. Cancellation settles unfinished tasks; reopening starts new ones. Human completion can take over and cancel active tasks.
+The step stores no chat or task ids. TaskService finds tasks by ticket, step and automation entry. Submission finishes only that task's contribution; automatic approval readiness also requires every entry submitted, every required field filled and every substep approved. Approval settles success; whole-step rejection continues the same tasks and chats. A stopped task stays active, blocking a step stops its active tasks, and unblocking continues them. Cancellation settles unfinished tasks; reopening starts new ones. Human completion can take over and cancel active tasks.
 
-Step-task reads follow ticket visibility and commands require involvement. Native tool receipts and the transaction boundary are described in [sandboxed chats](./sandboxed-chats.md).
+Task chats stay internal; their results and controls are exposed through step views under ticket visibility and involvement rules. Native tool receipts and the transaction boundary are described in [sandboxed chats](./sandboxed-chats.md).

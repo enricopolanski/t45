@@ -12,7 +12,7 @@ Each native message/part key is checked before attachment preparation and record
 
 The consumer and execution share a fiber, so stops cancel result handling directly, without an acknowledgement protocol. Chat and task completion commit together. Task and workflow commands save inputs and request stops after commit; a stop is only a request, so result handling never waits on its own execution.
 
-A task's state is independent of its chat's execution: blocking leaves the task active, and submission does not imply the execution has finished.
+A task's state is independent of its chat's execution: blocking leaves the task active, and submission does not imply the execution has finished. Submission lets OpenCode finish normally so rejection can resume from its saved disk; ordinary Stop discards the execution's disk changes and cannot serve as a successful finish.
 
 Workflow assistant operations use the member and immutable workflow scope in the conversation origin, never an identity supplied in tool arguments or prompt text. Workflow and ticket access are checked on every call, and writes use the same commands as member actions. Operation receipts are durable independently of provisional chat messages: writes and their responses commit together, keyed by conversation and request ID, before the response is delivered. Read responses use the same receipt path, so retrying an operation returns its original snapshot; a fresh read needs a new request ID. Reusing an ID with different arguments is refused; replaying an input with a newly chosen request ID can still repeat its effects.
 
@@ -41,6 +41,8 @@ The server doesn't start without `RUNNER_URL` and `RUNNER_TOKEN`, and the runner
 ## Chats
 
 A chat names its agent (`agentId`); the agent alone sets the model and the permissions. The web obtains authorized chat targets from `chats.listTargets`: active conversational agents with the instance tools enabled need a workflow binding, regardless of the agent's ID; other conversational agents are ordinary targets. T45 keeps the chat and decides when it runs (see [Chats](./chats.md)); the runner runs the execution, and nothing in it outlives the VM but the disk a finished execution saved.
+
+Starter agents are ordinary editable agents, created only with an empty database. Later starts neither overwrite their configuration nor recreate an archived agent; changes to their initial prompts or models affect only new installations and stay outside the schema fingerprint.
 
 - **One server per VM, reached by the runner alone.** The runner talks to the VM's OpenCode on the host's loopback with a password made fresh at every start. The agent runs in the VM's `/work`, and a message's attachments go into `/work/attachments/` before it is delivered.
 - **A VM is one execution's.** An execution replaces any VM left under its id and makes a new one from the agent's setup, on its own copy of the saved disk; the runner removes the VM and the copy when the execution finishes, fails or is interrupted. A removal that fails is only logged, except before a save, which it fails.

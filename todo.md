@@ -12,19 +12,11 @@
 
 ## Workflow side effects when replaying inputs
 
-- [ ] Define how to prevent duplicate workflow actions when pending inputs are replayed after a new input starts a failed chat, or server startup recovers a running chat. Replacing the generated conversation does not undo committed workflow changes, and new tool-call IDs can bypass the existing receipt ledger. Decide which effects can repeat and how the others are deduplicated.
+- [ ] Define how to prevent duplicate workflow actions when pending inputs are replayed after a new input starts a failed chat, or server startup recovers a running chat. Replacing the generated conversation does not undo committed workflow changes, and new tool-call IDs can bypass the existing receipt ledger. Workflow assistant writes now deduplicate a repeated request ID transactionally; a replay where the agent chooses new IDs, and step receipts keyed by native call IDs, still need a policy.
 
-## Port from PR #4 (`feat/add-workflow-agent`) what PR #5 lacks
+## Real-VM verification
 
-PR #4 bundled the tools into the runner image under `/opt/t45/`; port its instance tools onto #5's per-boot injection under `/work/runtime` instead.
+- [ ] Exercise the workflow assistant inside a real microVM on a machine with KVM: confirm that the MCP process runs in `/work`, a reply written through `sandbox.write` wakes its filesystem watcher, and all five operations return confirmed results. Local bundled-tool checks do not verify guest filesystem notifications.
+- [ ] Use the seeded Workflow designer in a real conversation to produce and save a blueprint; the seed, shared schemas and packaged tools have been checked separately.
 
-- [ ] Seed starter agents at database creation: "Workflow designer" (drafting MCP) and "Workflow assistant" (`seed.ts`).
-- [ ] Workflow assistant chats bound to one deployed workflow, opened from its board or the new-chat menu (`listTargets`, `Chat.workflowId`).
-- [ ] Workflow instance tools `get_workflow`, `list_tickets`, `get_ticket`, `create_ticket`, `set_field`: run with the member's permissions, check access per call, and make retries with the same `requestId` safe through transactional receipts (`WorkflowAssistant.ts`, `WorkflowToolReceipts.ts`).
-- [ ] Decide draft identities: #4 drafts carry no step or field IDs and saving assigns fresh ones (`WorkflowDraft.ts`, `definitionFromDraft`); #5 has the agent supply them.
-- [ ] Let authorized users start unassigned tickets; drop the `first_step_unassigned` requirement.
-- [ ] Nested, collapsible step-assignment and automation cards that explain inherited defaults (`WorkflowStepPeople.tsx` replacing `WorkflowPeople.tsx`).
-- [ ] Stream automation status into the step view with Run, Stop and Run again (`watchStep`, `runStepAutomation`, `StepRuns.tsx`). Saving automation config no longer starts a run; a rerun moves pending approval back to working.
-- [ ] `step_done` finishes only that automation's contribution; approval still needs complete fields and sub-steps and every automation submitted (`stepReadyForApproval`). Release the sandbox once a task is submitted or fails; an invalid write fails the task with a reason on the step.
-- [ ] Chat lists and APIs show only the member's own conversations (admins stop seeing triggered task chats); task histories stay internal, with results through steps.
-- [ ] Model tests: `Task.test.ts`, `Workflow.test.ts`, `WorkflowDraft.test.ts`.
+Other unresolved investigations and product questions are consolidated in [cleanup.md](docs/planning/cleanup.md).
