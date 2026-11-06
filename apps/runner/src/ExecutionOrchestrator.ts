@@ -384,6 +384,7 @@ export const layer = RunnerRpcs.toLayer(
             Effect.andThen(Queue.end(queue)),
           ),
         ),
+      // Workflow tools wait on these writes; delivering a reply must not require another OpenCode event.
       writeFiles: ({ rootId, files }) =>
         Effect.suspend(() => {
           const execution = activeExecutions.get(rootId);

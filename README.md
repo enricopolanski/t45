@@ -12,7 +12,7 @@ T45 needs Node.js 24.21.0 or newer in the 24.x line and [`vp`](#install-vp). For
 
 Docs live in [docs/](./docs).
 
-Working on the code? Start at [AGENTS.md](./AGENTS.md), [docs/operations/development.md](./docs/operations/development.md) and [docs/internals/overview.md](./docs/internals/overview.md).
+Working on the code? Start at [AGENTS.md](./AGENTS.md) and [docs/operations/development.md](./docs/operations/development.md).
 
 ## Install `vp`
 

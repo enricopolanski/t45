@@ -7,9 +7,8 @@ import {
 } from "@t45/contracts/models/Agent";
 
 /**
- * The MCP server a chat agent drafts workflows with: an injected tool, which admins add to
- * the agents that should draft. Outside Code Mode, each draft is a call the chat shows as a card,
- * and only under this name.
+ * Keep these tools outside Code Mode: T45 consumes their individual `<server>_<tool>` parts
+ * to apply workflow effects and render draft cards.
  */
 export const WORKFLOW_DRAFTING_MCP = {
   name: WORKFLOW_DRAFTING_MCP_NAME,

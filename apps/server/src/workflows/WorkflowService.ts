@@ -1434,6 +1434,7 @@ const make = Effect.gen(function* () {
             const { work, step, entry } = loaded.value;
             if (work.ticket.status.type !== "open" || !isActionable(step)) return null;
             const call = parsed.call;
+            // Submission leaves the execution running so normal completion saves the disk for rejection to resume.
             if (call?.tool === "step_submit_task") return { type: "submitted" } as const;
             if (call?.tool === "step_give_up")
               return {

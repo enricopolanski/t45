@@ -26,7 +26,7 @@ A step's `values` are keyed by field path: the field ids from the step down, joi
 
 ## Step files are attachments
 
-A step's files live in the [one attachment store](./providers.md#attachments), held by the step (`step_id`, and `field_key` when the file is a field's value). A file is uploaded as any attachment is and then attached by id, which gives the step the actor's own pending upload and refuses any other, so an id never moves a file someone else holds. Replacing or removing a file, saving fewer group rows and saving steps without its field take the file off its step: a chat it was sent to keeps it, and a file no chat holds is deleted. A file held by a step is readable by whoever may read its ticket.
+A step's files live in the [one attachment store](../../apps/server/src/attachments/AttachmentRepository.ts), held by the step (`step_id`, and `field_key` when the file is a field's value). A file is uploaded as any attachment is and then attached by id, which gives the step the actor's own pending upload and refuses any other, so an id never moves a file someone else holds. Replacing or removing a file, saving fewer group rows and saving steps without its field take the file off its step: a chat it was sent to keeps it, and a file no chat holds is deleted. A file held by a step is readable by whoever may read its ticket.
 
 ## Refusals belong to the models, verdicts to the views
 
@@ -56,4 +56,4 @@ A human assignee and automation entries are independent. Entries have stable ide
 
 The step stores no chat or task ids. TaskService finds tasks by ticket, step and automation entry. Submission finishes only that task's contribution; automatic approval readiness also requires every entry submitted, every required field filled and every substep approved. Approval settles success; whole-step rejection continues the same tasks and chats. A stopped task stays active, blocking a step stops its active tasks, and unblocking continues them. Cancellation settles unfinished tasks; reopening starts new ones. Human completion can take over and cancel active tasks.
 
-Task chats stay internal; their results and controls are exposed through step views under ticket visibility and involvement rules. Native tool receipts and the transaction boundary are described in [sandboxed chats](./sandboxed-chats.md).
+Task chats stay internal; their results and controls are exposed through step views under ticket visibility and involvement rules. [TaskService.ts](../../apps/server/src/tasks/TaskService.ts) handles native tool receipts and their transaction boundary.

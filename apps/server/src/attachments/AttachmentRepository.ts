@@ -215,6 +215,7 @@ const make = Effect.gen(function* () {
         if (id === undefined) return;
         const path = NodePath.join(attachmentsDir, entry);
         const info = yield* fileSystem.stat(path).pipe(Effect.option);
+        // Uploads place bytes before inserting their row; a fresh file without a row may still be in flight.
         const old = Option.exists(info, (stat) =>
           Option.exists(stat.mtime, (mtime) => now - mtime.getTime() > PENDING_MAX_AGE_MS),
         );
@@ -307,6 +308,7 @@ const make = Effect.gen(function* () {
         Effect.map(([claimed]) => claimed ?? null),
       ),
 
+    // Called inside workflow transactions: leave byte deletion to the sweep so rollback keeps the file.
     detach: (id) =>
       sql
         .withTransaction(

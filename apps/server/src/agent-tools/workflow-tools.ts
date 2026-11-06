@@ -1,4 +1,3 @@
-// Supplied at startup with the same draft contract the chat and blueprint save use.
 import { WorkflowDraft } from "@t45/contracts/resources/AgentTools";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -6,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { refuse, serve } from "./mcp-stdio.ts";
 
 const document = Schema.toJsonSchemaDocument(WorkflowDraft);
+// JSON Schema omits the distinct-ID checks; reject invalid drafts here so the agent can correct them.
 const decodeDraft = Schema.decodeUnknownResult(WorkflowDraft);
 
 const tools = [
