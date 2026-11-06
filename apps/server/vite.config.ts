@@ -29,6 +29,9 @@ export default mergeConfig(
         "runtime/step-tools": NodeURL.fileURLToPath(
           new URL("./src/agent-tools/step-tools.ts", import.meta.url),
         ),
+        "runtime/workflow-instance-tools": NodeURL.fileURLToPath(
+          new URL("./src/agent-tools/workflow-instance-tools.ts", import.meta.url),
+        ),
         "runtime/workflow-tools": NodeURL.fileURLToPath(
           new URL("./src/agent-tools/workflow-tools.ts", import.meta.url),
         ),

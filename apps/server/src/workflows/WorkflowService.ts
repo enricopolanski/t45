@@ -1,3 +1,5 @@
+import { ChatService } from "../chats/ChatService.ts";
+import * as WorkflowAssistant from "./WorkflowAssistant.ts";
 import type { Workflows } from "@t45/contracts/resources/Workflows";
 import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
@@ -835,7 +837,7 @@ const make = Effect.gen(function* () {
     yield* tickets.insert(work.ticket);
     const step = yield* enterStep(work, first, null, null, actorId);
     yield* save(work);
-    return { stepId: step.id };
+    return { ticketId: work.ticket.id, stepId: step.id };
   }, transaction);
 
   const cancelTicket = Effect.fnUntraced(function* (
@@ -921,26 +923,47 @@ const make = Effect.gen(function* () {
       })),
       comments: yield* tickets.comments(step.id),
       files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
-      tasks: (yield* stepTasks(work, step)).map(({ chatId, state, chatStatus }) => {
-        let statusLabel =
-          chatStatus === "running"
-            ? "Running"
-            : chatStatus === "failed"
-              ? "Failed"
-              : chatStatus === "interrupted"
-                ? step.status.type === "blocked"
-                  ? "Paused"
-                  : "Stopped"
-                : "Not running";
-        if (state.type === "submitted") {
-          statusLabel = chatStatus === "running" ? "Submitted · finishing" : "Submitted";
-        } else if (state.type === "settled") {
-          statusLabel =
-            state.outcome.type === "succeeded"
-              ? "Approved"
-              : `${state.outcome.type === "failed" ? "Failed" : "Cancelled"}: ${state.outcome.reason}`;
-        }
-        return { chatId, canOpenChat: chatStatus !== "deleted", statusLabel };
+      automations: yield* Effect.gen(function* () {
+        const attempts = yield* stepTasks(work, step);
+        const canRun =
+          work.ticket.status.type === "open" &&
+          isInvolved(actor, work.workflow, work.ticket) &&
+          canRunAutomation(step);
+        return step.automations.map((entry) => {
+          const latest = attempts.findLast((task) => task.trigger.automationId === entry.id);
+          if (latest === undefined)
+            return {
+              id: entry.id,
+              statusLabel: "Not run",
+              runLabel: canRun ? ("Run" as const) : null,
+              canStop: false,
+            };
+          const { state, chatStatus } = latest;
+          let statusLabel =
+            chatStatus === "running"
+              ? "Running"
+              : chatStatus === "failed"
+                ? "Failed"
+                : chatStatus === "interrupted"
+                  ? step.status.type === "blocked"
+                    ? "Paused"
+                    : "Stopped"
+                  : "Not running";
+          if (state.type === "submitted") {
+            statusLabel = chatStatus === "running" ? "Submitted · finishing" : "Submitted";
+          } else if (state.type === "settled") {
+            statusLabel =
+              state.outcome.type === "succeeded"
+                ? "Approved"
+                : `${state.outcome.type === "failed" ? "Failed" : "Cancelled"}: ${state.outcome.reason}`;
+          }
+          return {
+            id: entry.id,
+            statusLabel,
+            runLabel: canRun ? ("Run again" as const) : null,
+            canStop: canRun && state.type === "active" && chatStatus === "running",
+          };
+        });
       }),
     };
   });
@@ -1299,6 +1322,45 @@ const make = Effect.gen(function* () {
         return yield* new WorkflowRefused({ reason: "invalid_automations" });
     }
   });
+  const canRunAutomation = (step: Step) =>
+    isActionable(step) || step.status.type === "waiting_approval";
+  const loadAutomation = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"runStepAutomation">,
+  ) {
+    const loaded = yield* loadForCommand(actorId, input.stepId);
+    if (!canRunAutomation(loaded.step))
+      return yield* new WorkflowRefused({ reason: "step_not_actionable" });
+    const entry = loaded.step.automations.find((entry) => entry.id === input.automationId);
+    if (entry === undefined) return yield* new NotFound();
+    return { ...loaded, entry };
+  });
+  const runStepAutomation = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"runStepAutomation">,
+  ) {
+    const { work, step, entry } = yield* loadAutomation(actorId, input);
+    yield* validateEntries([entry]);
+    for (const task of yield* stepTasks(work, step)) {
+      if (task.trigger.automationId === entry.id && task.state.type !== "settled")
+        yield* cancelTask(task);
+    }
+    const updated = { ...step, status: { type: "working" as const, at: yield* DateTime.now } };
+    yield* notifications.removeApproval(step.id);
+    putStep(work, updated);
+    yield* save(work);
+    yield* startEntry(work, updated, entry);
+  }, transaction);
+  const stopStepAutomation = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"stopStepAutomation">,
+  ) {
+    const { work, step, entry } = yield* loadAutomation(actorId, input);
+    for (const task of yield* stepTasks(work, step)) {
+      if (task.trigger.automationId === entry.id && task.state.type === "active")
+        yield* tasks.requestStop(task.chatId);
+    }
+  }, transaction);
   const setStepAutomations = Effect.fnUntraced(function* (
     actorId: string,
     input: Payload<"setStepAutomations">,
@@ -1324,12 +1386,6 @@ const make = Effect.gen(function* () {
     putStep(work, updated);
     yield* refreshReadiness(work, updated);
     yield* save(work);
-    if (isActionable(stepIn(work, step.id)!)) {
-      for (const entry of updated.automations) {
-        if (step.automations.some((before) => same(entry, before))) continue;
-        yield* startEntry(work, updated, entry);
-      }
-    }
   }, transaction);
   const refreshReadiness = Effect.fnUntraced(function* (work: Work, step: Step) {
     if (
@@ -1429,8 +1485,6 @@ const make = Effect.gen(function* () {
       }),
   };
 
-  yield* tasks.consume(taskHooks);
-
   const memberCommand = <I extends { readonly stepId: string }, A, E>(
     mutate: (work: Work, step: Step, actorId: string, input: I) => Effect.Effect<A, E>,
   ) =>
@@ -1440,10 +1494,17 @@ const make = Effect.gen(function* () {
       return yield* mutate(work, step, actorId, input);
     }, transaction);
 
+  const setStepField = memberCommand(setField);
+  const receiveWorkflow = yield* WorkflowAssistant.makeReceiver({ startTicket, setStepField });
+  yield* (yield* ChatService).consume((result) =>
+    tasks.receive(result, taskHooks).pipe(Effect.andThen(receiveWorkflow(result))),
+  );
+
   return {
     memberDeactivated,
-    taskChanged: taskHooks.changed,
     setStepAutomations,
+    runStepAutomation,
+    stopStepAutomation,
     listDefinitions: definitions.list,
     getDefinition: (actorId: string, definitionId: string) =>
       Effect.gen(function* () {
@@ -1471,7 +1532,7 @@ const make = Effect.gen(function* () {
           tickets.watch(ticket, getStep(actorId, ticket.id, stepId)),
         ),
       ).pipe(Stream.changesWith(sameStepView)),
-    setStepField: memberCommand(setField),
+    setStepField,
     markStepDone,
     approveStep,
     rejectStep,

@@ -1,6 +1,11 @@
 import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
-import { canChatWithMembers } from "@t45/contracts/models/Agent";
+import {
+  canChatWithMembers,
+  WORKFLOW_INSTANCE_MCP_NAME,
+  type Agent,
+} from "@t45/contracts/models/Agent";
+import { oversees } from "@t45/contracts/models/Workflow";
 import { limitRefusal } from "@t45/contracts/models/Attachment";
 import {
   ChatId,
@@ -36,6 +41,10 @@ import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { makeAccess as makeWorkflowAccess } from "../workflows/WorkflowAssistant.ts";
+import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
+import { WorkflowDefinitionRepository } from "../workflows/WorkflowDefinitionRepository.ts";
+import { TicketRepository } from "../workflows/TicketRepository.ts";
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
 import { RunnerService } from "../runner/RunnerService.ts";
@@ -48,9 +57,6 @@ import * as PromptService from "./PromptService.ts";
 import { replaceComposerContextReferences } from "@t45/core/composerContextReferences";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
-import { isInvolved } from "@t45/contracts/models/Workflow";
-import { TicketRepository } from "../workflows/TicketRepository.ts";
-import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 
 export interface Member {
   readonly userId: StringId;
@@ -124,6 +130,9 @@ const readMessage = (
   }).pipe(Effect.orDie);
 
 const encodeChatMessage = Schema.encodeSync(Schema.fromJsonString(ChatMessage));
+const hasWorkflowTools = (agent: Agent) =>
+  agent.mcpServers[WORKFLOW_INSTANCE_MCP_NAME] !== undefined &&
+  agent.mcpServers[WORKFLOW_INSTANCE_MCP_NAME]?.disabled !== true;
 
 const readBytes = (message: ChatMessage) =>
   new TextEncoder().encode(encodeChatMessage(message)).byteLength;
@@ -136,10 +145,12 @@ const make = Effect.gen(function* () {
   const changes = yield* ChatEvents.ChatEvents;
   const runner = yield* RunnerService;
   const agents = yield* AgentRepository.AgentRepository;
+  const workflows = yield* WorkflowRepository;
+  const definitions = yield* WorkflowDefinitionRepository;
+  const tickets = yield* TicketRepository;
+  const loadWorkflow = yield* makeWorkflowAccess;
   const attachments = yield* AttachmentRepository.AttachmentRepository;
   const origins = repository.origins;
-  const tickets = yield* TicketRepository;
-  const workflows = yield* WorkflowRepository;
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "posted" | "deleted") =>
     changes.publish({ kind, chatId });
   const scope = yield* Effect.scope;
@@ -169,6 +180,12 @@ const make = Effect.gen(function* () {
           : agent.status !== "active")
       )
         return yield* refuse("agent_unavailable");
+      if (start.origin.kind === "conversation") {
+        if (start.origin.workflowId !== null) {
+          yield* loadWorkflow(start.origin.ownerUserId, start.origin.workflowId);
+          if (!hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
+        } else if (hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
+      }
       yield* repository.insert({ id: post.chatId, ...start, at });
       yield* origins.insert(start.origin);
     }
@@ -224,54 +241,28 @@ const make = Effect.gen(function* () {
 
   const liveChat = (chatId: ChatId) =>
     repository.get(chatId).pipe(Effect.filterOrFail((chat) => chat !== null, notFound));
-  const permission = (member: Member, chatId: ChatId) =>
-    Effect.gen(function* () {
-      const chat = yield* repository.get(chatId);
-      if (chat === null) return null;
-      const origin = yield* origins.get(chatId);
-      const trigger = origin?.kind === "task" ? origin.trigger : null;
-      const mode =
-        origin?.kind === "conversation"
-          ? origin.ownerUserId === member.userId
-            ? "write"
-            : null
-          : trigger?.type === "step"
-            ? yield* Effect.gen(function* () {
-                const ticket = yield* tickets.get(trigger.ticketId);
-                if (ticket === null) return null;
-                const workflow = yield* workflows.get(ticket.workflowId);
-                if (workflow === null) return null;
-                return isInvolved(
-                  { id: member.userId, isOrgAdmin: member.role === "admin" },
-                  workflow,
-                  ticket,
-                )
-                  ? ("write" as const)
-                  : workflow.isPublic
-                    ? ("read" as const)
-                    : null;
-              })
-            : origin !== null && member.role === "admin"
-              ? "write"
-              : null;
-      return mode === null ? null : { chat, mode };
-    });
   const access = (member: Member, chatId: ChatId) =>
-    permission(member, chatId).pipe(Effect.map((result) => result?.chat ?? null));
+    Effect.gen(function* () {
+      const origin = yield* origins.get(chatId);
+      if (origin?.kind !== "conversation" || origin.ownerUserId !== member.userId) return null;
+      return yield* repository.get(chatId);
+    });
   const memberChat = (member: Member, chatId: ChatId) =>
     access(member, chatId).pipe(Effect.filterOrFail((chat) => chat !== null, notFound));
-  const commandChat = (member: Member, chatId: ChatId) =>
-    permission(member, chatId).pipe(
-      Effect.flatMap((result) =>
-        result?.mode === "write" ? Effect.succeed(result.chat) : notFound(),
-      ),
-    );
-  const summaryOf = (chat: Chat, agentName: string | null) => ({
-    ...chat,
-    agentName,
-  });
+  const summaryOf = (chat: Chat, agentName: string | null) =>
+    Effect.gen(function* () {
+      const origin = yield* origins.get(chat.id);
+      const workflowId = origin?.kind === "conversation" ? origin.workflowId : null;
+      return {
+        ...chat,
+        agentName,
+        workflowId,
+        workflowName:
+          workflowId === null ? null : ((yield* workflows.get(workflowId))?.name ?? null),
+      };
+    });
   const openChatOf = (chat: Chat) =>
-    agents.get(chat.agentId).pipe(Effect.map((agent) => summaryOf(chat, agent?.name ?? null)));
+    agents.get(chat.agentId).pipe(Effect.flatMap((agent) => summaryOf(chat, agent?.name ?? null)));
 
   const sessionsOf = (chat: Chat) =>
     Effect.gen(function* () {
@@ -340,10 +331,53 @@ const make = Effect.gen(function* () {
 
   for (const chatId of yield* repository.owed) yield* executions.deliver(chatId);
 
+  const remove = Effect.fnUntraced(function* (chatId: ChatId) {
+    yield* repository.markDeleted(chatId, yield* nowIso);
+    yield* sql.afterCommit(
+      publish(chatId, "deleted").pipe(Effect.andThen(cleanup(chatId).pipe(Effect.forkIn(scope)))),
+    );
+  }, transaction);
+
   return {
     post,
+    remove,
     requestStop,
     consume: executions.consume,
+    listTargets: (member: Member) =>
+      Effect.gen(function* () {
+        const available = (yield* agents.list).filter(canChatWithMembers);
+        const plain = available
+          .filter((agent) => !hasWorkflowTools(agent))
+          .map((agent) => ({
+            agentId: agent.id,
+            name: agent.name,
+            workflowId: null,
+          }));
+        const assistants = available.filter(hasWorkflowTools);
+        if (assistants.length === 0) return plain;
+        const usableDefinitions = new Set(
+          (yield* definitions.list)
+            .filter((definition) => definition.steps.length > 0)
+            .map((definition) => definition.id),
+        );
+        const involved = new Set(yield* tickets.workflowIdsInvolving(member.userId));
+        const actor = { id: member.userId, isOrgAdmin: member.role === "admin" };
+        const bound = (yield* workflows.list)
+          .filter(
+            (workflow) =>
+              !workflow.isArchived &&
+              usableDefinitions.has(workflow.definitionId) &&
+              (workflow.isPublic || oversees(actor, workflow) || involved.has(workflow.id)),
+          )
+          .flatMap((workflow) =>
+            assistants.map((agent) => ({
+              agentId: agent.id,
+              name: assistants.length === 1 ? workflow.name : `${workflow.name} · ${agent.name}`,
+              workflowId: workflow.id,
+            })),
+          );
+        return [...plain, ...bound];
+      }),
     access,
     subscribe: (member: Member) =>
       Stream.unwrap(
@@ -352,11 +386,7 @@ const make = Effect.gen(function* () {
             (change) =>
               change.kind === "chat" || change.kind === "posted" || change.kind === "deleted",
           );
-          const load = Effect.gen(function* () {
-            const names = new Map((yield* agents.list).map((agent) => [agent.id, agent.name]));
-            const chats = yield* repository.list(member);
-            return { chats: chats.map((chat) => summaryOf(chat, names.get(chat.agentId) ?? null)) };
-          });
+          const load = repository.list(member).pipe(Effect.map((chats) => ({ chats })));
           return Stream.concat(
             Stream.fromEffect(load),
             listed.pipe(
@@ -381,7 +411,7 @@ const make = Effect.gen(function* () {
           const chat = yield* memberChat(member, input.chatId);
           const sessionId = yield* sessionOf(chat, requested);
           const snapshotOf = Effect.gen(function* () {
-            const now = yield* liveChat(chat.id);
+            const now = yield* memberChat(member, chat.id);
             const first = yield* pageOf(chat.id, sessionId, null);
             return {
               _tag: "snapshot",
@@ -469,8 +499,14 @@ const make = Effect.gen(function* () {
     send: Effect.fnUntraced(function* (input: Payload<"chats.send">, member: Member) {
       const origin = yield* origins.get(input.chatId);
       if (origin !== null) {
-        const existing = yield* commandChat(member, input.chatId);
-        if (input.agentId !== undefined && existing.agentId !== input.agentId)
+        const existing = yield* memberChat(member, input.chatId);
+        if (origin.kind === "conversation" && origin.workflowId !== null)
+          yield* loadWorkflow(member.userId, origin.workflowId);
+        if (
+          (input.agentId !== undefined && existing.agentId !== input.agentId) ||
+          (input.workflowId !== undefined &&
+            (origin.kind !== "conversation" || origin.workflowId !== input.workflowId))
+        )
           return yield* refuse("id_taken");
       }
       const payload = {
@@ -492,6 +528,7 @@ const make = Effect.gen(function* () {
                   kind: "conversation" as const,
                   chatId: input.chatId,
                   ownerUserId: member.userId,
+                  workflowId: input.workflowId ?? null,
                 },
               },
             }
@@ -501,7 +538,7 @@ const make = Effect.gen(function* () {
 
     cancel: (input: Payload<"chats.cancel">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
+        const chat = yield* memberChat(member, input.chatId);
         if ((yield* repository.input(chat.id, input.inputId)) === null) return yield* notFound();
         const pending = yield* repository.pendingInputs(chat.id);
         if (!pending.some((each) => each.inputId === input.inputId)) {
@@ -519,7 +556,10 @@ const make = Effect.gen(function* () {
 
     answer: (input: Payload<"chats.answer">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
+        const chat = yield* memberChat(member, input.chatId);
+        const origin = yield* origins.get(chat.id);
+        if (origin?.kind === "conversation" && origin.workflowId !== null)
+          yield* loadWorkflow(member.userId, origin.workflowId);
         const asked = (yield* repository.questions(chat.id)).find(
           (question) => question.sessionId === input.sessionId && question.form.id === input.formId,
         );
@@ -564,7 +604,7 @@ const make = Effect.gen(function* () {
 
     dismiss: (input: Payload<"chats.dismiss">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
+        const chat = yield* memberChat(member, input.chatId);
         yield* runner
           .dismiss({
             rootId: rootSessionId(chat.id),
@@ -581,26 +621,21 @@ const make = Effect.gen(function* () {
 
     stop: (input: Payload<"chats.stop">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
+        const chat = yield* memberChat(member, input.chatId);
         yield* requestStop(chat.id);
       }),
 
     rename: (input: Payload<"chats.rename">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
+        const chat = yield* memberChat(member, input.chatId);
         yield* repository.rename(chat.id, input.title);
         yield* publish(chat.id, "chat");
         yield* publish(chat.id, "sessions");
       }),
 
     delete: Effect.fnUntraced(function* (input: Payload<"chats.delete">, member: Member) {
-      const chat = yield* commandChat(member, input.chatId);
-      yield* repository.markDeleted(chat.id, yield* nowIso);
-      yield* sql.afterCommit(
-        publish(chat.id, "deleted").pipe(
-          Effect.andThen(cleanup(chat.id).pipe(Effect.forkIn(scope))),
-        ),
-      );
+      const chat = yield* memberChat(member, input.chatId);
+      yield* remove(chat.id);
     }, transaction),
   };
 });

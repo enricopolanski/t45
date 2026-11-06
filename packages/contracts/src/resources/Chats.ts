@@ -33,6 +33,8 @@ const SessionId = Session.ID.check(Schema.isMaxLength(512));
 export const ChatSummary = Schema.Struct({
   ...Chat.fields,
   agentName: Schema.NullOr(Schema.String),
+  workflowId: Schema.NullOr(StringId),
+  workflowName: Schema.NullOr(Schema.String),
 });
 export type ChatSummary = typeof ChatSummary.Type;
 
@@ -115,7 +117,15 @@ export type ChatHistory = typeof ChatHistory.Type;
 export const ChatErrors = Schema.Union([Refused, NotFound]);
 export type ChatErrors = typeof ChatErrors.Type;
 
+export const ChatTarget = Schema.Struct({
+  agentId: StringId,
+  name: Schema.String,
+  workflowId: Schema.NullOr(StringId),
+});
+export type ChatTarget = typeof ChatTarget.Type;
+
 export const Chats = RpcGroup.make(
+  Rpc.make("listTargets", { success: Schema.Array(ChatTarget) }),
   Rpc.make("getHistory", {
     payload: { chatId: ChatId, sessionId: SessionId, before: SessionMessage.ID },
     success: ChatHistory,
@@ -172,6 +182,7 @@ export const Chats = RpcGroup.make(
     payload: {
       chatId: ChatId,
       agentId: Schema.optional(StringId),
+      workflowId: Schema.optional(StringId),
       inputId: InputId,
       text: Schema.String.check(Schema.isMaxLength(MESSAGE_MAX_INPUT_CHARS)),
       attachments: Schema.Array(ChatAttachment).check(Schema.isMaxLength(MESSAGE_MAX_ATTACHMENTS)),

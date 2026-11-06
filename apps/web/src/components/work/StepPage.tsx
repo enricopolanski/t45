@@ -1,3 +1,4 @@
+import { Button } from "../ui/button";
 import { StepAutomationsEditor } from "./StepAutomationsEditor";
 import { StringId } from "@t45/contracts/models/primitives";
 import type { StepNameView, StepView } from "@t45/contracts/resources/Workflows";
@@ -195,33 +196,63 @@ function AgentCard({
 }) {
   return (
     <CardFold as="aside" title="Automations">
-      {view.tasks.map((task) => (
-        <div key={task.chatId} className="flex flex-col gap-1 text-sm">
-          {!task.canOpenChat ? (
-            <span className="text-muted-foreground">Chat deleted</span>
-          ) : (
-            <Link
-              to="/chats/$chatId"
-              params={{ chatId: task.chatId }}
-              className="text-primary hover:underline"
-            >
-              Open chat
-            </Link>
-          )}
-          <span>{task.statusLabel}</span>
-        </div>
-      ))}
-      {actions.canEditFields ? (
-        <StepAutomationsEditor
-          entries={view.step.automations}
-          busy={busy}
-          onSave={(automations) =>
-            void act(() =>
-              api("workflows.setStepAutomations", { stepId: view.step.id, automations }),
-            )
-          }
-        />
-      ) : null}
+      <StepAutomationsEditor
+        entries={view.step.automations}
+        busy={busy}
+        onSave={
+          actions.canEditFields
+            ? async (automations) =>
+                (await act(() =>
+                  api("workflows.setStepAutomations", { stepId: view.step.id, automations }),
+                )) === null
+            : undefined
+        }
+        renderStatus={(id) => {
+          const status = view.automations.find((entry) => entry.id === id);
+          if (status === undefined) return null;
+          return (
+            <>
+              <span>{status.statusLabel}</span>
+              <div className="flex gap-2">
+                {status.runLabel && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      void act(() =>
+                        api("workflows.runStepAutomation", {
+                          stepId: view.step.id,
+                          automationId: id,
+                        }),
+                      )
+                    }
+                  >
+                    {status.runLabel}
+                  </Button>
+                )}
+                {status.canStop && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      void act(() =>
+                        api("workflows.stopStepAutomation", {
+                          stepId: view.step.id,
+                          automationId: id,
+                        }),
+                      )
+                    }
+                  >
+                    Stop
+                  </Button>
+                )}
+              </div>
+            </>
+          );
+        }}
+      />
     </CardFold>
   );
 }

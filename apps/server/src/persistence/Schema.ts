@@ -4,8 +4,8 @@
  * place: the fingerprint of the statements changes, and a database created by other statements is
  * refused at startup.
  */
-import { Agent } from "@t45/contracts/models/Agent";
-import { WORKFLOW_DRAFTING_MCP } from "@t45/core/agentTools";
+import { Agent, WORKFLOW_ASSISTANT_ID } from "@t45/contracts/models/Agent";
+import { WORKFLOW_DRAFTING_MCP, WORKFLOW_INSTANCE_MCP } from "@t45/core/agentTools";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -27,6 +27,14 @@ Explain that the member saves the blueprint, then configures and publishes a wor
   permissions: { network: "provider" },
   isConversational: true,
   status: "active",
+} satisfies Omit<Agent, "createdAt" | "updatedAt">;
+
+const workflowAssistant = {
+  ...workflowDesigner,
+  id: WORKFLOW_ASSISTANT_ID,
+  name: "Workflow assistant",
+  instructions: `Help the member operate the workflow bound to this conversation. Use get_workflow and get_ticket to obtain current definitions, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. Choose a new UUID requestId for each operation; reuse it with identical arguments when retrying that operation. You cannot approve steps or edit workflow definitions.`,
+  mcpServers: { [WORKFLOW_INSTANCE_MCP.name]: WORKFLOW_INSTANCE_MCP.server },
 } satisfies Omit<Agent, "createdAt" | "updatedAt">;
 
 const encodeFiles = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.files));
@@ -168,7 +176,7 @@ const statements = [
       PRIMARY KEY (chat_id, call_key)
     ) WITHOUT ROWID`,
 
-  // In-app notifications: something new landed in a person's My work. Opening the step reads them.
+  // In-app notifications: something new landed in a person's My work. Clicking a notification marks it read.
   `CREATE TABLE workflow_notifications (
       id TEXT PRIMARY KEY NOT NULL,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -195,16 +203,26 @@ const statements = [
       updated_at TEXT NOT NULL,
       deleted_at TEXT
     )`,
+  // A conversation retains its scope even after that workflow is deleted.
   `CREATE TABLE chat_origins (
       chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(id),
       owner_user_id TEXT REFERENCES users(id),
+      workflow_id TEXT,
       trigger TEXT,
       state TEXT,
       CHECK ((owner_user_id IS NOT NULL AND trigger IS NULL AND state IS NULL)
-          OR (owner_user_id IS NULL AND trigger IS NOT NULL AND state IS NOT NULL))
+          OR (owner_user_id IS NULL AND workflow_id IS NULL AND trigger IS NOT NULL AND state IS NOT NULL))
     )`,
+  // Independent of provisional OpenCode messages: a lost execution cannot repeat a committed write.
+  `CREATE TABLE workflow_operation_receipts (
+      chat_id TEXT NOT NULL REFERENCES chat_origins(chat_id),
+      request_id TEXT NOT NULL,
+      response TEXT NOT NULL,
+      PRIMARY KEY (chat_id, request_id)
+    ) WITHOUT ROWID`,
   `CREATE INDEX origins_owner ON chat_origins(owner_user_id) WHERE owner_user_id IS NOT NULL`,
   `CREATE INDEX origins_step ON chat_origins(json_extract(trigger, '$.ticketId'), json_extract(trigger, '$.stepId')) WHERE trigger IS NOT NULL`,
+  `CREATE INDEX origins_automation ON chat_origins(json_extract(trigger, '$.type'), json_extract(trigger, '$.automationId')) WHERE trigger IS NOT NULL`,
   // A chat's OpenCode sessions, every session of its VM, keyed by chat so one VM can't reach
   // another chat's copy. `info_json` is the session as OpenCode last returned it.
   // `committed` once an execution that wrote it finished; the next execution drops what isn't.
@@ -292,19 +310,20 @@ export const setupSchema = Effect.fnUntraced(function* () {
           yield* sql.unsafe(statement);
         }
         const at = DateTime.formatIso(yield* DateTime.now);
-        yield* sql`INSERT INTO agents ${sql.insert({
-          id: workflowDesigner.id,
-          name: workflowDesigner.name,
-          instructions: workflowDesigner.instructions,
-          model: workflowDesigner.model,
-          files: yield* encodeFiles(workflowDesigner.files),
-          mcp_servers: yield* encodeMcpServers(workflowDesigner.mcpServers),
-          network: workflowDesigner.permissions.network,
-          is_conversational: Number(workflowDesigner.isConversational),
-          status: workflowDesigner.status,
-          created_at: at,
-          updated_at: at,
-        })}`;
+        for (const agent of [workflowDesigner, workflowAssistant])
+          yield* sql`INSERT INTO agents ${sql.insert({
+            id: agent.id,
+            name: agent.name,
+            instructions: agent.instructions,
+            model: agent.model,
+            files: yield* encodeFiles(agent.files),
+            mcp_servers: yield* encodeMcpServers(agent.mcpServers),
+            network: agent.permissions.network,
+            is_conversational: Number(agent.isConversational),
+            status: agent.status,
+            created_at: at,
+            updated_at: at,
+          })}`;
         yield* sql`CREATE TABLE schema_fingerprint (fingerprint TEXT NOT NULL)`;
         yield* sql`INSERT INTO schema_fingerprint (fingerprint) VALUES (${fingerprint})`;
       }),

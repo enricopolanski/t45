@@ -41,6 +41,7 @@ const Conversation = Schema.Struct({
   kind: Schema.Literal("conversation"),
   chatId: ChatId,
   ownerUserId: StringId,
+  workflowId: Schema.NullOr(StringId),
 });
 export const ChatOrigin = Schema.Union([Conversation, Task]);
 export type ChatOrigin = typeof ChatOrigin.Type;

@@ -33,7 +33,7 @@ export function CardFold({
           {title}
           <FoldChevron />
         </CollapsibleTrigger>
-        <CollapsiblePanel>
+        <CollapsiblePanel keepMounted>
           <div className="flex flex-col gap-4 pt-4">{children}</div>
         </CollapsiblePanel>
       </Collapsible>

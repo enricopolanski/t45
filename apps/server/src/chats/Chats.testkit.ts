@@ -113,7 +113,7 @@ export const seedChat = (chat: {
         : yield* (yield* TicketRepository.TicketRepository).getByStepId(chat.stepId);
     yield* origins.insert(
       chat.ownerUserId !== null
-        ? { kind: "conversation", chatId: chat.id, ownerUserId: chat.ownerUserId }
+        ? { kind: "conversation", chatId: chat.id, ownerUserId: chat.ownerUserId, workflowId: null }
         : {
             kind: "task",
             chatId: chat.id,

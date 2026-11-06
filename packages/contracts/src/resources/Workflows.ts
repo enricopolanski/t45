@@ -1,4 +1,3 @@
-import { ChatId } from "../models/Chat.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
@@ -126,11 +125,12 @@ export const StepView = Schema.Struct({
   subSteps: Schema.Array(Schema.Struct({ ...StepSummaryView.fields, name: TrimmedNonEmptyString })),
   comments: Schema.Array(Comment),
   files: Schema.Array(StepFileView),
-  tasks: Schema.Array(
+  automations: Schema.Array(
     Schema.Struct({
-      chatId: ChatId,
-      canOpenChat: Schema.Boolean,
+      id: StringId,
       statusLabel: Schema.String,
+      runLabel: Schema.NullOr(Schema.Literals(["Run", "Run again"])),
+      canStop: Schema.Boolean,
     }),
   ),
 });
@@ -240,6 +240,14 @@ export const Workflows = RpcGroup.make(
   Rpc.make("rejectStep", { payload: reason, error: WorkflowErrors }),
   Rpc.make("setStepAutomations", {
     payload: { ...step, automations: Step.fields.automations },
+    error: WorkflowErrors,
+  }),
+  Rpc.make("runStepAutomation", {
+    payload: { ...step, automationId: StringId },
+    error: WorkflowErrors,
+  }),
+  Rpc.make("stopStepAutomation", {
+    payload: { ...step, automationId: StringId },
     error: WorkflowErrors,
   }),
   /** Sets one ticket's step assignee; null clears it. */

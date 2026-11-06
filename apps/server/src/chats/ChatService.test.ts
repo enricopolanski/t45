@@ -87,7 +87,7 @@ describe("chats", () => {
           ],
           ["id_taken", "NotFound", "NotFound"],
         );
-        const automated = yield* tasks.start(
+        yield* tasks.start(
           { type: "automation", automationId: AutomationId.make("fixture") },
           agentId,
           {
@@ -97,7 +97,7 @@ describe("chats", () => {
         );
         assert.deepEqual(yield* listed(chats, alice), [chatId]);
         assert.deepEqual(yield* listed(chats, bob), []);
-        assert.deepEqual(yield* listed(chats, admin), [automated]);
+        assert.deepEqual(yield* listed(chats, admin), []);
 
         yield* chats.delete({ chatId }, alice);
         assert.deepEqual(yield* listed(chats, alice), []);
@@ -112,7 +112,7 @@ describe("chats", () => {
   );
 
   it.effect(
-    "refuses a member's chat with an agent that can't chat or is archived, which an automation still takes and an admin steers",
+    "refuses a member's chat with an agent that can't chat or is archived, which an automation still takes but no member can steer",
     () =>
       Effect.gen(function* () {
         const { runner, chats, repository, tasks } = yield* setup;
@@ -138,10 +138,13 @@ describe("chats", () => {
         );
 
         const chatId = yield* startTask(quiet);
-        yield* chats.send({ chatId, inputId: "steer-1", ...typed("Read it.") }, admin);
+        assert.equal(
+          yield* outcomeOf(chats.send({ chatId, inputId: "steer-1", ...typed("Read it.") }, admin)),
+          "NotFound",
+        );
         assert.deepEqual(
           (yield* repository.pendingInputs(chatId)).map((input) => input.payload.text),
-          ["Read the report.", "Read it."],
+          ["Read the report."],
         );
       }).pipe(Effect.provide(Fixture.layer)),
   );

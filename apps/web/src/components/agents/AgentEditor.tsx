@@ -2,7 +2,7 @@ import type { AgentModels } from "@t45/contracts/resources/Agents";
 import type { Agent } from "@t45/contracts/models/Agent";
 import type { StringId } from "@t45/contracts/models/primitives";
 import type { Skill } from "@t45/contracts/models/Skill";
-import { STEP_TOOLS_MCP, WORKFLOW_DRAFTING_MCP } from "@t45/core/agentTools";
+import { STEP_TOOLS_MCP, WORKFLOW_DRAFTING_MCP, WORKFLOW_INSTANCE_MCP } from "@t45/core/agentTools";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState, useTransition } from "react";
 
@@ -87,6 +87,7 @@ const fromDraft = ({ name, type, target, entries, server }: McpDraft): [string, 
 
 const PRESETS = [
   { mcp: WORKFLOW_DRAFTING_MCP, label: "Add workflow drafting" },
+  { mcp: WORKFLOW_INSTANCE_MCP, label: "Add workflow operations" },
   { mcp: STEP_TOOLS_MCP, label: "Add step tools" },
 ] as const;
 

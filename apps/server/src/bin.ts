@@ -37,6 +37,7 @@ import * as WorkflowRepository from "./workflows/WorkflowRepository.ts";
 import * as WorkflowService from "./workflows/WorkflowService.ts";
 
 const layerStore = Layer.mergeAll(
+  UserRepository.layer,
   ChatRepository.layer,
   AttachmentRepository.layer,
   AgentRepository.layer,
@@ -56,10 +57,7 @@ const layerChatServices = ChatService.layer.pipe(
   Layer.provideMerge(layerStore),
 );
 
-const layerOrg = OrganizationRepository.layer.pipe(
-  Layer.provideMerge(UserRepository.layer),
-  Layer.provideMerge(layerChatServices),
-);
+const layerOrg = OrganizationRepository.layer.pipe(Layer.provideMerge(layerChatServices));
 
 const layerRuntimeDependencies = Layer.effect(UserService, UserService.make).pipe(
   Layer.provide(Authentication.layer),

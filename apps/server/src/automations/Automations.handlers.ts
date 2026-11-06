@@ -96,8 +96,7 @@ export const layer = Automations.middleware(Authorization).toLayer(
           );
           return yield* found(updated);
         }),
-      "automations.runNow": ({ id }) =>
-        service.runNow(id).pipe(Effect.map((chatId) => ({ chatId }))),
+      "automations.runNow": ({ id }) => service.runNow(id).pipe(Effect.asVoid),
       "automations.rotateToken": ({ id }) =>
         automations
           .modify(

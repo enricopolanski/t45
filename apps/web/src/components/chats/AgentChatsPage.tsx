@@ -1,11 +1,10 @@
-import type { Agent } from "@t45/contracts/models/Agent";
 import { titleOf } from "@t45/contracts/models/Chat";
-import type { ChatSummary } from "@t45/contracts/resources/Chats";
+import type { ChatSummary, ChatTarget } from "@t45/contracts/resources/Chats";
 import { Link } from "@tanstack/react-router";
 import { ChevronDownIcon, MessageSquarePlusIcon } from "lucide-react";
 import { useTransition } from "react";
 
-import { useChatAgents } from "../../state/agents";
+import { chatTargets } from "../../state/agents";
 import { useNewChat } from "../../hooks/useNewChat";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { chats as chatAtoms } from "../../state/chats";
@@ -17,18 +16,14 @@ import { ErrorText } from "../ui/error-text";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { WorkFrame } from "../work/WorkFrame";
 
-/**
- * Chat: the chats with agents the signed-in member can open (an admin's include the automation
- * runs), most recent activity first as the server orders them, and a way to start one with any
- * agent the organization set up for chat. Each chat's agent works in its own VM on the runner.
- */
+/** The member's conversations and the targets they can start one with. */
 export function AgentChatsPage() {
   const chatsQuery = useApiQuery(chatAtoms.list);
-  const agents = useChatAgents();
+  const targets = useApiQuery(chatTargets).data ?? [];
   const chats = chatsQuery.data?.chats ?? [];
 
   return (
-    <WorkFrame title="Chat" actions={<NewChatMenu agents={agents} />}>
+    <WorkFrame title="Chat" actions={<NewChatMenu targets={targets} />}>
       <div className="flex flex-col gap-2">
         {chats.length > 0 ? (
           chats.map((item) => <AgentChatRow key={item.id} item={item} />)
@@ -40,7 +35,7 @@ export function AgentChatsPage() {
           />
         ) : chatsQuery.data === null ? null : (
           <p className="py-10 text-center text-sm text-muted-foreground">
-            {agents.length === 0
+            {targets.length === 0
               ? "No agents are set up for chat yet. Admins add them in Agents."
               : "No chats yet. Start one with an agent."}
           </p>
@@ -63,7 +58,7 @@ function AgentChatRow({ item }: { readonly item: ChatSummary }) {
     >
       <span className="truncate text-sm font-medium text-foreground">{title}</span>
       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="truncate">{item.agentName ?? "An agent"}</span>
+        <span className="truncate">{item.workflowName ?? item.agentName ?? "An agent"}</span>
         <span className="ml-auto shrink-0">
           {formatRelativeTimeLabel(item.lastActivityAt, now)}
         </span>
@@ -73,25 +68,30 @@ function AgentChatRow({ item }: { readonly item: ChatSummary }) {
 }
 
 /** Starts a new chat with the picked agent. */
-function NewChatMenu({ agents }: { readonly agents: ReadonlyArray<Agent> }) {
+function NewChatMenu({ targets }: { readonly targets: ReadonlyArray<ChatTarget> }) {
   const newChat = useNewChat();
   const [starting, startTransition] = useTransition();
-  const start = (agentId: Agent["id"]) =>
+  const start = (target: ChatTarget) =>
     startTransition(() =>
-      newChat(agentId).catch((cause: unknown) => toastFailure("Couldn't start a chat", cause)),
+      newChat(target.agentId, target.workflowId).catch((cause: unknown) =>
+        toastFailure("Couldn't start a chat", cause),
+      ),
     );
 
   return (
     <Menu>
-      <MenuTrigger render={<Button size="sm" disabled={agents.length === 0 || starting} />}>
+      <MenuTrigger render={<Button size="sm" disabled={targets.length === 0 || starting} />}>
         <MessageSquarePlusIcon />
         New chat
         <ChevronDownIcon />
       </MenuTrigger>
       <MenuPopup align="end" side="bottom">
-        {agents.map((agent) => (
-          <MenuItem key={agent.id} onClick={() => start(agent.id)}>
-            {agent.name}
+        {targets.map((target) => (
+          <MenuItem
+            key={`${target.agentId}/${target.workflowId ?? ""}`}
+            onClick={() => start(target)}
+          >
+            {target.name}
           </MenuItem>
         ))}
       </MenuPopup>

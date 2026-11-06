@@ -42,6 +42,8 @@ export class Agent extends Schema.Opaque<Agent>()(
 /** Names identify the built-in capabilities an agent is configured to use. */
 export const WORKFLOW_DRAFTING_MCP_NAME = "workflows";
 export const STEP_TOOLS_MCP_NAME = "step";
+export const WORKFLOW_INSTANCE_MCP_NAME = "instance";
+export const WORKFLOW_ASSISTANT_ID = "workflow-assistant";
 
 /** Where the runner writes T45's tools in the VM, outside the agent's /work. */
 export const T45_TOOLS_DIR = "/opt/t45";

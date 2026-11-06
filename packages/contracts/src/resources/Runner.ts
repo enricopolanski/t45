@@ -92,6 +92,7 @@ export const RunnerRpcs = RpcGroup.make(
     success: ExecutionUpdate,
     stream: true,
   }),
+  Rpc.make("writeFiles", { payload: { rootId: Session.ID, files: Files } }),
   Rpc.make("send", { payload: { rootId: Session.ID, message: Message, files: Files } }),
   Rpc.make("answer", {
     payload: { ...question, answer: Form.Answer, files: Files },

@@ -12,6 +12,7 @@ import * as Queue from "effect/Queue";
 import * as RpcTest from "effect/rpc/RpcTest";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import { AdminOnly } from "../auth/Authorization.ts";
@@ -115,9 +116,11 @@ const runOf = (chatId: ChatId) =>
   });
 
 const tasksWithRuns = Effect.gen(function* () {
-  const chats = yield* ChatRepository;
-  const runs = yield* chats.list({ userId: ADMIN, role: "admin" });
-  return runs.map((chat) => chat.title).sort();
+  const sql = yield* SqlClient.SqlClient;
+  const runs = yield* sql<{
+    readonly title: string;
+  }>`SELECT c.title FROM chats c JOIN chat_origins o ON o.chat_id = c.id WHERE o.trigger IS NOT NULL ORDER BY c.title`;
+  return runs.map((chat) => chat.title);
 });
 
 const layerTasks = (afterPost: (run: Run) => Effect.Effect<void> = () => Effect.void) =>
@@ -330,9 +333,11 @@ it.effect("Run now posts the prompt to a new chat and leaves the next slot alone
     });
     const admin = yield* clientAs("admin").pipe(Effect.provide(yield* Layer.build(layerTasks())));
 
-    const { chatId } = yield* admin["automations.runNow"]({
+    const nextRun = yield* followRuns;
+    yield* admin["automations.runNow"]({
       id: AutomationId.make("report"),
     });
+    const { chatId } = yield* nextRun();
     assert.deepEqual(yield* runOf(chatId), {
       origin: "task",
       agentId: CLERK,

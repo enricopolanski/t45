@@ -29,11 +29,11 @@ export const serve = ({
     readonly description: string;
     readonly inputSchema: unknown;
   }>;
-  readonly call: (name: string, args: Record<string, unknown>) => string;
+  readonly call: (name: string, args: Record<string, unknown>) => string | Promise<string>;
   readonly failure: string;
 }) => {
   const send = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
-  NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
+  NodeReadline.createInterface({ input: process.stdin }).on("line", async (line) => {
     if (!line.trim()) return;
     let message: Request;
     try {
@@ -54,7 +54,7 @@ export const serve = ({
         return reply({ tools });
       case "tools/call":
         try {
-          const text = call(message.params?.name ?? "", message.params?.arguments ?? {});
+          const text = await call(message.params?.name ?? "", message.params?.arguments ?? {});
           return reply({ content: [{ type: "text", text }] });
         } catch (error) {
           const text = error instanceof Refusal ? error.message : failure;

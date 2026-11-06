@@ -1,5 +1,9 @@
 import type { SessionMessage } from "@opencode/schema/session-message";
-import { STEP_TOOLS_MCP_NAME, WORKFLOW_DRAFTING_MCP_NAME } from "@t45/contracts/models/Agent";
+import {
+  STEP_TOOLS_MCP_NAME,
+  WORKFLOW_DRAFTING_MCP_NAME,
+  WORKFLOW_INSTANCE_MCP_NAME,
+} from "@t45/contracts/models/Agent";
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import { type Chat, type ChatId, type Input, titleOf } from "@t45/contracts/models/Chat";
 import { InputMetadata } from "@t45/contracts/resources/Chats";
@@ -15,6 +19,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as Struct from "effect/Struct";
 
+import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { SkillRepository } from "../agents/SkillRepository.ts";
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
@@ -63,6 +68,7 @@ export const make = Effect.gen(function* () {
   const changes = yield* ChatEvents;
   const runner = yield* RunnerService;
   const agents = yield* AgentRepository;
+  const workflows = yield* WorkflowRepository;
   const skills = yield* SkillRepository;
   const attachments = yield* AttachmentRepository;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -129,13 +135,24 @@ export const make = Effect.gen(function* () {
       const agent = (yield* agents.get(chat.agentId))!;
       const origin = yield* repository.origins.get(chat.id);
       const inputs = yield* repository.pendingInputs(chat.id);
+      const workflow =
+        origin?.kind === "conversation" && origin.workflowId !== null
+          ? yield* workflows.get(origin.workflowId)
+          : null;
       return {
         agent: {
           ...Struct.pick(agent, ["instructions", "model", "mcpServers", "permissions", "files"]),
+          instructions:
+            workflow === null
+              ? agent.instructions
+              : `${agent.instructions}\nThis conversation is bound to workflow ${workflow.id}, named ${workflow.name}; call instance_get_workflow for its current definition and IDs.`,
           tools: Object.entries(agent.mcpServers).some(
             ([name, server]) =>
-              [STEP_TOOLS_MCP_NAME, WORKFLOW_DRAFTING_MCP_NAME].includes(name) &&
-              server.disabled !== true,
+              [
+                STEP_TOOLS_MCP_NAME,
+                WORKFLOW_DRAFTING_MCP_NAME,
+                WORKFLOW_INSTANCE_MCP_NAME,
+              ].includes(name) && server.disabled !== true,
           )
             ? toolFiles
             : {},

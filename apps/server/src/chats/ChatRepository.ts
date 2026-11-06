@@ -9,6 +9,8 @@ import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import type * as Statement from "effect/sql/Statement";
 import { ChatOrigin, Task, TaskState, Trigger } from "@t45/contracts/models/Task";
+import { WorkflowInstanceResponse } from "@t45/contracts/resources/AgentTools";
+import { ChatSummary } from "@t45/contracts/resources/Chats";
 import type { Agent } from "@t45/contracts/models/Agent";
 import {
   Chat,
@@ -56,12 +58,15 @@ const decodeTaskRows = Schema.decodeUnknownEffect(
   ),
 );
 
+const decodeOperation = Schema.decodeEffect(Schema.fromJsonString(WorkflowInstanceResponse));
+const encodeOperation = Schema.encodeSync(Schema.fromJsonString(WorkflowInstanceResponse));
+
 const makeOrigins = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const select = (where: Statement.Fragment) =>
     sql<{ readonly origin: string }>`SELECT json_object('chatId', chat_id,
       'kind', CASE WHEN owner_user_id IS NULL THEN 'task' ELSE 'conversation' END,
-      'ownerUserId', owner_user_id, 'trigger', json(trigger), 'state', json(state)) AS origin
+      'ownerUserId', owner_user_id, 'workflowId', workflow_id, 'trigger', json(trigger), 'state', json(state)) AS origin
       FROM chat_origins WHERE ${where}`.pipe(
       Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeOrigin(row.origin))),
       Effect.orDie,
@@ -71,8 +76,9 @@ const makeOrigins = Effect.gen(function* () {
   return {
     get,
     insert: (origin: ChatOrigin) =>
-      sql`INSERT INTO chat_origins (chat_id, owner_user_id, trigger, state)
+      sql`INSERT INTO chat_origins (chat_id, owner_user_id, workflow_id, trigger, state)
       VALUES (${origin.chatId}, ${origin.kind === "conversation" ? origin.ownerUserId : null},
+        ${origin.kind === "conversation" ? origin.workflowId : null},
         ${origin.kind === "task" ? encodeTrigger(origin.trigger) : null},
         ${origin.kind === "task" ? encodeState(origin.state) : null})`.pipe(
         Effect.asVoid,
@@ -94,6 +100,20 @@ const makeOrigins = Effect.gen(function* () {
         Effect.map((rows) => rows.map(({ task, chatStatus }) => ({ ...task, chatStatus }))),
         Effect.orDie,
       ),
+    operationReceipt: (chatId: ChatId, requestId: string) =>
+      sql<{
+        readonly response: string;
+      }>`SELECT response FROM workflow_operation_receipts WHERE chat_id = ${chatId} AND request_id = ${requestId}`.pipe(
+        Effect.flatMap(([row]) =>
+          row === undefined ? Effect.succeed(null) : decodeOperation(row.response),
+        ),
+        Effect.orDie,
+      ),
+    recordOperation: (chatId: ChatId, response: typeof WorkflowInstanceResponse.Type) =>
+      sql`INSERT INTO workflow_operation_receipts (chat_id, request_id, response) VALUES (${chatId}, ${response.call.input.requestId}, ${encodeOperation(response)})`.pipe(
+        Effect.asVoid,
+        Effect.orDie,
+      ),
     recordedCalls: (chatId: ChatId, keys: ReadonlyArray<string>) =>
       sql<{ readonly key: string }>`SELECT call_key AS key FROM task_calls
         WHERE chat_id = ${chatId} AND ${sql.in("call_key", keys)}`.pipe(
@@ -112,7 +132,7 @@ const makeOrigins = Effect.gen(function* () {
 const CHAT_COLUMNS = `id, agent_id AS "agentId", title, status, updated_at AS "lastActivityAt"`;
 
 const decodeChat = Schema.decodeUnknownEffect(Chat);
-const decodeChats = Schema.decodeUnknownEffect(Schema.Array(Chat));
+const decodeSummaries = Schema.decodeUnknownEffect(Schema.Array(ChatSummary));
 
 const MESSAGE_COLUMNS = `session_id AS "sessionId", message_id AS "messageId", ordinal, json`;
 
@@ -186,11 +206,12 @@ const make = Effect.gen(function* () {
         VALUES (${row.id}, ${row.agentId}, ${row.title},
           ${row.at}, ${row.at})`.pipe(Effect.asVoid, Effect.orDie),
     list: (member: Member) =>
-      sql`SELECT ${chatColumns} FROM chats WHERE deleted_at IS NULL AND id IN (SELECT chat_id FROM chat_origins
-        WHERE owner_user_id = ${member.userId} OR (trigger IS NOT NULL AND ${member.role === "admin"})) ORDER BY updated_at DESC, id DESC`.pipe(
-        Effect.flatMap(decodeChats),
-        Effect.orDie,
-      ),
+      sql`SELECT c.id, c.agent_id AS "agentId", c.title, c.status, c.updated_at AS "lastActivityAt",
+          a.name AS "agentName", o.workflow_id AS "workflowId", w.name AS "workflowName"
+        FROM chats c JOIN chat_origins o ON o.chat_id = c.id
+          LEFT JOIN agents a ON a.id = c.agent_id LEFT JOIN workflows w ON w.id = o.workflow_id
+        WHERE c.deleted_at IS NULL AND o.owner_user_id = ${member.userId}
+        ORDER BY c.updated_at DESC, c.id DESC`.pipe(Effect.flatMap(decodeSummaries), Effect.orDie),
     exists: (chatId: ChatId) =>
       sql`SELECT id FROM chats WHERE id = ${chatId}`.pipe(
         Effect.map((rows) => rows.length > 0),

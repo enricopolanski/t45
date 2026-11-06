@@ -1,3 +1,4 @@
+import type { Receive } from "../chats/ChatExecutions.ts";
 import type { SessionMessage } from "@opencode/schema/session-message";
 import { ChatId, InputId, Refused, type InputPayload } from "@t45/contracts/models/Chat";
 import type { Task, Trigger, Outcome, TaskState } from "@t45/contracts/models/Task";
@@ -78,8 +79,8 @@ const make = Effect.gen(function* () {
     });
   const transition = Effect.fnUntraced(function* (task: Task, state: TaskState) {
     if (task.state.type === "settled") return null;
-    if (state.type === "settled") yield* chats.requestStop(task.chatId);
     yield* origins.setState(task.chatId, state);
+    if (state.type === "settled") yield* chats.remove(task.chatId);
     if (task.trigger.type === "step") yield* tickets.publishChange(task.trigger.ticketId);
     return { ...task, state };
   });
@@ -176,37 +177,29 @@ const make = Effect.gen(function* () {
     }, transaction),
     requestStop: chats.requestStop,
     settle,
-    send: Effect.fnUntraced(function* (...[input, member]: Parameters<typeof chats.send>) {
-      const task = yield* get(input.chatId);
-      const repeated =
-        task !== null && (yield* repository.input(input.chatId, input.inputId)) !== null;
-      yield* chats.send(input, member);
-      if (task !== null && !repeated) yield* prepareInput(task);
-    }, transaction),
-    consume: (steps: StepHooks) =>
-      chats.consume((result) => {
-        const { chatId } = result;
-        if (result.type === "messages")
-          return saved(chatId, result.messages, result.generated, steps);
-        return transaction(
-          Effect.gen(function* () {
-            const task = yield* get(chatId);
-            if (task?.state.type !== "active" || !(yield* canRun(task))) return;
-            const outcome: Outcome =
-              result.status === null && task.trigger.type !== "step"
-                ? { type: "succeeded" }
-                : {
-                    type: "failed",
-                    reason:
-                      result.status === null
-                        ? "The agent ended without submitting its work."
-                        : "The agent invocation failed.",
-                  };
-            const changed = yield* transition(task, { type: "settled", outcome });
-            if (changed !== null) yield* steps.changed(changed);
-          }),
-        );
-      }),
+    receive: (result: Parameters<Receive>[0], steps: StepHooks) => {
+      const { chatId } = result;
+      if (result.type === "messages")
+        return saved(chatId, result.messages, result.generated, steps);
+      return transaction(
+        Effect.gen(function* () {
+          const task = yield* get(chatId);
+          if (task?.state.type !== "active" || !(yield* canRun(task))) return;
+          const outcome: Outcome =
+            result.status === null && task.trigger.type !== "step"
+              ? { type: "succeeded" }
+              : {
+                  type: "failed",
+                  reason:
+                    result.status === null
+                      ? "The agent ended without submitting its work."
+                      : "The agent invocation failed.",
+                };
+          const changed = yield* transition(task, { type: "settled", outcome });
+          if (changed !== null) yield* steps.changed(changed);
+        }),
+      );
+    },
   };
 });
 

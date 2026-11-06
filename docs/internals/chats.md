@@ -50,13 +50,13 @@ The save is not part of the commit: it lands before it, so a crash or shutdown b
 
 ## Ids
 
-A chat's id and agent never change. Its single origin is either a member-owned Conversation or a triggered Task, stored in `chat_origins` and created atomically with the chat and first input. Task identity is chat identity; a retry after a final outcome gets a new pair. The origin remains with the chat tombstone. Chat storage and execution events carry neither member ownership nor workflow references.
+A chat's id and agent never change. Its single origin is either a member-owned Conversation or a triggered Task, stored in `chat_origins` and created atomically with the chat and first input. Task identity is chat identity; a retry after a final outcome gets a new pair. The origin remains with the chat tombstone. Workflow assistant conversations retain their workflow ID in the origin even if that workflow is deleted; cancellation of the first input cannot remove the binding. Public chat APIs expose only owned conversations: the owner retains their history and can delete it after workflow access ends, while new inputs and question answers need current workflow access. Tasks stay internal, with status and controls on their steps and the latest org automation outcome in automation settings. Execution events carry neither member ownership nor workflow references.
 
 The root session is `ses_t45_<chat>` and an input's message `msg_t45_<chat>_<input>`, so every execution names them the same and an input's stored user message tells it is taken. Subagent sessions and the agent's messages take OpenCode's ids, which the disk keeps; what an execution writes again after a discard gets new ones. Every native row is also keyed by chat, since one VM must never write into another chat's copy. T45 assigns session-local ordinals as it saves messages, because its ids do not sort with OpenCode's.
 
 ## Executions and tasks
 
-TaskService gives ChatService its consumer, using WorkflowService's receipt functions; executions wait for it before they start. The consumer runs on the execution's fiber, so a stop interrupts receipt handling and chat and task completion share a transaction. The files the step tools leave for T45 arrive in the stream before the messages naming them, so receipts never read from a VM. A task settling during execution uses ChatService's `requestStop`, which records `interrupted` in the caller's transaction and asks the owner to stop after commit; nothing waits for it, so the execution can stop itself.
+WorkflowService installs one execution consumer for task receipts and workflow assistant operations; executions wait for it before they start. The consumer runs on the execution's fiber, so a stop interrupts receipt handling and chat and task completion share a transaction. The files the step tools leave for T45 arrive in the stream before the messages naming them, so receipts never read from a VM. Settling a task tombstones its chat in the same transaction; cleanup stops any remaining execution and removes its disk, copied messages, inputs and unreferenced attachments. The origin and outcome remain for step readiness and automation status; workflow fields, comments and step files remain their own records. Active and submitted tasks retain their chats so stopped work and rejected submissions can resume.
 
 TaskService starts, continues, stops and settles tasks. A stop leaves a task active, and step submission is provisional until approval; rejection continues the same task and chat. Execution checks pending inputs before committing completion; task handling trusts that result. The call ledger and workflow effects commit together.
 
@@ -70,7 +70,7 @@ The `ChatService` layer provides one `ChatEvents` bus shared by posts, execution
 
 ## Delete
 
-Deleting tombstones the chat. After commit its execution is stopped, and the chat's hold on its files, the files nothing else holds, its disk and its rows are removed; a cleanup cut short is finished at the next server start. The tombstone retains its origin and final Task outcome, so access and identity remain resolvable, and normal reads exclude it.
+Deleting tombstones the chat. After commit its execution is stopped, and the chat's hold on its files, the files nothing else holds, its disk and its rows are removed; cleanup failures are logged. The tombstone retains its origin and workflow operation receipts, so access and identity remain resolvable, and normal reads exclude it.
 
 A chat exists from its first input on: a member's new chat is a page the web keeps until its first send carries the agent, so an empty chat leaves nothing behind.
 

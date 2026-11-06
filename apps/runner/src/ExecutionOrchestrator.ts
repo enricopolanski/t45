@@ -384,6 +384,13 @@ export const layer = RunnerRpcs.toLayer(
             Effect.andThen(Queue.end(queue)),
           ),
         ),
+      writeFiles: ({ rootId, files }) =>
+        Effect.suspend(() => {
+          const execution = activeExecutions.get(rootId);
+          return execution === undefined
+            ? Effect.die("The execution has ended.")
+            : execution.writeFiles(files).pipe(Effect.orDie);
+        }),
       send: ({ rootId, message, files }) =>
         Effect.gen(function* () {
           const execution = activeExecutions.get(rootId);

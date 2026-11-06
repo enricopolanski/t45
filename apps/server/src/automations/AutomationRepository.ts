@@ -1,4 +1,6 @@
 import { Schedule, Automation, type AutomationId } from "@t45/contracts/models/Automation";
+import { Chat, ChatStatus } from "@t45/contracts/models/Chat";
+import { TaskState } from "@t45/contracts/models/Task";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -13,6 +15,22 @@ const Row = Schema.Struct({
 });
 const decodeAutomations = Schema.decodeUnknownEffect(Schema.Array(Row));
 const encodeRow = Schema.encodeEffect(Row);
+const decodeSummaries = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      ...Row.fields,
+      lastRun: Schema.NullOr(
+        Schema.fromJsonString(
+          Schema.Struct({
+            state: TaskState,
+            status: Schema.NullOr(ChatStatus),
+            at: Chat.fields.lastActivityAt,
+          }),
+        ),
+      ),
+    }),
+  ),
+);
 
 const COLUMNS = `id, title, prompt, agent_id AS "agentId", is_enabled AS "isEnabled",
   schedule_json AS "schedule", webhook_token AS "webhookToken", next_run_at AS "nextRunAt",
@@ -31,8 +49,33 @@ const make = Effect.gen(function* () {
   const get = (id: AutomationId) => one(sql`SELECT ${columns} FROM automations WHERE id = ${id}`);
 
   return {
-    list: sql`SELECT ${columns} FROM automations ORDER BY created_at, id`.pipe(
-      Effect.flatMap(decodeAutomations),
+    list: sql`SELECT ${columns}, (
+        SELECT json_object('state', json(o.state), 'status', c.status, 'at', c.updated_at)
+        FROM chat_origins o JOIN chats c ON c.id = o.chat_id
+        WHERE o.trigger IS NOT NULL AND json_extract(o.trigger, '$.type') = 'automation'
+          AND json_extract(o.trigger, '$.automationId') = automations.id
+        ORDER BY c.created_at DESC, c.id DESC LIMIT 1
+      ) AS "lastRun" FROM automations ORDER BY created_at, id`.pipe(
+      Effect.flatMap(decodeSummaries),
+      Effect.map((rows) =>
+        rows.map(({ lastRun, ...automation }) => ({
+          ...automation,
+          lastRun:
+            lastRun === null
+              ? null
+              : {
+                  at: lastRun.at,
+                  statusLabel:
+                    lastRun.state.type === "settled"
+                      ? lastRun.state.outcome.type === "succeeded"
+                        ? "Succeeded"
+                        : `${lastRun.state.outcome.type === "failed" ? "Failed" : "Cancelled"}: ${lastRun.state.outcome.reason}`
+                      : lastRun.status === "running"
+                        ? "Running"
+                        : "Stopped",
+                },
+        })),
+      ),
       Effect.orDie,
     ),
     get,
