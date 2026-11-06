@@ -78,7 +78,7 @@ export const layerTest = Layer.unwrap(
 
 export const layerConfig = Layer.unwrap(
   Effect.gen(function* () {
-    const { dbPath } = yield* ServerConfig.ServerConfig;
+    const dbPath = yield* ServerConfig.dbPath;
     return layerFromPath(dbPath);
   }),
 );

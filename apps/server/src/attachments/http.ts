@@ -14,7 +14,11 @@ import { ChatService } from "../chats/ChatService.ts";
 import { TicketRepository } from "../workflows/TicketRepository.ts";
 import { canViewTicket } from "@t45/contracts/models/Workflow";
 import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
-import { AttachmentRepository, attachmentIsInlineImage } from "./AttachmentRepository.ts";
+import {
+  AttachmentRepository,
+  attachmentIsInlineImage,
+  isAttachmentId,
+} from "./AttachmentRepository.ts";
 
 // Types a browser may render as a document if a proxy strips the disposition
 // header. Downloads of these fall back to octet-stream.
@@ -74,9 +78,10 @@ export const layerAttachmentRoute = HttpRouter.add(
     const attachmentId = separatorIndex === -1 ? suffix : suffix.slice(0, separatorIndex);
     const notFound = HttpServerResponse.text("Not Found", { status: 404 });
     const files = yield* AttachmentRepository;
+    if (!isAttachmentId(attachmentId)) return notFound;
     const path = files.path(attachmentId);
-    const attachment = path === null ? null : yield* files.get(attachmentId);
-    if (path === null || attachment === null) return notFound;
+    const attachment = yield* files.get(attachmentId);
+    if (attachment === null) return notFound;
 
     const chats = yield* ChatService;
     const tickets = yield* TicketRepository;

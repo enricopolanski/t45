@@ -147,11 +147,6 @@ const NEW_CHAT_COMMAND = {
   description: "Start a new chat",
 } satisfies ComposerCommandItem;
 
-const COMPACT_COMMAND = {
-  command: "compact",
-  description: "Summarize the conversation to free up context",
-} satisfies ComposerCommandItem;
-
 function RetryUploadButton(props: {
   variant: "overlay" | "ghost";
   attachment: ComposerAttachment;
@@ -199,14 +194,13 @@ export interface ChatComposerProps {
   forceExpandedOnMobile: boolean;
   /** The agent is running: a send queues behind it. */
   running: boolean;
-  /** Stop is offered: a run is preparing, starting, or running. */
+  /** Stop is offered: the agent is running or waiting on a question. */
   canInterrupt: boolean;
   isSendBusy: boolean;
   sendDisabledReason: string | null;
   question: ComposerQuestion | null;
   /** The chat's messages are loading. */
   loadingMessages: boolean;
-  compactDisabled: boolean;
   getTimelineScrollableNode: () => HTMLElement | null;
   isTimelineAtLogicalEnd: () => boolean;
   /** Whether the timeline has more content than fits above the composer. */
@@ -222,7 +216,6 @@ export interface ChatComposerProps {
   onPageScrollKeyDown: (key: "PageUp" | "PageDown", repeat: boolean) => void;
   /** The strip of inputs waiting their turn, above the composer. */
   queueBanner?: ReactNode;
-  onCompactContext: () => void;
   onSend: (e?: { preventDefault: () => void }) => boolean;
   onStartNewChat: () => void;
   onInterrupt: () => void;
@@ -241,7 +234,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isSendBusy,
     sendDisabledReason: externalSendDisabledReason,
     question,
-    compactDisabled,
     getTimelineScrollableNode,
     isTimelineAtLogicalEnd,
     timelineOverflows,
@@ -249,7 +241,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     promptRef,
     ref,
     onPageScrollKeyDown,
-    onCompactContext,
     onSend,
     onStartNewChat,
     onInterrupt,
@@ -403,21 +394,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerImages.length + composerFiles.length > 0;
 
   const menuQuery = composerTrigger?.query.toLowerCase() ?? null;
-  // /compact runs only on a prompt that is nothing but the command.
-  const compactAvailable =
-    composerTrigger !== null &&
-    !compactDisabled &&
-    prompt.slice(0, composerTrigger.rangeStart).trim() === "" &&
-    prompt.slice(composerTrigger.rangeEnd).trim() === "" &&
-    composerImages.length + composerFiles.length === 0 &&
-    composerDraft.persistedImages.length === 0;
   const composerMenuItems: ComposerCommandItem[] =
-    menuQuery === null
-      ? []
-      : searchSlashCommandItems(
-          compactAvailable ? [NEW_CHAT_COMMAND, COMPACT_COMMAND] : [NEW_CHAT_COMMAND],
-          menuQuery,
-        );
+    menuQuery === null ? [] : searchSlashCommandItems([NEW_CHAT_COMMAND], menuQuery);
   const composerMenuOpen = composerTrigger !== null;
   const highlightedCommand = menuHighlight?.query === menuQuery ? menuHighlight?.command : null;
   const activeComposerMenuItem =
@@ -654,7 +632,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (!applied) return;
     setMenuHighlight(null);
     if (item.command === "new") onStartNewChat();
-    else onCompactContext();
   };
 
   const cancelComposerBlurFrame = () => {
@@ -1701,11 +1678,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </div>
             </div>
 
-            {composerSubmissionError ? (
-              <ErrorText size="xs" className="mx-3 mb-2 sm:mx-4">
-                {composerSubmissionError}
-              </ErrorText>
-            ) : null}
+            {composerSubmissionError && (
+              <ErrorText className="mx-3 mb-2 sm:mx-4" text={composerSubmissionError} />
+            )}
 
             {isComposerCollapsedMobile ? null : (
               <div

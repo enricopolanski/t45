@@ -203,19 +203,14 @@ body {
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
 }
 
-@utility alert-glass {
+@utility error-glass {
   @apply glass;
-  --alert-glass-tint: transparent;
   --glass-bg:
     linear-gradient(
-      color-mix(in srgb, var(--alert-glass-tint) 4%, transparent),
-      color-mix(in srgb, var(--alert-glass-tint) 4%, transparent)
+      color-mix(in srgb, var(--destructive) 4%, transparent),
+      color-mix(in srgb, var(--destructive) 4%, transparent)
     ),
     color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
-
-  &[data-variant="error"] {
-    --alert-glass-tint: var(--destructive);
-  }
 }
 
 @utility dialog-glass {
@@ -460,8 +455,7 @@ body {
     transition: opacity 200ms var(--default-transition-timing-function);
 
     [data-message-row]:hover &,
-    &:focus-within,
-    &[data-lost="true"] {
+    &:focus-within {
       opacity: 1;
     }
     @media (pointer: coarse) {

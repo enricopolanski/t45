@@ -1,63 +1,65 @@
-# Cleanup pass
+# Open follow-ups
 
-Requested explicitly, so it lives in the repo despite the "no plans" rule in AGENTS.md. Every tracked file was listed (`git ls-files | sort`, 1,639 outside `.repos/`, which is vendored and read-only) and walked directory by directory in that order. Files were read where a scan flagged them: leftover terms (providers, desktop/mobile, worktrees, forks, version skew…), modules only their tests import, exports nobody uses, and producers or consumers that no longer exist. The rest were skimmed by header. Only scanned and skimmed, not read line by line: `apps/web/src/components/{ui,work,workflows,home,chats,agents}` and `apps/server/src/{workflows,org,scheduledTasks}`. Sections follow the walk; only files with a possible improvement, cut or leftover are listed.
+Keep unresolved work and design questions here; remove an entry when it is implemented or decided. Tool packaging, replayed workflow effects and real-VM verification have one checklist in [todo.md](../../todo.md). Current decisions belong in [internals](../internals/); commits and PRs record delivered changes.
 
-Each entry names the file and what could change. Delete an entry once it is done or decided.
+These are follow-ups from the earlier cleanup reviews, with references updated to the current source; proposals still need checking when picked up, and are not instructions to add abstractions, retries, limits or tests indiscriminately.
 
-## apps/server/src/attachments
+## Chats and execution
 
-- `apps/server/src/attachments/AttachmentRepository.ts` — the store keeps every file's bytes under the server's state directory (`attachmentsDir`). Add a cloud implementation that keeps them in an object-storage bucket behind the same service.
-- `apps/server/src/runner/RunnerService.ts` — `putFile` only logs when the server lost a file or the runner refuses it, but `promptText` and `answersWithAttachmentPaths` still name its path, so the agent looks for a file that isn't in `/work/attachments`. Have `putFile` report what it put, and say in the prompt, or in a note for files re-put at restore, which files didn't arrive.
+- `apps/server/src/chats/ChatService.ts`: order snapshots, message copies and deltas consistently. A queued message invalidation reads its rows at delivery time, so the copy can contain text already streamed in earlier deltas. Capturing rows when publishing is insufficient on its own: subscription starts before the initial snapshot, which must not be overwritten by an older queued copy.
+- `apps/server/src/chats/ChatService.ts`: decide whether archiving an agent should prevent new inputs to its existing conversations; currently it prevents only new conversations. If that policy changes, explain the unavailable state in the composer.
+- `apps/server/src/chats/ChatService.ts`: narrow display truncation to known large content fields instead of every long string and every property named `data`; preserve the original stored message and whole-message access. Preserve answer attachment ownership if native answer validation refuses the request.
+- `apps/runner/src/ExecutionOrchestrator.ts`: session permission rules override the provider-only `webfetch`/`websearch` denies from `SandboxManager.ts`, leaving network enforcement as the only restriction. Align the rules so the agent sees the capabilities its network actually allows.
+- `apps/runner/src/ExecutionOrchestrator.ts`: handle a deleted subagent consistently with the retained history contract. Its ID remains in `known`, and subsequent reads can fail with `SessionNotFoundError`; deleting the root must still fail its execution.
+- `apps/runner/src/ExecutionOrchestrator.ts`: evaluate whether reading complete sessions per event batch can replace `PendingReads`, cursors and unfinished-message bookkeeping. Measure long-chat transfer and `saveMessages` work first; a smaller reader that repeatedly sends and upserts the full conversation may cost more overall.
+- `apps/runner/src/ExecutionOrchestrator.ts`: the output queue created by `Stream.callback` is unbounded before the RPC transport's bounded queue. Evaluate backpressure at that boundary while preserving event order and independent reply-file writes, without another acknowledgement protocol.
+- `apps/server/src/chats/ChatExecutions.ts`: disk replacement precedes the SQL commit, so interruption between them leaves the disk ahead of the stored output. Decide whether a disk pointer changed in the commit is worth the extra storage lifecycle.
+- `apps/runner/src/SandboxManager.ts`: saved ext4 archives keep deleted blocks; check whether guest `fstrim` reduces archive size before changing the save procedure.
+- When deployment size warrants it, decide per-chat storage policy and runner admission based on actual capacity; the VM disk bound does not bound T45's stored messages and attachments, and there is no concurrent-VM admission policy.
 
-## apps/server/src/chats, opencode
+## Workflows and agents
 
-- `apps/server/src/chats/ChatService.ts` — `open` reads a `messages` change's rows when it sends the change, not when the worker published it, so on a slow link a copy can reach the browser after deltas that streamed before the copy was read, and show their text twice until the next copy. Send the copy the reconcile read with the change instead.
-- `apps/server/src/chats/ChatService.ts` — a later input no longer checks the chat's agent, so archiving an agent only stops new chats with it, and members keep writing in their existing ones. Decide whether those chats should freeze again, with the composer saying why.
-- `apps/server/src/runner/RunnerService.ts` — `setBoot` is the boot's last write, so a T45 that dies after restoring a new boot but before recording it restores again into the same running VM on restart: `/work` goes back to the last save and attachments are put again.
-- `apps/server/src/runner/RunnerService.ts` — capture commits a page of messages before `hooks.saved` applies their step calls in a second transaction, and nothing replays stored messages after a restart (`recoverTask` only calls `ended`, and a re-capture passes on only the rows that changed), so a T45 that stops between the two loses those calls: a lost `step_done` fails its task as "ended without submitting". Replay the stored messages of active step tasks through `saved` at startup; the `task_calls` ledger already skips the applied ones.
-- `apps/server/src/opencode/OpenCode2Client.ts` — every session gets `sessionRules` (allow everything but questions for working agents), and OpenCode merges session rules after the agent's and takes the last match (`.repos/opencode/packages/core/src/permission.ts`), so they override the `webfetch`/`websearch` deny the runner writes into `opencode.json` on the provider-only network; only the network policy still stops them. Send the deny with the session rules for those chats, or drop the session rules.
-- `apps/server/src/opencode/OpenCode2Client.ts` — a message over the 64 MiB per-answer cap (`RESPONSE_MAX_BYTES`) gets no placeholder: capture fails on it and the chat's worker keeps retrying. Nor is there a per-chat storage quota: only the workspace is capped, not the messages and attachments T45 keeps.
+- `apps/server/src/chats/ChatExecutions.ts`, `apps/server/src/tasks/TaskService.ts`, `apps/server/src/workflows/WorkflowService.ts`: `allowQuestions: false` only disables the blocking question tool. Define unattended instructions and completion criteria together: no human will answer, which assumptions are allowed, and how to report a blocker. A step task fails without submission, while a non-step automation currently succeeds on normal execution completion. Keep task policy on the server and supplied capabilities in the runner.
+- `apps/server/src/workflows/WorkflowService.ts`: large task context or more than 100 attachments can exceed the ordinary chat input limits and prevent a task from starting. Evaluate a context file and an attachment delivery path that preserves one task input's meaning instead of silently omitting context.
+- Starter agents are editable organization-owned definitions after initialization; decide separately whether any supplied agents should instead be application-owned capabilities updated with releases. Prepared images could package an agent definition's environment, instructions, model, skills and tools, but should share the definition and execution path used by custom agents. Revisit when different runtime dependencies or release-owned behavior are actually needed; credentials and host permissions remain runtime configuration.
+- `apps/server/src/workflows/WorkflowService.ts`: batch repeated attachment metadata, definition and actor reads within a view or command when measurements justify it; preserve one transaction per command and avoid permission caches across requests.
+- `apps/server/src/workflows/WorkflowService.ts`: validate that default-assignment keys refer to steps in the workflow's definition rather than retaining orphan settings.
+- `apps/server/src/workflows/WorkflowService.ts`, `apps/server/src/workflows/NotificationRepository.ts`: consider combining owner-scoped notification marking and reading; decide retention and how users reach unread notices beyond the list limit. Keep marking read tied to an explicit notification action.
+- Plan pagination for chat lists, My work and boards together with their UI consumers when those lists become large; do not silently truncate server results.
 
-## apps/runner
+## Storage, authentication and HTTP
 
-- Nothing has run on a real microsandbox VM yet (`apps/runner/src/MicrosandboxChats.ts`): check the workspace `tar` running as the agent, `/tmp` permissions for the workspace upload, and VM removal.
-- `apps/runner/src/ChatTable.ts` — the runner has no cap on VMs running at once (the env caps and `RunnerBusyError` were removed). When capacity matters, have the runner compute what it can take from its own resources and tell T45 when it can't start another VM, instead of hardcoded counts.
-- `apps/runner/src/MicrosandboxChats.ts` — agent files are written into `/work` beside what every boot writes itself (`AGENTS.md`, `opencode.json`, `attachments/`, `.opencode/skills/`), and `agents.create`/`agents.update` no longer refuse those paths. Have the runner place agent files where they can't collide.
+- `apps/server/src/attachments/AttachmentRepository.ts`: add an object-storage implementation when local attachment storage is no longer appropriate, keeping the same ownership rules.
+- `apps/server/src/attachments/http.ts`: replace manual attachment-ID extraction from a wildcard route with a route parameter if the router supports the trailing filename; retain private access and safe download headers.
+- `apps/server/src/org/http.ts`, `apps/server/src/org/avatars.ts`: version avatar URLs by image change rather than every profile update, then use immutable caching instead of downloading on each page load.
+- `apps/server/src/auth/http.ts`: review `Secure` cookies for HTTPS deployments and `no-store` on session responses; preserve local HTTP development.
+- `apps/server/src/auth/Authentication.ts`: consider a shared claim decoder after signature verification while retaining issuer, expiry, verified-email and optional `azp` policy; validate the decoded Clerk hostname as a bare host, and validate the runner URL at its configuration boundary.
+- `apps/server/src/auth/Authentication.ts`: expired session rows are rejected but retained; choose a retention policy when needed without changing the session TTL or post-commit revocation behavior.
+- `apps/server/src/org/Users.handlers.ts`: decide whether ordinary members should receive pending and deactivated users from `users.list`, or only an active directory.
+- `apps/server/src/chats/ChatRepository.ts`, `apps/server/src/org/UserRepository.ts`: review unchecked SQL row annotations such as message and avatar rows when changing their persistence boundaries; keep decoding local rather than adding a schema layer for every query.
+- `apps/server/src/automations/webhook.ts`: parse query parameters once per rendered prompt, and decide how expansion should behave when repeated placeholders exceed the eventual prompt limit; preserve explicit raw-field access and aggregate credential redaction. Correct the constant-time comparison comment: hashing still depends on input length, and the supported signature scheme is HMAC over the raw body, not every provider's protocol.
 
-## apps/server/src/org
+## Web
 
-- `apps/server/src/org/http.ts` — avatars are served `no-cache` without a validator, so every page load downloads them again. Version their URL by upload time instead of `updatedAt` and serve them `immutable`.
+- `apps/web/src/**/*.tsx`: choose one form for rendering optional content; a mechanical conversion to `&&` must avoid numeric guards rendering `0`.
+- `apps/web/src/components/chat/ChatTimeline.tsx`: evaluate focused private components and shared context only if they make the timeline easier to follow; more files are not themselves an improvement.
+- `apps/web/src/components/markdown/Markdown.tsx`: decide whether link favicons are useful enough to restore, without disclosing every linked domain to a third-party favicon service.
+- `apps/web/src/components/markdown/CodeBlock.tsx`: consider CSS-only language colors for code blocks and file chips, with readable contrast and a small set of language aliases.
+- `apps/web/src/router.ts`: verify stale-route-chunk recovery across production deployments in Chromium, Firefox and WebKit, including preload failures and persistent missing chunks without reload loops.
+- `apps/web/src/state/session.ts`: consider exposing the admitted `User` through route/session context so signed-in consumers need no nullable fallbacks or extra self-directory lookup; retain session revocation on role/state changes and refresh after profile edits.
+- `apps/web/src/timestampFormat.ts`: decide whether to restore a 12/24-hour preference and whether English tooltip dates should follow the browser locale.
+- `apps/web/src/components/agents/SkillEditor.tsx`: duplicate file paths currently collapse to the last row when converted to a record; decide how the editor should report that before saving.
 
-## apps/server/src/persistence
+## Development and verification
 
-- `apps/server/src/persistence/Schema.ts` — at the first release, freeze the schema as the baseline and add an append-only migration ledger applied on top of it, so released databases upgrade instead of being refused.
+- Provide a reusable authenticated local-browser workflow in [Development](../operations/development.md). Clerk configuration is documented and disposable checks have used a locally seeded session, but there is no maintained command for that fixture flow; the original claim that authenticated local verification is impossible is obsolete.
+- `apps/server/src/persistence/Sqlite.ts`: evaluate moving the cached schema-image/test-database construction out of production persistence, retaining measured setup savings and independent connections.
+- `apps/server/src/persistence/Sqlite.test.ts`: replace the child lock-holder's timer with an observable release handshake and scoped process cleanup.
+- Inventory existing server tests by business invariant and future model/frontend-e2e home before removing them. Retain input replay, rollback, private-content access and session-revocation guarantees; remove duplicate helper assertions only when their behavior is still covered. The new workflow controls and assistant have disposable verification but no new permanent regression tests, by instruction.
+- `vite.base.config.ts`: measure the value of `isolate: false` before keeping test workarounds for shared module state.
+- `vite.base.config.ts`, `package.json`: evaluate consolidating format, lint and typechecking into `vp check` once Vite+/Oxlint and Effect diagnostics cover every workspace; do not drop the separate typecheck before parity is established.
+- Consider one server in development and production, with Vite middleware in development, if it removes more proxy/port plumbing than it adds.
 
-## apps/server/src (tests, workflows)
+## Retained design scenarios
 
-- `apps/server/src/workflows/WorkflowService.ts` — nothing bounds a step's chat now that the run deadline is gone: each refused call starts a new turn, so an agent that keeps repeating one loops without end, and a background shell left running keeps the chat running, so its step never settles.
-- `apps/server/src/workflows/WorkflowService.ts` — the brief travels inline in the chat input, so the chat refuses a step whose carried values or comments pass 120,000 characters, or that carries more than 100 files: handing it to an agent falls back to its responsible in the same command. Send the brief as a file next to the step's files, and spread more than 100 files over several inputs.
-
-## apps/web/src/components (ChatView)
-
-- `apps/web/src/components/markdown/Markdown.tsx` — consider showing site favicons next to links again (now a globe or the GitHub mark). The removed version fetched them from Google's favicon service, which disclosed every linked domain and needed a private-host filter; prefer a source that leaks nothing, such as the server fetching and caching them.
-- `apps/web/src/components/markdown/CodeBlock.tsx` — consider tinting code blocks and file chips by language again, in CSS only: code blocks would need a `data-language` attribute again, so `.chat-markdown-codeblock:is([data-language="ts" i], [data-language="typescript" i])` can set a `--code-tint` the header reads; file chips would need a `data-file-name` attribute to match with `[data-file-name$=".py" i]`. Decide where the color goes (label text, a dot or a border; label text needs a contrast check in both themes) and keep it to the common languages, since models write several aliases for each.
-
-## apps/web/src (hooks, lib, rpc, state, root modules)
-
-- `apps/web/src/router.ts` — test TanStack's built-in stale-route-chunk recovery with old tabs across production deployments in Chromium, Firefox, and WebKit: startup and navigation failures, hover preloads, successful reload recovery, persistent missing chunks without reload loops, and blocked `sessionStorage`.
-- `apps/web/src/state/session.ts` — replace `useSession` with a `useUser()` that returns the signed-in `User` model, never null, since the shell only mounts once the gate admits a session: let the signed-in `AuthSessionState` carry the `User` (the session handler reads it with `UserRepository.get`), keep it in the root route's context with the admitted gate state, and drop the `?.` and `?? ""` fallbacks at its seven callers and `AccountMenu`'s directory lookup of the user's own name and avatar. Role changes and deactivation end the session, so only the user's own profile edits need to refresh it.
-- `apps/web/src/timestampFormat.ts` — the time-format setting is gone, so times follow the browser locale. Check whether anyone needs a 12/24-hour choice back, and whether the English-only tooltip date ("4th June 2026") should follow the locale too.
-
-## docs
-
-- `docs/planning/backlog.md` — its one item ("Authenticated local verification") is about the Clerk-only door blocking browser checks; this pass did it with a throwaway script that mints a dev session in a scratch home. Turn that into a documented dev command or keep the item.
-
-## patches, scripts
-
-- `vite.base.config.ts`, `package.json` — consolidate formatting, linting, and typechecking into `vp check`. Align Vite+'s Oxlint/tsgolint versions with `@effect/tsgo` support, enable the Effect Oxlint integration (`effect-tsgo patch --oxlint`) and `lint.options.typeAware`/`typeCheck`, and verify that every workspace package and the existing Effect diagnostics remain covered before removing the separate typecheck from pre-commit. Replace the stale integration comment once verified.
-- Dev runs two servers (Vite serving the page with live reload, proxying `/api` to the T45 server) while production runs one. Move to a single server in both, e.g. the T45 server hosting Vite in middleware mode, and drop the proxy in `apps/web/vite.config.ts` and the split ports.
-
-## packages/contracts
-
-- `packages/contracts/src/models/Skill.ts` — the checks in its schemas (the name pattern, `FilePath`, no SKILL.md) have no tests; review whether they need some.
-- `apps/web/src/components/agents/SkillEditor.tsx` — the form edits file rows and builds `files` as a record on save, so two rows with the same path silently keep only the last. Decide whether `SaveSkillRequest.files` should be a list with unique paths that the server turns into the record.
+[User management](./users/user-management.feature) and [workflows](./workflows/workflows.feature) retain the original scenarios, including future ideas; they are not a verified description of the current implementation. Reconcile the workflow scenarios before using them as acceptance criteria: they still describe agent assignees and helpers, an assigned first-step requirement, notification reads on opening a step, ticket-only substeps and deferred workflow drafting, which the current design has superseded.

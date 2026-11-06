@@ -1,4 +1,4 @@
-import { BotIcon, CalendarClockIcon, ServerIcon, UsersIcon, WorkflowIcon } from "lucide-react";
+import { BotIcon, CalendarClockIcon, UsersIcon, WorkflowIcon } from "lucide-react";
 
 import type { NavLink } from "../sidebar/AppNav";
 
@@ -19,10 +19,7 @@ export const SETTINGS_GROUPS: ReadonlyArray<{
   },
   {
     label: "AI Team",
-    links: [
-      { to: "/settings/agents", label: "Agents", icon: <BotIcon /> },
-      { to: "/settings/runner", label: "Runner", icon: <ServerIcon /> },
-    ],
+    links: [{ to: "/settings/agents", label: "Agents", icon: <BotIcon /> }],
   },
   {
     label: "Organization",

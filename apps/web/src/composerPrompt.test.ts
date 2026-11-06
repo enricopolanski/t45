@@ -157,42 +157,20 @@ describe("parseStandaloneComposerSlashCommand", () => {
     expect(parseStandaloneComposerSlashCommand(" /NEW ")).toBe("new");
   });
 
-  it("parses standalone /compact command", () => {
-    expect(parseStandaloneComposerSlashCommand("/compact\n")).toBe("compact");
-  });
-
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/new explain this")).toBeNull();
-    expect(parseStandaloneComposerSlashCommand("/compact the notes")).toBeNull();
   });
 });
 
 describe("searchSlashCommandItems", () => {
   const items = [
     { command: "new", description: "Start a new chat" },
-    { command: "compact", description: "Summarize the conversation to free up context" },
   ] satisfies ComposerCommandItem[];
 
-  it("lists every command for an empty query", () => {
-    expect(searchSlashCommandItems(items, "").map((item) => item.command)).toEqual([
-      "new",
-      "compact",
-    ]);
-  });
-
-  it("puts a command-name match ahead of a description match", () => {
-    expect(searchSlashCommandItems(items, "c").map((item) => item.command)).toEqual([
-      "compact",
-      "new",
-    ]);
-  });
-
-  it("matches a description after every name match", () => {
-    expect(searchSlashCommandItems(items, "free").map((item) => item.command)).toEqual(["compact"]);
-    expect(searchSlashCommandItems(items, "t").map((item) => item.command)).toEqual([
-      "compact",
-      "new",
-    ]);
+  it("matches a command by its name or its description", () => {
+    expect(searchSlashCommandItems(items, "").map((item) => item.command)).toEqual(["new"]);
+    expect(searchSlashCommandItems(items, "ne").map((item) => item.command)).toEqual(["new"]);
+    expect(searchSlashCommandItems(items, "chat").map((item) => item.command)).toEqual(["new"]);
     expect(searchSlashCommandItems(items, "cmp")).toEqual([]);
   });
 });

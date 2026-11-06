@@ -6,6 +6,7 @@ import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { WorkflowNavigation } from "./WorkflowNavigation";
 import { WorkFrame } from "../work/WorkFrame";
 
@@ -49,11 +50,7 @@ export function WorkflowList() {
         workflow.
       </p>
       <section aria-label="Workflows" className="flex flex-col gap-3">
-        {error !== null ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error && <ErrorText text={error} />}
         {workflows !== null && workflows.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No workflows yet. Choose a blueprint to configure a workflow for your team.

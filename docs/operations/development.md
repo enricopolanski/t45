@@ -2,9 +2,11 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24; Bun is optional. Copy `.env.example` to `.env` and set `AUTH_CLERK_PUBLISHABLE_KEY` to your Clerk development instance's publishable key. From the repository root:
+Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24.21.0 or newer in the 24.x line, with the development version pinned in `.node-version`; Bun is optional. Copy `.env.example` to `.env` and set `AUTH_CLERK_PUBLISHABLE_KEY` to your Clerk development instance's publishable key. From the repository root:
 
 ```sh
+vp env on node
+vp env install
 vp i
 vp run dev
 ```
@@ -53,16 +55,19 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 
 ### The runner in dev
 
-`vp run dev` starts the runner on loopback next to the server (`runnerUrl=` on the `[dev-runner]` line) and points the server at it, with a token made fresh for each run. To use a shared runner instead, set both `RUNNER_URL` and `RUNNER_TOKEN`; this skips the local runner. The local runner needs two things:
+`vp run dev` starts the runner on loopback next to the server (`runnerUrl=` on the `[dev-runner]` line) and points the server at it, with a token made fresh for each run. To use a shared runner instead, set both `RUNNER_URL` and `RUNNER_TOKEN`; this skips the local runner. The local runner needs three things:
 
 - **`OPENCODE_API_KEY`** in `.env`: the runner's OpenCode Go key. The runner doesn't start without it; the sandbox only sees a placeholder.
 - **The agent image**, built with Docker and loaded into microsandbox as `t45-agent:dev`: `vp run --filter @t45/runner image`. Rebuild after changing `apps/runner/image`. Without it, chats fail and the server log names the reason, as in production.
+- **`mkfs.ext4` (e2fsprogs) and GNU tar** on the host, which make and pack VM disks. On macOS, install `e2fsprogs` and `gnu-tar` with Homebrew and put their `sbin` and `gnubin` folders first on `PATH`.
 
-Without `/dev/kvm` the runner's inventory says it can't run sandboxes, which the runner page (`/settings/runner`) shows, and the runner refuses every chat.
+The server and its built-in MCP tools are compiled together from `apps/server/src`; development watches that build and restarts the server after changes. T45 sends the tools with each execution of an agent that uses them, and the runner writes them to `/opt/t45`, so changing a tool does not require an image rebuild. The server reads them when it starts, so a chat gets changed tools at its first execution after the restart.
+
+Without `/dev/kvm` every chat's VM fails to start, and the runner's log names the reason.
 
 ## Release builds
 
-The build cleans `apps/server/dist`, packs the server and copies the complete web client into `dist/client`. Rebuilding or switching a checkout used by a running built server removes that server's assets, so build a release in a separate checkout before switching to it.
+The build cleans `apps/server/dist`, builds the server and MCP tools into `dist/bin.mjs` and `dist/runtime`, then copies the complete web client into `dist/client`. Rebuilding or switching a checkout used by a running built server removes that server's assets, so build a release in a separate checkout before switching to it.
 
 Capture the checkout's full commit SHA once and pass it to the build:
 

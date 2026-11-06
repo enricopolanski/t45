@@ -10,7 +10,8 @@ import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 
 import { ChatRepository } from "../chats/ChatRepository.ts";
-import { addAgent, addUser, layerStore as layerChats } from "../chats/Chats.testkit.ts";
+import { addAgent, addUser, layer as layerChats } from "../chats/Chats.testkit.ts";
+import { FakeRunner } from "../runner/FakeRunner.testkit.ts";
 import * as AutomationRepository from "./AutomationRepository.ts";
 import * as AutomationService from "./AutomationService.ts";
 import { renderPrompt, type WebhookRequest } from "./webhook.ts";
@@ -23,6 +24,8 @@ const at = DateTime.makeUnsafe(AT);
 const layerStore = AutomationRepository.layer.pipe(Layer.provideMerge(layerChats));
 
 const seed = Effect.gen(function* () {
+  // Inputs stay pending, so `runOf` reads every input a run got.
+  (yield* FakeRunner).hold = true;
   yield* addUser("admin", "admin");
   yield* addAgent("Clerk", { chat: false });
   yield* addAgent("Retired", { status: "archived" });
@@ -85,7 +88,7 @@ const decodeAccepted = Schema.decodeUnknownSync(Schema.Struct({ chatId: ChatId }
 const runOf = (response: Response) =>
   Effect.gen(function* () {
     const { chatId } = decodeAccepted(yield* json(response));
-    const inputs = yield* (yield* ChatRepository).openInputs(chatId);
+    const inputs = yield* (yield* ChatRepository).pendingInputs(chatId);
     return inputs.map((input) => input.payload.text);
   });
 

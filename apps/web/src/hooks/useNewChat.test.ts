@@ -1,5 +1,3 @@
-import { Agent } from "@t45/contracts/models/Agent";
-import * as DateTime from "effect/DateTime";
 import * as Fiber from "effect/Fiber";
 import { Session } from "@opencode/schema/session";
 import type { ChatId } from "@t45/contracts/models/Chat";
@@ -44,24 +42,12 @@ it.effect.each([
       Effect.forkScoped,
     );
     const request = yield* fake.next;
-    expect(request.tag).toBe("agents.list");
-    const agent = Agent.make({
-      id: CHAT_SUMMARY.agentId,
-      name: "Analyst",
-      instructions: "",
-      model: "test/model",
-      files: {},
-      skills: [],
-      mcpServers: {},
-      permissions: { network: "provider" },
-      status: "active",
-      isConversational: conversational,
-      createdAt: DateTime.makeUnsafe(0),
-      updatedAt: DateTime.makeUnsafe(0),
-    });
+    expect(request.tag).toBe("chats.listTargets");
     request.succeed([
-      agent,
-      { ...agent, id: "fallback", name: "Assistant", isConversational: true },
+      ...(conversational
+        ? [{ agentId: CHAT_SUMMARY.agentId, name: "Analyst", workflowId: null }]
+        : []),
+      { agentId: "fallback", name: "Assistant", workflowId: null },
     ]);
     yield* Fiber.join(opening);
 

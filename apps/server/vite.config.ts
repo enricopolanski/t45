@@ -1,5 +1,6 @@
 import "vite-plus/test/config";
 import { defineConfig, mergeConfig } from "vite-plus";
+import * as NodeURL from "node:url";
 
 import baseConfig from "../../vite.base.config.ts";
 
@@ -10,6 +11,11 @@ export default mergeConfig(
   defineConfig({
     run: {
       tasks: {
+        dev: {
+          command: 'vp pack --watch --on-success "node dist/bin.mjs"',
+          cache: false,
+        },
+        test: { command: "vp test run", dependsOn: ["build:bundle"] },
         build: {
           command: "node scripts/build.ts",
           dependsOn: ["@t45/web#build"],
@@ -18,7 +24,20 @@ export default mergeConfig(
       },
     },
     pack: {
-      entry: ["src/bin.ts"],
+      entry: {
+        bin: "src/bin.ts",
+        "runtime/step-tools": NodeURL.fileURLToPath(
+          new URL("./src/agent-tools/step-tools.ts", import.meta.url),
+        ),
+        "runtime/workflow-instance-tools": NodeURL.fileURLToPath(
+          new URL("./src/agent-tools/workflow-instance-tools.ts", import.meta.url),
+        ),
+        "runtime/workflow-tools": NodeURL.fileURLToPath(
+          new URL("./src/agent-tools/workflow-tools.ts", import.meta.url),
+        ),
+      },
+      // Inject the tool entry points and modules they share with the server together.
+      outputOptions: { chunkFileNames: "runtime/[name]-[hash].mjs" },
       outDir: "dist",
       sourcemap: true,
       clean: true,

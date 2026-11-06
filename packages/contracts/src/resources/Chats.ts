@@ -27,18 +27,14 @@ import { NotFound } from "./errors.ts";
 export const InputMetadata = Schema.Struct({ t45: InputPayload });
 export type InputMetadata = typeof InputMetadata.Type;
 
-/** What T45 keeps in the metadata of a note it adds to a chat, and what the note is about. */
-export const NoteMetadata = Schema.Struct({
-  t45: Schema.Struct({ note: Schema.Literals(["restore", "workspace", "refused"]) }),
-});
-export type NoteMetadata = typeof NoteMetadata.Type;
-
 const SessionId = Session.ID.check(Schema.isMaxLength(512));
 
 /** One chat as its list shows it; `lastActivityAt` is its latest message, or its creation. */
 export const ChatSummary = Schema.Struct({
   ...Chat.fields,
   agentName: Schema.NullOr(Schema.String),
+  workflowId: Schema.NullOr(StringId),
+  workflowName: Schema.NullOr(Schema.String),
 });
 export type ChatSummary = typeof ChatSummary.Type;
 
@@ -51,13 +47,13 @@ export type ChatSession = typeof ChatSession.Type;
 
 /**
  * A message of a session exactly as OpenCode keeps it. `state` is T45's: `live` while OpenCode is
- * still writing it, `settled` once finished, `lost` when its VM went away before it finished.
+ * still writing it, `settled` once finished.
  * Reads cut long tool output and text and say so with `isTruncated`; `chats.getMessage` returns
  * it whole.
  */
 export const ChatMessage = Schema.Struct({
   sessionId: Session.ID,
-  state: Schema.Literals(["live", "settled", "lost"]),
+  state: Schema.Literals(["live", "settled"]),
   isTruncated: Schema.Boolean,
   message: SessionMessage.Info,
 });
@@ -121,7 +117,15 @@ export type ChatHistory = typeof ChatHistory.Type;
 export const ChatErrors = Schema.Union([Refused, NotFound]);
 export type ChatErrors = typeof ChatErrors.Type;
 
+export const ChatTarget = Schema.Struct({
+  agentId: StringId,
+  name: Schema.String,
+  workflowId: Schema.NullOr(StringId),
+});
+export type ChatTarget = typeof ChatTarget.Type;
+
 export const Chats = RpcGroup.make(
+  Rpc.make("listTargets", { success: Schema.Array(ChatTarget) }),
   Rpc.make("getHistory", {
     payload: { chatId: ChatId, sessionId: SessionId, before: SessionMessage.ID },
     success: ChatHistory,
@@ -143,7 +147,7 @@ export const Chats = RpcGroup.make(
   }),
   /**
    * Streams one session of a chat, its root when `sessionId` is absent: a snapshot, then every
-   * change to it. Never boots its VM.
+   * change to it. Output an execution that didn't finish wrote is dropped with a new snapshot.
    */
   Rpc.make("watch", {
     payload: { chatId: ChatId, sessionId: Schema.optional(SessionId) },
@@ -163,7 +167,6 @@ export const Chats = RpcGroup.make(
     error: ChatErrors,
   }),
   Rpc.make("cancel", { payload: { chatId: ChatId, inputId: InputId }, error: ChatErrors }),
-  Rpc.make("compact", { payload: { chatId: ChatId }, error: ChatErrors }),
   Rpc.make("delete", { payload: { chatId: ChatId }, error: ChatErrors }),
   Rpc.make("dismiss", {
     payload: { chatId: ChatId, sessionId: SessionId, formId: Form.ID },
@@ -171,14 +174,15 @@ export const Chats = RpcGroup.make(
   }),
   Rpc.make("rename", { payload: { chatId: ChatId, title: Title }, error: ChatErrors }),
   /**
-   * A member's message to the chat's agent. T45 saves it before answering, and the agent takes it
-   * up when its VM is ready; repeating it with the same `inputId` is a no-op, and with different
+   * A member's message to the chat's agent. T45 saves it before answering, and the chat's execution
+   * delivers it; repeating it with the same `inputId` is a no-op, and with different
    * content an `input_conflict`. The first message starts the current user's chat with `agentId`.
    */
   Rpc.make("send", {
     payload: {
       chatId: ChatId,
       agentId: Schema.optional(StringId),
+      workflowId: Schema.optional(StringId),
       inputId: InputId,
       text: Schema.String.check(Schema.isMaxLength(MESSAGE_MAX_INPUT_CHARS)),
       attachments: Schema.Array(ChatAttachment).check(Schema.isMaxLength(MESSAGE_MAX_ATTACHMENTS)),

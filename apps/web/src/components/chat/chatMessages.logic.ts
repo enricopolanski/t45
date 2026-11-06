@@ -1,5 +1,5 @@
 import { type ChatAttachment } from "@t45/contracts/models/Attachment";
-import { type ChatMessage, InputMetadata, NoteMetadata } from "@t45/contracts/resources/Chats";
+import { type ChatMessage, InputMetadata } from "@t45/contracts/resources/Chats";
 import { type ChatMessageContext } from "@t45/contracts/models/Chat";
 import { WORKFLOW_DRAFT_TOOL_NAME, WorkflowDraft } from "@t45/contracts/resources/AgentTools";
 import * as Option from "effect/Option";
@@ -45,19 +45,13 @@ export function promptHistoryOf(
   );
 }
 
-const isNoteMetadata = Schema.is(NoteMetadata);
-
 /**
- * Whether the agent is between turns after `messages`, oldest first: it has had none, its last
- * one ended, or T45 added a note since, which starts none.
+ * Whether the agent is between turns after `messages`, oldest first: it has had none, or its last
+ * one ended.
  */
 export function betweenTurns(messages: ReadonlyArray<ChatMessage>): boolean {
   const last = messages.at(-1)?.message;
-  return (
-    last === undefined ||
-    last.type === "idle" ||
-    (last.type === "synthetic" && isNoteMetadata(last.metadata))
-  );
+  return last === undefined || last.type === "idle";
 }
 
 /** Whether the timeline shows the message at all: bookkeeping rows say nothing to members. */

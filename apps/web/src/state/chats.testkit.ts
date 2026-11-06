@@ -20,6 +20,8 @@ const chatSummary = (title = "Quarterly report"): ChatSummary =>
     id: CHAT_ID,
     agentId: "agent-1",
     agentName: "Analyst",
+    workflowId: null,
+    workflowName: null,
     title,
     status: null,
     lastActivityAt: "2026-10-01T10:00:00.000Z",
@@ -50,7 +52,7 @@ export function assistantMessage(
   id: string,
   content: ReadonlyArray<unknown>,
   options: {
-    readonly state?: "live" | "settled" | "lost";
+    readonly state?: "live" | "settled";
     readonly completed?: boolean;
     readonly error?: unknown;
     readonly sessionId?: string;

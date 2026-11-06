@@ -1,13 +1,14 @@
 /**
- * What changed in which chat, as it happens, for the streams members have open and the chats'
- * followers: a chat's row, its sessions, messages, inputs and questions, the text an agent is
- * streaming, an input or stop request committed for it, and its deletion.
+ * What changed in which chat, as it happens, for the streams members have open: a chat's row, its
+ * sessions, messages, inputs and questions, the text an agent is streaming, output an unfinished
+ * execution wrote being dropped, an input committed for it, and its deletion.
  *
  * Each stream holds only the changes it asked for, and at most `BACKLOG` it hasn't sent: a client
  * that stops reading keeps its stream open, and its request, for as long as its connection lasts.
  * Past that, what the stream holds becomes one `missed`, and it reads everything again.
  */
 import type { ChatId } from "@t45/contracts/models/Chat";
+import type { ExecutionUpdate } from "@t45/contracts/resources/Runner";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -25,16 +26,11 @@ export type ChatChange = {
       readonly sessionId: string;
       readonly messageIds: ReadonlyArray<string>;
     }
-  | {
-      readonly kind: "delta";
-      readonly sessionId: string;
-      readonly messageId: string;
-      readonly ordinal: number;
-      readonly part: "text" | "reasoning";
-      readonly delta: string;
-    }
+  | { readonly kind: "delta"; readonly event: Extract<ExecutionUpdate, { _tag: "delta" }> }
   | { readonly kind: "inputs" }
   | { readonly kind: "questions" }
+  /** What an execution that didn't finish wrote was dropped, with its questions. */
+  | { readonly kind: "replaced" }
   | { readonly kind: "posted" }
   | { readonly kind: "deleted" }
 );

@@ -116,7 +116,7 @@ describe("step people", () => {
     );
   });
 
-  it("refuses an unassigned first step even for an organization admin", () => {
+  it("lets an organization admin start an unassigned first step while retaining authorization", () => {
     const blueprint = {
       id: workflow.definitionId,
       name: "Review",
@@ -125,7 +125,7 @@ describe("step people", () => {
     };
     assert.equal(
       ticketStartRefusal({ id: "admin01", isOrgAdmin: true }, workflow, blueprint),
-      "first_step_unassigned",
+      null,
     );
     const configured = {
       ...workflow,

@@ -19,7 +19,7 @@ import { stripInlineContextReferences } from "../lib/composerContextReferences";
 import { describeFailure, isNotFound } from "../lib/failures";
 import { forgetChatDrafts } from "../questionDrafts";
 import { api, reachableAtom } from "../rpc/api";
-import { agentsList } from "../state/agents";
+import { chatTargets } from "../state/agents";
 import { chatSessionKey, chats } from "../state/chats";
 import { toastFailure } from "../state/query";
 import { useApiQuery } from "../state/rpc";
@@ -40,23 +40,23 @@ import { useChatQuestions } from "./chat/useChatQuestions";
 import { useComposerFocus } from "./chat/useComposerFocus";
 import { PageHeader } from "./PageHeader";
 import { Button } from "./ui/button";
-import { toastManager } from "./ui/toast";
 
 const NO_PROMPT_HISTORY: ReadonlyArray<ComposerPromptHistoryMessage> = [];
 const NO_INPUTS: ReadonlyArray<PendingInput> = [];
 
-const START_FAILED =
-  "The agent's sandbox couldn't start. T45 keeps trying, and your message waits.";
+const EXECUTION_FAILED = "The agent's sandbox failed. Send a message to try again.";
 
 export default function ChatView({
   chatId,
   sessionId,
   newAgentId,
+  newWorkflowId,
 }: {
   readonly chatId: ChatId;
   /** A subagent session of the chat to show, read only; null for the chat itself. */
   readonly sessionId: Session.ID | null;
   readonly newAgentId: Agent["id"] | null;
+  readonly newWorkflowId: string | null;
 }) {
   const readOnly = sessionId !== null;
   const newChat = useNewChat();
@@ -98,8 +98,10 @@ export default function ChatView({
     ready?.sessions.find((session) => session.parentID === undefined)?.id ?? null;
 
   const status = chatInfo?.status ?? null;
-  const running = status === "running";
-  const canInterrupt = !readOnly && (status === "running" || status === "waiting");
+  // A running chat with an open question waits for its answer.
+  const waiting = status === "running" && (ready?.questions.length ?? 0) > 0;
+  const running = status === "running" && !waiting;
+  const canInterrupt = !readOnly && status === "running";
   const working = running && !ready?.replying;
   // The next input to an agent between turns is on its way into the conversation, and shows
   // there; what follows it waits its turn in the queue.
@@ -108,23 +110,23 @@ export default function ChatView({
     !readOnly && running && ready?.betweenTurns === true ? (pendingInputs[0] ?? null) : null;
   const queuedInputs = sendingInput === null ? pendingInputs : pendingInputs.slice(1);
 
-  const newAgent = useApiQuery(isNew ? agentsList : null).data?.find(
-    (agent) => agent.id === newAgentId,
+  const newAgent = useApiQuery(isNew ? chatTargets : null).data?.find(
+    (target) => target.agentId === newAgentId && target.workflowId === newWorkflowId,
   );
-  const agentName = chatInfo?.agentName ?? newAgent?.name ?? null;
+  const agentName = chatInfo?.workflowName ?? chatInfo?.agentName ?? newAgent?.name ?? null;
   const title = chatInfo !== null ? titleOf(chatInfo) : isNew ? titleOf({ title: null }) : "";
 
-  // A failed open, or an agent that couldn't start, shows until dismissed, or until it changes;
-  // a failure the conversation shows already needs no banner.
-  const banner =
+  // A failure already shown in the conversation needs no banner.
+  const bannerError =
     view.status === "failed" && !missing
       ? describeFailure(view.error, "Could not open the chat.")
       : status === "failed" && ready?.endsWithError === false
-        ? START_FAILED
+        ? EXECUTION_FAILED
         : null;
-  const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
-  if (dismissedBanner !== null && dismissedBanner !== banner) setDismissedBanner(null);
-  const shownBanner = banner === dismissedBanner ? null : banner;
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  // Dismissal lasts only while the same error remains active.
+  if (dismissedError && dismissedError !== bannerError) setDismissedError(null);
+  const visibleError = bannerError === dismissedError ? null : bannerError;
 
   const promptRef = useRef("");
   const composerRef = useRef<ChatComposerHandle | null>(null);
@@ -191,7 +193,7 @@ export default function ChatView({
     setLiveFollowEnabled(true);
     setExpandedImage(null);
     setFileDragActive(false);
-    setDismissedBanner(null);
+    setDismissedError(null);
     setTimelineInset(0);
   }
   useLayoutEffect(() => {
@@ -199,8 +201,8 @@ export default function ChatView({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the opened session is the trigger
   }, [openedSession]);
 
-  // A change of chat or of the composer's layout re-measures before the frame paints; the
-  // observer catches the rest.
+  // Measure height and resting state together before paint; mixing an old height with a new layout
+  // can shrink the timeline's inset and clamp its scroll.
   useLayoutEffect(() => {
     if (!composerOverlayElement) return;
     // A status bar in the composer's place never rests.
@@ -261,20 +263,6 @@ export default function ChatView({
   const startNewChat = () =>
     void newChat().catch((error: unknown) => toastFailure("Couldn't start a new chat", error));
 
-  const compactDisabled =
-    readOnly ||
-    loading ||
-    running ||
-    sendBusy ||
-    !isReachable ||
-    question !== null ||
-    !ready?.hasUserMessages;
-  const onCompactContext = () => {
-    if (compactDisabled) return;
-    void api("chats.compact", { chatId }).catch((error: unknown) =>
-      toastFailure("Couldn't compact the conversation", error),
-    );
-  };
   const onSend = (event?: { preventDefault: () => void }) => {
     event?.preventDefault();
     if (readOnly || sendsInFlight.has(chatId) || loading) return false;
@@ -286,18 +274,11 @@ export default function ChatView({
     const attachments = draft ? [...draft.images, ...draft.files] : [];
     const prompt = promptRef.current;
     const trimmedPrompt = stripInlineContextReferences(prompt).trim();
-    const command =
-      attachments.length === 0 ? parseStandaloneComposerSlashCommand(trimmedPrompt) : null;
-    if (command === "compact" && compactDisabled) {
-      toastManager.add({ type: "error", title: "Compacting is unavailable right now." });
-      return false;
-    }
-    if (command !== null) {
+    if (attachments.length === 0 && parseStandaloneComposerSlashCommand(trimmedPrompt) === "new") {
       promptRef.current = "";
       clearComposerDraftContent(chatId);
       composerRef.current?.resetCursorState();
-      if (command === "new") startNewChat();
-      else onCompactContext();
+      startNewChat();
       return true;
     }
     if (trimmedPrompt.length === 0 && attachments.length === 0) return false;
@@ -306,6 +287,7 @@ export default function ChatView({
     void sendChatMessage({
       chatId,
       agentId: isNew ? newAgentId : null,
+      workflowId: isNew ? newWorkflowId : null,
       prompt,
       attachments,
       setBusy: setSendBusy,
@@ -351,12 +333,7 @@ export default function ChatView({
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
         <PageHeader className="relative">
-          <ChatHeader
-            activeChatId={chatId}
-            activeChatTitle={title}
-            compactDisabled={compactDisabled}
-            onCompactContext={onCompactContext}
-          />
+          <ChatHeader activeChatId={chatId} activeChatTitle={title} />
         </PageHeader>
 
         <div className="relative flex min-h-0 min-w-0 flex-1">
@@ -382,9 +359,9 @@ export default function ChatView({
               </div>
             ) : null}
             {/* Banners overlay the timeline without changing its content height. */}
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col">
-              <ChatBanner error={shownBanner} onDismiss={() => setDismissedBanner(banner)} />
-            </div>
+            {visibleError && (
+              <ChatBanner error={visibleError} onDismiss={() => setDismissedError(visibleError)} />
+            )}
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               <ChatTimeline
                 key={openedSession}
@@ -402,7 +379,7 @@ export default function ChatView({
                 onIsAtEndChange={onIsAtEndChange}
                 onContentOverflowChange={setTimelineOverflows}
                 emptyPlaceholder={isEmptyChat || loading ? "blank" : "prompt"}
-                topFadeEnabled={shownBanner === null}
+                topFadeEnabled={!visibleError}
               />
             </div>
 
@@ -466,14 +443,12 @@ export default function ChatView({
                           }
                           question={question}
                           loadingMessages={loading && isReachable}
-                          compactDisabled={compactDisabled}
                           getTimelineScrollableNode={getTimelineScrollableNode}
                           isTimelineAtLogicalEnd={isTimelineAtLogicalEnd}
                           timelineOverflows={timelineOverflows}
                           onLayoutChange={setComposerLayout}
                           promptRef={promptRef}
                           onPageScrollKeyDown={onComposerPageScroll}
-                          onCompactContext={onCompactContext}
                           onSend={onSend}
                           onStartNewChat={startNewChat}
                           onInterrupt={onInterrupt}

@@ -1,7 +1,7 @@
 import { useRouter } from "@tanstack/react-router";
 import { Button } from "../ui/button";
 import type { ChatId } from "@t45/contracts/models/Chat";
-import { ChevronDownIcon, PencilIcon, ShrinkIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import {
   useRef,
   useState,
@@ -36,8 +36,6 @@ import { PageBreadcrumb, PageBreadcrumbLink, PageBreadcrumbText } from "../PageB
 interface ChatHeaderProps {
   activeChatId: ChatId;
   activeChatTitle: string;
-  compactDisabled: boolean;
-  onCompactContext: () => void;
 }
 
 function errorToast(title: string, error: unknown) {
@@ -48,12 +46,7 @@ function errorToast(title: string, error: unknown) {
   });
 }
 
-export function ChatHeader({
-  activeChatId,
-  activeChatTitle,
-  compactDisabled,
-  onCompactContext,
-}: ChatHeaderProps) {
+export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
   // Inline rename, keyed by chat: navigating away drops an in-progress
   // rename instead of committing stale text. Cleared on chat change (not
   // just hidden) so returning to the chat doesn't revive the old draft.
@@ -84,7 +77,7 @@ export function ChatHeader({
       errorToast("Failed to rename chat", error),
     );
   };
-  // T45 removes the chat's VM, attachments and workspace itself. Deleting the open chat lands on
+  // T45 stops the chat's agent and removes its attachments itself. Deleting the open chat lands on
   // the Chat list.
   const deleteChat = async (chatId: ChatId) => {
     try {
@@ -127,10 +120,6 @@ export function ChatHeader({
       <MenuItem onClick={startRename}>
         <PencilIcon />
         Rename chat
-      </MenuItem>
-      <MenuItem disabled={compactDisabled} onClick={onCompactContext}>
-        <ShrinkIcon />
-        Compact conversation
       </MenuItem>
       <MenuSeparator />
       <MenuItem variant="destructive" onClick={() => setConfirmingDelete(true)}>

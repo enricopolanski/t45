@@ -64,6 +64,7 @@ export const runtime = ManagedRuntime.make(
 /** The same client for atoms, sharing `runtime`'s one client. */
 export const atomRuntime = Atom.runtime(Layer.effectContext(runtime.contextEffect));
 
+/** Never gate calls on this flag: without a watch, a new call may be the only way to detect recovery. */
 export const reachableAtom = Atom.make(true).pipe(
   Atom.keepAlive,
   Atom.withLabel("server-reachable"),

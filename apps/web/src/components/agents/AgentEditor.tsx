@@ -2,7 +2,7 @@ import type { AgentModels } from "@t45/contracts/resources/Agents";
 import type { Agent } from "@t45/contracts/models/Agent";
 import type { StringId } from "@t45/contracts/models/primitives";
 import type { Skill } from "@t45/contracts/models/Skill";
-import { STEP_TOOLS_MCP, WORKFLOW_DRAFTING_MCP } from "@t45/core/agentTools";
+import { STEP_TOOLS_MCP, WORKFLOW_DRAFTING_MCP, WORKFLOW_INSTANCE_MCP } from "@t45/core/agentTools";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState, useTransition } from "react";
 
@@ -87,6 +87,7 @@ const fromDraft = ({ name, type, target, entries, server }: McpDraft): [string, 
 
 const PRESETS = [
   { mcp: WORKFLOW_DRAFTING_MCP, label: "Add workflow drafting" },
+  { mcp: WORKFLOW_INSTANCE_MCP, label: "Add workflow operations" },
   { mcp: STEP_TOOLS_MCP, label: "Add step tools" },
 ] as const;
 
@@ -217,7 +218,6 @@ function SkillPicker({
   );
 }
 
-/** Picks an agent's model from what the runner offers. */
 function ModelPicker({
   models,
   value,
@@ -226,12 +226,12 @@ function ModelPicker({
   readonly value: string | null;
 }) {
   if (models.reason !== null) {
-    return <ErrorText>The runner can't list its models: {models.reason}</ErrorText>;
+    return <ErrorText text={`T45 can't list the models: ${models.reason}`} />;
   }
   return (
     <Select name="model" required defaultValue={value}>
       <SelectTrigger>
-        <SelectValue placeholder="Model the runner offers">
+        <SelectValue placeholder="Choose a model">
           {(slug: string) => models.models.find((model) => model.slug === slug)?.name ?? slug}
         </SelectValue>
       </SelectTrigger>
@@ -276,7 +276,7 @@ function AgentForm({
         const form = new FormData(event.currentTarget);
         const model = form.get("model") ?? agent?.model;
         if (typeof model !== "string" || model === "") {
-          setError("Choose a model the runner offers.");
+          setError("Choose a model.");
         } else if (new Set(servers.map((server) => server.name)).size < servers.length) {
           setError("Give each MCP server its own name.");
         } else {
@@ -381,7 +381,7 @@ function AgentForm({
         >
           <FilesEditor files={files} onChange={setFiles} />
         </Section>
-        {error ? <ErrorText>{error}</ErrorText> : null}
+        {error && <ErrorText text={error} />}
         <div className="flex gap-2">
           <Button type="submit" size="sm">
             {agent ? "Save agent" : "Create agent"}

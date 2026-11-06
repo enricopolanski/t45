@@ -94,7 +94,7 @@ function SkillForm({ skill }: { readonly skill: Skill | null }) {
         >
           <FilesEditor files={files} onChange={setFiles} />
         </Section>
-        {error ? <ErrorText>{error}</ErrorText> : null}
+        {error && <ErrorText text={error} />}
         <div className="flex gap-2">
           <Button type="submit" size="sm">
             {skill ? "Save skill" : "Create skill"}

@@ -6,6 +6,7 @@ import { useCallback, useState } from "react";
 
 import { api } from "../../rpc/api";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { PageBreadcrumbLink } from "../PageBreadcrumb";
 import { WorkFrame } from "../work/WorkFrame";
 import { useWorkflowDefinitionDetail } from "./useWorkflowDefinitionDetail";
@@ -134,11 +135,7 @@ export function WorkflowSteps({
       ) : null}
       <section aria-label="Step Editor" className="flex flex-col gap-2.5">
         <h2 className="text-sm font-semibold">Step Editor</h2>
-        {error !== null ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error && <ErrorText text={error} />}
         {path !== null && open !== undefined ? (
           <div className="flex flex-col gap-2.5">
             <StepTrail path={path} onOpen={onOpenStep} />

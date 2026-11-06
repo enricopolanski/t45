@@ -596,9 +596,7 @@ function MermaidDiagram({
     return (
       <div>
         <div className="flex items-center justify-between gap-2">
-          <ErrorText size="xs" className="m-0">
-            Unable to render diagram: {result.message}
-          </ErrorText>
+          <ErrorText text={`Unable to render diagram: ${result.message}`} />
           {result.retryable ? (
             <Button
               type="button"

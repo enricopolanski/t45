@@ -1,9 +1,9 @@
 import { CopyIcon, MoreHorizontalIcon, PencilIcon, PlayIcon, RefreshCwIcon } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { type Schedule, type Automation } from "@t45/contracts/models/Automation";
+import type { AutomationSummary } from "@t45/contracts/resources/Automations";
 
-import { formatScheduledLabel } from "../../timestampFormat";
+import { formatRelativeTimeLabel, formatScheduledLabel } from "../../timestampFormat";
 import { agentsList } from "../../state/agents";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -19,6 +19,7 @@ import {
   webhookPath,
   type DraftState,
 } from "./automationsSettings.logic";
+import { ErrorText } from "../ui/error-text";
 import { Field, Fieldset, SwitchField } from "../ui/field";
 import { Label } from "../ui/label";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
@@ -94,9 +95,19 @@ export function AutomationsSettings() {
         title="Automations"
         description="Run agents on a schedule or when a webhook is received."
         action={
-          <Button size="sm" variant="outline" onClick={() => setEditor({ automation: null })}>
-            New automation
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={automationsQuery.refresh}
+              disabled={automationsQuery.isPending}
+            >
+              Refresh runs
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setEditor({ automation: null })}>
+              New automation
+            </Button>
+          </div>
         }
       >
         {automationsQuery.error ? (
@@ -132,11 +143,10 @@ function AutomationRow({
   onEdit,
   onChanged,
 }: {
-  readonly automation: Automation;
+  readonly automation: AutomationSummary;
   readonly onEdit: () => void;
   readonly onChanged: () => void;
 }) {
-  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<"rotate" | null>(null);
   const now = useNowMinute();
@@ -164,17 +174,8 @@ function AutomationRow({
     });
   const runNow = () =>
     act("Could not run automation", async () => {
-      const { chatId } = await api("automations.runNow", { id: automation.id });
-      toastManager.add({
-        type: "success",
-        title: "Run started",
-        actionProps: {
-          children: "Open",
-          onClick: () => {
-            void navigate({ to: "/chats/$chatId", params: { chatId } });
-          },
-        },
-      });
+      await api("automations.runNow", { id: automation.id });
+      toastManager.add({ type: "success", title: "Run started" });
     });
   const rotate = () =>
     act("Could not rotate webhook URL", async () => {
@@ -203,7 +204,13 @@ function AutomationRow({
                   ? `Next run ${formatScheduledLabel(automation.nextRunAt, now)}`
                   : "Not scheduled"}
           </p>
-          {automation.lastError ? <p className="text-destructive">{automation.lastError}</p> : null}
+          {automation.lastRun !== null && (
+            <p>
+              Last run: {automation.lastRun.statusLabel} ·{" "}
+              {formatRelativeTimeLabel(automation.lastRun.at, now)}
+            </p>
+          )}
+          {automation.lastError && <ErrorText text={automation.lastError} />}
         </div>
       }
       control={

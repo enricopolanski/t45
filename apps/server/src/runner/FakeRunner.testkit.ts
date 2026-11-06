@@ -1,175 +1,194 @@
-import { RunConfig, RunnerInventory } from "@t45/contracts/resources/RunnerVms";
+import { Form } from "@opencode/schema/form";
+import { Session } from "@opencode/schema/session";
+import { SessionMessage } from "@opencode/schema/session-message";
+import {
+  type Message,
+  type ExecutionRequest,
+  type ExecutionUpdate,
+  RunnerRpcs,
+} from "@t45/contracts/resources/Runner";
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-
-import * as ConfigProvider from "effect/ConfigProvider";
+import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
-import type * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as Stream from "effect/Stream";
+import type * as Rpc from "effect/rpc/Rpc";
+import type * as RpcGroup from "effect/rpc/RpcGroup";
+import * as RpcTest from "effect/rpc/RpcTest";
 
-/** Scripted runner HTTP responses and receipts for T45's execution tests. */
-export interface FakeRunner {
-  inventory: RunnerInventory;
-  /** The models it offers agents. */
-  models: ReadonlyArray<{ readonly slug: string; readonly name: string }>;
-  /** Set to refuse every VM start with this reason. */
-  refuse: string | null;
-  /** Each VM start T45 asked for, by chat id, refused ones included. */
-  readonly starts: Array<string>;
-  /** Set while the runner is unreachable. */
-  down: boolean;
-  /** Operations that find the runner unreachable while they are listed. */
-  readonly downFor: Set<string>;
-  /** VMs running, by chat id, with what each was started with. */
-  readonly chats: Map<string, RunConfig>;
-  /** The boot of each running VM; removing a VM makes its next start a new boot. */
-  readonly boots: Map<string, string>;
-  /** Each VM's workspace tarball, as T45 put it or a test scripts it. */
-  readonly workspaces: Map<string, Uint8Array>;
-  /** Set to refuse every workspace read with this reason, as when packing it fails. */
-  refuseWorkspace: string | null;
-  /** Set to refuse every workspace put with this reason, as when unpacking it fails. */
-  refuseUnpack: string | null;
-  readonly removedChats: Array<string>;
-  holdRemove: Effect.Effect<void> | null;
-  /** Told of each VM T45 removes, for `removed`. */
-  readonly removals: Set<(chatId: string) => void>;
-  /** Files put into VMs, by `<chatId>:<path>`. */
-  readonly chatFiles: Map<string, Uint8Array>;
-  /** Where VMs' OpenCode servers answer, such as a local stand-in. */
-  chatUrl: string;
+import { rootSessionId } from "../chats/ChatIds.ts";
+import { RunnerService } from "./RunnerService.ts";
+
+type RunnerRpc = RpcGroup.Rpcs<typeof RunnerRpcs>;
+type Payload<Tag extends RunnerRpc["_tag"]> = Rpc.Payload<Rpc.ExtractTag<RunnerRpc, Tag>>;
+
+interface Execution {
+  readonly request: ExecutionRequest;
+  readonly messages: Array<Message>;
+  readonly events: Queue.Queue<ExecutionUpdate, Cause.Done>;
+  readonly ended: Deferred.Deferred<void>;
 }
 
-export const makeFakeRunner = (): FakeRunner => ({
-  inventory: { isAvailable: true, reason: null, vms: [] },
-  models: [{ slug: "opencode-go/test-model", name: "test-model" }],
-  refuse: null,
-  starts: [],
-  down: false,
-  downFor: new Set(),
-  chats: new Map(),
-  boots: new Map(),
-  workspaces: new Map(),
-  refuseWorkspace: null,
-  refuseUnpack: null,
-  removedChats: [],
-  holdRemove: null,
-  removals: new Set(),
-  chatFiles: new Map(),
-  chatUrl: "http://127.0.0.1:9",
-});
+const NOW = 1_790_000_000_000;
+const decodeSession = Schema.decodeUnknownSync(Session.Info);
+const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Info);
 
-/** Back to a fresh, healthy runner with no VMs, for the next test. */
-export const reset = (runner: FakeRunner) => {
-  Object.assign(runner, makeFakeRunner());
-};
+/** A runner at the contract's level: tests script what its executions emit and read what T45 sent it. */
+const make = () => {
+  const running = new Map<string, Execution>();
+  let next = 1;
 
-/** Waits until T45 has removed the VM `chatId`, as when its chat went to sleep. */
-export const removed = (runner: FakeRunner, chatId: string) =>
-  Effect.suspend(() =>
-    runner.removedChats.includes(chatId)
-      ? Effect.void
-      : Effect.callback<void>((resume) => {
-          const told = (removed: string) => {
-            if (removed !== chatId) return;
-            runner.removals.delete(told);
-            resume(Effect.void);
+  const executionOf = (chatId: string) => {
+    const execution = running.get(rootSessionId(chatId));
+    if (execution === undefined) throw new Error(`No execution for ${chatId}.`);
+    return execution;
+  };
+  const emit = (execution: Execution, event: ExecutionUpdate) =>
+    void Queue.offerUnsafe(execution.events, event);
+  const write = (execution: Execution, message: unknown) =>
+    emit(execution, {
+      _tag: "messages",
+      sessionId: execution.request.rootId,
+      messages: [decodeMessage(message)],
+    });
+  const deliver = (execution: Execution, message: Message) => {
+    if (!fake.hold) write(execution, { ...message, type: "user", time: { created: NOW } });
+  };
+  /** As in a new VM: the root session, then each message the agent takes. */
+  const begin = (execution: Execution) => {
+    const { rootId, title } = execution.request;
+    const info = decodeSession({
+      id: rootId,
+      title,
+      projectID: "global",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: NOW, updated: NOW },
+      location: { directory: "/work" },
+    });
+    emit(execution, { _tag: "sessions", sessions: [info] });
+    for (const message of execution.messages) deliver(execution, message);
+  };
+
+  const fake = {
+    /** Set to keep messages from the agent: they stay pending. */
+    hold: false,
+    /** Set to fail each execution with this reason. */
+    refuse: null as string | null,
+    /** Every execution T45 asked for, refused ones included. */
+    executions: [] as Array<Payload<"execute">>,
+    fileWrites: [] as Array<Payload<"writeFiles">>,
+    sends: [] as Array<Payload<"send">>,
+    answers: [] as Array<Payload<"answer">>,
+    cancels: [] as Array<Payload<"cancel">>,
+    emit: (id: string, event: ExecutionUpdate) => emit(executionOf(id), event),
+    /** The agent writes a reply in the root, unfinished while `streaming`. Returns its id. */
+    reply: (
+      id: string,
+      text: string,
+      options: { readonly streaming?: boolean; readonly parts?: number } = {},
+    ) => {
+      const messageId = `msg_a${String(next++)}`;
+      write(executionOf(id), {
+        id: messageId,
+        type: "assistant",
+        agent: "build",
+        model: { providerID: "opencode-go", id: "test-model" },
+        content: Array.from({ length: options.parts ?? 1 }, () => ({ type: "text", text })),
+        time: options.streaming === true ? { created: NOW } : { created: NOW, completed: NOW },
+      });
+      return messageId;
+    },
+    /** The agent asks a question in the root. Returns its form's id. */
+    ask: (id: string) => {
+      const execution = executionOf(id);
+      const form = Form.Info.make({
+        id: Form.ID.make(`frm_${String(next++)}`),
+        sessionID: execution.request.rootId,
+        title: "Which year?",
+        fields: [{ key: "year", type: "string" }],
+      });
+      emit(execution, { _tag: "questions", forms: [form] });
+      return form.id;
+    },
+    fail: (id: string) =>
+      void Queue.failCauseUnsafe(executionOf(id).events, Cause.die("The sandbox was lost.")),
+    finish: (
+      id: string,
+      {
+        outcome = null,
+        disk = new Uint8Array(),
+      }: { readonly outcome?: "failed" | null; readonly disk?: Uint8Array } = {},
+    ) => {
+      const execution = executionOf(id);
+      emit(execution, { _tag: "finished", outcome, disk });
+      Queue.endUnsafe(execution.events);
+    },
+    /** Waits until the chat's `execute` call ended: at once when none runs. */
+    ended: (id: string) =>
+      Effect.suspend(() => {
+        const execution = running.get(rootSessionId(id));
+        return execution === undefined ? Effect.void : Deferred.await(execution.ended);
+      }),
+  };
+
+  const handlers = RunnerRpcs.of({
+    execute: (request) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          fake.executions.push(request);
+          if (fake.refuse !== null) {
+            return Stream.die(fake.refuse);
+          }
+          const execution: Execution = {
+            request,
+            messages: [...request.messages],
+            events: yield* Queue.unbounded<ExecutionUpdate, Cause.Done>(),
+            ended: yield* Deferred.make<void>(),
           };
-          runner.removals.add(told);
-          return Effect.sync(() => runner.removals.delete(told));
+          running.set(request.rootId, execution);
+          begin(execution);
+          return Stream.fromQueue(execution.events).pipe(
+            Stream.ensuring(
+              Effect.suspend(() => {
+                if (running.get(request.rootId) === execution) running.delete(request.rootId);
+                return Deferred.succeed(execution.ended, undefined);
+              }),
+            ),
+          );
         }),
-  );
-
-const encodeInventory = Schema.encodeSync(Schema.toCodecJson(RunnerInventory));
-const decodeRunConfig = Schema.decodeUnknownSync(
-  Schema.fromJsonString(Schema.toCodecJson(RunConfig)),
-);
-const json = (value: unknown, status = 200) =>
-  new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
-const refused = (reason: string) => json({ _tag: "RunnerRefusedError", reason }, 422);
-
-/** The existing fake runner's HTTP endpoint. */
-export const respond = (
-  runner: FakeRunner,
-  request: HttpClientRequest.HttpClientRequest,
-  url: URL,
-) =>
-  Effect.gen(function* () {
-    const matched = /^\/chats\/([^/]+)(?:\/(workspace|files))?$/u.exec(url.pathname);
-    const chatId = decodeURIComponent(matched?.[1] ?? "");
-    const part = matched?.[2];
-    const operation =
-      request.method === "GET" && url.pathname === "/inventory"
-        ? "inventory"
-        : request.method === "GET" && url.pathname === "/models"
-          ? "models"
-          : part === "workspace" && request.method === "GET"
-            ? "getChatWorkspace"
-            : part === "workspace" && request.method === "PUT"
-              ? "putChatWorkspace"
-              : part === "files" && request.method === "PUT"
-                ? "putChatFile"
-                : matched !== null && part === undefined && request.method === "DELETE"
-                  ? "removeChat"
-                  : matched !== null && part === undefined && request.method === "PUT"
-                    ? "ensureChat"
-                    : null;
-    if (operation === null)
-      throw new Error(`Unscripted runner request: ${request.method} ${url.pathname}`);
-    if (request.headers.authorization !== "Bearer runner-token") {
-      throw new Error("The fixture expects T45's runner bearer token.");
-    }
-    if (operation === "ensureChat") runner.starts.push(chatId);
-    if (runner.down || runner.downFor.has(operation)) return json({ error: "down" }, 503);
-    if ((part === "workspace" || part === "files") && !runner.boots.has(chatId)) {
-      return refused("The chat's sandbox isn't running.");
-    }
-    const bytes = request.body._tag === "Uint8Array" ? request.body.body : new Uint8Array();
-    switch (operation) {
-      case "inventory":
-        return json(encodeInventory(runner.inventory));
-      case "models":
-        return json({ models: runner.models });
-      case "ensureChat": {
-        if (runner.refuse !== null) return refused(runner.refuse);
-        if (!runner.chats.has(chatId)) {
-          runner.boots.set(chatId, `boot-${chatId}-${runner.starts.length}`);
-          runner.chats.set(chatId, decodeRunConfig(new TextDecoder().decode(bytes)));
-        }
-        return json({ bootId: runner.boots.get(chatId)! });
-      }
-      case "getChatWorkspace":
-        return runner.refuseWorkspace !== null
-          ? refused(runner.refuseWorkspace)
-          : new Response(new Uint8Array(runner.workspaces.get(chatId) ?? []), {
-              headers: { "content-type": "application/octet-stream" },
-            });
-      case "putChatWorkspace":
-        if (runner.refuseUnpack !== null) return refused(runner.refuseUnpack);
-        runner.workspaces.set(chatId, bytes);
-        return new Response(null, { status: 204 });
-      case "putChatFile":
-        runner.chatFiles.set(`${chatId}:${url.searchParams.get("path")}`, bytes);
-        return new Response(null, { status: 204 });
-      case "removeChat": {
-        const held = runner.holdRemove;
-        runner.holdRemove = null;
-        if (held !== null) yield* held;
-        runner.removedChats.push(chatId);
-        runner.chats.delete(chatId);
-        runner.boots.delete(chatId);
-        runner.workspaces.delete(chatId);
-        for (const key of runner.chatFiles.keys()) {
-          if (key.startsWith(`${chatId}:`)) runner.chatFiles.delete(key);
-        }
-        for (const told of runner.removals) told(chatId);
-        return new Response(null, { status: 204 });
-      }
-    }
+      ),
+    writeFiles: (payload) => Effect.sync(() => void fake.fileWrites.push(payload)),
+    send: (payload) =>
+      Effect.sync(() => {
+        fake.sends.push(payload);
+        const execution = running.get(payload.rootId);
+        if (execution === undefined) return;
+        execution.messages.push(payload.message);
+        deliver(execution, payload.message);
+      }),
+    answer: (payload) => Effect.sync(() => void fake.answers.push(payload)),
+    dismiss: () => Effect.void,
+    cancel: (payload) => Effect.sync(() => void fake.cancels.push(payload)),
   });
 
-/** Points RunnerService at the existing fake HTTP endpoint. */
-export const layer = (runner: FakeRunner) =>
-  ConfigProvider.layer(
-    ConfigProvider.fromEnv({
-      env: { RUNNER_URL: runner.chatUrl, RUNNER_TOKEN: "runner-token" },
-    }),
-  );
+  return { fake, handlers };
+};
+
+export class FakeRunner extends Context.Service<FakeRunner, ReturnType<typeof make>["fake"]>()(
+  "t45/runner/FakeRunner.testkit/FakeRunner",
+) {}
+
+/** The fake as the RunnerService, over an in-memory RPC client. */
+export const layer = Layer.unwrap(
+  Effect.sync(() => {
+    const { fake, handlers } = make();
+    return Layer.effect(RunnerService, RpcTest.makeClient(RunnerRpcs)).pipe(
+      Layer.provide(RunnerRpcs.toLayer(handlers)),
+      Layer.merge(Layer.succeed(FakeRunner, fake)),
+    );
+  }),
+);

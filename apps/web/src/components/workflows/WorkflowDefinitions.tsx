@@ -7,6 +7,7 @@ import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { WorkFrame } from "../work/WorkFrame";
@@ -48,11 +49,7 @@ export function WorkflowDefinitions() {
         Blueprints define the process: steps, fields and rules. Create workflows from them to assign
         people and run tickets.
       </p>
-      {error !== null ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+      {error && <ErrorText text={error} />}
       {definitions?.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No blueprints yet. Create a blueprint to get started.
@@ -147,11 +144,7 @@ export function NewWorkflowDefinition() {
             disabled={busy}
           />
         </div>
-        {error !== null ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error && <ErrorText text={error} />}
         <div>
           <Button type="submit" disabled={busy || !name.trim()}>
             Create blueprint
@@ -202,11 +195,7 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
           Editing requires admin access to every workflow using this blueprint.
         </p>
       ) : null}
-      {error !== null ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+      {error && <ErrorText text={error} />}
       <section
         aria-label="Blueprint"
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"

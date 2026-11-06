@@ -22,7 +22,7 @@ export const layer = Layer.mergeAll(
   TicketRepository.layer,
 ).pipe(
   Layer.provideMerge(Sqlite.layerTest),
-  Layer.provideMerge(ServerConfig.layerTest({ prefix: "t3-attachments-" })),
+  Layer.provideMerge(ServerConfig.layerTest("t3-attachments-")),
   Layer.provideMerge(NodeServices.layer),
 );
 

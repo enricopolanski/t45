@@ -46,7 +46,7 @@ export function OrganizationOnboarding() {
             placeholder="Acme"
           />
         </Field>
-        {error ? <ErrorText>{error}</ErrorText> : null}
+        {error && <ErrorText text={error} />}
         <div className="flex items-center justify-between gap-2">
           <UseAnotherAccountButton />
           <Button type="submit" size="sm" disabled={submitting}>

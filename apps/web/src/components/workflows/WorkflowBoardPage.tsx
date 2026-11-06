@@ -1,3 +1,8 @@
+import { chatTargets } from "../../state/agents";
+import { useApiQuery } from "../../state/rpc";
+import { useNewChat } from "../../hooks/useNewChat";
+import { toastFailure } from "../../state/query";
+import { Button } from "../ui/button";
 import type {
   StepSummaryView,
   TicketSummaryView,
@@ -9,6 +14,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
+import { ErrorText } from "../ui/error-text";
 import { DueBadge } from "../work/MyWork";
 import { NewItemDialog } from "../work/NewItemDialog";
 import { useWorkDirectory } from "../work/useWorkDirectory";
@@ -46,6 +52,8 @@ function BoardCard({
  * id ends on the slug.
  */
 export function WorkflowBoardPage({ workflowId }: { readonly workflowId: string }) {
+  const newChat = useNewChat();
+  const targets = useApiQuery(chatTargets);
   const [board, setBoard] = useState<WorkflowInstanceBoardView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +65,7 @@ export function WorkflowBoardPage({ workflowId }: { readonly workflowId: string 
   }, [workflowId]);
 
   const slug = board?.workflow.slug ?? null;
+  const target = targets.data?.find((target) => target.workflowId === board?.workflow.id);
   if (slug !== null && slug !== workflowId) {
     return <Navigate to="/boards/$slug" params={{ slug }} replace />;
   }
@@ -66,17 +75,28 @@ export function WorkflowBoardPage({ workflowId }: { readonly workflowId: string 
       title={board?.workflow.name ?? "Board"}
       width="full"
       actions={
-        board !== null && !board.workflow.isArchived ? (
-          <NewItemDialog workflow={board.workflow} />
+        board !== null ? (
+          <>
+            {target !== undefined && !board.workflow.isArchived && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  void newChat(target.agentId, target.workflowId).catch((cause) =>
+                    toastFailure("Workflow chat unavailable", cause),
+                  )
+                }
+              >
+                Chat
+              </Button>
+            )}
+            {!board.workflow.isArchived && <NewItemDialog workflow={board.workflow} />}
+          </>
         ) : null
       }
     >
       <div className="flex flex-col gap-4">
-        {error !== null ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error && <ErrorText text={error} />}
         <div className="flex gap-3 overflow-x-auto pb-2">
           {board?.definition.steps.map((column) => {
             const cards = board.tickets.flatMap((ticket) =>

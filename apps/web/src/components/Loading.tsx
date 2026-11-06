@@ -17,7 +17,7 @@ function LoadError({ error, reset }: ErrorComponentProps) {
   if (!(error instanceof LoadFailed)) throw error;
   return (
     <div className="flex flex-col items-start gap-3">
-      <ErrorText>{error.message}</ErrorText>
+      <ErrorText text={error.message} />
       <Button
         size="sm"
         variant="outline"

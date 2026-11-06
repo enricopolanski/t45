@@ -9,10 +9,9 @@ import {
 import { NonNegativeInt, StringId, Title, TrimmedNonEmptyString } from "./primitives.ts";
 
 /**
- * Chats with agents. T45 keeps each chat: its OpenCode sessions and messages in OpenCode's own
- * shapes, the inputs it is sent, and the agent's workspace. The agent runs in a VM that keeps
- * nothing: T45 boots one when the chat has work, restores the chat into it, and removes it once
- * the chat is idle and saved.
+ * Chats with agents. T45 keeps the inputs a chat is sent, the OpenCode sessions and messages its
+ * executions wrote, in OpenCode's own shapes, and the VM disk the last finished one left. Each
+ * execution runs in a new VM booted on that disk, removed once the execution ends.
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -28,7 +27,7 @@ export const InputId = TrimmedNonEmptyString.check(
 export type InputId = typeof InputId.Type;
 
 /** What a chat is doing; null when it is idle. */
-export const ChatStatus = Schema.Literals(["running", "waiting", "failed", "interrupted"]);
+export const ChatStatus = Schema.Literals(["running", "failed", "interrupted"]);
 export type ChatStatus = typeof ChatStatus.Type;
 
 export class Chat extends Schema.Opaque<Chat>()(
@@ -90,14 +89,10 @@ export const InputPayload = Schema.Struct({
 });
 export type InputPayload = typeof InputPayload.Type;
 
-const InputState = Schema.Literals(["waiting", "admitted", "materialized", "cancelled"]);
-export type InputState = typeof InputState.Type;
-
 export class Input extends Schema.Opaque<Input>()(
   Schema.Struct({
     inputId: InputId,
     ordinal: NonNegativeInt,
-    state: InputState,
     payload: InputPayload,
     createdAt: Schema.DateTimeUtcFromString,
   }),

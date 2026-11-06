@@ -1,5 +1,11 @@
-import { Session, SessionMessage } from "@opencode/client/effect";
-import { canChatWithMembers } from "@t45/contracts/models/Agent";
+import { Session } from "@opencode/schema/session";
+import { SessionMessage } from "@opencode/schema/session-message";
+import {
+  canChatWithMembers,
+  WORKFLOW_INSTANCE_MCP_NAME,
+  type Agent,
+} from "@t45/contracts/models/Agent";
+import { oversees } from "@t45/contracts/models/Workflow";
 import { limitRefusal } from "@t45/contracts/models/Attachment";
 import {
   ChatId,
@@ -25,31 +31,32 @@ import {
   type Chats,
 } from "@t45/contracts/resources/Chats";
 import { NotFound } from "@t45/contracts/resources/errors";
+import { isSettled } from "@t45/contracts/resources/Runner";
 import * as Context from "effect/Context";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { makeAccess as makeWorkflowAccess } from "../workflows/WorkflowAssistant.ts";
+import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
+import { WorkflowDefinitionRepository } from "../workflows/WorkflowDefinitionRepository.ts";
+import { TicketRepository } from "../workflows/TicketRepository.ts";
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
-import * as PromptService from "../runner/PromptService.ts";
-import { type ChatVm, RunnerService } from "../runner/RunnerService.ts";
+import { RunnerService } from "../runner/RunnerService.ts";
 import * as ChatEvents from "./ChatEvents.ts";
-import { rootSessionId } from "./ChatIds.ts";
+import * as ChatExecutions from "./ChatExecutions.ts";
+import { inputMessageId, rootSessionId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
+import * as PromptService from "./PromptService.ts";
 
 import { replaceComposerContextReferences } from "@t45/core/composerContextReferences";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
-import * as FiberMap from "effect/FiberMap";
-import * as Schedule from "effect/Schedule";
-import { TaskService, make as makeTasks, type StepHooks } from "../tasks/TaskService.ts";
 
 export interface Member {
   readonly userId: StringId;
@@ -75,7 +82,6 @@ const refuse = (reason: Refused["reason"]) => new Refused({ reason });
 const notFound = () => new NotFound();
 const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 const encodePayload = Schema.encodeSync(Schema.fromJsonString(InputPayload));
-const isRefused = Schema.is(Refused);
 
 const PAGE_MESSAGES = 50;
 const PAGE_BYTES = 512 * 1024;
@@ -117,13 +123,16 @@ const readMessage = (
     );
     return {
       sessionId: Session.ID.make(sessionId),
-      state: row.state,
+      state: isSettled(message) ? "settled" : "live",
       isTruncated: flag.cut,
       message,
     } satisfies ChatMessage;
   }).pipe(Effect.orDie);
 
 const encodeChatMessage = Schema.encodeSync(Schema.fromJsonString(ChatMessage));
+const hasWorkflowTools = (agent: Agent) =>
+  agent.mcpServers[WORKFLOW_INSTANCE_MCP_NAME] !== undefined &&
+  agent.mcpServers[WORKFLOW_INSTANCE_MCP_NAME]?.disabled !== true;
 
 const readBytes = (message: ChatMessage) =>
   new TextEncoder().encode(encodeChatMessage(message)).byteLength;
@@ -136,13 +145,26 @@ const make = Effect.gen(function* () {
   const changes = yield* ChatEvents.ChatEvents;
   const runner = yield* RunnerService;
   const agents = yield* AgentRepository.AgentRepository;
+  const workflows = yield* WorkflowRepository;
+  const definitions = yield* WorkflowDefinitionRepository;
+  const tickets = yield* TicketRepository;
+  const loadWorkflow = yield* makeWorkflowAccess;
   const attachments = yield* AttachmentRepository.AttachmentRepository;
   const origins = repository.origins;
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "posted" | "deleted") =>
     changes.publish({ kind, chatId });
-  const cleanups = yield* FiberMap.make<string>();
   const scope = yield* Effect.scope;
-  const announce = (chatId: ChatId) => sql.afterCommit(publish(chatId, "posted"));
+  const executions = yield* ChatExecutions.make;
+  /** Members see the input, and execution takes it, once the post commits. */
+  const announce = (chatId: ChatId, posted: ChatExecutions.Posted) =>
+    sql.afterCommit(
+      publish(chatId, "posted").pipe(Effect.andThen(executions.deliver(chatId, posted))),
+    );
+  /** Refuses when the runner didn't answer. */
+  const unavailable = (chatId: ChatId) => (error: unknown) =>
+    Effect.logWarning("The runner refused a chat's request", { chatId, error }).pipe(
+      Effect.andThen(refuse("unavailable")),
+    );
 
   const post = Effect.fnUntraced(function* (post: Post) {
     const chat = yield* repository.get(post.chatId);
@@ -158,6 +180,12 @@ const make = Effect.gen(function* () {
           : agent.status !== "active")
       )
         return yield* refuse("agent_unavailable");
+      if (start.origin.kind === "conversation") {
+        if (start.origin.workflowId !== null) {
+          yield* loadWorkflow(start.origin.ownerUserId, start.origin.workflowId);
+          if (!hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
+        } else if (hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
+      }
       yield* repository.insert({ id: post.chatId, ...start, at });
       yield* origins.insert(start.origin);
     }
@@ -168,7 +196,6 @@ const make = Effect.gen(function* () {
         if (encodePayload(sent.payload) !== payloadJson) {
           return yield* refuse("input_conflict");
         }
-        if (sent.state === "waiting") yield* announce(post.chatId);
         return;
       }
     }
@@ -177,7 +204,7 @@ const make = Effect.gen(function* () {
 
     yield* attachments.bindToChat(post.chatId, post.input.attachments, post.from);
     yield* repository.addInput(post.chatId, { inputId: post.inputId, payload: post.input, at });
-    yield* repository.markRunning(post.chatId);
+    yield* repository.markRunning(post.chatId, at);
     if ((chat?.title ?? post.start?.title ?? null) === null) {
       const plainText = replaceComposerContextReferences(post.input.text, () => "");
       yield* repository.setTitleIfUntitled(
@@ -185,119 +212,57 @@ const make = Effect.gen(function* () {
         titleFromText(plainText, post.input.attachments),
       );
     }
-    yield* announce(post.chatId);
+    yield* announce(post.chatId, { inputId: post.inputId, payload: post.input });
   }, transaction);
 
+  /** Recorded as interrupted at once, so a server start doesn't run it again. */
   const requestStop = Effect.fnUntraced(function* (chatId: ChatId) {
-    const chat = yield* repository.requestStop(chatId);
-    if (chat !== null) yield* announce(chat.id);
+    if (!(yield* repository.setStatus(chatId, "interrupted", null))) return;
+    yield* sql.afterCommit(publish(chatId, "chat").pipe(Effect.andThen(executions.stop(chatId))));
   }, transaction);
 
-  const onVm = <A, E>(
-    chatId: ChatId,
-    job: (vm: ChatVm) => Effect.Effect<A, E>,
-    options?: { readonly boot?: boolean },
-  ) =>
-    runner
-      .run(
-        chatId,
-        (vm) =>
-          job(vm).pipe(
-            Effect.catchCause((cause): Effect.Effect<A, Refused> => {
-              if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
-              const error = Cause.findErrorOption(cause);
-              if (Option.isSome(error) && isRefused(error.value)) return error.value;
-              return Effect.logWarning("A chat's VM refused a request", { chatId, cause }).pipe(
-                Effect.andThen(refuse("unavailable")),
-              );
-            }),
-          ),
-        options,
-      )
-      .pipe(Effect.catchTags({ JobTimeoutError: () => refuse("unavailable") }));
-
+  /** Stops what runs for a deleted chat, then removes its files, disk and copy. */
   const cleanup = (chatId: ChatId) =>
     Effect.gen(function* () {
-      yield* runner.removeChat(chatId);
+      yield* executions.stop(chatId);
       yield* attachments.release(chatId);
-      yield* repository.deleteWorkspace(chatId);
+      yield* repository.deleteDisk(chatId);
       yield* repository.finishDelete(chatId);
-    });
-
-  const cleanUntilDone = (chatId: ChatId) =>
-    cleanup(chatId).pipe(
+    }).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.interrupt
-          : Effect.logWarning("Cleaning up a deleted chat failed; trying again", {
+          : Effect.logWarning("Cleaning up a deleted chat failed", {
               chatId,
               cause,
-            }).pipe(
-              Effect.andThen(
-                FiberMap.run(
-                  cleanups,
-                  chatId,
-                  cleanup(chatId).pipe(
-                    Effect.tapCause((retry) =>
-                      Effect.logWarning("Cleaning up a deleted chat failed", {
-                        chatId,
-                        cause: retry,
-                      }),
-                    ),
-                    Effect.catchCause((retry) =>
-                      Cause.hasInterruptsOnly(retry) ? Effect.interrupt : Effect.fail(retry),
-                    ),
-                    Effect.retry(Schedule.spaced("30 seconds")),
-                    Effect.orDie,
-                  ),
-                  { onlyIfMissing: true },
-                ),
-              ),
-              Effect.asVoid,
-            ),
+            }),
       ),
     );
 
-  const steps = yield* Deferred.make<StepHooks>();
-  const tasks = yield* makeTasks({ post, requestStop }, Deferred.await(steps));
   const liveChat = (chatId: ChatId) =>
     repository.get(chatId).pipe(Effect.filterOrFail((chat) => chat !== null, notFound));
-  const permission = (member: Member, chatId: ChatId) =>
-    Effect.gen(function* () {
-      const chat = yield* repository.get(chatId);
-      if (chat === null) return null;
-      const origin = yield* origins.get(chatId);
-      const trigger = origin?.kind === "task" ? origin.trigger : null;
-      const mode =
-        origin?.kind === "conversation"
-          ? origin.ownerUserId === member.userId
-            ? "write"
-            : null
-          : trigger?.type === "step"
-            ? yield* Effect.flatMap(Deferred.await(steps), (step) =>
-                step.canAccess(trigger.ticketId, member.userId),
-              )
-            : origin !== null && member.role === "admin"
-              ? "write"
-              : null;
-      return mode === null ? null : { chat, mode };
-    });
   const access = (member: Member, chatId: ChatId) =>
-    permission(member, chatId).pipe(Effect.map((result) => result?.chat ?? null));
+    Effect.gen(function* () {
+      const origin = yield* origins.get(chatId);
+      if (origin?.kind !== "conversation" || origin.ownerUserId !== member.userId) return null;
+      return yield* repository.get(chatId);
+    });
   const memberChat = (member: Member, chatId: ChatId) =>
     access(member, chatId).pipe(Effect.filterOrFail((chat) => chat !== null, notFound));
-  const commandChat = (member: Member, chatId: ChatId) =>
-    permission(member, chatId).pipe(
-      Effect.flatMap((result) =>
-        result?.mode === "write" ? Effect.succeed(result.chat) : notFound(),
-      ),
-    );
-  const summaryOf = (chat: Chat, agentName: string | null) => ({
-    ...chat,
-    agentName,
-  });
+  const summaryOf = (chat: Chat, agentName: string | null) =>
+    Effect.gen(function* () {
+      const origin = yield* origins.get(chat.id);
+      const workflowId = origin?.kind === "conversation" ? origin.workflowId : null;
+      return {
+        ...chat,
+        agentName,
+        workflowId,
+        workflowName:
+          workflowId === null ? null : ((yield* workflows.get(workflowId))?.name ?? null),
+      };
+    });
   const openChatOf = (chat: Chat) =>
-    agents.get(chat.agentId).pipe(Effect.map((agent) => summaryOf(chat, agent?.name ?? null)));
+    agents.get(chat.agentId).pipe(Effect.flatMap((agent) => summaryOf(chat, agent?.name ?? null)));
 
   const sessionsOf = (chat: Chat) =>
     Effect.gen(function* () {
@@ -328,7 +293,7 @@ const make = Effect.gen(function* () {
     });
 
   const inputsOf = (chatId: ChatId) =>
-    repository.openInputs(chatId).pipe(
+    repository.pendingInputs(chatId).pipe(
       Effect.map((rows) =>
         rows.map((row): PendingInput => ({
           inputId: row.inputId,
@@ -364,8 +329,55 @@ const make = Effect.gen(function* () {
       };
     });
 
+  for (const chatId of yield* repository.owed) yield* executions.deliver(chatId);
+
+  const remove = Effect.fnUntraced(function* (chatId: ChatId) {
+    yield* repository.markDeleted(chatId, yield* nowIso);
+    yield* sql.afterCommit(
+      publish(chatId, "deleted").pipe(Effect.andThen(cleanup(chatId).pipe(Effect.forkIn(scope)))),
+    );
+  }, transaction);
+
   return {
-    tasks,
+    post,
+    remove,
+    requestStop,
+    consume: executions.consume,
+    listTargets: (member: Member) =>
+      Effect.gen(function* () {
+        const available = (yield* agents.list).filter(canChatWithMembers);
+        const plain = available
+          .filter((agent) => !hasWorkflowTools(agent))
+          .map((agent) => ({
+            agentId: agent.id,
+            name: agent.name,
+            workflowId: null,
+          }));
+        const assistants = available.filter(hasWorkflowTools);
+        if (assistants.length === 0) return plain;
+        const usableDefinitions = new Set(
+          (yield* definitions.list)
+            .filter((definition) => definition.steps.length > 0)
+            .map((definition) => definition.id),
+        );
+        const involved = new Set(yield* tickets.workflowIdsInvolving(member.userId));
+        const actor = { id: member.userId, isOrgAdmin: member.role === "admin" };
+        const bound = (yield* workflows.list)
+          .filter(
+            (workflow) =>
+              !workflow.isArchived &&
+              usableDefinitions.has(workflow.definitionId) &&
+              (workflow.isPublic || oversees(actor, workflow) || involved.has(workflow.id)),
+          )
+          .flatMap((workflow) =>
+            assistants.map((agent) => ({
+              agentId: agent.id,
+              name: assistants.length === 1 ? workflow.name : `${workflow.name} · ${agent.name}`,
+              workflowId: workflow.id,
+            })),
+          );
+        return [...plain, ...bound];
+      }),
     access,
     subscribe: (member: Member) =>
       Stream.unwrap(
@@ -374,11 +386,7 @@ const make = Effect.gen(function* () {
             (change) =>
               change.kind === "chat" || change.kind === "posted" || change.kind === "deleted",
           );
-          const load = Effect.gen(function* () {
-            const names = new Map((yield* agents.list).map((agent) => [agent.id, agent.name]));
-            const chats = yield* repository.list(member);
-            return { chats: chats.map((chat) => summaryOf(chat, names.get(chat.agentId) ?? null)) };
-          });
+          const load = repository.list(member).pipe(Effect.map((chats) => ({ chats })));
           return Stream.concat(
             Stream.fromEffect(load),
             listed.pipe(
@@ -396,13 +404,14 @@ const make = Effect.gen(function* () {
           const changed = yield* changes.subscribe(
             (change) =>
               change.chatId === input.chatId &&
-              ((change.kind !== "messages" && change.kind !== "delta") ||
-                change.sessionId === requested),
+              (change.kind === "messages"
+                ? change.sessionId === requested
+                : change.kind !== "delta" || change.event.sessionId === requested),
           );
           const chat = yield* memberChat(member, input.chatId);
           const sessionId = yield* sessionOf(chat, requested);
           const snapshotOf = Effect.gen(function* () {
-            const now = yield* liveChat(chat.id);
+            const now = yield* memberChat(member, chat.id);
             const first = yield* pageOf(chat.id, sessionId, null);
             return {
               _tag: "snapshot",
@@ -419,6 +428,7 @@ const make = Effect.gen(function* () {
           ): Effect.Effect<ReadonlyArray<ChatEvent>, ChatErrors> => {
             switch (change.kind) {
               case "missed":
+              case "replaced":
                 return snapshotOf.pipe(Effect.map((snapshot) => [snapshot]));
               case "deleted":
                 return Effect.fail(notFound());
@@ -442,16 +452,7 @@ const make = Effect.gen(function* () {
                   ),
                 );
               case "delta":
-                return Effect.succeed([
-                  {
-                    _tag: "delta",
-                    sessionId: Session.ID.make(change.sessionId),
-                    messageId: SessionMessage.ID.make(change.messageId),
-                    ordinal: change.ordinal,
-                    kind: change.part,
-                    delta: change.delta,
-                  },
-                ]);
+                return Effect.succeed([change.event]);
               case "inputs":
                 return inputsOf(chat.id).pipe(Effect.map((inputs) => [{ _tag: "inputs", inputs }]));
               case "posted":
@@ -498,8 +499,14 @@ const make = Effect.gen(function* () {
     send: Effect.fnUntraced(function* (input: Payload<"chats.send">, member: Member) {
       const origin = yield* origins.get(input.chatId);
       if (origin !== null) {
-        const existing = yield* commandChat(member, input.chatId);
-        if (input.agentId !== undefined && existing.agentId !== input.agentId)
+        const existing = yield* memberChat(member, input.chatId);
+        if (origin.kind === "conversation" && origin.workflowId !== null)
+          yield* loadWorkflow(member.userId, origin.workflowId);
+        if (
+          (input.agentId !== undefined && existing.agentId !== input.agentId) ||
+          (input.workflowId !== undefined &&
+            (origin.kind !== "conversation" || origin.workflowId !== input.workflowId))
+        )
           return yield* refuse("id_taken");
       }
       const payload = {
@@ -507,11 +514,6 @@ const make = Effect.gen(function* () {
         attachments: input.attachments,
         ...(input.context === undefined ? {} : { context: input.context }),
       };
-      if (origin?.kind === "task")
-        return yield* tasks.continue(input.chatId, payload, {
-          inputId: input.inputId,
-          from: member.userId,
-        });
       yield* post({
         chatId: input.chatId,
         inputId: input.inputId,
@@ -526,6 +528,7 @@ const make = Effect.gen(function* () {
                   kind: "conversation" as const,
                   chatId: input.chatId,
                   ownerUserId: member.userId,
+                  workflowId: input.workflowId ?? null,
                 },
               },
             }
@@ -535,29 +538,28 @@ const make = Effect.gen(function* () {
 
     cancel: (input: Payload<"chats.cancel">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
-        const sent = yield* repository.input(chat.id, input.inputId);
-        if (sent === null) return yield* notFound();
-        if (sent.state === "cancelled") return;
-        if (sent.state === "materialized") return yield* refuse("already_taken");
-        const cancelled = yield* runner.whileNotDelivering(
-          chat.id,
-          repository.moveInput(chat.id, sent.inputId, ["waiting"], "cancelled"),
-        );
-        if (!cancelled) {
-          const withdrawn = yield* onVm(chat.id, (vm) => vm.withdraw(sent));
-          if (Option.isNone(withdrawn)) {
-            yield* repository.moveInput(chat.id, sent.inputId, ["admitted"], "cancelled");
-          }
+        const chat = yield* memberChat(member, input.chatId);
+        if ((yield* repository.input(chat.id, input.inputId)) === null) return yield* notFound();
+        const pending = yield* repository.pendingInputs(chat.id);
+        if (!pending.some((each) => each.inputId === input.inputId)) {
+          return yield* refuse("already_taken");
         }
+        yield* runner
+          .cancel({
+            rootId: rootSessionId(chat.id),
+            messageId: inputMessageId(chat.id, input.inputId),
+          })
+          .pipe(Effect.catchTags({ RpcClientError: unavailable(chat.id) }));
+        yield* repository.deleteInput(chat.id, input.inputId);
         yield* publish(chat.id, "inputs");
-        const after = yield* repository.input(chat.id, sent.inputId);
-        if (after?.state === "materialized") return yield* refuse("already_taken");
       }),
 
     answer: (input: Payload<"chats.answer">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
+        const chat = yield* memberChat(member, input.chatId);
+        const origin = yield* origins.get(chat.id);
+        if (origin?.kind === "conversation" && origin.workflowId !== null)
+          yield* loadWorkflow(member.userId, origin.workflowId);
         const asked = (yield* repository.questions(chat.id)).find(
           (question) => question.sessionId === input.sessionId && question.form.id === input.formId,
         );
@@ -583,103 +585,58 @@ const make = Effect.gen(function* () {
           answers: input.answers,
           attachmentsByField: Object.fromEntries(files),
         });
-        const answered = yield* onVm(chat.id, (vm) =>
-          vm.putFiles(sent.map((file) => file.id)).pipe(
-            Effect.andThen(
-              vm.api.client.session.form.reply({
-                sessionID: input.sessionId,
-                formID: input.formId,
-                answer,
-              }),
-            ),
+        yield* runner
+          .answer({
+            rootId: rootSessionId(chat.id),
+            sessionId: input.sessionId,
+            formId: input.formId,
+            answer,
+            files: yield* executions.filesOf(sent.map((file) => file.id)),
+          })
+          .pipe(
             Effect.catchTags({
-              FormNotFoundError: () => refuse("question_gone"),
-              FormAlreadySettledError: () => refuse("question_gone"),
-              SessionNotFoundError: () => refuse("question_gone"),
-              FormInvalidAnswerError: () => refuse("answer_invalid"),
+              QuestionGone: () => refuse("question_gone"),
+              AnswerInvalid: () => refuse("answer_invalid"),
+              RpcClientError: unavailable(chat.id),
             }),
-          ),
-        );
-        if (Option.isNone(answered)) return yield* refuse("question_gone");
+          );
       }),
 
     dismiss: (input: Payload<"chats.dismiss">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
-        const dismissed = yield* onVm(chat.id, (vm) =>
-          vm.api.client.session.form
-            .cancel({ sessionID: input.sessionId, formID: input.formId })
-            .pipe(
-              Effect.catchTags({
-                FormNotFoundError: () => refuse("question_gone"),
-                FormAlreadySettledError: () => refuse("question_gone"),
-                SessionNotFoundError: () => refuse("question_gone"),
-              }),
-            ),
-        );
-        if (Option.isNone(dismissed)) return yield* refuse("question_gone");
+        const chat = yield* memberChat(member, input.chatId);
+        yield* runner
+          .dismiss({
+            rootId: rootSessionId(chat.id),
+            sessionId: input.sessionId,
+            formId: input.formId,
+          })
+          .pipe(
+            Effect.catchTags({
+              QuestionGone: () => refuse("question_gone"),
+              RpcClientError: unavailable(chat.id),
+            }),
+          );
       }),
 
     stop: (input: Payload<"chats.stop">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
+        const chat = yield* memberChat(member, input.chatId);
         yield* requestStop(chat.id);
-        yield* runner.cancelWaiting(chat.id);
-        yield* runner.wake(chat.id);
-      }),
-
-    compact: (input: Payload<"chats.compact">, member: Member) =>
-      Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
-        const compacted = yield* onVm(
-          chat.id,
-          (vm) => vm.api.client.session.compact({ sessionID: vm.root }),
-          { boot: true },
-        );
-        if (Option.isNone(compacted)) return yield* refuse("unavailable");
       }),
 
     rename: (input: Payload<"chats.rename">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* commandChat(member, input.chatId);
+        const chat = yield* memberChat(member, input.chatId);
         yield* repository.rename(chat.id, input.title);
         yield* publish(chat.id, "chat");
         yield* publish(chat.id, "sessions");
-        yield* onVm(chat.id, (vm) =>
-          vm.api.client.session.update({ sessionID: vm.root, title: input.title }),
-        ).pipe(Effect.ignore);
       }),
 
     delete: Effect.fnUntraced(function* (input: Payload<"chats.delete">, member: Member) {
-      const chat = yield* commandChat(member, input.chatId);
-      yield* tasks.settle(chat.id, {
-        type: "failed",
-        reason: "The task's chat was deleted.",
-      });
-      if (!(yield* repository.markDeleted(chat.id, yield* nowIso))) return;
-      yield* sql.afterCommit(
-        publish(chat.id, "deleted").pipe(
-          Effect.andThen(
-            runner
-              .stop(chat.id)
-              .pipe(
-                Effect.andThen(cleanUntilDone(chat.id)),
-                Effect.interruptible,
-                Effect.forkIn(scope),
-              ),
-          ),
-        ),
-      );
+      const chat = yield* memberChat(member, input.chatId);
+      yield* remove(chat.id);
     }, transaction),
-    start: (hooks: StepHooks) =>
-      Effect.gen(function* () {
-        yield* Deferred.succeed(steps, hooks);
-        for (const chatId of yield* repository.pendingDeletes) yield* cleanUntilDone(chatId);
-        yield* runner.start(
-          tasks.hooks,
-          (yield* origins.nonterminal).map((task) => task.chatId),
-        );
-      }),
   };
 });
 
@@ -690,12 +647,4 @@ export class ChatService extends Context.Service<ChatService, Effect.Success<typ
     return layer;
   }
 }
-const layer = Layer.effect(ChatService, make).pipe(
-  Layer.provideMerge(RunnerService.layer),
-  Layer.provideMerge(ChatEvents.layer),
-);
-
-export const layerTasks = Layer.effect(
-  TaskService,
-  Effect.map(ChatService, (chats) => chats.tasks),
-);
+const layer = Layer.effect(ChatService, make).pipe(Layer.provideMerge(ChatEvents.layer));

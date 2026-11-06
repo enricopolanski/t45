@@ -93,7 +93,7 @@ const reasonOf = (check: Effect.Effect<void, Refused>) =>
   );
 
 const storedFiles = Effect.gen(function* () {
-  const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+  const attachmentsDir = yield* ServerConfig.attachmentsDir;
   return NodeFS.readdirSync(attachmentsDir).toSorted();
 });
 
@@ -134,11 +134,7 @@ describe("AttachmentRepository", () => {
       );
       assert.deepEqual(yield* files.get(file.id), file);
       assert.deepEqual(yield* storedFiles, [file.id]);
-      const path = files.path(file.id);
-      assert.deepEqual(
-        path === null ? null : NodeFS.readFileSync(path),
-        Buffer.from([1, 2, 3, 4, 5, 6]),
-      );
+      assert.deepEqual(NodeFS.readFileSync(files.path(file.id)), Buffer.from([1, 2, 3, 4, 5, 6]));
     }).pipe(Effect.provide(Attachments.layer)),
   );
 
@@ -243,7 +239,7 @@ describe("AttachmentRepository", () => {
         yield* reasonOf(files.bindToChat(aliceOtherChat, [sent(mine)], alice)),
         "file_unavailable",
       );
-      assert.deepEqual(yield* files.boundTo(aliceChat), [mine.id]);
+      assert.deepEqual(yield* files.chatsHolding(mine.id), [aliceChat]);
     }).pipe(Effect.provide(Attachments.layer)),
   );
 
@@ -279,7 +275,7 @@ describe("AttachmentRepository", () => {
       const bound = yield* uploadText(alice);
       yield* files.bindToChat(aliceChat, [sent(bound)], alice);
       const held = yield* stepFile(seeded.stepId);
-      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      const attachmentsDir = yield* ServerConfig.attachmentsDir;
       for (const entry of yield* storedFiles) {
         NodeFS.utimesSync(NodePath.join(attachmentsDir, entry), 0, 0);
       }
@@ -296,7 +292,7 @@ describe("AttachmentRepository", () => {
   it.effect("removes bytes without a row once they are a day old, keeping younger ones", () =>
     Effect.gen(function* () {
       const { files } = yield* setup;
-      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      const attachmentsDir = yield* ServerConfig.attachmentsDir;
       yield* TestClock.adjust("25 hours");
       const old = "00000000-0000-4000-8000-000000000001.txt";
       const cutShort = "00000000-0000-4000-8000-000000000002.txt.part";

@@ -1,16 +1,11 @@
 import { StepAutomationsEditor } from "../work/StepAutomationsEditor";
-import {
-  hasInitialWork,
-  type StepAutomation,
-  type StepDefinition,
-  type Workflow,
-} from "@t45/contracts/models/Workflow";
+import type { StepAutomation, StepDefinition, Workflow } from "@t45/contracts/models/Workflow";
 import { StringId } from "@t45/contracts/models/primitives";
 
 import type { WorkflowInstanceView } from "@t45/contracts/resources/Workflows";
 import { useNavigate } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
@@ -27,6 +22,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { ErrorText } from "../ui/error-text";
 import { Label } from "../ui/label";
 import { PersonPicker } from "../work/ActorPicker";
 import { useWorkDirectory } from "../work/useWorkDirectory";
@@ -94,12 +90,11 @@ export function WorkflowPeople({ detail, busy, run }: Editing) {
             placeholder="Choose a person"
             disabled={busy}
           />
-          {left(workflow.responsible) ? (
-            <p role="alert" className="text-sm text-destructive">
-              {actorName(directory, workflow.responsible)} has left. Steps that would go to them go
-              to the longest-serving admin until you choose who is responsible now.
-            </p>
-          ) : null}
+          {left(workflow.responsible) && (
+            <ErrorText
+              text={`${actorName(directory, workflow.responsible)} has left. Steps that would go to them go to the longest-serving admin until you choose who is responsible now.`}
+            />
+          )}
         </div>
         <div role="group" aria-label="Admins" className="flex flex-col gap-1.5">
           <span className="text-sm font-medium">Admins</span>
@@ -127,11 +122,7 @@ export function WorkflowPeople({ detail, busy, run }: Editing) {
               );
             })}
           </ul>
-          {leaveError !== null ? (
-            <p role="alert" className="text-sm text-destructive">
-              {leaveError}
-            </p>
-          ) : null}
+          {leaveError && <ErrorText text={leaveError} />}
           <div className="flex flex-wrap items-center gap-2">
             <PersonPicker
               aria-label="New admin"
@@ -154,22 +145,9 @@ export function WorkflowPeople({ detail, busy, run }: Editing) {
   );
 }
 
-const stepRows = (
-  steps: ReadonlyArray<StepDefinition>,
-  parentName: string | null = null,
-): ReadonlyArray<{
-  readonly step: StepDefinition;
-  readonly name: string;
-  readonly parentName: string | null;
-}> =>
-  steps.flatMap((step) => {
-    const name = parentName === null ? step.name : `${parentName} › ${step.name}`;
-    return [{ step, name, parentName }, ...stepRows(step.subSteps, name)];
-  });
-
 export function WorkflowStepPeople({ detail, busy, run }: Editing) {
   const { workflow, definition } = detail;
-  const rows = stepRows(definition.steps);
+  const directory = useWorkDirectory();
   const firstId = definition.steps[0]?.id;
   const save = (stepId: string, change: Partial<Workflow["defaultAssignments"][string]>) => {
     const current = workflow.defaultAssignments[stepId] ?? EMPTY_ASSIGNMENT;
@@ -181,70 +159,83 @@ export function WorkflowStepPeople({ detail, busy, run }: Editing) {
       next.assignee === null && next.responsible === null && next.automations.length === 0
         ? others
         : { ...others, [stepId]: next };
-    void run(() =>
+    return run(() =>
       api("workflows.updateInstance", { workflowId: workflow.id, defaultAssignments }),
     );
   };
+  const renderSteps = (
+    steps: ReadonlyArray<StepDefinition>,
+    parentPath: string | null = null,
+  ): ReactNode =>
+    steps.map((step) => {
+      const assignment = workflow.defaultAssignments[step.id];
+      const name = step.name;
+      const stepPath = parentPath === null ? name : `${parentPath} / ${name}`;
+      const inherited =
+        step.id === firstId
+          ? "Unassigned"
+          : parentPath === null
+            ? "Whoever did the step before"
+            : `Whoever has ${parentPath}`;
+      const assignee = assignment?.assignee ? actorName(directory, assignment.assignee) : inherited;
+      const responsible = actorName(directory, assignment?.responsible ?? workflow.responsible);
+      return (
+        <details key={step.id} className="rounded-xl border border-border bg-card p-4">
+          <summary className="cursor-pointer text-sm">
+            <span className="font-medium">{name}</span>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              {assignee} · Approved by {responsible} · {assignment?.automations.length ?? 0}{" "}
+              automations · {step.subSteps.length} substeps
+            </span>
+          </summary>
+          <div className="mt-4 flex flex-col gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Assignee</span>
+                <PersonPicker
+                  aria-label={`${stepPath} assignee`}
+                  value={assignment?.assignee ?? null}
+                  onChange={(assignee) => void save(step.id, { assignee })}
+                  noneLabel={inherited}
+                  onClear={() => void save(step.id, { assignee: null })}
+                  placeholder="Choose an assignee"
+                  disabled={busy}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Responsible</span>
+                <PersonPicker
+                  aria-label={`${stepPath} responsible`}
+                  value={assignment?.responsible ?? null}
+                  onChange={(responsible) => void save(step.id, { responsible })}
+                  noneLabel="The workflow's responsible"
+                  onClear={() => void save(step.id, { responsible: null })}
+                  placeholder="Choose who approves"
+                  disabled={busy}
+                />
+              </div>
+            </div>
+            <StepAutomationsEditor
+              entries={assignment?.automations ?? EMPTY_AUTOMATIONS}
+              busy={busy}
+              onSave={(automations) => save(step.id, { automations })}
+            />
+            {step.subSteps.length > 0 && (
+              <div className="ml-3 flex flex-col gap-3 border-l pl-3">
+                {renderSteps(step.subSteps, stepPath)}
+              </div>
+            )}
+          </div>
+        </details>
+      );
+    });
   return (
     <section aria-label="Who does each step" className="flex flex-col gap-2.5">
       <h2 className="text-sm font-semibold">Who does each step</h2>
-      <div className="divide-y divide-border rounded-xl border border-border bg-card">
-        {rows.length === 0 ? (
-          <p className="px-4 py-3 text-sm text-muted-foreground">No steps yet.</p>
-        ) : null}
-        {rows.map(({ step, name, parentName }) => {
-          const assignment = workflow.defaultAssignments[step.id];
-          const isFirst = step.id === firstId;
-          return (
-            <div key={step.id} className="flex flex-col gap-3 px-4 py-3">
-              <p className="truncate text-sm font-medium">{name}</p>
-              {isFirst && !hasInitialWork(workflow, definition) ? (
-                <p className="text-xs text-destructive">
-                  Tickets can start once the first step has an assignee or automation.
-                </p>
-              ) : null}
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">Assignee</span>
-                  <PersonPicker
-                    aria-label={`${name} assignee`}
-                    value={assignment?.assignee ?? null}
-                    onChange={(assignee) => save(step.id, { assignee })}
-                    {...(isFirst
-                      ? {}
-                      : {
-                          noneLabel:
-                            parentName === null
-                              ? "Whoever did the step before"
-                              : "Whoever has the step it sits in",
-                          onClear: () => save(step.id, { assignee: null }),
-                        })}
-                    placeholder="Choose an assignee"
-                    disabled={busy}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">Responsible</span>
-                  <PersonPicker
-                    aria-label={`${name} responsible`}
-                    value={assignment?.responsible ?? null}
-                    onChange={(responsible) => save(step.id, { responsible })}
-                    noneLabel="The workflow's responsible"
-                    onClear={() => save(step.id, { responsible: null })}
-                    placeholder="Choose who approves"
-                    disabled={busy}
-                  />
-                </div>
-              </div>
-              <StepAutomationsEditor
-                entries={assignment?.automations ?? EMPTY_AUTOMATIONS}
-                busy={busy}
-                onSave={(automations) => save(step.id, { automations })}
-              />
-            </div>
-          );
-        })}
-      </div>
+      {definition.steps.length === 0 && (
+        <p className="text-sm text-muted-foreground">No steps yet.</p>
+      )}
+      {renderSteps(definition.steps)}
     </section>
   );
 }

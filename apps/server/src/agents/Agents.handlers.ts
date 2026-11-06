@@ -5,16 +5,24 @@ import { Authorization } from "@t45/contracts/Authorization";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
-import { RunnerService } from "../runner/RunnerService.ts";
 import { AgentRepository } from "./AgentRepository.ts";
 import { SkillRepository } from "./SkillRepository.ts";
+
+/** OpenCode Go's models, OpenAI-style (`{ data: [{ id }] }`); listing them needs no key. */
+const MODELS_URL = "https://opencode.ai/zen/go/v1/models";
+
+const decodeModels = HttpClientResponse.schemaBodyJson(
+  Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString })) }),
+);
 
 export const layer = Agents.middleware(Authorization).toLayer(
   Effect.gen(function* () {
     const agents = yield* AgentRepository;
     const skills = yield* SkillRepository;
-    const runner = yield* RunnerService;
+    const httpClient = yield* HttpClient.HttpClient;
     const crypto = yield* Crypto.Crypto;
 
     const find = (agentId: string) =>
@@ -24,8 +32,15 @@ export const layer = Agents.middleware(Authorization).toLayer(
           () => new NotFound(),
         ),
       );
+    const models = yield* httpClient.get(MODELS_URL).pipe(
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.flatMap(decodeModels),
+      Effect.map(({ data }) => data.map(({ id }) => ({ slug: `opencode-go/${id}`, name: id }))),
+      Effect.timeout("15 seconds"),
+      Effect.cachedWithTTL("5 minutes"),
+    );
     const requireOfferedModel = (model: string) =>
-      runner.models.pipe(
+      models.pipe(
         Effect.orElseSucceed(() => []),
         Effect.flatMap((offered) =>
           offered.some((entry) => entry.slug === model)
@@ -48,12 +63,9 @@ export const layer = Agents.middleware(Authorization).toLayer(
     return Agents.of({
       "agents.list": () => agents.list,
       "agents.listModels": () =>
-        runner.models.pipe(
+        models.pipe(
           Effect.map((models) => ({ models, reason: null })),
-          Effect.catchTags({
-            RunnerUnavailableError: (error) =>
-              Effect.succeed({ models: [], reason: error.message }),
-          }),
+          Effect.orElseSucceed(() => ({ models: [], reason: "OpenCode Go did not answer." })),
         ),
       "agents.get": ({ agentId }) => find(agentId),
       "agents.archive": ({ agentId }) =>

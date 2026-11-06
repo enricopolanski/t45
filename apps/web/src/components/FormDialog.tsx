@@ -61,7 +61,7 @@ function DialogForm({
       <DialogPanel>
         <div className="flex flex-col gap-4">
           {children}
-          {error !== null ? <ErrorText>{error}</ErrorText> : null}
+          {error && <ErrorText text={error} />}
         </div>
       </DialogPanel>
       <DialogFooter>

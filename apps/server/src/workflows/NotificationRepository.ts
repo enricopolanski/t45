@@ -33,11 +33,7 @@ export class NotificationRepository extends Context.Service<
       readonly userId: string;
       readonly at: DateTime.Utc;
     }) => Effect.Effect<void>;
-    readonly markReadForStep: (input: {
-      readonly userId: string;
-      readonly stepId: string;
-      readonly at: DateTime.Utc;
-    }) => Effect.Effect<void>;
+    readonly removeApproval: (stepId: string) => Effect.Effect<void>;
   }
 >()("t45/workflows/NotificationRepository") {}
 
@@ -84,9 +80,8 @@ export const layer = Layer.effect(
           Effect.asVoid,
           Effect.orDie,
         ),
-      markReadForStep: (input) =>
-        sql`UPDATE workflow_notifications SET read_at = ${DateTime.formatIso(input.at)}
-          WHERE user_id = ${input.userId} AND step_id = ${input.stepId} AND read_at IS NULL`.pipe(
+      removeApproval: (stepId) =>
+        sql`DELETE FROM workflow_notifications WHERE step_id = ${stepId} AND kind = 'to_approve'`.pipe(
           Effect.asVoid,
           Effect.orDie,
         ),

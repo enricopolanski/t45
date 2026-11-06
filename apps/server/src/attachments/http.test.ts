@@ -9,15 +9,11 @@ import { describe, expect, it } from "@effect/vitest";
 import { type Attachment, type ChatAttachment } from "@t45/contracts/models/Attachment";
 import { ATTACHMENT_ROUTE_PREFIX } from "@t45/contracts/resources/Attachments";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
-import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter } from "effect/http";
 
-import { ChatService } from "../chats/ChatService.ts";
-import * as WorkflowService from "../workflows/WorkflowService.ts";
-import { ServerActivation } from "../serverActivation.ts";
 import { UserService } from "../org/UserService.ts";
 import { SessionInvalidError } from "../auth/Authentication.ts";
 import * as Fixture from "../chats/Chats.testkit.ts";
@@ -135,18 +131,8 @@ describe("attachment routes", () => {
         : Effect.fail(new SessionInvalidError({})),
   });
   const layerContext = layerAuth.pipe(
-    Layer.provideMerge(
-      WorkflowService.layer.pipe(
-        Layer.provideMerge(Fixture.layerBase),
-        Layer.tap((context) =>
-          Context.get(context, ChatService).start(
-            Context.get(context, WorkflowService.WorkflowService).taskHooks,
-          ),
-        ),
-      ),
-    ),
+    Layer.provideMerge(Fixture.layer),
     Layer.provideMerge(layerFileResponse),
-    Layer.provide(Layer.succeed(ServerActivation, Effect.never)),
   );
 
   type RequestOptions = { method?: string; body?: string; session?: string };
@@ -162,7 +148,9 @@ describe("attachment routes", () => {
     Effect.gen(function* () {
       // Route handlers read these per request, like the server provides them.
       const requestContext = yield* Layer.build(layerContext);
-      const { attachmentsDir } = Context.get(requestContext, ServerConfig.ServerConfig);
+      const attachmentsDir = yield* ServerConfig.attachmentsDir.pipe(
+        Effect.provideContext(requestContext),
+      );
       const seeded = yield* seed.pipe(Effect.provideContext(requestContext));
       const layerApp = Layer.mergeAll(
         AttachmentsHttp.layerAttachmentRoute,

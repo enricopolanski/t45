@@ -6,6 +6,7 @@ import { useEffect, useId, useState } from "react";
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -139,11 +140,7 @@ export function NewWorkflow({
             disabled={busy}
           />
         </div>
-        {error !== null ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error && <ErrorText text={error} />}
         <div>
           <Button
             type="submit"

@@ -3,7 +3,7 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { ChatId, Refused as ChatRefused } from "../models/Chat.ts";
+import { Chat, Refused as ChatRefused } from "../models/Chat.ts";
 import { Refused as AutomationRefused, Automation, AutomationId } from "../models/Automation.ts";
 import { AdminOnly } from "../Authorization.ts";
 import { NotFound } from "./errors.ts";
@@ -18,8 +18,19 @@ const Settings = Struct.pick(Automation.fields, [
   "schedule",
 ]);
 
+export const AutomationSummary = Schema.Struct({
+  ...Automation.fields,
+  lastRun: Schema.NullOr(
+    Schema.Struct({
+      statusLabel: Schema.String,
+      at: Chat.fields.lastActivityAt,
+    }),
+  ),
+});
+export type AutomationSummary = typeof AutomationSummary.Type;
+
 export const Automations = RpcGroup.make(
-  Rpc.make("list", { success: Schema.Array(Automation) }),
+  Rpc.make("list", { success: Schema.Array(AutomationSummary) }),
   Rpc.make("create", {
     payload: Settings,
     success: Automation,
@@ -32,7 +43,6 @@ export const Automations = RpcGroup.make(
   }),
   Rpc.make("runNow", {
     payload: { id: AutomationId },
-    success: Schema.Struct({ chatId: ChatId }),
     error: Schema.Union([AutomationRefused, ChatRefused, NotFound]),
   }),
   /** Flips only the enabled flag, never overwriting the automation's other fields. */

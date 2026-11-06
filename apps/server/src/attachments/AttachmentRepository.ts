@@ -26,7 +26,7 @@ import type * as Statement from "effect/sql/Statement";
 import * as ServerConfig from "../config.ts";
 
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const isAttachmentId = Schema.is(AttachmentId);
+export const isAttachmentId = Schema.is(AttachmentId);
 
 /** An image upload's stored extension, by its (schema-checked) mime type. */
 const IMAGE_ATTACHMENT_EXTENSIONS = {
@@ -55,8 +55,8 @@ const displayFileName = (name: string) =>
 const storedFileId = (entry: string) =>
   [entry, entry.replace(/\.part$/u, "")].find((id) => isAttachmentId(id));
 
-export function attachmentPath(attachmentsDir: string, attachmentId: string): string | null {
-  return isAttachmentId(attachmentId) ? NodePath.resolve(attachmentsDir, attachmentId) : null;
+function attachmentPath(attachmentsDir: string, attachmentId: AttachmentId): string {
+  return NodePath.resolve(attachmentsDir, attachmentId);
 }
 
 /** Images render inline; every other stored extension downloads. */
@@ -108,8 +108,6 @@ export class AttachmentRepository extends Context.Service<
       files: ReadonlyArray<ChatAttachment>,
       from: string | null,
     ) => Effect.Effect<void, Refused>;
-    /** The ids of the files sent to the chat. */
-    readonly boundTo: (chatId: ChatId) => Effect.Effect<ReadonlyArray<AttachmentId>>;
     readonly chatsHolding: (id: AttachmentId) => Effect.Effect<ReadonlyArray<ChatId>>;
     readonly claimForStep: (input: {
       readonly id: AttachmentId;
@@ -120,7 +118,7 @@ export class AttachmentRepository extends Context.Service<
     readonly detach: (id: AttachmentId) => Effect.Effect<void>;
     readonly release: (chatId: ChatId) => Effect.Effect<void>;
     readonly sweep: Effect.Effect<void>;
-    readonly path: (id: AttachmentId) => string | null;
+    readonly path: (id: AttachmentId) => string;
   }
 >()("t45/attachments/AttachmentRepository") {}
 
@@ -131,8 +129,9 @@ const decodeAttachment = Schema.decodeUnknownEffect(Attachment);
 const decodeAttachments = Schema.decodeUnknownEffect(Schema.Array(Attachment));
 
 const make = Effect.gen(function* () {
-  const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+  const attachmentsDir = yield* ServerConfig.attachmentsDir;
   const fileSystem = yield* FileSystem.FileSystem;
+  yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
 
@@ -150,13 +149,15 @@ const make = Effect.gen(function* () {
   const get: AttachmentRepository["Service"]["get"] = (id) =>
     select(sql`id = ${id}`).pipe(Effect.map(([attachment]) => attachment ?? null));
 
-  const removeBytes = (id: string) => {
+  const removeBytes = (id: AttachmentId) => {
     const path = attachmentPath(attachmentsDir, id);
-    return path === null
-      ? Effect.void
-      : Effect.forEach([path, `${path}.part`], (each) => fileSystem.remove(each, { force: true }), {
-          discard: true,
-        }).pipe(Effect.orDie);
+    return Effect.forEach(
+      [path, `${path}.part`],
+      (each) => fileSystem.remove(each, { force: true }),
+      {
+        discard: true,
+      },
+    ).pipe(Effect.orDie);
   };
 
   const upload: AttachmentRepository["Service"]["upload"] = Effect.fnUntraced(
@@ -214,6 +215,7 @@ const make = Effect.gen(function* () {
         if (id === undefined) return;
         const path = NodePath.join(attachmentsDir, entry);
         const info = yield* fileSystem.stat(path).pipe(Effect.option);
+        // Uploads place bytes before inserting their row; a fresh file without a row may still be in flight.
         const old = Option.exists(info, (stat) =>
           Option.exists(stat.mtime, (mtime) => now - mtime.getTime() > PENDING_MAX_AGE_MS),
         );
@@ -288,13 +290,6 @@ const make = Effect.gen(function* () {
       )} ON CONFLICT DO NOTHING`.pipe(Effect.orDie);
     }),
 
-    boundTo: (chatId) =>
-      sql<{ readonly id: AttachmentId }>`SELECT attachment_id AS id FROM chat_attachments
-        WHERE chat_id = ${chatId} ORDER BY attachment_id`.pipe(
-        Effect.map((rows) => rows.map((row) => row.id)),
-        Effect.orDie,
-      ),
-
     chatsHolding: (id) =>
       sql<{ readonly chatId: ChatId }>`SELECT chat_id AS "chatId" FROM chat_attachments
         WHERE attachment_id = ${id} ORDER BY chat_id`.pipe(
@@ -313,6 +308,7 @@ const make = Effect.gen(function* () {
         Effect.map(([claimed]) => claimed ?? null),
       ),
 
+    // Called inside workflow transactions: leave byte deletion to the sweep so rollback keeps the file.
     detach: (id) =>
       sql
         .withTransaction(

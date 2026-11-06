@@ -296,8 +296,8 @@ export function chatSessionKey(
 }
 
 /**
- * How long a chat's stream stays open after its last reader leaves. Nothing outlives it: a return
- * after that folds a fresh stream from its first snapshot, as a reload does.
+ * How long a chat's stream stays open after its last reader leaves. Discard its state with it:
+ * cached live text would join new deltas across a gap, since snapshots omit a part's text until it ends.
  */
 const CHAT_IDLE_TTL_MS = 2_000;
 

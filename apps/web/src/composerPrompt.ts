@@ -4,7 +4,7 @@ import { parseInlineTokens } from "./inlineTokens";
 import { removeContextReferences } from "./lib/composerContextReferences";
 import { isMacPlatform } from "./lib/utils";
 
-export type ComposerSlashCommand = "new" | "compact";
+export type ComposerSlashCommand = "new";
 
 export interface ComposerTrigger {
   query: string;
@@ -166,8 +166,7 @@ export function composerStateAtPromptEnd(text: string) {
 
 /** A message that is nothing but a slash command, which runs instead of being sent. */
 export function parseStandaloneComposerSlashCommand(text: string): ComposerSlashCommand | null {
-  const command = /^\/(new|compact)\s*$/i.exec(text.trim())?.[1]?.toLowerCase();
-  return command === "new" || command === "compact" ? command : null;
+  return /^\/new\s*$/i.test(text.trim()) ? "new" : null;
 }
 
 export function replaceTextRange(
@@ -182,18 +181,14 @@ export function replaceTextRange(
   return { text: nextText, cursor: safeStart + replacement.length };
 }
 
-/** Commands whose name contains `query`, then those whose description does. */
+/** Commands whose name or description contains `query`. */
 export function searchSlashCommandItems(
   items: ReadonlyArray<ComposerCommandItem>,
   query: string,
 ): ComposerCommandItem[] {
-  const byName = items.filter((item) => item.command.includes(query));
-  return [
-    ...byName,
-    ...items.filter(
-      (item) => !byName.includes(item) && item.description.toLowerCase().includes(query),
-    ),
-  ];
+  return items.filter(
+    (item) => item.command.includes(query) || item.description.toLowerCase().includes(query),
+  );
 }
 
 // ── List continuation & indentation ────────────────────────────────────────

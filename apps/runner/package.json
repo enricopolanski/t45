@@ -6,23 +6,21 @@
     "dev": "node --watch src/bin.ts",
     "start": "node src/bin.ts",
     "image": "sh image/build-local.sh",
-    "typecheck": "tsc --noEmit",
-    "test": "vp test run --config ../../vite.base.config.ts --dir ."
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
     "@opencode/client": "catalog:",
+    "@opencode/protocol": "catalog:",
     "@opencode/schema": "catalog:",
     "@t45/contracts": "workspace:*",
     "effect": "catalog:",
     "microsandbox": "0.7.8"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
-    "@types/node": "catalog:",
-    "vite-plus": "catalog:"
+    "@types/node": "catalog:"
   },
   "engines": {
-    "node": "^24.13.1"
+    "node": "^24.21.0"
   }
 }

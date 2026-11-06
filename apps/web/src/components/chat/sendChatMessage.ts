@@ -16,9 +16,11 @@ import { toastManager } from "../ui/toast";
 
 export const sendsInFlight = new Set<ChatId>();
 
+// Kept outside ChatView: inlining this try/finally makes React Compiler skip the component.
 export async function sendChatMessage(send: {
   readonly chatId: ChatId;
   readonly agentId: Agent["id"] | null;
+  readonly workflowId?: string | null;
   readonly prompt: string;
   readonly attachments: ReadonlyArray<ComposerAttachment>;
   readonly setBusy: (busy: boolean) => void;
@@ -48,6 +50,7 @@ export async function sendChatMessage(send: {
       await api("chats.send", {
         chatId,
         ...(send.agentId === null ? {} : { agentId: send.agentId }),
+        ...(send.workflowId == null ? {} : { workflowId: send.workflowId }),
         inputId,
         text: send.prompt.trim(),
         attachments: uploaded,

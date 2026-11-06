@@ -25,7 +25,6 @@ export type NavLink = {
     | "/people"
     | "/settings/workflows"
     | "/settings/agents"
-    | "/settings/runner"
     | "/settings/automations"
     | "/settings/organization";
 };

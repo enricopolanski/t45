@@ -102,6 +102,9 @@ importers:
       '@opencode/client':
         specifier: 'catalog:'
         version: 2.1.4(effect@4.0.6)
+      '@opencode/protocol':
+        specifier: 'catalog:'
+        version: 2.1.4
       '@opencode/schema':
         specifier: 'catalog:'
         version: 2.1.4
@@ -115,15 +118,9 @@ importers:
         specifier: 0.7.8
         version: 0.7.8
     devDependencies:
-      '@effect/vitest':
-        specifier: 4.0.6
-        version: 4.0.6(patch_hash=05e5cd0bf557ad9b177d6f4959976f4d076bf8d81ac51a8ab87ad4b1c66f6c40)(@types/node@24.12.4)(@vitest/ui@5.0.1(vitest@5.0.1))(effect@4.0.6)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(tsx@4.23.15)(typescript@7.0.2)(unrun@0.2.39)(yaml@2.9.0)
       '@types/node':
         specifier: 24.12.4
         version: 24.12.4
-      vite-plus:
-        specifier: 1.0.0
-        version: 1.0.0(@types/node@24.12.4)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(tsx@4.23.15)(typescript@7.0.2)(unrun@0.2.39)(yaml@2.9.0)
 
   apps/server:
     dependencies:
@@ -136,10 +133,7 @@ importers:
       '@effect/sql-sqlite-node':
         specifier: 4.0.6
         version: 4.0.6(effect@4.0.6)
-      '@opencode/client':
-        specifier: 'catalog:'
-        version: 2.1.4(effect@4.0.6)
-      '@opencode/protocol':
+      '@opencode/schema':
         specifier: 'catalog:'
         version: 2.1.4
       effect:
@@ -3443,8 +3437,8 @@ packages:
     resolution: {integrity: sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==}
     engines: {node: '>=0.12'}
 
-  entities@8.1.0:
-    resolution: {integrity: sha512-kxL7msIffSuh9aaFAMD7rxAIuTRMAHMeBtgHW2yUdWw732ZNh4MehkF2gdjvtdmikkaIP9bFDDJOPlsvm7avrA==}
+  entities@8.0.0:
+    resolution: {integrity: sha512-zwfzJecQ/Uej6tusMqwAqU/6KL2XaB2VZ2Jg54Je6ahNBGNH6Ek6g3jjNCF0fG9EWQKGZNddNjU5F1ZQn/sBnA==}
     engines: {node: '>=20.19.0'}
 
   es-errors@1.3.0:
@@ -7233,7 +7227,7 @@ snapshots:
 
   entities@6.0.1: {}
 
-  entities@8.1.0:
+  entities@8.0.0:
     optional: true
 
   es-errors@1.3.0:
@@ -8238,7 +8232,7 @@ snapshots:
 
   parse5@8.0.1:
     dependencies:
-      entities: 8.1.0
+      entities: 8.0.0
     optional: true
 
   path-data-parser@0.1.0: {}

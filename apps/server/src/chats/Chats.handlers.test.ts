@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
-import { Form, SessionMessage } from "@opencode/client/effect";
+import { Form } from "@opencode/schema/form";
+import { SessionMessage } from "@opencode/schema/session-message";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import { type Role } from "@t45/contracts/models/User";
@@ -81,7 +82,6 @@ const refusalsFor = (client: RpcClient.FromGroup<typeof group>, chatId: ChatId) 
     ),
     dismiss: failed(client["chats.dismiss"]({ chatId, sessionId, formId })),
     stop: failed(client["chats.stop"]({ chatId })),
-    compact: failed(client["chats.compact"]({ chatId })),
     rename: failed(client["chats.rename"]({ chatId, title: "Mine now" })),
     delete: failed(client["chats.delete"]({ chatId })),
   });
@@ -96,7 +96,6 @@ const allNotFound = {
   answer: "NotFound",
   dismiss: "NotFound",
   stop: "NotFound",
-  compact: "NotFound",
   rename: "NotFound",
   delete: "NotFound",
 };
@@ -111,7 +110,7 @@ it.effect("answers NotFound for another person's chat, even for admins", () =>
       const client = yield* clientFor(userId, role);
       assert.deepStrictEqual(yield* refusalsFor(client, aliceChat), allNotFound);
     }
-  }).pipe(Effect.scoped, Effect.provide(Fixture.layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
 );
 
 it.effect("answers NotFound for a deleted chat, even to its owner", () =>
@@ -120,17 +119,16 @@ it.effect("answers NotFound for a deleted chat, even to its owner", () =>
     yield* (yield* ChatRepository).markDeleted(aliceChat, "2026-10-23T09:00:00.000Z");
     const client = yield* clientFor("user-alice", "member");
     assert.deepStrictEqual(yield* refusalsFor(client, aliceChat), allNotFound);
-  }).pipe(Effect.scoped, Effect.provide(Fixture.layerStore)),
+  }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
 );
 
-it.effect("lets admins reach automation's chats, which members don't find", () =>
+it.effect("keeps task chats internal for members and admins", () =>
   Effect.gen(function* () {
     yield* seed;
     const member = yield* clientFor("user-alice", "member");
     assert.deepStrictEqual(yield* refusalsFor(member, automation), allNotFound);
 
     const admin = yield* clientFor("admin01", "admin");
-    yield* admin["chats.rename"]({ chatId: automation, title: "Nightly" });
-    assert.equal((yield* (yield* ChatRepository).get(automation))?.title, "Nightly");
-  }).pipe(Effect.scoped, Effect.provide(Fixture.layerStore)),
+    assert.deepStrictEqual(yield* refusalsFor(admin, automation), allNotFound);
+  }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
 );

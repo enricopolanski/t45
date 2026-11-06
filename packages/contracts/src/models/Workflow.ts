@@ -14,10 +14,13 @@ export const FieldPathSegment = StringId.check(isFieldPathSegment);
 const hasDistinctIds = (ids: ReadonlyArray<string>) => new Set(ids).size === ids.length;
 
 const FieldBase = {
-  id: FieldPathSegment,
+  id: FieldPathSegment.annotate({
+    description: "Identifier unique among sibling fields; used in dotted field paths.",
+  }),
   label: TrimmedNonEmptyString,
-  /** What to put in it, shown under the label. */
-  description: Schema.optionalKey(Schema.String),
+  description: Schema.optionalKey(
+    Schema.String.annotate({ description: "Guidance shown below the field label." }),
+  ),
 };
 
 const ValueField = Schema.Struct({
@@ -28,13 +31,15 @@ const ValueField = Schema.Struct({
 const SelectField = Schema.Struct({
   ...FieldBase,
   type: Schema.Literal("select"),
-  options: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
+  options: Schema.Array(TrimmedNonEmptyString)
+    .annotate({ description: "Allowed choices, shown as written." })
+    .check(Schema.isMinLength(1)),
 });
 
 class GroupField extends Schema.Class<GroupField>("GroupField")({
   ...FieldBase,
   type: Schema.Literal("group"),
-  repeatable: Schema.Boolean,
+  repeatable: Schema.Boolean.annotate({ description: "Whether the group allows multiple rows." }),
   fields: Schema.Array(Schema.suspend((): Schema.Codec<StepField> => StepField)),
 }) {}
 
@@ -47,14 +52,20 @@ const fieldIdsAreDistinct = (fields: ReadonlyArray<StepField>): boolean =>
   fields.every((field) => field.type !== "group" || fieldIdsAreDistinct(field.fields));
 
 export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition")({
-  id: StringId,
+  id: StringId.annotate({
+    description: "Identifier unique across all steps and sub-steps in the blueprint.",
+  }),
   name: TrimmedNonEmptyString,
   instructions: Schema.String,
   fields: Schema.Array(StepField).check(
     Schema.makeFilter(fieldIdsAreDistinct, { expected: "distinct field ids among siblings" }),
   ),
-  /** Start with their parent, which can't be done until every one is approved. */
-  subSteps: Schema.Array(Schema.suspend((): Schema.Codec<StepDefinition> => StepDefinition)),
+  subSteps: Schema.Array(
+    Schema.suspend((): Schema.Codec<StepDefinition> => StepDefinition),
+  ).annotate({
+    description:
+      "Steps that start with their parent and must all be approved before it can finish.",
+  }),
 }) {}
 
 const stepNodes = (
@@ -239,7 +250,6 @@ const REFUSALS = {
   last_admin: "A workflow needs at least one active admin.",
   not_overseer: "Only the workflow's responsible and admins can do that.",
   cannot_start_ticket: "You can't start tickets in this workflow.",
-  first_step_unassigned: "Assign the first step before starting a ticket.",
   not_step_responsible: "Only the step's responsible can do that.",
   workflow_archived: "This workflow is archived.",
   ticket_not_open: "This ticket is no longer open.",
@@ -320,7 +330,7 @@ const fieldsComplete = (fields: ReadonlyArray<StepField>, values: Values, prefix
     );
   });
 
-export const carriedFields = (
+export const buildPreviousStepsFieldViews = (
   steps: ReadonlyArray<StepDefinition>,
   rootId: string,
   reached: ReadonlyArray<Step>,
@@ -369,14 +379,6 @@ export const isInvolved = (actor: WorkflowActor, workflow: Workflow, ticket: Tic
 
 export const canViewTicket = (actor: WorkflowActor, workflow: Workflow, ticket: Ticket) =>
   workflow.isPublic || isInvolved(actor, workflow, ticket);
-
-export const hasInitialWork = (workflow: Workflow, definition: WorkflowDefinition) => {
-  const first = definition.steps[0];
-  const assignment = first === undefined ? undefined : workflow.defaultAssignments[first.id];
-  return (
-    assignment !== undefined && (assignment.assignee !== null || assignment.automations.length > 0)
-  );
-};
 
 /** A workflow must retain an active admin when its administrators change. */
 export const lastAdminRefusal = (activeAdminIds: ReadonlyArray<string>) =>
@@ -511,7 +513,6 @@ export const ticketStartRefusal = (
   const first = definition.steps[0];
   if (first === undefined) return "no_steps";
   if (workflow.isArchived) return "workflow_archived";
-  if (!hasInitialWork(workflow, definition)) return "first_step_unassigned";
   return workflow.defaultAssignments[first.id]?.assignee === actor.id || oversees(actor, workflow)
     ? null
     : "cannot_start_ticket";

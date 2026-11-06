@@ -8,6 +8,7 @@ import { api } from "../../rpc/api";
 import { useApiQuery } from "../../state/rpc";
 import { notifications } from "../../state/work";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 
 const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
@@ -21,7 +22,7 @@ const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
 
 /**
  * What landed in my My work. The count is re-read on a timer, on focus, and whenever this
- * browser changes work; opening a notification opens its step, which reads it.
+ * browser changes work; clicking a notification marks it read and opens its destination.
  */
 export function NotificationBell() {
   const navigate = useNavigate();
@@ -31,17 +32,17 @@ export function NotificationBell() {
 
   const openNotification = (notification: NotificationView) => {
     setOpen(false);
-    if (notification.stepId !== null) {
-      void navigate({ to: "/my-work/$stepId", params: { stepId: notification.stepId } });
-      return;
-    }
-    // A notice about a whole workflow opens its editor, where it gets fixed.
     if (!notification.isRead) {
       void api("notifications.markRead", { notificationId: notification.id }).then(
         refresh,
         () => undefined,
       );
     }
+    if (notification.stepId !== null) {
+      void navigate({ to: "/my-work/$stepId", params: { stepId: notification.stepId } });
+      return;
+    }
+    // A notice about a whole workflow opens its editor, where it gets fixed.
     void navigate({
       to: "/settings/workflows/$workflowId/edit",
       params: { workflowId: notification.workflowId },
@@ -74,11 +75,7 @@ export function NotificationBell() {
       </PopoverTrigger>
       <PopoverPopup align="end" aria-label="Notifications" width="md">
         <PopoverTitle>Notifications</PopoverTitle>
-        {error !== null ? (
-          <p role="alert" className="mt-2 text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error && <ErrorText className="mt-2" text={error} />}
         {inbox !== null && inbox.notifications.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">Nothing new.</p>
         ) : null}

@@ -6,4 +6,4 @@ Each question keeps its own answer and attachments as you move between questions
 
 The files go into the chat's sandbox with your answer, which tells the agent where they are. Questions that only accept predefined choices do not offer attachments.
 
-Submitted attachments remain in the chat history; deleting the chat uses the same file cleanup as other attachments. You can attach up to 100 files across one set of answers, using the same file and total image size limits as the normal composer.
+Submitted attachments stay with the chat; deleting the chat uses the same file cleanup as other attachments. You can attach up to 100 files across one set of answers, using the same file and total image size limits as the normal composer.

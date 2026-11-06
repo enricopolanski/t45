@@ -9,6 +9,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { ErrorText } from "../ui/error-text";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 
@@ -81,11 +82,7 @@ export function ReasonDialog({
                   disabled={busy}
                 />
               </div>
-              {error !== null ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
-              ) : null}
+              {error && <ErrorText text={error} />}
             </div>
           </DialogPanel>
           <DialogFooter>

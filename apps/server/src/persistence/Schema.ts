@@ -4,11 +4,41 @@
  * place: the fingerprint of the statements changes, and a database created by other statements is
  * refused at startup.
  */
+import { Agent, WORKFLOW_ASSISTANT_ID } from "@t45/contracts/models/Agent";
+import { WORKFLOW_DRAFTING_MCP, WORKFLOW_INSTANCE_MCP } from "@t45/core/agentTools";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+
+// Defaults apply only to fresh databases; later changes belong to the organization.
+const workflowDesigner = {
+  id: "workflow-designer",
+  name: "Workflow designer",
+  instructions: `Help the member design a reusable workflow. Clarify the process and expected outputs,
+then use the workflow draft tool to propose a complete blueprint. Submit the complete draft for revisions.
+Explain that the member saves the blueprint, then configures and publishes a workflow from it.`,
+  model: "opencode-go/deepseek-v4.1-flash",
+  files: {},
+  skills: [],
+  mcpServers: { [WORKFLOW_DRAFTING_MCP.name]: WORKFLOW_DRAFTING_MCP.server },
+  permissions: { network: "provider" },
+  isConversational: true,
+  status: "active",
+} satisfies Omit<Agent, "createdAt" | "updatedAt">;
+
+const workflowAssistant = {
+  ...workflowDesigner,
+  id: WORKFLOW_ASSISTANT_ID,
+  name: "Workflow assistant",
+  instructions: `Help the member operate the workflow bound to this conversation. Use get_workflow and get_ticket to obtain current definitions, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. Choose a new UUID requestId for each operation; reuse it with identical arguments when retrying that operation. You cannot approve steps or edit workflow definitions.`,
+  mcpServers: { [WORKFLOW_INSTANCE_MCP.name]: WORKFLOW_INSTANCE_MCP.server },
+} satisfies Omit<Agent, "createdAt" | "updatedAt">;
+
+const encodeFiles = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.files));
+const encodeMcpServers = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.mcpServers));
 
 // The organization's users and sessions, agents and automations, workflows, chats, and files.
 const statements = [
@@ -49,7 +79,7 @@ const statements = [
   // Named agents, their skills and automations, and the workflows people and agents work
   // through.
   // Named agents are organization-wide. Every agent works in a sandbox of its own, and its model
-  // is an OpenCode `provider/model` slug the runner offers. Admins choose which agents members can
+  // is a `provider/model` slug OpenCode Go offers. Admins choose which agents members can
   // chat with, and which of those draft workflows.
   `CREATE TABLE agents (
       id TEXT PRIMARY KEY NOT NULL,
@@ -146,7 +176,7 @@ const statements = [
       PRIMARY KEY (chat_id, call_key)
     ) WITHOUT ROWID`,
 
-  // In-app notifications: something new landed in a person's My work. Opening the step reads them.
+  // In-app notifications: something new landed in a person's My work. Clicking a notification marks it read.
   `CREATE TABLE workflow_notifications (
       id TEXT PRIMARY KEY NOT NULL,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -159,95 +189,74 @@ const statements = [
     )`,
   `CREATE INDEX workflow_notifications_user ON workflow_notifications(user_id, read_at, created_at)`,
 
-  // Chats with agents. T45 keeps each chat: its OpenCode sessions and messages as OpenCode returned
-  // them, the inputs it is sent, its open questions and the agent's workspace. The agent runs in
-  // a VM that keeps nothing; T45 boots one when the chat has work and restores the chat into it.
-  // `updated_at` is the
-  // chat's latest activity: its latest message, or its creation. A deleted chat stays as a
-  // tombstone so its id never comes back, `cleanup_pending` until its VM, files and mirror are
-  // gone. `boot_id` is the VM boot T45 last restored the chat into, and `vm` whether T45 keeps a
-  // VM for it now. The agent's saved /work is a tarball named after the chat in the server's chat
-  // workspace folder; `workspace_unsaved` while T45 gave up on saving it, as too large or refused
-  // again and again, which keeps the last good one and tells the chat once.
+  // Chats with agents. T45 keeps a chat's inputs, the OpenCode sessions and messages its
+  // executions wrote, and the VM disk the last finished execution left, a file named after the chat
+  // in the server's chat disks folder. `status` is `running` while an execution is
+  // owed, which a server start runs again. `updated_at` is the chat's latest activity.
+  // A deleted chat stays as a tombstone so its id never comes back.
   `CREATE TABLE chats (
       id TEXT PRIMARY KEY NOT NULL,
       agent_id TEXT NOT NULL REFERENCES agents(id),
       title TEXT,
-      status TEXT CHECK (status IN ('running', 'waiting', 'failed', 'interrupted')),
+      status TEXT CHECK (status IN ('running', 'failed', 'interrupted')),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      deleted_at TEXT,
-      cleanup_pending INTEGER NOT NULL DEFAULT 0,
-      boot_id TEXT,
-      vm TEXT NOT NULL DEFAULT 'asleep' CHECK (vm IN ('awake', 'asleep')),
-      stop_through INTEGER,
-      workspace_unsaved INTEGER NOT NULL DEFAULT 0
+      deleted_at TEXT
     )`,
+  // A conversation retains its scope even after that workflow is deleted.
   `CREATE TABLE chat_origins (
       chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(id),
       owner_user_id TEXT REFERENCES users(id),
+      workflow_id TEXT,
       trigger TEXT,
       state TEXT,
       CHECK ((owner_user_id IS NOT NULL AND trigger IS NULL AND state IS NULL)
-          OR (owner_user_id IS NULL AND trigger IS NOT NULL AND state IS NOT NULL))
+          OR (owner_user_id IS NULL AND workflow_id IS NULL AND trigger IS NOT NULL AND state IS NOT NULL))
     )`,
+  // Independent of provisional OpenCode messages: a lost execution cannot repeat a committed write.
+  `CREATE TABLE workflow_operation_receipts (
+      chat_id TEXT NOT NULL REFERENCES chat_origins(chat_id),
+      request_id TEXT NOT NULL,
+      response TEXT NOT NULL,
+      PRIMARY KEY (chat_id, request_id)
+    ) WITHOUT ROWID`,
   `CREATE INDEX origins_owner ON chat_origins(owner_user_id) WHERE owner_user_id IS NOT NULL`,
   `CREATE INDEX origins_step ON chat_origins(json_extract(trigger, '$.ticketId'), json_extract(trigger, '$.stepId')) WHERE trigger IS NOT NULL`,
-  `CREATE INDEX chats_stop ON chats(id) WHERE stop_through IS NOT NULL`,
-  // A chat's OpenCode sessions: its root and the subagents' sessions under it. A chat's VM names
-  // its sessions, so everything of a session is keyed by its chat too: one VM can't reach another
-  // chat's copy. `info_json` is the session as OpenCode last returned it; `tail_cursor` pages its
-  // messages after the newest one captured from the running VM, and `next_ordinal` numbers the
-  // next message captured.
+  `CREATE INDEX origins_automation ON chat_origins(json_extract(trigger, '$.type'), json_extract(trigger, '$.automationId')) WHERE trigger IS NOT NULL`,
+  // A chat's OpenCode sessions, every session of its VM, keyed by chat so one VM can't reach
+  // another chat's copy. `info_json` is the session as OpenCode last returned it.
+  // `committed` once an execution that wrote it finished; the next execution drops what isn't.
   `CREATE TABLE chat_sessions (
       chat_id TEXT NOT NULL REFERENCES chats(id),
       session_id TEXT NOT NULL,
       parent_session_id TEXT,
       info_json TEXT NOT NULL,
-      tail_cursor TEXT,
-      next_ordinal INTEGER NOT NULL DEFAULT 0,
+      committed INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (chat_id, session_id)
     )`,
-  // Every message of a session, encoded as OpenCode returned it and never cut: restoring imports
-  // it. `ordinal` is the session's order, which native ids don't give. `live` while OpenCode still
-  // writes it, `settled` once finished, `lost` when its VM went away first.
+  // Every message of a session, encoded as OpenCode returned it. `ordinal` is the session's order,
+  // which native ids don't give. `committed` once its execution finished, as its saved disk has it.
   `CREATE TABLE chat_messages (
       chat_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
       message_id TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('live', 'settled', 'lost')),
       json TEXT NOT NULL,
+      committed INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (chat_id, session_id, message_id),
       UNIQUE (chat_id, session_id, ordinal)
     )`,
-  `CREATE INDEX chat_messages_live ON chat_messages(chat_id, session_id) WHERE state = 'live'`,
-  // The inputs sent to a chat, in order: `waiting` until OpenCode admitted it under the message id
-  // T45 derives from its id, `materialized` once that message is in the chat, or `cancelled`.
-  // OpenCode forgets a cancel, so this is what keeps a cancelled input from coming back.
-  // `payload_json` is the input as sent: its text, attachments and context.
+  // The inputs sent to a chat, in order. An input is pending until its user message is stored, and
+  // an execution sends the pending ones. `payload_json` is the input as sent: its text, attachments
+  // and context.
   `CREATE TABLE chat_inputs (
       chat_id TEXT NOT NULL REFERENCES chats(id),
       input_id TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('waiting', 'admitted', 'materialized', 'cancelled')),
       payload_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
       PRIMARY KEY (chat_id, input_id),
       UNIQUE (chat_id, ordinal)
-    )`,
-  `CREATE INDEX chat_inputs_open ON chat_inputs(chat_id, ordinal)
-    WHERE state IN ('waiting', 'admitted')`,
-  // The questions the chat's agents asked and nobody answered yet, as the running VM lists them.
-  // A question lost with its VM leaves here at the restore that tells the agent about it.
-  `CREATE TABLE chat_questions (
-      chat_id TEXT NOT NULL REFERENCES chats(id),
-      session_id TEXT NOT NULL,
-      form_id TEXT NOT NULL,
-      form_json TEXT NOT NULL,
-      asked_at TEXT NOT NULL,
-      PRIMARY KEY (chat_id, session_id, form_id)
     )`,
 
   `CREATE TABLE attachments (
@@ -300,6 +309,21 @@ export const setupSchema = Effect.fnUntraced(function* () {
         for (const statement of statements) {
           yield* sql.unsafe(statement);
         }
+        const at = DateTime.formatIso(yield* DateTime.now);
+        for (const agent of [workflowDesigner, workflowAssistant])
+          yield* sql`INSERT INTO agents ${sql.insert({
+            id: agent.id,
+            name: agent.name,
+            instructions: agent.instructions,
+            model: agent.model,
+            files: yield* encodeFiles(agent.files),
+            mcp_servers: yield* encodeMcpServers(agent.mcpServers),
+            network: agent.permissions.network,
+            is_conversational: Number(agent.isConversational),
+            status: agent.status,
+            created_at: at,
+            updated_at: at,
+          })}`;
         yield* sql`CREATE TABLE schema_fingerprint (fingerprint TEXT NOT NULL)`;
         yield* sql`INSERT INTO schema_fingerprint (fingerprint) VALUES (${fingerprint})`;
       }),

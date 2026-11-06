@@ -55,12 +55,17 @@ it.layer(NodeServices.layer)("server build", (it) => {
     Effect.gen(function* () {
       const { fs, path, server, dist } = yield* fixture();
       yield* fs.makeDirectory(path.join(dist, "client/assets"), { recursive: true });
+      yield* fs.makeDirectory(path.join(dist, "runtime"), { recursive: true });
+      yield* fs.writeFileString(path.join(dist, "runtime/old-tool.mjs"), "old tool");
       yield* fs.writeFileString(path.join(dist, "old-server.mjs"), "old server");
       yield* fs.writeFileString(path.join(dist, "client/assets/old.js"), "old client");
 
       yield* buildServer(server);
 
       assert.isTrue(yield* fs.exists(path.join(dist, "bin.mjs")));
+      assert.isTrue(yield* fs.exists(path.join(dist, "runtime/step-tools.mjs")));
+      assert.isTrue(yield* fs.exists(path.join(dist, "runtime/workflow-tools.mjs")));
+      assert.isFalse(yield* fs.exists(path.join(dist, "runtime/old-tool.mjs")));
       assert.isFalse(yield* fs.exists(path.join(dist, "old-server.mjs")));
       assert.isFalse(yield* fs.exists(path.join(dist, "client/assets/old.js")));
       assert.strictEqual(

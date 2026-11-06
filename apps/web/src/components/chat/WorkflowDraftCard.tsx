@@ -1,4 +1,3 @@
-import type { StepDefinition } from "@t45/contracts/models/Workflow";
 import type { WorkflowDraft } from "@t45/contracts/resources/AgentTools";
 import { Link } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
@@ -7,6 +6,7 @@ import { useState } from "react";
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { Button } from "../ui/button";
+import { ErrorText } from "../ui/error-text";
 import { plural } from "../work/workLogic";
 
 /** Which drafts this browser saved as definitions, so a reload opens the same blueprint. */
@@ -24,7 +24,7 @@ const rememberCreated = (itemId: string, definitionId: string) => {
   } catch {}
 };
 
-function DraftSteps({ steps }: { readonly steps: ReadonlyArray<StepDefinition> }) {
+function DraftSteps({ steps }: { readonly steps: WorkflowDraft["steps"] }) {
   return (
     <ol className="flex flex-col gap-1.5 list-decimal ps-4">
       {steps.map((step) => (
@@ -59,7 +59,7 @@ export function WorkflowDraftCard(props: {
   const create = () => {
     setCreating(true);
     setError(null);
-    void api("workflows.createDefinition", { name: draft.name, steps: draft.steps })
+    void api("workflows.createDefinition", draft)
       .then(
         (created) => {
           rememberCreated(itemId, created.definitionId);
@@ -83,11 +83,7 @@ export function WorkflowDraftCard(props: {
         </div>
       </div>
       <DraftSteps steps={draft.steps} />
-      {error !== null ? (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      ) : null}
+      {error && <ErrorText text={error} />}
       <div className="flex min-w-0 items-center justify-between gap-2">
         <p className="min-w-0 text-xs text-muted-foreground">
           {definitionId === null
