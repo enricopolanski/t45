@@ -102,12 +102,9 @@ const stepFileForChat = (file: Attachment) => ({
   sizeBytes: file.sizeBytes,
 });
 
-const refusalPrompt = (tool: string, reason: string) =>
-  `Your ${tool} call was refused: ${reason.replace(/\.$/u, "")}.`;
+const INPUT_REFUSED = "The input doesn't fit the tool.";
 
-const INPUT_REFUSED = "its input doesn't fit the tool";
-
-const ATTACH_UNREAD = "T45 couldn't read the file; attach it again";
+const ATTACH_UNREAD = "T45 couldn't read the attached file.";
 
 const decodeAttachReply = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ name: Schema.String, file: Schema.String })),
@@ -1384,14 +1381,11 @@ const make = Effect.gen(function* () {
                 NotFound: () => Effect.succeed(ATTACH_UNREAD),
               }),
             );
-            if (refusal !== null)
-              yield* tasks
-                .continue(task.chatId, {
-                  text: refusalPrompt(parsed.tool, refusal),
-                  attachments: [],
-                })
-                .pipe(Effect.orDie);
-            return null;
+            if (refusal === null) return null;
+            return {
+              type: "settled",
+              outcome: { type: "failed", reason: `${parsed.tool} was refused: ${refusal}` },
+            } as const;
           }),
         };
       }),

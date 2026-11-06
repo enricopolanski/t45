@@ -1,6 +1,6 @@
 // The step tools inside a chat's VM: a stdio MCP server, `step` to OpenCode, that admins give the
 // agents that work steps. It checks the shared input contract: T45 reads each call back from the
-// chat, checks it as it applies it, and answers a refused one with a message in the chat. OpenCode
+// chat, checks it as it applies it, and fails the task if the call is refused. OpenCode
 // starts it in the agent's working folder, which its paths are relative to. An attach is a snapshot of the file under .t45/attached, which T45 reads by the
 // name the reply gives.
 // @effect-diagnostics nodeBuiltinImport:off cryptoRandomUUID:off
@@ -16,7 +16,7 @@ import { refuse, serve } from "./mcp-stdio.ts";
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 const APPLIED =
-  "T45 applies the call to the step and answers one it refuses with a message in this chat.";
+  "T45 applies the call to the step; a refusal fails this task and notifies the responsible person.";
 
 const descriptions: Record<StepToolCall["tool"], string> = {
   step_set_field:

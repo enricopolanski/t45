@@ -18,7 +18,7 @@ This inventory checks PR #4's three commits and 67 changed files against the cur
 | Run, Stop and Run again on each automation                | Missing                    | Explicit commands, fresh attempts, and rerunning from pending approval.                                      |
 | Saving automation configuration without running it        | Missing                    | Saving still starts new or changed entries.                                                                  |
 | Finishing one automation independently of the shared step | Implemented                | `submit_task` submits only that task; shared readiness retains the completion checks.                        |
-| Failing a task on a refused workflow write                | Missing                    | Refusals still enqueue another agent input.                                                                  |
+| Failing a task on a refused workflow write                | Implemented                | Refusals fail the task with the tool name and reason, a step comment and a notification.                     |
 | Passing the current step's file-field values to the agent | Missing                    | Inputs include earlier fields' files and loose attachments, but omit current fields' files.                  |
 | Keeping task conversations internal                       | Missing                    | Admins still see task chats; workflow participants can access step chats.                                    |
 | Releasing a VM when a task submits or fails               | Partly covered differently | Finished executions already release their VMs; submission itself does not request a stop.                    |
@@ -135,9 +135,9 @@ The existing `refreshReadiness` keeps the shared approval guard and now also run
 
 PR #4 turns a workflow refusal into a failed task outcome, with the tool and refusal reason reported on the step and the responsible person notified. It removes the path that asks the agent to try another turn after a rejected write.
 
-The current [receipt handler](../../apps/server/src/workflows/WorkflowService.ts) still calls `tasks.continue` with `refusalPrompt(...)` and keeps the attempt active. Its existing `taskFailed` function already knows how to add the step comment and notification; the missing part is choosing that outcome when a receipt is refused.
+The [receipt handler](../../apps/server/src/workflows/WorkflowService.ts) now returns a failed task outcome containing the tool name and refusal reason. The existing task transition requests an execution stop and calls `taskFailed` to add the step comment and notification. The refusal-driven continuation and `refusalPrompt` are removed; receipt recording and attachment preparation keep their existing transaction boundaries.
 
-This policy is independent of the execution retry loop removed earlier: that removal stops infrastructure failures being retried, while workflow refusals still deliberately create more inputs. PR #4's behavior would cut this continuation path. It concerns calls refused by T45's workflow application; it should not be described as making every OpenCode/MCP error automatically fail the task.
+This policy is independent of the execution retry loop removed earlier: that removal stops infrastructure failures being retried, while this change stops workflow refusals from creating more inputs. It concerns calls refused by T45's workflow application; it does not make every OpenCode/MCP error automatically fail the task.
 
 ## 11. The current step's file fields reach the agent
 
@@ -244,7 +244,7 @@ Before adopting this, establish whether agents actually need different installed
 
 - [x] C1. Rename `step_done` to `submit_task` (`step_submit_task` in OpenCode), submitting the active task without calling `requireComplete` on the shared step. Preserve required-field and substep checks for human completion and approval readiness.
 - [x] C2. Update `buildAssignmentPrompt`, `buildTaskInput`, `buildResumptionPrompt` and the step tool descriptions together: finish this automation's contribution, explain remaining work in a comment, call `step_submit_task`, and stop producing further work. Keep `step_give_up` for a contribution the agent cannot complete.
-- [ ] C3. Return a failed task outcome for a workflow receipt refusal, containing the tool name and refusal reason. Reuse `taskFailed` for the comment and notification. Delete `refusalPrompt` and the refusal-driven `tasks.continue` path; retain the existing receipt ledger and attachment preparation outside the transaction.
+- [x] C3. Return a failed task outcome for a workflow receipt refusal, containing the tool name and refusal reason. Reuse `taskFailed` for the comment and notification. Delete `refusalPrompt` and the refusal-driven `tasks.continue` path; retain the existing receipt ledger and attachment preparation outside the transaction.
 - [x] C4. Keep the normal execution finish described below. Preserve submission as a business state even if the agent's final turn is still ending.
 - [x] C5. Recompute the existing approval predicate when the remaining shared work becomes complete, including a human filling the last required field or approving the final substep after all automations submitted. Keep this in the existing workflow mutation paths. Without it, independent contribution submission can leave a complete step waiting for another unrelated event to become ready.
 - [x] C6. Preserve rejection and blocking behavior: rejection continues the submitted tasks with a fresh brief; blocking pauses active work; explicit cancellation settles it. Additional receipts after a task submits remain consumed without applying more workflow writes.
