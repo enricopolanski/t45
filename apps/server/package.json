@@ -4,7 +4,6 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build:bundle": "vp pack",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -15,11 +15,18 @@ export default mergeConfig(
           command: 'vp pack --watch --on-success "node dist/bin.mjs"',
           cache: false,
         },
+        "build:bundle": {
+          command: "vp pack",
+          cache: {
+            env: ["BUILD_SHA"],
+            output: ["dist/bin.mjs", "dist/bin.mjs.map", "dist/runtime/**"],
+          },
+        },
         test: { command: "vp test run", dependsOn: ["build:bundle"] },
         build: {
           command: "node scripts/build.ts",
-          dependsOn: ["@t45/web#build"],
-          cache: false,
+          dependsOn: ["build:bundle", "@t45/web#build"],
+          cache: { output: ["dist/client/**"] },
         },
       },
     },
@@ -48,9 +55,9 @@ export default mergeConfig(
       banner: {
         js: "#!/usr/bin/env node\n",
       },
-      define: {
-        "process.env.BUILD_SHA": JSON.stringify(process.env.BUILD_SHA || "development"),
-      },
+      define: process.env.BUILD_SHA
+        ? { "process.env.BUILD_SHA": JSON.stringify(process.env.BUILD_SHA) }
+        : {},
     },
     test: {
       maxWorkers: "100%",

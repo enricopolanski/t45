@@ -38,7 +38,7 @@ type ServerAuthGateState =
   | { status: "awaiting-approval" }
   /** Signed in as an admin, but the organization has no name yet. */
   | { status: "onboarding" }
-  | { status: "requires-auth"; clerkPublishableKey: string };
+  | { status: "requires-auth" };
 
 let bootstrapPromise: Promise<ServerAuthGateState> | null = null;
 /** Set once the gate admitted this page; signing out or in clears it. */
@@ -110,10 +110,7 @@ export async function requireAdmin(): Promise<void> {
 async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
   const currentSession = await fetchSessionState();
   if (!currentSession.isAuthenticated) {
-    return {
-      status: "requires-auth",
-      clerkPublishableKey: currentSession.clerkPublishableKey,
-    };
+    return { status: "requires-auth" };
   }
 
   if (currentSession.state === "pending") {
@@ -128,10 +125,10 @@ async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
   return { status: "authenticated" };
 }
 
-/** Exchanges a Clerk session token for the server's session cookie. */
-export async function submitClerkSessionToken(token: string): Promise<void> {
+/** Exchanges an identity token for the server's session cookie. */
+export async function submitIdentityToken(token: string): Promise<void> {
   await retryTransientBootstrap(() =>
-    request("/api/auth/clerk-session", {
+    request("/api/auth/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(token),
@@ -155,7 +152,7 @@ export async function submitClerkLogin(readToken: () => Promise<string | null>):
   }
 
   try {
-    await submitClerkSessionToken(token);
+    await submitIdentityToken(token);
     return;
   } catch (error) {
     if (!(isAuthRequestError(error) && error.reason === "invalid_credential")) {
@@ -167,7 +164,7 @@ export async function submitClerkLogin(readToken: () => Promise<string | null>):
   if (!refreshedToken) {
     throw new ServerClerkTokenUnavailableError({});
   }
-  await submitClerkSessionToken(refreshedToken);
+  await submitIdentityToken(refreshedToken);
 }
 
 /**

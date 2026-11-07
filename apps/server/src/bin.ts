@@ -10,7 +10,7 @@ import * as Logger from "effect/Logger";
 import * as References from "effect/References";
 import { FetchHttpClient, HttpRouter } from "effect/http";
 
-import { AppRpcLayer } from "./AppRpc.ts";
+import * as AppRpc from "./AppRpc.ts";
 import * as AgentRepository from "./agents/AgentRepository.ts";
 import * as SkillRepository from "./agents/SkillRepository.ts";
 import * as AttachmentRepository from "./attachments/AttachmentRepository.ts";
@@ -22,7 +22,7 @@ import * as WebhookRoute from "./automations/webhookRoute.ts";
 import * as ChatRepository from "./chats/ChatRepository.ts";
 import { ChatService } from "./chats/ChatService.ts";
 import * as ServerConfig from "./config.ts";
-import * as ServerHttp from "./http.ts";
+import * as HttpServer from "./http.ts";
 import * as OrgHttp from "./org/http.ts";
 import * as OrganizationRepository from "./org/OrganizationRepository.ts";
 import * as UserRepository from "./org/UserRepository.ts";
@@ -36,59 +36,58 @@ import * as WorkflowDefinitionRepository from "./workflows/WorkflowDefinitionRep
 import * as WorkflowRepository from "./workflows/WorkflowRepository.ts";
 import * as WorkflowService from "./workflows/WorkflowService.ts";
 
-const layerStore = Layer.mergeAll(
+const Store = Layer.mergeAll(
   UserRepository.layer,
   ChatRepository.layer,
   AttachmentRepository.layer,
   AgentRepository.layer,
   SkillRepository.layer,
-).pipe(Layer.provideMerge(SqlitePersistence.layerConfig));
+).pipe(Layer.provideMerge(SqlitePersistence.layer));
 
-const layerWorkflowRepositories = Layer.mergeAll(
+const WorkflowRepositories = Layer.mergeAll(
   WorkflowDefinitionRepository.layer,
   WorkflowRepository.layer,
   TicketRepository.layer,
   NotificationRepository.layer,
 );
 
-const layerChatServices = ChatService.layer.pipe(
+const ChatServices = ChatService.layer.pipe(
   Layer.provideMerge(RunnerService.layer),
-  Layer.provideMerge(layerWorkflowRepositories),
-  Layer.provideMerge(layerStore),
+  Layer.provideMerge(WorkflowRepositories),
+  Layer.provideMerge(Store),
 );
 
-const layerOrg = OrganizationRepository.layer.pipe(Layer.provideMerge(layerChatServices));
+const Org = OrganizationRepository.layer.pipe(Layer.provideMerge(ChatServices));
 
-const layerRuntimeDependencies = Layer.effect(UserService, UserService.make).pipe(
+const RuntimeDependencies = Layer.effect(UserService, UserService.make).pipe(
   Layer.provide(Authentication.layer),
   Layer.provideMerge(WorkflowService.layer),
   Layer.provideMerge(AutomationService.layer),
   Layer.provideMerge(TaskService.layer),
-  Layer.provideMerge(layerOrg),
+  Layer.provideMerge(Org),
 );
 
-const layerMakeRoutes = Layer.mergeAll(
+const Routes = Layer.mergeAll(
   AuthHttp.layer,
   OrgHttp.layer,
   WebhookRoute.layer,
-  AttachmentsHttp.layerAttachmentRoute,
-  AttachmentsHttp.layerAttachmentUploadRoute,
-  ServerHttp.layerStaticRoutes,
-  AppRpcLayer,
-).pipe(Layer.provide(ServerHttp.layerSameOrigin), Layer.provide(ServerHttp.layerHttpCompression));
+  AttachmentsHttp.layer,
+  HttpServer.layer,
+  AppRpc.layer,
+);
 
-const layerMakeServer = Layer.unwrap(
+const Server = Layer.unwrap(
   Effect.gen(function* () {
     const host = yield* ServerConfig.host;
     const port = yield* ServerConfig.port;
     const logLevel = yield* ServerConfig.logLevel;
     const logRequests = yield* ServerConfig.logRequests;
 
-    const layerRoutes = HttpRouter.serve(layerMakeRoutes, {
+    const ServedRoutes = HttpRouter.serve(Routes, {
       disableLogger: !logRequests,
       routerConfig: { maxParamLength: 512 },
     }).pipe(Layer.tap(() => Effect.logInfo("T45 server is ready", { host, port })));
-    return layerRoutes.pipe(
+    return ServedRoutes.pipe(
       Layer.provideMerge(
         NodeHttpServer.layer(() => NodeHttp.createServer(), {
           host,
@@ -96,13 +95,14 @@ const layerMakeServer = Layer.unwrap(
           gracefulShutdownTimeout: 0,
         }),
       ),
-      Layer.provideMerge(layerRuntimeDependencies),
+      Layer.provideMerge(RuntimeDependencies),
       Layer.provide(Logger.layer([Logger.consolePretty()])),
       Layer.provide(Layer.succeed(References.MinimumLogLevel, logLevel)),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provide(ServerConfig.layer),
     );
   }),
 );
 
-NodeRuntime.runMain(Layer.launch(layerMakeServer).pipe(Effect.withTracerEnabled(false)));
+NodeRuntime.runMain(Layer.launch(Server).pipe(Effect.withTracerEnabled(false)));

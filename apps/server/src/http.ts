@@ -23,7 +23,7 @@ const isCompressible = (contentType: string) => {
   return type.startsWith("text/") || COMPRESSIBLE_TYPES.has(type);
 };
 
-export const layerHttpCompression = HttpRouter.middleware(
+const compression = HttpRouter.middleware(
   HttpMiddleware.compression({ compressible: isCompressible }),
   { global: true },
 );
@@ -38,7 +38,7 @@ const isSameOrigin = (request: HttpServerRequest.HttpServerRequest) => {
   return URL.canParse(origin) && new URL(origin).host === request.headers.host;
 };
 
-export const layerSameOrigin = HttpRouter.middleware(
+const sameOrigin = HttpRouter.middleware(
   (httpEffect) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
@@ -55,11 +55,14 @@ export const layerSameOrigin = HttpRouter.middleware(
 
 const clientDir = `${import.meta.dirname}/client`;
 
-export const layerStaticRoutes = Layer.mergeAll(
+/** Serves the web client and applies compression and the same-origin guard to every route. */
+export const layer = Layer.mergeAll(
   HttpStaticServer.layer({ root: clientDir, spa: true, cacheControl: "no-cache" }),
   HttpStaticServer.layer({
     root: `${clientDir}/assets`,
     prefix: "/assets",
     cacheControl: "public, max-age=31536000, immutable",
   }),
+  compression,
+  sameOrigin,
 );

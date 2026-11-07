@@ -10,12 +10,6 @@ import { defineProject, type TestProjectInlineConfiguration } from "vite-plus/te
 import "vite-plus/test/config";
 import { defineConfig, type Connect, type Plugin } from "vite-plus";
 
-import { loadRepoEnv } from "../../scripts/lib/public-config";
-
-const repoEnv = loadRepoEnv();
-Object.assign(process.env, repoEnv);
-
-const port = Number(process.env.WEB_PORT ?? 5733);
 const sourcemapEnv = process.env.WEB_SOURCEMAP?.trim().toLowerCase();
 
 const buildSourcemap: boolean | "hidden" =
@@ -91,15 +85,16 @@ function devCompressionPlugin(): Plugin {
   };
 }
 
-// Vite rejects requests whose Host header isn't localhost, which blocks sharing
-// a dev server by name (ngrok, a LAN host alias); those go through the env var.
-const allowedHosts = (process.env.DEV_ALLOWED_HOSTS ?? "")
-  .split(",")
-  .map((entry) => entry.trim())
-  .filter((entry) => entry.length > 0);
-
 export default defineConfig(() => {
   return {
+    run: {
+      tasks: {
+        build: {
+          command: "vp build",
+          cache: { env: ["BUILD_SHA", "AUTH_CLERK_PUBLISHABLE_KEY"], output: ["dist/**"] },
+        },
+      },
+    },
     plugins: [
       devCompressionPlugin(),
       // Route components load as split chunks so settings and admin code stay
@@ -131,20 +126,22 @@ export default defineConfig(() => {
     },
     define: {
       "process.env.BUILD_SHA": JSON.stringify(process.env.BUILD_SHA || "development"),
+      // Release builds embed the key; loopback hosts never read it.
+      "process.env.AUTH_CLERK_PUBLISHABLE_KEY": JSON.stringify(
+        process.env.AUTH_CLERK_PUBLISHABLE_KEY ?? "",
+      ),
     },
     resolve: {
       tsconfigPaths: true,
       dedupe: ["react", "react-dom"],
     },
     server: {
-      host: "0.0.0.0",
-      port,
+      host: "127.0.0.1",
+      port: 5733,
       strictPort: true,
-      allowedHosts,
       // Transform the whole module graph at server start instead of on the
       // first request. Without this, a cold worktree discovers and transforms
-      // modules one import-level at a time while the browser waits — which
-      // over a remote origin turns into minutes of waterfall.
+      // modules one import-level at a time while the browser waits.
       warmup: {
         clientFiles: ["./src/main.tsx"],
       },

@@ -4,10 +4,8 @@
   "type": "module",
   "scripts": {
     "prepare": "effect-tsgo patch && git config core.hooksPath .githooks",
-    "pre-commit": "vp check && vp run typecheck && vp run knip && vp run test",
     "typecheck": "vp run -r typecheck",
     "knip": "knip",
-    "test": "vp run -r test",
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist packages/*/dist .vite-plus apps/*/.vite-plus packages/*/.vite-plus"
   },
   "devDependencies": {

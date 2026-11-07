@@ -21,13 +21,10 @@ type TestWindow = {
   location: URL;
 };
 
-const AUTH_KEY = "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==";
-
 const CREATED_AT = DateTime.makeUnsafe("2026-04-05T00:00:00.000Z");
 const DEPLOY_VERSION = "development";
 const signedOut: AuthSessionState = {
   isAuthenticated: false,
-  clerkPublishableKey: AUTH_KEY,
   deployVersion: DEPLOY_VERSION,
 };
 const signedIn = (role: Role = "member", state: State = "active"): AuthSessionState => ({
@@ -63,10 +60,10 @@ type Answer = () => Response | Promise<Response>;
 
 function installAuthRoutes(routes: {
   readonly session?: Answer;
-  readonly clerkSession?: (token: string) => Response;
+  readonly login?: (token: string) => Response;
   readonly logout?: Answer;
 }) {
-  const calls = { session: 0, clerkSession: [] as Array<string>, logout: 0 };
+  const calls = { session: 0, login: [] as Array<string>, logout: 0 };
   const unexpected = (path: string) => Promise.reject(new Error(`Unexpected request: ${path}`));
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -74,10 +71,10 @@ function installAuthRoutes(routes: {
       case "/api/auth/session":
         calls.session += 1;
         return routes.session?.() ?? unexpected(path);
-      case "/api/auth/clerk-session": {
+      case "/api/auth/login": {
         const token: string = JSON.parse(String(init?.body));
-        calls.clerkSession.push(token);
-        return routes.clerkSession?.(token) ?? unexpected(path);
+        calls.login.push(token);
+        return routes.login?.(token) ?? unexpected(path);
       }
       case "/api/auth/logout":
         calls.logout += 1;
@@ -123,7 +120,6 @@ describe("resolveInitialServerAuthGateState", () => {
 
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "requires-auth",
-      clerkPublishableKey: AUTH_KEY,
     });
   });
 
@@ -187,7 +183,6 @@ describe("resolveInitialServerAuthGateState", () => {
 
     await expect(gateStatePromise).resolves.toEqual({
       status: "requires-auth",
-      clerkPublishableKey: AUTH_KEY,
     });
     expect(calls.session).toBe(4);
   });
@@ -195,27 +190,24 @@ describe("resolveInitialServerAuthGateState", () => {
   it("exchanges a fresh Clerk token and resets the authenticated gate", async () => {
     const calls = installAuthRoutes({
       session: sessions(sequence(signedOut, signedIn())),
-      clerkSession: () => ok(),
+      login: () => ok(),
     });
-    const { resolveInitialServerAuthGateState, submitClerkSessionToken } =
-      await import("./http/auth");
+    const { resolveInitialServerAuthGateState, submitIdentityToken } = await import("./http/auth");
 
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "requires-auth",
-      clerkPublishableKey: AUTH_KEY,
     });
-    await expect(submitClerkSessionToken("fresh-clerk-token")).resolves.toBeUndefined();
+    await expect(submitIdentityToken("fresh-clerk-token")).resolves.toBeUndefined();
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "authenticated",
     });
-    expect(calls.clerkSession).toEqual(["fresh-clerk-token"]);
+    expect(calls.login).toEqual(["fresh-clerk-token"]);
     expect(calls.session).toBe(2);
   });
 
   it("retries a rejected Clerk exchange once with a re-read token", async () => {
     const calls = installAuthRoutes({
-      clerkSession: (token) =>
-        token === "stale-token" ? refused(401, "invalid_credential") : ok(),
+      login: (token) => (token === "stale-token" ? refused(401, "invalid_credential") : ok()),
     });
     const { submitClerkLogin } = await import("./http/auth");
     const tokens = ["stale-token", "fresh-token"];
@@ -223,13 +215,13 @@ describe("resolveInitialServerAuthGateState", () => {
 
     await expect(submitClerkLogin(async () => tokens[reads++] ?? null)).resolves.toBeUndefined();
 
-    expect(calls.clerkSession).toEqual(["stale-token", "fresh-token"]);
+    expect(calls.login).toEqual(["stale-token", "fresh-token"]);
     expect(reads).toBe(2);
   });
 
   it("surfaces a second rejected Clerk exchange and a missing token", async () => {
     const calls = installAuthRoutes({
-      clerkSession: () => refused(401, "invalid_credential"),
+      login: () => refused(401, "invalid_credential"),
     });
     const { AuthRequestError, ServerClerkTokenUnavailableError, submitClerkLogin } =
       await import("./http/auth");
@@ -245,12 +237,12 @@ describe("resolveInitialServerAuthGateState", () => {
       reason: "invalid_credential",
       message: "This sign-in is not valid for this address. Sign out and sign in again.",
     });
-    expect(calls.clerkSession).toEqual(["clerk-token-1", "clerk-token-2"]);
+    expect(calls.login).toEqual(["clerk-token-1", "clerk-token-2"]);
     expect(calls.session).toBe(0);
   });
 
   it("does not re-read the token for a deactivated account", async () => {
-    const calls = installAuthRoutes({ clerkSession: () => refused(403, "deactivated") });
+    const calls = installAuthRoutes({ login: () => refused(403, "deactivated") });
     const { submitClerkLogin } = await import("./http/auth");
     let reads = 0;
 
@@ -260,14 +252,14 @@ describe("resolveInitialServerAuthGateState", () => {
       message: "Your access to this organization has been deactivated.",
     });
     expect(reads).toBe(1);
-    expect(calls.clerkSession).toEqual(["clerk-token-1"]);
+    expect(calls.login).toEqual(["clerk-token-1"]);
   });
 
   it("reads a refusal whose body isn't an auth failure as an internal error", async () => {
-    installAuthRoutes({ clerkSession: () => new Response("upstream timeout", { status: 500 }) });
-    const { submitClerkSessionToken } = await import("./http/auth");
+    installAuthRoutes({ login: () => new Response("upstream timeout", { status: 500 }) });
+    const { submitIdentityToken } = await import("./http/auth");
 
-    await expect(submitClerkSessionToken("clerk-token")).rejects.toMatchObject({
+    await expect(submitIdentityToken("clerk-token")).rejects.toMatchObject({
       status: 500,
       reason: "internal_error",
       message: "Couldn't sign in right now. Try again.",
@@ -301,7 +293,6 @@ describe("resolveInitialServerAuthGateState", () => {
     expect(calls.logout).toBe(1);
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "requires-auth",
-      clerkPublishableKey: AUTH_KEY,
     });
   });
 
@@ -318,7 +309,6 @@ describe("resolveInitialServerAuthGateState", () => {
     await expect(logoutServerSession()).resolves.toBeUndefined();
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "requires-auth",
-      clerkPublishableKey: AUTH_KEY,
     });
     expect(calls.session).toBe(2);
   });

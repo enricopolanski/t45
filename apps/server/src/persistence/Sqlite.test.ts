@@ -103,7 +103,7 @@ it.layer(NodeServices.layer)("SqlitePersistence", (it) => {
       const fromScratch = yield* schemaState.pipe(
         Effect.provide(SqlitePersistence.layerFromPath(path.join(tempDir, "state.sqlite"))),
       );
-      const fromImage = yield* schemaState.pipe(Effect.provide(SqlitePersistence.layerTest));
+      const fromImage = yield* schemaState.pipe(Effect.provide(SqlitePersistence.testLayer));
       assert.lengthOf(fromScratch.fingerprint, 1);
       assert.deepEqual(fromImage, fromScratch);
     }),
@@ -114,7 +114,7 @@ it.layer(NodeServices.layer)("SqlitePersistence", (it) => {
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* sql`CREATE TABLE image_isolation_probe(id INTEGER PRIMARY KEY)`;
-      }).pipe(Effect.provide(SqlitePersistence.layerTest));
+      }).pipe(Effect.provide(SqlitePersistence.testLayer));
       const probe = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const tables = yield* sql<{ readonly name: string }>`
@@ -122,7 +122,7 @@ it.layer(NodeServices.layer)("SqlitePersistence", (it) => {
         `;
         const foreignKeys = yield* sql<{ readonly foreign_keys: number }>`PRAGMA foreign_keys`;
         return { tables: tables.length, foreignKeys: foreignKeys[0]?.foreign_keys };
-      }).pipe(Effect.provide(SqlitePersistence.layerTest));
+      }).pipe(Effect.provide(SqlitePersistence.testLayer));
       assert.deepEqual(probe, { tables: 0, foreignKeys: 1 });
     }),
   );

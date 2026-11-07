@@ -21,7 +21,7 @@ it.effect("starts with an unnamed organization and keeps its rename", () =>
     assert.deepStrictEqual(yield* organizations.get, renamed);
   }).pipe(
     Effect.provide(
-      OrganizationRepository.layer.pipe(Layer.provideMerge(SqlitePersistence.layerTest)),
+      OrganizationRepository.layer.pipe(Layer.provideMerge(SqlitePersistence.testLayer)),
     ),
   ),
 );

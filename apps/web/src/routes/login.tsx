@@ -1,8 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
-import { ClerkLoginSurface } from "../components/auth/ClerkLoginSurface";
+import { Login } from "../components/auth/Login";
 
-/** The only unauthenticated gate: the browser signs in with the Clerk key the server advertises. */
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>): { signedOut?: true } =>
     search.signedOut === true ? { signedOut: true } : {},
@@ -16,8 +15,7 @@ function LoginRouteView() {
   if (authGateState.status !== "requires-auth") return null;
 
   return (
-    <ClerkLoginSurface
-      publishableKey={authGateState.clerkPublishableKey}
+    <Login
       signOutFirst={signedOut === true}
       onAuthenticated={() => void navigate({ to: "/", replace: true })}
     />

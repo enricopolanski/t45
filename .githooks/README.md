@@ -14,4 +14,4 @@ Runs on branch checkouts only (flag `1`); file-only checkouts are left alone.
 
 ## `pre-commit`
 
-Runs `vpr pre-commit`, the root package script for workspace format/lint checks, typechecking, unused code (knip), then tests. It checks the whole working tree and stops on the first failure without changing files or staging. Vite+ caches successful tasks by default. Run `vpr pre-commit` yourself, or `vpr --no-cache pre-commit` for fresh checks.
+Runs `vpr pre-commit`, the root task for workspace format/lint checks, typechecking, unused code (knip), unit tests and mandatory browser E2Es. It checks the whole working tree and stops on the first failure without changing files or staging. The parent tasks and browser E2Es are uncached; other checks retain their caches. Run `vpr pre-commit` yourself, or `vpr --no-cache pre-commit` for fresh checks throughout. Run `sh scripts/setup.sh` before your first commit and after changing Playwright versions to install the matching Chromium and its system libraries. Linux setup may request sudo authentication and fails if the required privileges are unavailable. Pre-commit performs no browser or system package installation.

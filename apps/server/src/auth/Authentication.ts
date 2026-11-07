@@ -1,7 +1,6 @@
 import { StringId } from "@t45/contracts/models/primitives";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
 import { Role, State } from "@t45/contracts/models/User";
-import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
@@ -12,8 +11,6 @@ import * as Base64Url from "effect/encoding/Base64Url";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
-import * as SchemaIssue from "effect/SchemaIssue";
-import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlSchema from "effect/sql/SqlSchema";
 import { createRemoteJWKSet, errors, jwtVerify, type JWTVerifyGetKey } from "jose";
@@ -38,23 +35,22 @@ class SessionStoreError extends Schema.TaggedError<SessionStoreError>()("Session
   }
 }
 
-export interface VerifiedClerkIdentity {
+export interface ValidatedIdentity {
   /** The token's `sub`, which is the user id. */
   readonly subject: string;
   /** The verified email claim; the approval queue identifies people by it. */
   readonly email: string;
   /** The optional display name claim. */
   readonly name: string | null;
-  readonly imageUrl?: string | null;
 }
 
-export class InvalidClerkIdentityToken extends Schema.TaggedError<InvalidClerkIdentityToken>()(
-  "InvalidClerkIdentityToken",
+export class InvalidIdentityToken extends Schema.TaggedError<InvalidIdentityToken>()(
+  "InvalidIdentityToken",
   { cause: Schema.Defect() },
 ) {}
 
-export class ClerkIdentityProviderUnavailable extends Schema.TaggedError<ClerkIdentityProviderUnavailable>()(
-  "ClerkIdentityProviderUnavailable",
+export class IdentityProviderUnavailable extends Schema.TaggedError<IdentityProviderUnavailable>()(
+  "IdentityProviderUnavailable",
   { cause: Schema.Defect() },
 ) {}
 
@@ -68,7 +64,7 @@ const isTokenValidationFailure = (cause: unknown) =>
   cause instanceof errors.JWKSMultipleMatchingKeys ||
   cause instanceof errors.JWSSignatureVerificationFailed;
 
-/** The identity verified by Clerk is deactivated and may not sign in. */
+/** The validated identity is deactivated and may not sign in. */
 export class UserDeactivatedError extends Schema.TaggedError<UserDeactivatedError>()(
   "UserDeactivatedError",
   { userId: Schema.String },
@@ -83,35 +79,22 @@ class UserAuthInternalError extends Data.TaggedError("UserAuthInternalError")<{
   readonly cause: unknown;
 }> {}
 
-/** Verifies Clerk session tokens; `layer` is the instance configured from env. */
-export class IdentityProvider extends Context.Service<
-  IdentityProvider,
+/** Validates identity tokens before admission to a server session. */
+export class IdentityTokenValidator extends Context.Service<
+  IdentityTokenValidator,
   {
-    /** The Clerk tenant key; signed-out browsers load Clerk with it. */
-    readonly publishableKey: string;
-    /**
-     * When the token carries an `azp` claim it must equal the request origin;
-     * Clerk omits the claim when `Origin` was empty or null, and such tokens
-     * are accepted. Callers must pass a canonical origin because the
-     * comparison is exact string equality.
-     */
-    readonly verify: (input: {
+    readonly validate: (input: {
       readonly token: string;
       readonly authorizedParty?: string;
-    }) => Effect.Effect<
-      VerifiedClerkIdentity,
-      InvalidClerkIdentityToken | ClerkIdentityProviderUnavailable
-    >;
+    }) => Effect.Effect<ValidatedIdentity, InvalidIdentityToken | IdentityProviderUnavailable>;
   }
->()("t45/auth/Authentication/IdentityProvider") {}
+>()("t45/auth/Authentication/IdentityTokenValidator") {}
 
-export const makeIdentityProvider = (input: {
-  readonly publishableKey: string;
+export const makeIdentityTokenValidator = (input: {
   readonly issuer: string;
   readonly jwks: JWTVerifyGetKey;
-}): IdentityProvider["Service"] => ({
-  publishableKey: input.publishableKey,
-  verify: Effect.fnUntraced(function* ({ token, authorizedParty }) {
+}): IdentityTokenValidator["Service"] => ({
+  validate: Effect.fnUntraced(function* ({ token, authorizedParty }) {
     const { payload } = yield* Effect.tryPromise({
       try: () =>
         jwtVerify(token, input.jwks, {
@@ -121,23 +104,27 @@ export const makeIdentityProvider = (input: {
         }),
       catch: (cause) =>
         isTokenValidationFailure(cause)
-          ? new InvalidClerkIdentityToken({ cause })
-          : new ClerkIdentityProviderUnavailable({ cause }),
+          ? new InvalidIdentityToken({ cause })
+          : new IdentityProviderUnavailable({ cause }),
     });
-    const invalid = (message: string) =>
-      new InvalidClerkIdentityToken({ cause: new Error(message) });
+    const makeInvalidIdentityToken = (message: string) =>
+      new InvalidIdentityToken({ cause: new Error(message) });
+    // `azp` must equal the request origin as an exact string, so callers pass a canonical origin.
+    // Clerk omits `azp` when the request had no `Origin`, and such tokens are accepted.
     if (payload.azp !== undefined && payload.azp !== authorizedParty) {
-      return yield* invalid("Token authorized party did not match request origin.");
+      return yield* makeInvalidIdentityToken(
+        "Token authorized party did not match request origin.",
+      );
     }
     if (typeof payload.sub !== "string" || payload.sub.length === 0) {
-      return yield* invalid("Token subject was missing.");
+      return yield* makeInvalidIdentityToken("Token subject was missing.");
     }
-    // The approval queue identifies people by a verified email in Clerk's session token template.
+    // The approval queue identifies people by a verified email.
     if (typeof payload.email !== "string" || payload.email.length === 0) {
-      return yield* invalid("Token email was missing.");
+      return yield* makeInvalidIdentityToken("Token email was missing.");
     }
     if (payload.email_verified !== true) {
-      return yield* invalid("Token email was not verified.");
+      return yield* makeInvalidIdentityToken("Token email was not verified.");
     }
     return {
       subject: payload.sub,
@@ -148,44 +135,33 @@ export const makeIdentityProvider = (input: {
   }),
 });
 
-const ClerkPublishableKey = Schema.String.pipe(
-  Schema.decodeTo(
-    Schema.Struct({ publishableKey: Schema.String, issuer: Schema.String }),
-    SchemaTransformation.transformEffect({
-      decode: (publishableKey, options) => {
-        const PUBLISHABLE_KEY = /^pk_(?:test|live)_([A-Za-z0-9+/]+={0,2})$/u;
-        const encoded = PUBLISHABLE_KEY.exec(publishableKey)?.[1];
-        let host: string | undefined;
-        try {
-          host = encoded && globalThis.atob(encoded).replace(/\$$/u, "");
-        } catch {
-          host = undefined;
-        }
-        const issuer = `https://${host}`;
-        return host && !host.includes("/") && URL.canParse(issuer)
-          ? Effect.succeed({ publishableKey, issuer })
-          : Effect.fail(
-              new SchemaIssue.InvalidValue(
-                { message: "Invalid Clerk publishable key." },
-                publishableKey,
-                options,
-              ),
-            );
-      },
-      encode: ({ publishableKey }) => Effect.succeed(publishableKey),
+/** Trusts tokens issued by the Clerk instance at `issuer`. */
+const layerClerk = (issuer: string) =>
+  Layer.succeed(
+    IdentityTokenValidator,
+    makeIdentityTokenValidator({
+      issuer,
+      jwks: createRemoteJWKSet(new URL("/.well-known/jwks.json", issuer)),
     }),
-  ),
-);
+  );
 
-export const layer = Layer.effect(
-  IdentityProvider,
+/** Takes the typed email itself as the identity token and checks nothing else. */
+const layerEmailTrusting = Layer.succeed(IdentityTokenValidator, {
+  validate: ({ token }) => {
+    const email = token.trim();
+    return /^[^\s@]+@[^\s@]+$/u.test(email)
+      ? Effect.succeed({ subject: email, email, name: email.split("@")[0] ?? null })
+      : Effect.fail(new InvalidIdentityToken({ cause: new Error("Sign-in needs an email.") }));
+  },
+});
+
+/** Production trusts its Clerk instance; development trusts the typed email. */
+export const layer = Layer.unwrap(
   Effect.gen(function* () {
-    const { publishableKey, issuer } = yield* Config.schema(
-      ClerkPublishableKey,
-      "AUTH_CLERK_PUBLISHABLE_KEY",
-    );
-    const jwks = createRemoteJWKSet(new URL("/.well-known/jwks.json", issuer));
-    return makeIdentityProvider({ publishableKey, issuer, jwks });
+    const environment = yield* ServerConfig.environment;
+    return environment._tag === "production"
+      ? layerClerk(environment.clerkIssuer)
+      : layerEmailTrusting;
   }),
 );
 
@@ -317,18 +293,18 @@ const makeSessions = Effect.gen(function* () {
 const toInternalError = (cause: unknown) => new UserAuthInternalError({ cause });
 
 export const make = Effect.gen(function* () {
-  const identityProvider = yield* IdentityProvider;
+  const identityTokenValidator = yield* IdentityTokenValidator;
   const sessions = yield* makeSessions;
   const users = yield* UserRepository;
   const sql = yield* SqlClient.SqlClient;
 
-  const loginFromClerkSession = Effect.fnUntraced(function* (
-    input: Parameters<IdentityProvider["Service"]["verify"]>[0],
+  const loginWithIdentityToken = Effect.fnUntraced(function* (
+    input: Parameters<IdentityTokenValidator["Service"]["validate"]>[0],
   ) {
-    const identity = yield* identityProvider.verify(input);
+    const identity = yield* identityTokenValidator.validate(input);
 
     // Keep admission and issuance atomic with organization membership changes.
-    // Token verification above may fetch JWKS, so it stays outside the lock.
+    // Token validation above may fetch JWKS, so it stays outside the lock.
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
@@ -360,5 +336,8 @@ export const make = Effect.gen(function* () {
       .pipe(Effect.catchTags({ SqlError: toInternalError }));
   });
 
-  return { ...sessions, loginFromClerkSession, publishableKey: identityProvider.publishableKey };
+  return {
+    ...sessions,
+    loginWithIdentityToken,
+  };
 });

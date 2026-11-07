@@ -52,7 +52,7 @@ These are follow-ups from the earlier cleanup reviews, with references updated t
 
 ## Development and verification
 
-- Provide a reusable authenticated local-browser workflow in [Development](../operations/development.md). Clerk configuration is documented and disposable checks have used a locally seeded session, but there is no maintained command for that fixture flow; the original claim that authenticated local verification is impossible is obsolete.
+- `scripts/browser.ts`, `.agents/skills/drive-browser/SKILL.md`: evaluate whether the authenticated browser command and `--steps` interface simplify agent checks compared with direct Playwright use. Consider sharing login actions with E2Es through a page object. Review whether the skill clearly tells agents to write automations under `/tmp` and rerun them with `vp run browser --email <email> --steps <file>`; keep the command while this remains undecided.
 - `apps/server/src/persistence/Sqlite.ts`: evaluate moving the cached schema-image/test-database construction out of production persistence, retaining measured setup savings and independent connections.
 - `apps/server/src/persistence/Sqlite.test.ts`: replace the child lock-holder's timer with an observable release handshake and scoped process cleanup.
 - Inventory existing server tests by business invariant and future model/frontend-e2e home before removing them. Retain input replay, rollback, private-content access and session-revocation guarantees; remove duplicate helper assertions only when their behavior is still covered. The new workflow controls and assistant have disposable verification but no new permanent regression tests, by instruction.
