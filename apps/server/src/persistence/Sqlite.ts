@@ -62,7 +62,7 @@ const schemaImage = Effect.gen(function* () {
 );
 
 /** A fresh database per build, copied from a schema created once per process. */
-export const layerTest = Layer.unwrap(
+export const testLayer = Layer.unwrap(
   Effect.gen(function* () {
     const image = yield* schemaImage;
     const fs = yield* FileSystem.FileSystem;
@@ -76,7 +76,7 @@ export const layerTest = Layer.unwrap(
   }),
 ).pipe(Layer.provide(layerNodeFileSystem));
 
-export const layerConfig = Layer.unwrap(
+export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const dbPath = yield* ServerConfig.dbPath;
     return layerFromPath(dbPath);

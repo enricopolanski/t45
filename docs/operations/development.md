@@ -2,16 +2,18 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24.21.0 or newer in the 24.x line, with the development version pinned in `.node-version`; Bun is optional. Copy `.env.example` to `.env` and set `AUTH_CLERK_PUBLISHABLE_KEY` to your Clerk development instance's publishable key. From the repository root:
+Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24.21.0 or newer in the 24.x line, with the development version pinned in `.node-version`; Bun is optional. Copy `.env.example` to `.env`. From the repository root:
 
 ```sh
 vp env on node
 vp env install
-vp i
+sh scripts/setup.sh
 vp run dev
 ```
 
-Open the web URL printed by the dev runner and sign in with Clerk. The server requires `AUTH_CLERK_PUBLISHABLE_KEY`; a fresh database uses the normal organization registration and approval flow.
+Setup installs workspace dependencies, the Chromium revision required by the pinned Playwright version, and its system libraries. Linux setup may request sudo authentication and fails if the required privileges are unavailable. Re-run setup after upgrading Playwright or switching to a branch with a different version. Browser installation uses the checkout's Playwright CLI and its managed cache.
+
+Open the web URL printed by the dev runner and sign in with any email; a fresh database uses the normal organization registration and approval flow.
 
 `vp run sync:repos` initializes the registered Effect and OpenCode reference submodules in `.repos/` and checks out tags matching `pnpm-workspace.yaml`. Run it after cloning or changing those dependency versions. This root task is uncached and leaves staging to you. Use `--repo effect` or `--repo opencode` to select one, and `--dry-run` to print the Git commands without running them. These sources do not include our installed package patches.
 
@@ -21,19 +23,25 @@ Open the web URL printed by the dev runner and sign in with Clerk. The server re
 
 Flags go directly after the task name, for example `vp run dev --home-dir /tmp/t45-dev`.
 
+### Signing in and browser checks
+
+Development builds skip token validation: the login page on `localhost` or `127.0.0.1` signs you in as whatever email you enter, and every other host shows Clerk. For a fresh browser profile, run `vp run browser --email alice@example.test` with `vp run dev` running and the web server ready. The browser command opens `http://localhost:5733` in a fresh browser profile and signs in through the ordinary login flow. It stays open until you close its window. Run it again with another email to open a separate user session on the same server. The first user names the organization; later users await approval.
+
+For agent checks, use `vp run browser --email alice@example.test --steps /tmp/check.mjs`. This opens a headless browser, signs in, calls the module's default function with `{ page, context, browser, url }`, and closes the browser when the function finishes. A thrown error exits nonzero; use the steps to wait for application signals and capture screenshots or PDFs outside the repository.
+
+Registration, approval, and deactivation rules still apply.
+
+The Playwright smoke check is mandatory in pre-commit. Start `vp run dev` first and leave it running for E2Es or pre-commit. Run the check on its own with `vp run --filter @t45/e2e test`. It opens the running development app at `http://localhost:5733` and checks that the login page renders. Playwright does not start servers or build the app. It uses the Chromium installed by setup; a missing browser fails the check. Browser traces on failure live under `e2e/test-results`.
+
 ### State and ports
 
 Dev state lives in the gitignored `.t45/userdata` of the checkout you launch from, even when `DATA_DIR` is set; an explicit `--home-dir` wins. Never run a development server against the live `~/.t3/userdata`.
 
-Read ports from the `[dev-runner]` output: occupied server, web, or local runner ports shift them together. `PORT_OFFSET` selects a preferred offset from the defaults: server 13773, web 5733, runner 8790. `--port` or `PORT` fixes the server port and fails if it is occupied; web and runner ports can still shift. `--host` or `HOST` accepts loopback and wildcard bind addresses. `LOG_REQUESTS` controls request logging. `--dry-run` prints the configuration without starting services.
+Ports are fixed: server 13773, web 5733, runner 8790. If one is taken, for example by a dev run in another checkout, startup fails. `--port` or `PORT` moves only the server port. `--host` or `HOST` accepts loopback and wildcard bind addresses. `LOG_REQUESTS` controls request logging. `--dry-run` prints the configuration without starting services.
 
-The launcher passes the server's port as `PORT` and Vite's port as `WEB_PORT`, so the web proxy always targets the server.
+The launcher passes the server's port as `PORT` so the web proxy targets it. Vite always listens on port 5733.
 
 The server writes logs to stdout. `LOG_LEVEL` sets the minimum level (default `Info`); `LOG_REQUESTS` enables HTTP request logs (enabled by default in development, disabled by default when starting the server directly).
-
-### Remote debugging
-
-The web client always reaches its server at the page origin. Vite proxies the backend, so the same build works over localhost and remote connections. Vite accepts only localhost and IP `Host` headers; add other names to `DEV_ALLOWED_HOSTS`.
 
 ## microsandbox
 
@@ -67,7 +75,7 @@ Without `/dev/kvm` every chat's VM fails to start, and the runner's log names th
 
 ## Release builds
 
-The build cleans `apps/server/dist`, builds the server and MCP tools into `dist/bin.mjs` and `dist/runtime`, then copies the complete web client into `dist/client`. Rebuilding or switching a checkout used by a running built server removes that server's assets, so build a release in a separate checkout before switching to it.
+The `build:bundle` task cleans `apps/server/dist` and builds the server and MCP tools into `dist/bin.mjs` and `dist/runtime`. Both server tests and the full build depend on that one task. The full build also depends on the web build and only replaces `dist/client`; cached bundle outputs exclude the client. Rebuilding or switching a checkout used by a running built server removes that server's assets, so build a release in a separate checkout before switching to it.
 
 Capture the checkout's full commit SHA once and pass it to the build:
 
@@ -75,7 +83,7 @@ Capture the checkout's full commit SHA once and pass it to the build:
 BUILD_SHA="$(git rev-parse HEAD)" vp run --filter t45 build
 ```
 
-Both artifacts embed `BUILD_SHA` as supplied; CI and manual builds are responsible for providing it. The web build is an uncached package script, so server-only commits also refresh the frontend's stamp. If build caching is enabled later, its inputs must include `BUILD_SHA`. The server reports its own stamp in the session state; open tabs offer a reload when it differs from their embedded stamp. When `BUILD_SHA` is unset or empty, both sides use `development` and do not prompt.
+Both artifacts embed `BUILD_SHA` as supplied; CI and manual builds are responsible for providing it. Releases sign in with Clerk: pass `AUTH_CLERK_PUBLISHABLE_KEY` to the build, which embeds it in the web client, and give the server the same value. A server built with a `BUILD_SHA` refuses to start without it. The bundle and web-build tasks include `BUILD_SHA` in their cache inputs, so a changed commit stamp rebuilds both artifacts. The server reports its own stamp in the session state; open tabs offer a reload when it differs from their embedded stamp. When `BUILD_SHA` is unset or empty, both sides use `development` and do not prompt.
 
 ## Checks
 
@@ -87,7 +95,29 @@ vp lint <files>
 vp run --filter <package> typecheck
 ```
 
-Every commit runs the root `pre-commit` package script: workspace format/lint checks, typechecking, unused code, then tests, with caching enabled by default. Run it manually with `vpr pre-commit`. There is no PR CI.
+Every commit runs the root `pre-commit` task: workspace format/lint checks, typechecking, unused code, unit tests and mandatory browser E2Es. The parent tasks and browser E2Es are uncached so every invocation runs the browsers; other checks retain their caches. Run it manually with `vpr pre-commit`, or `vpr --no-cache pre-commit` to force every check fresh. Pre-commit never downloads browsers or installs system packages: if Chromium is missing, re-run `sh scripts/setup.sh`. The shared bundle task finishes before server tests and client packaging; packaging replaces only `dist/client`, so recursive tests can run safely in parallel. There is no PR CI.
+
+### Verifying setup and build changes
+
+For setup changes, use a disposable checkout containing the proposed changes, without `node_modules`, build outputs, `.t45`, or task caches. Verify system dependencies in a fresh supported container or VM with Node, `vp`, Git, and the documented installation privileges. Do not mount the host's browser cache or supply a browser executable override. From that checkout, give Playwright an empty managed cache and run the normal setup and checks:
+
+```sh
+export PLAYWRIGHT_BROWSERS_PATH="$(mktemp -d)"
+sh scripts/setup.sh
+vpr --no-cache pre-commit
+```
+
+When upgrading Playwright, also run setup and checks in an environment prepared with the previous version. Confirm that the installed package selects its matching browser revision. A successful run with system dependencies already installed does not verify their installation; report that limitation when a fresh machine or the required privileges are unavailable.
+
+For build graph or cache changes, run recursive tests directly. Force a fresh execution, then run normally twice to populate and exercise caches:
+
+```sh
+vp run --no-cache -r test
+vp run -r test
+vp run -r test
+```
+
+Then make a server-only source edit and run `vp run -r test` again. Confirm that the web build is a cache hit while the bundle and affected server tests execute. Inspect command output and `node_modules/.vite/task-cache/*/last-summary.json`, saving the summary before another invocation overwrites it. Require one shared pack execution on the cold and server-change runs, completed before its consumers; warm runs may restore that bundle instead. Verify that bundle cache restoration preserves the packaged client and that E2Es execute on every run. Restore temporary verification edits without discarding existing working-tree changes.
 
 ### Unused code
 

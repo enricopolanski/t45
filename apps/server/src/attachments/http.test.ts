@@ -115,7 +115,6 @@ describe("downloadContentDisposition", () => {
 describe("attachment routes", () => {
   // The session cookie names whether the test session is an approved member or awaits approval.
   const layerAuth = Layer.mock(UserService)({
-    publishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
     cookieName: "session",
     authenticate: (token) =>
       ["member", "pending", "other", "admin"].includes(token)
@@ -152,10 +151,7 @@ describe("attachment routes", () => {
         Effect.provideContext(requestContext),
       );
       const seeded = yield* seed.pipe(Effect.provideContext(requestContext));
-      const layerApp = Layer.mergeAll(
-        AttachmentsHttp.layerAttachmentRoute,
-        AttachmentsHttp.layerAttachmentUploadRoute,
-      ).pipe(Layer.provide(layerFileResponse));
+      const layerApp = AttachmentsHttp.layer.pipe(Layer.provide(layerFileResponse));
       return yield* Effect.acquireUseRelease(
         Effect.sync(() => HttpRouter.toWebHandler(layerApp, { disableLogger: true })),
         ({ handler }) =>

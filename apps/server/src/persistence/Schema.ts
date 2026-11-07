@@ -53,7 +53,7 @@ const statements = [
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,
-  // Every session is a browser cookie from a Clerk sign-in. The cookie holds the
+  // Every session is a browser cookie from an identity sign-in. The cookie holds the
   // token; the row keeps only its hash. Revoking a session deletes its row.
   `CREATE TABLE auth_sessions (
       session_id TEXT PRIMARY KEY,

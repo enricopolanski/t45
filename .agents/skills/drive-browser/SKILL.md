@@ -50,9 +50,7 @@ Any thrown error (including a failing assertion) exits non-zero with the failure
 on stderr, so the same command doubles as an e2e check. `page`, `context`,
 `browser`, `url`, and `out` are available; use Playwright's normal API.
 
-For the T3 app, start `vp run dev` and read the web URL from the `[dev-runner]`
-line. Sign-in is Clerk: a fresh profile lands on the sign-in page, so signed-in
-flows must sign in inside `--steps`. Never commit or paste credentials.
+For authenticated T45 checks, start `vp run dev --home-dir /tmp/t45-browser` and wait for the web server to be ready. Run `vp run browser --email alice@example.test --steps /tmp/t3-drive/steps.mjs`. The browser command uses `http://localhost:5733`. It opens a fresh headless profile, signs in through the normal login form, and calls the module's default function with `{ page, context, browser, url }`. It closes the browser when the steps finish and exits nonzero on failure. Capture screenshots or PDFs from those steps using Playwright's API; keep artifacts under `/tmp`. The first user names the organization; subsequent users await approval. Omit `--steps` to leave a headed browser open for manual exploration. See [Development](../../../docs/operations/development.md#signing-in-and-browser-checks).
 
 ## Show the evidence
 
@@ -63,6 +61,4 @@ Reference the printed path as markdown so the user sees it inline in the chat:
 [screen recording of the flow](/tmp/t3-drive/flow.webm)
 ```
 
-Keep artifacts out of the repository (defaults live in `/tmp/t3-drive`). The
-browser is a fresh logged-out profile; authenticate inside the steps when a flow
-needs it. Set `T45_BROWSER_PATH` to override browser discovery.
+Keep artifacts out of the repository (defaults live in `/tmp/t3-drive`). The generic capture helper starts with a fresh logged-out profile; supply sign-in steps when needed. For T45, use the authenticated browser command above. `T45_BROWSER_PATH` overrides browser discovery only for the generic capture helper.

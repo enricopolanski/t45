@@ -15,7 +15,7 @@ import * as AssignmentsHandlers from "./workflows/Assignments.handlers.ts";
 import * as NotificationsHandlers from "./workflows/Notifications.handlers.ts";
 import * as WorkflowsHandlers from "./workflows/Workflows.handlers.ts";
 
-export const AppRpcLayer = Layer.unwrap(
+export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const rpc = yield* RpcServer.toHttpEffect(RpcApi, {
       disableTracing: true,

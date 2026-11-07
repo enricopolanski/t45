@@ -1,6 +1,6 @@
 /*
- * The organization's users: one Clerk identity each, keyed by the token's `sub`, with its role,
- * lifecycle state and profile. The repository stores them; it does not verify Clerk tokens or
+ * The organization's users: one validated identity each, keyed by the token's `sub`, with its role,
+ * lifecycle state and profile. The repository stores them; it does not verify identity tokens or
  * mint sessions.
  */
 import { User } from "@t45/contracts/models/User";
@@ -28,7 +28,7 @@ export class UserRepository extends Context.Service<
     readonly list: Effect.Effect<ReadonlyArray<User>>;
     readonly get: (userId: string) => Effect.Effect<User | null>;
     /**
-     * Registers a Clerk identity. The first on a fresh deployment becomes the active admin, in the
+     * Registers a validated identity. The first on a fresh deployment becomes the active admin, in the
      * insert itself; every later one is a pending member.
      */
     readonly register: (identity: {

@@ -2,6 +2,7 @@ packages:
   - apps/runner
   - apps/server
   - apps/web
+  - e2e
   - oxlint-plugin-t3code
   - packages/*
   - scripts
@@ -14,6 +15,7 @@ allowBuilds:
   msw: false
 
 catalog:
+  "@playwright/test": 1.65.0
   "@clerk/backend": 3.18.1
   "@clerk/clerk-js": 6.32.1
   "@clerk/react": 6.16.1
@@ -36,6 +38,7 @@ catalog:
   effect: 4.0.6
   jose: 6.2.2
   lightningcss: 1.33.0
+  playwright: 1.65.0
   tailwindcss: 4.3.3
   typescript: 7.0.2
   undici: 8.12.3

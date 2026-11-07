@@ -7,11 +7,14 @@ import {
   isAuthRequestError,
   ServerClerkTokenUnavailableError,
   submitClerkLogin,
+  submitIdentityToken,
 } from "../../http/auth";
 import { describeFailure } from "../../lib/failures";
 import { clerkAppearance } from "./clerkAppearance";
 import { ErrorText } from "../ui/error-text";
 import { Button } from "../ui/button";
+import { Field } from "../ui/field";
+import { Input } from "../ui/input";
 import { StandalonePage, StandalonePageHeader } from "../StandalonePage";
 
 /** A failed exchange can be retried this many times before the user must switch accounts. */
@@ -21,41 +24,80 @@ interface ExchangeAttempt {
   readonly attempt: number;
   readonly promise: Promise<void>;
   /** Set once a subscription has reported this attempt's success. */
-  succeeded: boolean;
+  hasSucceeded: boolean;
 }
 
 interface SignOutAttempt {
   readonly attempt: number;
   readonly promise: Promise<void>;
   /** Set once a subscription has reported this attempt's outcome. */
-  settled: boolean;
+  isSettled: boolean;
 }
 
-/**
- * Browser sign-in for the server itself: the key comes from the server's
- * descriptor, so the tenant always matches the server that will verify the
- * token.
- *
- * The surface owns its Clerk provider; T45 never mounts a second one above it.
- */
-export function ClerkLoginSurface({
-  publishableKey,
+/** Owns identity entry and the exchange for a server session. */
+export function Login({
   signOutFirst = false,
   onAuthenticated,
 }: {
-  readonly publishableKey: string;
   /** Set when the server session was just ended: sign out of Clerk before exchanging again. */
   readonly signOutFirst?: boolean;
   readonly onAuthenticated: () => void;
 }) {
+  // Loopback servers trust an email as the identity token; deployments use Clerk.
+  const isEmailTrusting = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const [email, setEmail] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   return (
-    <ClerkProvider appearance={clerkAppearance} publishableKey={publishableKey}>
-      <ClerkLoginFlow signOutFirst={signOutFirst} onAuthenticated={onAuthenticated} />
-    </ClerkProvider>
+    <StandalonePage>
+      <StandalonePageHeader
+        title="Sign in to this server"
+        description={
+          isEmailTrusting
+            ? "Development servers sign you in as any email you enter."
+            : "Sign in with your account to continue."
+        }
+      />
+      {isEmailTrusting ? (
+        <form
+          className="mt-6 flex flex-col gap-4"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            setIsSubmitting(true);
+            setErrorMessage("");
+            try {
+              await submitIdentityToken(email);
+              onAuthenticated();
+            } catch (error) {
+              setErrorMessage(isAuthRequestError(error) ? error.message : describeFailure(error));
+            } finally {
+              setIsSubmitting(false);
+            }
+          }}
+        >
+          <Field label="Email">
+            <Input value={email} onChange={(event) => setEmail(event.target.value)} required />
+          </Field>
+          <Button type="submit" disabled={isSubmitting}>
+            Sign in
+          </Button>
+          {errorMessage && <ErrorText text={errorMessage} />}
+        </form>
+      ) : (
+        <ClerkProvider
+          appearance={clerkAppearance}
+          publishableKey={process.env.AUTH_CLERK_PUBLISHABLE_KEY ?? ""}
+        >
+          <ClerkLogin signOutFirst={signOutFirst} onAuthenticated={onAuthenticated} />
+        </ClerkProvider>
+      )}
+    </StandalonePage>
   );
 }
 
-function ClerkLoginFlow({
+// Clerk hooks must run beneath its provider; this child owns only the SDK-specific flow.
+function ClerkLogin({
   signOutFirst,
   onAuthenticated,
 }: {
@@ -66,9 +108,9 @@ function ClerkLoginFlow({
   const { signOut } = useClerk();
   const [errorMessage, setErrorMessage] = useState("");
   const [retryCount, setRetryCount] = useState(0);
-  const [lastFailureRetryable, setLastFailureRetryable] = useState(false);
+  const [isFailureRetryable, setIsFailureRetryable] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [pendingSignOut, setPendingSignOut] = useState(signOutFirst);
+  const [shouldSignOut, setShouldSignOut] = useState(signOutFirst);
   const [signOutAttemptNumber, setSignOutAttemptNumber] = useState(0);
   const onAuthenticatedRef = useRef(onAuthenticated);
   // The pipeline of a single exchange attempt. Holding it in a ref keeps a
@@ -84,12 +126,12 @@ function ClerkLoginFlow({
   }, [onAuthenticated]);
 
   useEffect(() => {
-    if (!pendingSignOut || !isLoaded) {
+    if (!shouldSignOut || !isLoaded) {
       return;
     }
     if (!isSignedIn) {
       // oxlint-disable-next-line react/set-state-in-effect -- the logout request is satisfied when Clerk already has no session; clearing the flag here ends the one-shot state instead of leaking it to the next sign-in.
-      setPendingSignOut(false);
+      setShouldSignOut(false);
       return;
     }
 
@@ -100,16 +142,16 @@ function ClerkLoginFlow({
         : {
             attempt: signOutAttemptNumber,
             promise: signOut({ redirectUrl: "/login" }),
-            settled: false,
+            isSettled: false,
           };
     signOutAttemptRef.current = signOutAttempt;
 
     void signOutAttempt.promise.then(
       () => {
-        if (signOutAttempt.settled) {
+        if (signOutAttempt.isSettled) {
           return;
         }
-        signOutAttempt.settled = true;
+        signOutAttempt.isSettled = true;
         // The effect that started this attempt may have been replayed and
         // discarded; completing on the ref keeps the mounted flow from being
         // stranded on "Signing you out…".
@@ -117,23 +159,23 @@ function ClerkLoginFlow({
           return;
         }
         setErrorMessage("");
-        setPendingSignOut(false);
+        setShouldSignOut(false);
       },
       (error: unknown) => {
-        if (signOutAttempt.settled) {
+        if (signOutAttempt.isSettled) {
           return;
         }
-        signOutAttempt.settled = true;
+        signOutAttempt.isSettled = true;
         if (signOutAttemptRef.current !== signOutAttempt) {
           return;
         }
         setErrorMessage(describeFailure(error, "Sign-out failed."));
       },
     );
-  }, [isLoaded, isSignedIn, pendingSignOut, signOut, signOutAttemptNumber]);
+  }, [isLoaded, isSignedIn, shouldSignOut, signOut, signOutAttemptNumber]);
 
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || pendingSignOut) {
+    if (!isLoaded || !isSignedIn || shouldSignOut) {
       return;
     }
 
@@ -144,32 +186,32 @@ function ClerkLoginFlow({
         : {
             attempt,
             promise: submitClerkLogin(() => getToken({ skipCache: true })),
-            succeeded: false,
+            hasSucceeded: false,
           };
     exchangeRef.current = exchange;
 
-    let cancelled = false;
+    let isCancelled = false;
     void exchange.promise.then(
       () => {
         // The effect may have been torn down and replayed while the exchange
         // was in flight; that is not a reason to drop a successful login.
-        if (exchange.succeeded) {
+        if (exchange.hasSucceeded) {
           return;
         }
-        exchange.succeeded = true;
+        exchange.hasSucceeded = true;
         onAuthenticatedRef.current();
       },
       (error: unknown) => {
-        if (!cancelled) {
-          setErrorMessage(clerkLoginErrorMessage(error));
-          setLastFailureRetryable(!(isAuthRequestError(error) && error.reason === "deactivated"));
+        if (!isCancelled) {
+          setErrorMessage(describeClerkLoginFailure(error));
+          setIsFailureRetryable(!(isAuthRequestError(error) && error.reason === "deactivated"));
         }
       },
     );
     return () => {
-      cancelled = true;
+      isCancelled = true;
     };
-  }, [attempt, getToken, isLoaded, isSignedIn, pendingSignOut]);
+  }, [attempt, getToken, isLoaded, isSignedIn, shouldSignOut]);
 
   const retry = () => {
     exchangeRef.current = null;
@@ -188,61 +230,55 @@ function ClerkLoginFlow({
     exchangeRef.current = null;
     setErrorMessage("");
     setRetryCount(0);
-    setLastFailureRetryable(false);
+    setIsFailureRetryable(false);
     setAttempt((value) => value + 1);
-    setPendingSignOut(true);
+    setShouldSignOut(true);
     // Always start a fresh sign-out attempt: re-entering the flow after an
     // earlier attempt settled must not reuse its promise.
     setSignOutAttemptNumber((value) => value + 1);
   };
 
-  const canRetry = lastFailureRetryable && retryCount < MAX_RETRY_ATTEMPTS && !pendingSignOut;
-  const signOutFailed = pendingSignOut && errorMessage.length > 0;
-  const showAccountActions = errorMessage.length > 0;
+  const canRetry = isFailureRetryable && retryCount < MAX_RETRY_ATTEMPTS && !shouldSignOut;
+  const hasSignOutFailed = shouldSignOut && errorMessage.length > 0;
+  const shouldShowAccountActions = errorMessage.length > 0;
 
   return (
-    <StandalonePage>
-      <StandalonePageHeader
-        title="Sign in to this server"
-        description="Sign in with your account to continue."
-      />
-      <div className="mt-6 flex flex-col items-center gap-4">
-        {pendingSignOut ? (
-          errorMessage ? null : (
+    <div className="mt-6 flex flex-col items-center gap-4">
+      {shouldSignOut ? (
+        errorMessage ? null : (
+          <p role="status" className="text-sm text-muted-foreground">
+            Signing you out…
+          </p>
+        )
+      ) : (
+        <>
+          {isSignedIn ? null : <SignIn fallbackRedirectUrl="/login" />}
+          {isSignedIn && !errorMessage ? (
             <p role="status" className="text-sm text-muted-foreground">
-              Signing you out…
+              Preparing your session…
             </p>
-          )
-        ) : (
-          <>
-            {isSignedIn ? null : <SignIn fallbackRedirectUrl="/login" />}
-            {isSignedIn && !errorMessage ? (
-              <p role="status" className="text-sm text-muted-foreground">
-                Preparing your session…
-              </p>
-            ) : null}
-          </>
-        )}
-        {errorMessage && <ErrorText text={errorMessage} />}
-        {showAccountActions ? (
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {canRetry || signOutFailed ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={signOutFailed ? retrySignOut : retry}
-              >
-                Try again
-              </Button>
-            ) : null}
-            <Button type="button" variant="secondary" size="sm" onClick={switchAccount}>
-              Use another account
+          ) : null}
+        </>
+      )}
+      {errorMessage && <ErrorText text={errorMessage} />}
+      {shouldShowAccountActions ? (
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {canRetry || hasSignOutFailed ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={hasSignOutFailed ? retrySignOut : retry}
+            >
+              Try again
             </Button>
-          </div>
-        ) : null}
-      </div>
-    </StandalonePage>
+          ) : null}
+          <Button type="button" variant="secondary" size="sm" onClick={switchAccount}>
+            Use another account
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -250,6 +286,6 @@ const isSignInFailure = Schema.is(
   Schema.Union([AuthRequestError, ServerClerkTokenUnavailableError]),
 );
 
-function clerkLoginErrorMessage(error: unknown) {
+function describeClerkLoginFailure(error: unknown) {
   return isSignInFailure(error) ? error.message : describeFailure(error);
 }

@@ -16,7 +16,7 @@ Before changing or reviewing code, read and follow [Styles and rules](docs/opera
 
 Continue on the current branch. Create a new branch or PR only when the user asks.
 
-Every commit runs the `pre-commit` package script: workspace format/lint checks, typechecking, unused code (knip), then tests. Run it manually with `vpr pre-commit` (`vp run pre-commit` is equivalent). Vite+ caches successful tasks by default; `vpr --no-cache pre-commit` forces fresh checks. It checks the whole working tree without modifying files or staging. Use focused `vp test run <files>` while iterating.
+Every commit runs the root `pre-commit` task: workspace format/lint checks, typechecking, unused code (knip), unit tests and mandatory browser E2Es. Start `vp run dev` first; E2Es use the running development app at `http://localhost:5733`. Run pre-commit manually with `vpr pre-commit` (`vp run pre-commit` is equivalent). The parent tasks and browser E2Es are uncached so every commit runs the E2Es; other checks retain their caches. `vpr --no-cache pre-commit` forces all checks fresh. It checks the whole working tree without modifying files or staging.
 
 Commits use conventional, plain-language titles (`fix(web): new threads no longer spike CPU`), a body stating the problem and the fix, and end with the model and harness that did the work.
 
@@ -28,11 +28,11 @@ Commits use conventional, plain-language titles (`fix(web): new threads no longe
 
 ## Dev servers
 
-`vp i` installs; `vp run dev` starts server and web. Details: `docs/operations/development.md`.
+`sh scripts/setup.sh` installs workspace dependencies, the matching Playwright Chromium, and its system libraries. Linux setup may request sudo authentication and fails if the required privileges are unavailable. Re-run setup after changing Playwright versions. `vp run dev` starts server and web. Details: `docs/operations/development.md`.
 
 - Dev state lives in the gitignored `.t45` of the checkout you launch from, even when `DATA_DIR` is set.
-- Read the real ports from the `[dev-runner]` line; occupied ports shift them.
-- Sign-in is Clerk (`AUTH_CLERK_PUBLISHABLE_KEY` in `.env`).
+- Dev ports are fixed: server 13773, web 5733, runner 8790. A second dev run on the same machine fails on the busy port.
+- Dev builds sign in with any email, without token validation: with `vp run dev` running, `vp run browser --email <email>` opens a signed-in browser; `--steps <module>` runs authenticated headless checks.
 
 ## Code map
 

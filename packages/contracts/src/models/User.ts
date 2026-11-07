@@ -11,10 +11,10 @@ export type Role = typeof Role.Type;
 export const State = Schema.Literals(["pending", "active", "deactivated"]);
 export type State = typeof State.Type;
 
-/** A name chosen in the profile editor; Clerk's initial suggestion may be longer. */
+/** A name chosen in the profile editor; the identity provider's initial suggestion may be longer. */
 export const DisplayName = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
 
-/** One Clerk identity in this deployment, including its access and chosen profile. */
+/** One verified identity in this deployment, including its access and chosen profile. */
 export class User extends Schema.Opaque<User>()(
   Schema.Struct({
     id: StringId,

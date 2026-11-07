@@ -6,6 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
+import * as ServerConfig from "../config.ts";
 import { UserService } from "../org/UserService.ts";
 
 const CREDENTIAL_RESPONSE_HEADERS = {
@@ -30,8 +31,6 @@ const refuse = (error: AuthFailure["error"]) =>
 
 const failed = (cause: unknown) =>
   Effect.logError("auth request failed", { cause }).pipe(Effect.as(refuse("internal_error")));
-
-const deployVersion = process.env.BUILD_SHA || "development";
 
 const readSession = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
@@ -62,12 +61,12 @@ const sessionRoute = HttpRouter.add(
   "/api/auth/session",
   Effect.gen(function* () {
     const session = yield* readSession;
+    const environment = yield* ServerConfig.environment;
+    const deployVersion = environment._tag === "production" ? environment.buildSha : "development";
     return yield* HttpServerResponse.schemaJson(AuthSessionState)(
       session === null
         ? {
             isAuthenticated: false,
-            // What signed-out browsers need to sign in.
-            clerkPublishableKey: (yield* UserService).publishableKey,
             deployVersion,
           }
         : {
@@ -81,9 +80,9 @@ const sessionRoute = HttpRouter.add(
   }).pipe(Effect.catchTags({ SessionStoreError: failed, HttpBodyError: failed })),
 );
 
-const clerkSessionRoute = HttpRouter.add(
+const loginRoute = HttpRouter.add(
   "POST",
-  "/api/auth/clerk-session",
+  "/api/auth/login",
   Effect.gen(function* () {
     const token = yield* HttpServerRequest.schemaBodyJson(TrimmedNonEmptyString).pipe(
       Effect.option,
@@ -92,7 +91,7 @@ const clerkSessionRoute = HttpRouter.add(
     const origin = (yield* HttpServerRequest.HttpServerRequest).headers.origin;
     const sessions = yield* UserService;
     return yield* sessions
-      .loginFromClerkSession({
+      .loginWithIdentityToken({
         token: token.value,
         ...(origin === undefined ? {} : { authorizedParty: origin }),
       })
@@ -106,9 +105,9 @@ const clerkSessionRoute = HttpRouter.add(
           ),
         ),
         Effect.catchTags({
-          InvalidClerkIdentityToken: () => Effect.succeed(refuse("invalid_credential")),
+          InvalidIdentityToken: () => Effect.succeed(refuse("invalid_credential")),
           UserDeactivatedError: () => Effect.succeed(refuse("deactivated")),
-          ClerkIdentityProviderUnavailable: failed,
+          IdentityProviderUnavailable: failed,
           UserAuthInternalError: failed,
           CookiesError: failed,
         }),
@@ -138,4 +137,4 @@ const logoutRoute = HttpRouter.add(
   }),
 );
 
-export const layer = Layer.mergeAll(sessionRoute, clerkSessionRoute, logoutRoute);
+export const layer = Layer.mergeAll(sessionRoute, loginRoute, logoutRoute);

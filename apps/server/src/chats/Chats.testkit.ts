@@ -46,8 +46,8 @@ const layerPersistence = Layer.mergeAll(
   AgentRepository.layer,
   SkillRepository.layer,
 ).pipe(
-  Layer.provideMerge(Sqlite.layerTest),
-  Layer.provideMerge(ServerConfig.layerTest("t3-chats-")),
+  Layer.provideMerge(Sqlite.testLayer),
+  Layer.provideMerge(ServerConfig.testLayer("t3-chats-")),
   Layer.provideMerge(NodeServices.layer),
 );
 

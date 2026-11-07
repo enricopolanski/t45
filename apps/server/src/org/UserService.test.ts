@@ -31,13 +31,12 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as UserRepository from "./UserRepository.ts";
 import { UserService } from "./UserService.ts";
 import * as Authentication from "../auth/Authentication.ts";
-import type { VerifiedClerkIdentity } from "../auth/Authentication.ts";
+import type { ValidatedIdentity } from "../auth/Authentication.ts";
 import * as UsersHandlers from "./Users.handlers.ts";
 import { WorkflowService } from "../workflows/WorkflowService.ts";
 
 describe("UserService", () => {
-  describe("Clerk identity", () => {
-    const publishableKey = "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==";
+  describe("Identity token validation", () => {
     const issuer = "https://clerk.example.test";
     const authorizedParty = "https://app.example.test";
 
@@ -80,27 +79,26 @@ describe("UserService", () => {
 
     let signingKeys: ReturnType<typeof generateKeyPair> | undefined;
 
-    const makeProvider = async () => {
+    const makeValidator = async () => {
       const keyPair = await (signingKeys ??= generateKeyPair("RS256"));
       const publicJwk = await exportJWK(keyPair.publicKey);
       return {
         keyPair,
-        provider: Authentication.makeIdentityProvider({
-          publishableKey,
+        validator: Authentication.makeIdentityTokenValidator({
           issuer,
           jwks: createLocalJWKSet({ keys: [{ ...publicJwk, alg: "RS256", kid: "test-key" }] }),
         }),
       };
     };
 
-    it.effect("ClerkIdentityProvider verifies a session and extracts its identity", () =>
+    it.effect("IdentityTokenValidator validates a token and extracts its identity", () =>
       Effect.gen(function* () {
-        const { keyPair, provider } = yield* Effect.promise(makeProvider);
+        const { keyPair, validator } = yield* Effect.promise(makeValidator);
         const token = yield* Effect.promise(() =>
           makeToken({ privateKey: keyPair.privateKey, name: "Ada Lovelace" }),
         );
 
-        assert.deepStrictEqual(yield* provider.verify({ token, authorizedParty }), {
+        assert.deepStrictEqual(yield* validator.validate({ token, authorizedParty }), {
           subject: "user_123",
           email: "user@example.test",
           name: "Ada Lovelace",
@@ -108,9 +106,9 @@ describe("UserService", () => {
       }),
     );
 
-    it.effect("ClerkIdentityProvider accepts a token without an azp claim", () =>
+    it.effect("IdentityTokenValidator accepts a token without an azp claim", () =>
       Effect.gen(function* () {
-        const { keyPair, provider } = yield* Effect.promise(makeProvider);
+        const { keyPair, validator } = yield* Effect.promise(makeValidator);
         const token = yield* Effect.promise(() =>
           makeToken({ privateKey: keyPair.privateKey, authorizedParty: null }),
         );
@@ -120,14 +118,14 @@ describe("UserService", () => {
           email: "user@example.test",
           name: null,
         };
-        assert.deepStrictEqual(yield* provider.verify({ token, authorizedParty }), expected);
-        assert.deepStrictEqual(yield* provider.verify({ token }), expected);
+        assert.deepStrictEqual(yield* validator.validate({ token, authorizedParty }), expected);
+        assert.deepStrictEqual(yield* validator.validate({ token }), expected);
       }),
     );
 
-    it.effect("ClerkIdentityProvider rejects tokens without a verified email", () =>
+    it.effect("IdentityTokenValidator rejects tokens without a verified email", () =>
       Effect.gen(function* () {
-        const { keyPair, provider } = yield* Effect.promise(makeProvider);
+        const { keyPair, validator } = yield* Effect.promise(makeValidator);
         const tokens = yield* Effect.promise(() =>
           Promise.all([
             makeToken({ privateKey: keyPair.privateKey, email: null }),
@@ -138,19 +136,19 @@ describe("UserService", () => {
         );
 
         for (const token of tokens) {
-          const error = yield* Effect.flip(provider.verify({ token, authorizedParty }));
-          assert.instanceOf(error, Authentication.InvalidClerkIdentityToken);
+          const error = yield* Effect.flip(validator.validate({ token, authorizedParty }));
+          assert.instanceOf(error, Authentication.InvalidIdentityToken);
         }
       }),
     );
 
-    it.effect("ClerkIdentityProvider rejects an azp-bearing token without a request origin", () =>
+    it.effect("IdentityTokenValidator rejects an azp-bearing token without a request origin", () =>
       Effect.gen(function* () {
-        const { keyPair, provider } = yield* Effect.promise(makeProvider);
+        const { keyPair, validator } = yield* Effect.promise(makeValidator);
         const token = yield* Effect.promise(() => makeToken({ privateKey: keyPair.privateKey }));
 
-        const error = yield* Effect.flip(provider.verify({ token }));
-        assert.instanceOf(error, Authentication.InvalidClerkIdentityToken);
+        const error = yield* Effect.flip(validator.validate({ token }));
+        assert.instanceOf(error, Authentication.InvalidIdentityToken);
       }),
     );
 
@@ -160,72 +158,70 @@ describe("UserService", () => {
       { name: "empty-subject", claims: { subject: "" } },
       { name: "wrong-issuer", claims: { issuer: "https://other.clerk.test" } },
       { name: "wrong-party", claims: { authorizedParty: "https://other.example.test" } },
-    ] as const)("ClerkIdentityProvider rejects $name tokens", ({ claims }) =>
+    ] as const)("IdentityTokenValidator rejects $name tokens", ({ claims }) =>
       Effect.gen(function* () {
-        const { keyPair, provider } = yield* Effect.promise(makeProvider);
+        const { keyPair, validator } = yield* Effect.promise(makeValidator);
         const token = yield* Effect.promise(() =>
           makeToken({ privateKey: keyPair.privateKey, ...claims }),
         );
 
-        const error = yield* Effect.flip(provider.verify({ token, authorizedParty }));
-        assert.instanceOf(error, Authentication.InvalidClerkIdentityToken);
+        const error = yield* Effect.flip(validator.validate({ token, authorizedParty }));
+        assert.instanceOf(error, Authentication.InvalidIdentityToken);
       }),
     );
 
-    it.effect("ClerkIdentityProvider rejects invalid-signature tokens", () =>
+    it.effect("IdentityTokenValidator rejects invalid-signature tokens", () =>
       Effect.gen(function* () {
-        const { provider } = yield* Effect.promise(makeProvider);
+        const { validator } = yield* Effect.promise(makeValidator);
         const otherKeyPair = yield* Effect.promise(() => generateKeyPair("RS256"));
         const token = yield* Effect.promise(() =>
           makeToken({ privateKey: otherKeyPair.privateKey }),
         );
 
-        const error = yield* Effect.flip(provider.verify({ token, authorizedParty }));
-        assert.instanceOf(error, Authentication.InvalidClerkIdentityToken);
+        const error = yield* Effect.flip(validator.validate({ token, authorizedParty }));
+        assert.instanceOf(error, Authentication.InvalidIdentityToken);
       }),
     );
 
-    it.effect("ClerkIdentityProvider reports a JWKS outage as unavailable", () =>
+    it.effect("IdentityTokenValidator reports a JWKS outage as unavailable", () =>
       Effect.gen(function* () {
-        const { keyPair } = yield* Effect.promise(makeProvider);
+        const { keyPair } = yield* Effect.promise(makeValidator);
         const token = yield* Effect.promise(() => makeToken({ privateKey: keyPair.privateKey }));
 
-        const provider = Authentication.makeIdentityProvider({
-          publishableKey,
+        const validator = Authentication.makeIdentityTokenValidator({
           issuer,
           jwks: () => Promise.reject(new errors.JWKSTimeout()),
         });
-        const error = yield* Effect.flip(provider.verify({ token, authorizedParty }));
-        assert.instanceOf(error, Authentication.ClerkIdentityProviderUnavailable);
+        const error = yield* Effect.flip(validator.validate({ token, authorizedParty }));
+        assert.instanceOf(error, Authentication.IdentityProviderUnavailable);
       }),
     );
   });
 
   it.layer(NodeServices.layer)("Sign-in", (it) => {
-    const identity: VerifiedClerkIdentity = {
+    const identity: ValidatedIdentity = {
       subject: "user_123",
       email: "user@example.test",
       name: "Ada Lovelace",
-      imageUrl: "https://img.clerk.com/ada.png",
     };
     const at = DateTime.makeUnsafe("2026-01-02T00:00:00Z");
     const login = UserService.use((auth) =>
-      auth.loginFromClerkSession({ token: identity.subject }),
+      auth.loginWithIdentityToken({ token: identity.subject }),
     );
     const layer = (
-      verify: ReturnType<typeof Authentication.makeIdentityProvider>["verify"] = ({ token }) =>
-        Effect.succeed({ ...identity, subject: token }),
+      validate: ReturnType<typeof Authentication.makeIdentityTokenValidator>["validate"] = ({
+        token,
+      }) => Effect.succeed({ ...identity, subject: token }),
     ) =>
       Layer.effect(UserService, UserService.make).pipe(
         Layer.provide(
-          Layer.succeed(Authentication.IdentityProvider, {
-            publishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
-            verify,
+          Layer.succeed(Authentication.IdentityTokenValidator, {
+            validate,
           }),
         ),
         Layer.provideMerge(UserRepository.layer),
-        Layer.provideMerge(SqlitePersistence.layerTest),
-        Layer.provide(ServerConfig.layerTest("t3-user-auth-")),
+        Layer.provideMerge(SqlitePersistence.testLayer),
+        Layer.provide(ServerConfig.testLayer("t3-user-auth-")),
       );
 
     /** The identity as an earlier sign-in registered it, with `changes` made since. */
@@ -254,7 +250,7 @@ describe("UserService", () => {
             [admin.userId, admin.role, admin.state],
             [identity.subject, "admin", "active"],
           );
-          const pending = yield* auth.loginFromClerkSession({ token: "another-user" });
+          const pending = yield* auth.loginWithIdentityToken({ token: "another-user" });
           const member = yield* sessions.authenticate(pending.token);
           assert.deepStrictEqual(
             [member.userId, member.role, member.state],
@@ -262,7 +258,7 @@ describe("UserService", () => {
           );
           const approved = yield* users.get(member.userId);
           if (approved !== null) yield* users.update({ ...approved, state: "active" });
-          const again = yield* auth.loginFromClerkSession({ token: member.userId });
+          const again = yield* auth.loginWithIdentityToken({ token: member.userId });
           const active = yield* sessions.authenticate(again.token);
           assert.deepStrictEqual([active.role, active.state], ["member", "active"]);
           assert.strictEqual((yield* users.list).length, 2);
@@ -271,7 +267,7 @@ describe("UserService", () => {
 
     it.effect.each([
       {
-        title: "names a new user after Clerk's name",
+        title: "names a new user after the provider's name",
         name: " Ada Lovelace ",
         expected: "Ada Lovelace",
       },
@@ -290,7 +286,7 @@ describe("UserService", () => {
 
     it.effect.each([
       {
-        title: "preserves the stored name when Clerk changes its suggestion",
+        title: "preserves the stored name when the provider changes its suggestion",
         name: identity.name,
         edited: false,
         expected: "Kept name",
@@ -307,7 +303,7 @@ describe("UserService", () => {
         edited: true,
         expected: "Chosen name",
       },
-    ])("$title, refreshing the email and Clerk's picture", (scenario) =>
+    ])("$title, refreshing the email", (scenario) =>
       Effect.gen(function* () {
         const users = yield* UserRepository.UserRepository;
         const sessions = yield* UserService;
@@ -348,8 +344,8 @@ describe("UserService", () => {
     );
 
     it.effect.each([
-      new Authentication.InvalidClerkIdentityToken({ cause: new Error("expired") }),
-      new Authentication.ClerkIdentityProviderUnavailable({ cause: new Error("jwks") }),
+      new Authentication.InvalidIdentityToken({ cause: new Error("expired") }),
+      new Authentication.IdentityProviderUnavailable({ cause: new Error("jwks") }),
     ])("preserves $_tag without registering or signing in", (error) =>
       Effect.gen(function* () {
         const users = yield* UserRepository.UserRepository;
@@ -372,15 +368,14 @@ describe("UserService", () => {
     const layerSessionStore = (stateDirPrefix = "t3-session-store-") =>
       Layer.effect(UserService, UserService.make).pipe(
         Layer.provide(
-          Layer.succeed(Authentication.IdentityProvider, {
-            publishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
-            verify: ({ token }) =>
+          Layer.succeed(Authentication.IdentityTokenValidator, {
+            validate: ({ token }) =>
               Effect.succeed({ subject: token, email: `${token}@example.test`, name: token }),
           }),
         ),
         Layer.provideMerge(UserRepository.layer),
-        Layer.provideMerge(SqlitePersistence.layerTest),
-        Layer.provide(ServerConfig.layerTest(stateDirPrefix)),
+        Layer.provideMerge(SqlitePersistence.testLayer),
+        Layer.provide(ServerConfig.testLayer(stateDirPrefix)),
       );
 
     it.effect("authenticates a token with the user's current role and state", () =>
@@ -526,16 +521,15 @@ describe("UserService", () => {
             }),
           ).pipe(Layer.provide(UserRepository.layer))
         : UserRepository.layer;
-      const layerIdentityProvider = Layer.succeed(Authentication.IdentityProvider, {
-        publishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
-        verify: ({ token }) =>
+      const identityTokenValidatorLayer = Layer.succeed(Authentication.IdentityTokenValidator, {
+        validate: ({ token }) =>
           Effect.succeed({ subject: token, email: `${token}@example.test`, name: token }),
       });
       const layer = Layer.effect(UserService, UserService.make).pipe(
-        Layer.provide(layerIdentityProvider),
+        Layer.provide(identityTokenValidatorLayer),
         Layer.provideMerge(layerUsers),
-        Layer.provide(ServerConfig.layerTest("t3-members-test-")),
-        Layer.provideMerge(SqlitePersistence.layerTest),
+        Layer.provide(ServerConfig.testLayer("t3-members-test-")),
+        Layer.provideMerge(SqlitePersistence.testLayer),
       );
       return { layer };
     }
@@ -572,7 +566,7 @@ describe("UserService", () => {
 
     /** Signs a stored user in, returning the session token. */
     const signIn = (userId: string) =>
-      UserService.use((users) => users.loginFromClerkSession({ token: userId })).pipe(
+      UserService.use((users) => users.loginWithIdentityToken({ token: userId })).pipe(
         Effect.map((login) => login.token),
       );
 
@@ -591,7 +585,7 @@ describe("UserService", () => {
           const auth = yield* UserService;
           const sessions = yield* UserService;
           yield* seedAdmin;
-          const login = yield* auth.loginFromClerkSession({ token: memberId });
+          const login = yield* auth.loginWithIdentityToken({ token: memberId });
           assert.strictEqual((yield* sessions.authenticate(login.token)).state, "pending");
 
           const approved = yield* members.approve({ userId: memberId, role: "member" });
@@ -626,7 +620,7 @@ describe("UserService", () => {
           const auth = yield* UserService;
           const sessions = yield* UserService;
           yield* seedAdmin;
-          const login = yield* auth.loginFromClerkSession({ token: memberId });
+          const login = yield* auth.loginWithIdentityToken({ token: memberId });
           assert.strictEqual((yield* sessions.authenticate(login.token)).state, "pending");
 
           yield* members.decline({ userId: memberId });
@@ -821,7 +815,7 @@ describe("UserService", () => {
   });
 
   describe("Repository", () => {
-    const layer = UserRepository.layer.pipe(Layer.provideMerge(SqlitePersistence.layerTest));
+    const layer = UserRepository.layer.pipe(Layer.provideMerge(SqlitePersistence.testLayer));
     const createdAt = DateTime.makeUnsafe("2026-09-21T12:00:00.000Z");
     const updatedAt = DateTime.makeUnsafe("2026-09-22T12:00:00.000Z");
 
@@ -890,36 +884,32 @@ describe("UserService", () => {
   });
 
   describe("Authentication HTTP", () => {
-    const clerkPublishableKey = "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==";
-    const identities: Readonly<Record<string, VerifiedClerkIdentity>> = {
+    const identities: Readonly<Record<string, ValidatedIdentity>> = {
       "clerk-token": { subject: "user_1", email: "user_1@example.test", name: "User One" },
       "deactivated-token": { subject: "user_2", email: "user_2@example.test", name: "User Two" },
     };
-    const verified: Array<{ readonly token: string; readonly authorizedParty?: string }> = [];
-    const identityProvider: Authentication.IdentityProvider["Service"] = {
-      publishableKey: clerkPublishableKey,
-      verify: (input) => {
-        verified.push(input);
+    const validated: Array<{ readonly token: string; readonly authorizedParty?: string }> = [];
+    const identityTokenValidator: Authentication.IdentityTokenValidator["Service"] = {
+      validate: (input) => {
+        validated.push(input);
         const identity = identities[input.token];
         if (identity !== undefined) return Effect.succeed(identity);
         return input.token === "unreachable-token"
           ? Effect.fail(
-              new Authentication.ClerkIdentityProviderUnavailable({
+              new Authentication.IdentityProviderUnavailable({
                 cause: new Error("jwks fetch to secret-host"),
               }),
             )
-          : Effect.fail(
-              new Authentication.InvalidClerkIdentityToken({ cause: new Error("expired") }),
-            );
+          : Effect.fail(new Authentication.InvalidIdentityToken({ cause: new Error("expired") }));
       },
     };
 
-    const layerConfig = ServerConfig.layerTest("t3-auth-http-test-");
+    const layerConfig = ServerConfig.testLayer("t3-auth-http-test-");
 
     const layerServices = Layer.effect(UserService, UserService.make).pipe(
-      Layer.provide(Layer.succeed(Authentication.IdentityProvider, identityProvider)),
+      Layer.provide(Layer.succeed(Authentication.IdentityTokenValidator, identityTokenValidator)),
       Layer.provideMerge(UserRepository.layer),
-      Layer.provideMerge(SqlitePersistence.layerTest),
+      Layer.provideMerge(SqlitePersistence.testLayer),
       Layer.provideMerge(layerConfig),
     );
 
@@ -966,7 +956,7 @@ describe("UserService", () => {
           Effect.sync(() => HttpRouter.toWebHandler(layerRoutes, { disableLogger: true })),
           ({ handler }) => {
             const signIn = (token: unknown, headers?: Readonly<Record<string, string>>) =>
-              handler(postJson("/api/auth/clerk-session", token, headers), requestContext);
+              handler(postJson("/api/auth/login", token, headers), requestContext);
             return Effect.tryPromise(() =>
               use({
                 signIn,
@@ -1004,7 +994,7 @@ describe("UserService", () => {
 
     const deployVersion = process.env.BUILD_SHA || "development";
 
-    it.effect("exchanges a Clerk session token for a browser session cookie", () =>
+    it.effect("exchanges an identity token for a browser session cookie", () =>
       withRoutes(async ({ signIn }) => {
         const response = await signIn("clerk-token", {
           origin: "https://app.example.test",
@@ -1019,14 +1009,14 @@ describe("UserService", () => {
         expect(cookies[0]).toContain("HttpOnly");
         expect(cookies[0]).toContain("SameSite=Lax");
         expect(await response.text()).toBe("");
-        expect(verified.at(-1)).toEqual({
+        expect(validated.at(-1)).toEqual({
           token: "clerk-token",
           authorizedParty: "https://app.example.test",
         });
       }),
     );
 
-    it.effect("refuses Clerk logins with the auth failure body and no cookie", () =>
+    it.effect("refuses identity logins with the auth failure body and no cookie", () =>
       withRoutes(
         async ({ signIn }) => {
           const cases = [
@@ -1047,12 +1037,11 @@ describe("UserService", () => {
     );
 
     it.effect(
-      "reports the Clerk user and the server's build on the session after a login exchange",
+      "reports the verified user and the server's build on the session after a login exchange",
       () =>
         withRoutes(async ({ login, sessionState }) => {
           expect(await sessionState()).toEqual({
             isAuthenticated: false,
-            clerkPublishableKey,
             deployVersion,
           });
           expect(await sessionState(await login())).toEqual({
@@ -1096,15 +1085,14 @@ describe("UserService", () => {
   it.layer(NodeServices.layer)("User RPC", (it) => {
     const layerSessions = Layer.effect(UserService, UserService.make).pipe(
       Layer.provide(
-        Layer.succeed(Authentication.IdentityProvider, {
-          publishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
-          verify: ({ token }) =>
+        Layer.succeed(Authentication.IdentityTokenValidator, {
+          validate: ({ token }) =>
             Effect.succeed({ subject: token, email: `${token}@example.test`, name: token }),
         }),
       ),
       Layer.provideMerge(UserRepository.layer),
-      Layer.provideMerge(SqlitePersistence.layerTest),
-      Layer.provide(ServerConfig.layerTest("t3-users-handlers-")),
+      Layer.provideMerge(SqlitePersistence.testLayer),
+      Layer.provide(ServerConfig.testLayer("t3-users-handlers-")),
     );
 
     const insertUser = (id: string, role: "admin" | "member") =>

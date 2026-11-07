@@ -5,6 +5,7 @@ import {
   type AttachmentUploadResult,
 } from "@t45/contracts/resources/Attachments";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -61,7 +62,7 @@ export function attachmentResponseHeaders(
   };
 }
 
-export const layerAttachmentRoute = HttpRouter.add(
+const attachmentRoute = HttpRouter.add(
   "GET",
   `${ATTACHMENT_ROUTE_PREFIX}/*`,
   Effect.gen(function* () {
@@ -132,7 +133,7 @@ const refuse = (error: { readonly message: string }) =>
  * `POST <prefix>?type=file&name=<name>&mimeType=<mime>` with the bytes as the
  * body; `Content-Length` is the size. Answers with the new pending attachment id.
  */
-export const layerAttachmentUploadRoute = HttpRouter.add(
+const attachmentUploadRoute = HttpRouter.add(
   "POST",
   ATTACHMENT_ROUTE_PREFIX,
   Effect.gen(function* () {
@@ -175,3 +176,5 @@ export const layerAttachmentUploadRoute = HttpRouter.add(
     );
   }),
 );
+
+export const layer = Layer.mergeAll(attachmentRoute, attachmentUploadRoute);

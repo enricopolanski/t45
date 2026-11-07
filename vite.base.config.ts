@@ -24,6 +24,7 @@ export default defineConfig({
     isolate: false,
     exclude: [
       "**/.repos/**",
+      "**/e2e/**",
       "**/.t45/**",
       "**/.t3/**",
       "**/node_modules/**",

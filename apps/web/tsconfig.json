@@ -25,5 +25,5 @@
       }
     ]
   },
-  "include": ["src", "vite", "vite.config.ts", "test", "../../scripts/lib/public-config.ts"]
+  "include": ["src", "vite", "vite.config.ts", "test"]
 }

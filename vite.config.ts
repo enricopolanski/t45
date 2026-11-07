@@ -10,7 +10,16 @@ export default mergeConfig(
     run: {
       cache: true,
       tasks: {
-        dev: { command: "node scripts/dev.ts", cache: false },
+        "pre-commit": {
+          command: "vp check && vp run typecheck && vp run knip && vp run test",
+          cache: false,
+        },
+        test: {
+          command: "vp run -r test",
+          cache: false,
+        },
+        browser: { command: "node scripts/browser.ts", cache: false },
+        dev: { command: "node --env-file-if-exists=.env scripts/dev.ts", cache: false },
         "sync:repos": { command: "node scripts/sync-reference-repos.ts", cache: false },
       },
     },

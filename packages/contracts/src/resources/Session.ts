@@ -12,7 +12,6 @@ const DeployVersion = TrimmedNonEmptyString;
 export const AuthSessionState = Schema.Union([
   Schema.Struct({
     isAuthenticated: Schema.Literal(false),
-    clerkPublishableKey: TrimmedNonEmptyString,
     deployVersion: DeployVersion,
   }),
   Schema.Struct({

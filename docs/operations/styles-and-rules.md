@@ -1,6 +1,6 @@
 # Styles and rules
 
-These rules apply when writing or reviewing T45 code.
+These rules apply when writing or reviewing T45 code and follow our [design principles](./design-principles.md).
 
 ## Merging pull requests
 
@@ -35,9 +35,34 @@ A refusal is the domain declining a well-formed request because of the applicati
 
 Malformed requests are decode failures. Storage failures are defects. Keep these separate from domain refusals.
 
+## Build tasks and caches
+
+Declare prerequisites between packages in the task graph. Build scripts must not invoke other build tasks outside that graph. Ordering must remain correct through direct package commands and recursive workspace commands.
+
+Define which artifacts each task owns. Treat cleanup and cache restoration as writes: deleting a parent directory affects every descendant. Order conflicting accesses and declare cache outputs explicitly when tasks share an output tree. Include environment values that change artifacts in cache inputs.
+
+When changing build dependencies or artifact ownership, verify cold execution, warm execution, and a changed package with cached dependencies. Inspect task summaries to confirm which tasks ran, how many times, and their ordering. A passing run alone does not establish that the graph is correct.
+
+## Setup and verification
+
+The documented setup command installs the pinned development tools and their required runtime assets and system dependencies. Required checks consume those prerequisites without downloading them or silently skipping coverage. Setup failures must propagate and explain what is missing.
+
+When changing setup or introducing prerequisites, verify the documented commands in a disposable environment without installed workspace dependencies, build outputs, application state, or tool-specific caches. Exercise system-package installation with the documented privileges. Repeat setup verification when upgrading tools that select external runtime assets.
+
+Limit verification claims to the conditions exercised. Distinguish installation from an installation dry run, executed checks from cached results, and default configuration from local overrides. State any unverified part of setup explicitly.
+
 ## Naming
 
-A name carries the feature that sets the thing apart, in plain words, so a reader does not need its documentation or body to know what it does. Avoid overloaded words that leave that feature to be guessed: prefer `isNonEmptyAfterTrimming` over `isNonBlank`, since “blank” can mean empty, whitespace-only, or unset.
+Name a thing after the domain concept it is. Don't name it after a workflow it takes part in, after who uses it, or after when it runs. Data that describes, configures or selects a concept takes that concept's name. Adding a noun to a workflow word doesn't fix the name: `signInMethod` and `signInConfig` still name the workflow.
+
+- An identity provider such as Clerk issues identity tokens. The server component that checks them doesn't provide identities, so it's the `IdentityTokenValidator`, not `IdentityProvider`. Only the operation that starts a session is `signIn`.
+- The validator that development builds use trusts whatever email it receives, so it's `layerEmailTrusting`, not `layerDev` or `layerLocal`. In Effect code, `testLayer` means a test double, so never give that name to a layer that production code selects.
+
+Use one name for one concept across contracts, server, web, scripts, flags, env vars, files and docs. When the same thing has two names, such as "test" and "local" for the provider above, pick the better one and rename the other everywhere. A poor existing name is a reason to rename it, not to match it.
+
+Reserve verbs for operations. A function or method name starts with a verb that says what it does: `makeFixture()`, not `fixture()`, and `makeInvalidIdentityToken(message)`, not `invalid(message)`. Values, types, modules and flags are nouns.
+
+A name carries the feature that sets the thing apart, in plain words, so a reader does not need its documentation or body to know what it does. Avoid overloaded words that leave that feature to be guessed: prefer `isNonEmptyAfterTrimming` over `isNonBlank`, since “blank” can mean empty, whitespace-only, or unset. Prefer `keyPair` over `keys` for a key pair, and `privateKeyPath` over `keyPath` when other keys are nearby.
 
 A boolean's name is the yes-or-no question it answers, starting with a verb such as `is`, `has`, `can`, or `should`; use `isConversational` instead of `conversational`.
 
@@ -46,3 +71,7 @@ A boolean's name is the yes-or-no question it answers, starting with a verb such
 Prefer inferred types over annotations; do not use `any`.
 
 Comments describe how a thing is used and explain important rationale that the code and its dependencies do not reveal.
+
+Reuse established UI primitives and the nearest equivalent implementation before introducing new markup or conventions. Keep helper inputs limited to variation required by actual callers.
+
+After a refactor, remove obsolete fields and configuration, and check that module names, comments, fixtures, and test titles describe the resulting behavior.
