@@ -112,7 +112,7 @@ export function StepAutomationsEditor({
         <DialogPopup closeButton={false}>
           <DialogHeader>
             <DialogTitle>Remove this automation?</DialogTitle>
-            <DialogDescription>Any running task for it will be cancelled.</DialogDescription>
+            <DialogDescription>Its current execution will be stopped.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={busy} />}>

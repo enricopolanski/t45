@@ -9,7 +9,6 @@ import * as Stream from "effect/Stream";
 
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
 import { FakeRunner } from "../runner/FakeRunner.testkit.ts";
-import { TaskService } from "../tasks/TaskService.ts";
 import * as WorkflowService from "../workflows/WorkflowService.ts";
 import { inputMessageId, rootSessionId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
@@ -167,28 +166,38 @@ describe("a chat's execution", () => {
   );
 
   it.effect(
-    "discards a failed execution's output and questions, keeps the saved disk, and ends without retrying",
+    "retains a failed execution's output and saved disk, clears questions, and ends without retrying",
     () =>
       Effect.gen(function* () {
-        const { runner, chatId, repository, events, ended, deliver, converse } = yield* setup;
+        const { runner, chats, chatId, root, repository, events, ended, deliver, converse } =
+          yield* setup;
         const reply = yield* converse("input-1", "Sum the receipts.");
         yield* deliver("input-2", "Then email it.");
-        const partial = runner.reply(chatId, "Emailing");
-        yield* Fixture.next(events, Fixture.showing(partial, "settled"));
+        const partial = runner.reply(chatId, "Emailing", { streaming: true });
+        yield* Fixture.next(events, Fixture.showing(partial, "live"));
         runner.ask(chatId);
         yield* Fixture.next(events, asking);
         runner.fail(chatId);
 
-        const snapshot = yield* Fixture.next(events, Fixture.isSnapshot);
-        const shown = snapshot.messages.map((each) => each.message.id);
-        assert.include(shown, reply);
-        assert.notInclude(shown, partial);
-        assert.deepEqual(snapshot.questions, []);
+        yield* Fixture.next(events, Fixture.showing(partial, "settled"));
+        assert.equal(yield* ended, "failed");
+        assert.equal(
+          (yield* chats.message(
+            { chatId, sessionId: root, messageId: SessionMessage.ID.make(partial) },
+            alice,
+          )).state,
+          "settled",
+        );
+        const rows = yield* repository.page(chatId, rootSessionId(chatId), null, 50);
+        assert.includeMembers(
+          rows.rows.map((row) => row.messageId),
+          [reply, partial],
+        );
+        assert.deepEqual(yield* repository.questions(chatId), []);
         assert.deepEqual(
-          snapshot.inputs.map((input) => input.inputId),
+          (yield* repository.executionInputs(chatId)).map((input) => input.inputId),
           ["input-2"],
         );
-        assert.equal(yield* ended, "failed");
         yield* runner.ended(chatId);
         assert.lengthOf(runner.executions, 2);
         assert.deepEqual(yield* repository.readDisk(chatId), disk);
@@ -212,25 +221,37 @@ describe("a chat's execution", () => {
   );
 
   it.effect(
-    "stops by ending its execution and discarding what it wrote, and the next execution sends the input again",
+    "stops its execution while retaining its output, and resends inputs missing from the saved disk",
     () =>
       Effect.gen(function* () {
-        const { runner, chats, chatId, events, ended, deliver } = yield* setup;
+        const { runner, chats, chatId, repository, events, ended, deliver } = yield* setup;
         yield* deliver("input-1", "Sort the files.");
         const unfinished = runner.reply(chatId, "Sorting", { streaming: true });
         yield* Fixture.next(events, Fixture.showing(unfinished, "live"));
 
         yield* chats.stop({ chatId }, alice);
+        yield* Fixture.next(events, Fixture.showing(unfinished, "settled"));
         assert.equal(yield* ended, "interrupted");
         yield* runner.ended(chatId);
-        const { messages, inputs } = yield* Fixture.next(events, Fixture.isSnapshot);
-        assert.deepEqual(messages, []);
+        assert.isNotNull(yield* repository.message(chatId, rootSessionId(chatId), unfinished));
+        assert.isNotEmpty(yield* repository.sessions(chatId));
         assert.deepEqual(
-          inputs.map((input) => input.inputId),
+          (yield* repository.executionInputs(chatId)).map((input) => input.inputId),
           ["input-1"],
         );
 
         yield* deliver("input-2", "Zip them too.");
+        assert.equal(
+          (yield* chats.message(
+            {
+              chatId,
+              sessionId: rootSessionId(chatId),
+              messageId: SessionMessage.ID.make(unfinished),
+            },
+            alice,
+          )).state,
+          "settled",
+        );
         assert.deepEqual(
           runner.executions.at(-1)?.messages.map((message) => message.id),
           messageIds(chatId, "input-1", "input-2"),
@@ -303,12 +324,7 @@ describe("a server start", () => {
       yield* repository.markRunning(chatId, at);
 
       const started = yield* Layer.build(
-        Layer.fresh(
-          WorkflowService.layer.pipe(
-            Layer.provideMerge(TaskService.layer),
-            Layer.provideMerge(ChatService.layer),
-          ),
-        ),
+        Layer.fresh(WorkflowService.layer.pipe(Layer.provideMerge(ChatService.layer))),
       );
       const events = yield* Fixture.follow(chatId, alice).pipe(Effect.provide(started));
       yield* Fixture.next(events, Fixture.showing(inputMessageId(chatId, "input-1"), "settled"));

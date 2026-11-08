@@ -32,7 +32,6 @@ import * as UserRepository from "./org/UserRepository.ts";
 import { UserService } from "./org/UserService.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { RunnerService } from "./runner/RunnerService.ts";
-import { TaskService } from "./tasks/TaskService.ts";
 import * as NotificationRepository from "./workflows/NotificationRepository.ts";
 import * as TicketRepository from "./workflows/TicketRepository.ts";
 import * as WorkflowDefinitionRepository from "./workflows/WorkflowDefinitionRepository.ts";
@@ -71,7 +70,6 @@ const InstanceDependencies = Layer.effect(UserService, UserService.make).pipe(
   Layer.provide(Authentication.layer),
   Layer.provideMerge(WorkflowService.layer),
   Layer.provideMerge(AutomationService.layer),
-  Layer.provideMerge(TaskService.layer),
   Layer.provideMerge(Org),
 );
 

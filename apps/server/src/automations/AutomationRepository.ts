@@ -1,6 +1,5 @@
 import { Schedule, Automation, type AutomationId } from "@t45/contracts/models/Automation";
 import { Chat, ChatStatus } from "@t45/contracts/models/Chat";
-import { TaskState } from "@t45/contracts/models/Task";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -22,7 +21,6 @@ const decodeSummaries = Schema.decodeUnknownEffect(
       lastRun: Schema.NullOr(
         Schema.fromJsonString(
           Schema.Struct({
-            state: TaskState,
             status: Schema.NullOr(ChatStatus),
             at: Chat.fields.lastActivityAt,
           }),
@@ -50,7 +48,7 @@ const make = Effect.gen(function* () {
 
   return {
     list: sql`SELECT ${columns}, (
-        SELECT json_object('state', json(o.state), 'status', c.status, 'at', c.updated_at)
+        SELECT json_object('status', c.status, 'at', c.updated_at)
         FROM chat_origins o JOIN chats c ON c.id = o.chat_id
         WHERE o.trigger IS NOT NULL AND json_extract(o.trigger, '$.type') = 'automation'
           AND json_extract(o.trigger, '$.automationId') = automations.id
@@ -65,14 +63,7 @@ const make = Effect.gen(function* () {
               ? null
               : {
                   at: lastRun.at,
-                  statusLabel:
-                    lastRun.state.type === "settled"
-                      ? lastRun.state.outcome.type === "succeeded"
-                        ? "Succeeded"
-                        : `${lastRun.state.outcome.type === "failed" ? "Failed" : "Cancelled"}: ${lastRun.state.outcome.reason}`
-                      : lastRun.status === "running"
-                        ? "Running"
-                        : "Stopped",
+                  statusLabel: lastRun.status === "running" ? "Running" : "Ended",
                 },
         })),
       ),

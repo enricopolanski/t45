@@ -55,8 +55,6 @@ export const ExecutionUpdate = Schema.Union([
     delta: Schema.String,
   }),
   Schema.TaggedStruct("questions", { forms: Schema.Array(Form.Info) }),
-  /** Before the messages that name it. */
-  Schema.TaggedStruct("file", { path: Schema.String, content: Schema.Uint8Array }),
   /** Keeps the call's connection from going idle while the agent waits. */
   Schema.TaggedStruct("heartbeat", {}),
   Schema.TaggedStruct("finished", {
@@ -83,6 +81,10 @@ export class QuestionGone extends Schema.TaggedError<QuestionGone>()("QuestionGo
 
 export class AnswerInvalid extends Schema.TaggedError<AnswerInvalid>()("AnswerInvalid", {}) {}
 
+export class FileUnavailable extends Schema.TaggedError<FileUnavailable>()("FileUnavailable", {
+  message: Schema.String,
+}) {}
+
 const question = { rootId: Session.ID, sessionId: Session.ID, formId: Form.ID };
 
 /** One execution per root session at a time; it lasts as long as its `execute` call. */
@@ -91,6 +93,15 @@ export const RunnerRpcs = RpcGroup.make(
     payload: ExecutionRequest,
     success: ExecutionUpdate,
     stream: true,
+  }),
+  Rpc.make("readFile", {
+    payload: {
+      rootId: Session.ID,
+      path: Schema.String,
+      maxBytes: Schema.Int.check(Schema.isGreaterThan(0)),
+    },
+    success: Schema.Struct({ name: Schema.String, content: Schema.Uint8Array }),
+    error: FileUnavailable,
   }),
   Rpc.make("writeFiles", { payload: { rootId: Session.ID, files: Files } }),
   Rpc.make("send", { payload: { rootId: Session.ID, message: Message, files: Files } }),

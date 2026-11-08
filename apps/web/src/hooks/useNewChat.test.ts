@@ -13,7 +13,7 @@ const SUBAGENT = Session.ID.make("ses_child");
 
 it.effect.each([
   { title: "the conversational agent on screen", conversational: true },
-  { title: "an eligible fallback for a task-only agent", conversational: false },
+  { title: "an eligible fallback for an automation-only agent", conversational: false },
 ])("opens a new chat with $title", ({ conversational }) =>
   Effect.gen(function* () {
     const fake = yield* makeFakeApi;

@@ -35,10 +35,8 @@ export type Receive = (
     | {
         readonly type: "messages";
         readonly messages: ReadonlyArray<SessionMessage.Info>;
-        /** The files the agent's tools left for T45, by path. */
-        readonly generated: ReadonlyMap<string, Uint8Array>;
       }
-    | { readonly type: "ended"; readonly status: "failed" | null }
+    | { readonly type: "ended" }
   ),
 ) => Effect.Effect<void>;
 
@@ -59,8 +57,8 @@ interface Owner {
 
 /**
  * One execution at a time per chat while it is owed one. It starts from the agent's current setup,
- * the disk the last finished execution left, and the inputs the agent hasn't taken; what an
- * execution that doesn't finish wrote is discarded.
+ * the disk the last finished execution left, and inputs missing from that disk. Stored messages
+ * and sessions are retained when execution stops or fails.
  */
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -105,11 +103,25 @@ export const make = Effect.gen(function* () {
         .pipe(Effect.map((content) => [PromptService.attachmentFile(id), content] as const)),
     ).pipe(Effect.map(Object.fromEntries), Effect.orDie);
 
-  const discard = (chatId: ChatId) =>
+  const clearQuestions = (chatId: ChatId) =>
     Effect.gen(function* () {
-      if (yield* repository.discardUncommitted(chatId)) {
-        yield* changes.publish({ chatId, kind: "replaced" });
+      if (yield* repository.setQuestions(chatId, [])) yield* publish(chatId, "questions");
+    });
+
+  const settleMessages = (chatId: ChatId) =>
+    Effect.gen(function* () {
+      const settled = yield* repository.settleMessages(chatId);
+      const sessions = new Map<string, Array<string>>();
+      for (const { sessionId, messageId } of settled) {
+        const ids = sessions.get(sessionId) ?? [];
+        ids.push(messageId);
+        sessions.set(sessionId, ids);
       }
+      yield* sql.afterCommit(
+        Effect.forEach(sessions, ([sessionId, messageIds]) =>
+          changes.publish({ kind: "messages", chatId, sessionId, messageIds }),
+        ),
+      );
     });
 
   /** Commits what a finished execution wrote; the chat stays owed while an input is pending. */
@@ -118,6 +130,7 @@ export const make = Effect.gen(function* () {
       .withTransaction(
         Effect.gen(function* () {
           if ((yield* repository.get(chatId))?.status !== "running") return;
+          yield* settleMessages(chatId);
           if (disk !== undefined) {
             // SQL rollback cannot undo this replacement; a failed commit can leave the disk ahead of the rows.
             yield* repository.saveDisk(chatId, disk);
@@ -125,7 +138,7 @@ export const make = Effect.gen(function* () {
             if ((yield* repository.pendingInputs(chatId)).length > 0) return;
           }
           yield* repository.setStatus(chatId, status, yield* nowIso);
-          yield* receive({ chatId, type: "ended", status });
+          yield* receive({ chatId, type: "ended" });
           yield* sql.afterCommit(publish(chatId, "chat"));
         }),
       )
@@ -135,7 +148,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const agent = (yield* agents.get(chat.agentId))!;
       const origin = yield* repository.origins.get(chat.id);
-      const inputs = yield* repository.pendingInputs(chat.id);
+      const inputs = yield* repository.executionInputs(chat.id);
       const workflow =
         origin?.kind === "conversation" && origin.workflowId !== null
           ? yield* workflows.get(origin.workflowId)
@@ -185,13 +198,12 @@ export const make = Effect.gen(function* () {
       )
       .pipe(Effect.orDie);
 
-  /** No automatic retry: discarded chat output may already have caused workflow or external tool effects. */
+  /** No automatic retry: chat output may already have caused workflow or external tool effects. */
   const execute = (chat: Chat, receive: Receive) =>
     Effect.gen(function* () {
       const chatId = chat.id;
-      yield* discard(chatId);
+      yield* clearQuestions(chatId);
       const request = yield* requestOf(chat);
-      const generated = new Map<string, Uint8Array>();
       const handle = (event: ExecutionUpdate): Effect.Effect<void> => {
         switch (event._tag) {
           case "sessions":
@@ -218,7 +230,6 @@ export const make = Effect.gen(function* () {
                 chatId,
                 type: "messages",
                 messages: event.messages.filter((message) => written.has(message.id)),
-                generated,
               });
               yield* changes.publish({
                 chatId,
@@ -235,8 +246,6 @@ export const make = Effect.gen(function* () {
               .pipe(
                 Effect.flatMap((changed) => (changed ? publish(chatId, "questions") : Effect.void)),
               );
-          case "file":
-            return Effect.sync(() => void generated.set(event.path, event.content));
           case "heartbeat":
             return Effect.void;
           case "finished":
@@ -253,13 +262,13 @@ export const make = Effect.gen(function* () {
               chatId: chat.id,
               cause,
             });
-            yield* discard(chat.id);
+            yield* clearQuestions(chat.id);
             yield* end(chat.id, receive, "failed");
           }),
       ),
     );
 
-  /** A stop ends the current execution and discards what it wrote. */
+  /** A stop ends the current execution and clears its transient questions. */
   const own = (chatId: ChatId, owner: Owner) =>
     Effect.gen(function* () {
       const receive = yield* Deferred.await(receiver);
@@ -271,7 +280,7 @@ export const make = Effect.gen(function* () {
           Effect.raceFirst(Deferred.await(owner.stop).pipe(Effect.as(true))),
         );
         if (stopped) {
-          yield* discard(chatId);
+          yield* clearQuestions(chatId);
           owner.stop = yield* Deferred.make<void>();
         }
       }
@@ -305,6 +314,7 @@ export const make = Effect.gen(function* () {
 
   return {
     deliver,
+    settleMessages,
     filesOf,
     consume: (receive: Receive) => Deferred.succeed(receiver, receive),
     /** The owner runs again only for an input posted since. */

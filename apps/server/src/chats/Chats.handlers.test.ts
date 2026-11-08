@@ -122,7 +122,7 @@ it.effect("answers NotFound for a deleted chat, even to its owner", () =>
   }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
 );
 
-it.effect("keeps task chats internal for members and admins", () =>
+it.effect("keeps automation chats internal for members and admins", () =>
   Effect.gen(function* () {
     yield* seed;
     const member = yield* clientFor("user-alice", "member");

@@ -134,6 +134,22 @@ describe("applyChatEvent", () => {
       snapshotEvent([live("msg_1", [{ type: "text", text: "" }])]),
     );
     expect(text(reconnected)).toEqual([{ type: "text", text: "Hello" }]);
+    const stopped = applyChatEvent(reconnected, {
+      _tag: "messages",
+      messages: [assistantMessage("msg_1", [{ type: "text", text: "" }], { completed: false })],
+    });
+    expect(loaded(stopped).messages[0]?.state).toBe("settled");
+    expect(text(stopped)).toEqual([{ type: "text", text: "Hello" }]);
+    expect(
+      text(
+        applyChatEvent(
+          stopped,
+          snapshotEvent([
+            assistantMessage("msg_1", [{ type: "text", text: "" }], { completed: false }),
+          ]),
+        ),
+      ),
+    ).toEqual([{ type: "text", text: "Hello" }]);
     const ended = applyChatEvent(reconnected, {
       _tag: "messages",
       messages: [live("msg_1", [{ type: "text", text: "Hello there" }])],

@@ -6,6 +6,7 @@ import {
   type ExecutionRequest,
   type ExecutionUpdate,
   RunnerRpcs,
+  FileUnavailable,
 } from "@t45/contracts/resources/Runner";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -161,6 +162,7 @@ const make = () => {
           );
         }),
       ),
+    readFile: () => Effect.fail(new FileUnavailable({ message: "The file could not be found." })),
     writeFiles: (payload) => Effect.sync(() => void fake.fileWrites.push(payload)),
     send: (payload) =>
       Effect.sync(() => {

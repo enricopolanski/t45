@@ -6,12 +6,12 @@ export const NotificationId = makeId("NotificationId");
 export type NotificationId = typeof NotificationId.Type;
 
 /**
- * Why something landed in My work: a step to do or a failed agent's step; or, for a workflow's
+ * Why something landed in My work: a step to do or a step whose automation ended; or, for a workflow's
  * admins, a workflow that needs a new responsible or names a deactivated person.
  */
 export const NotificationKind = Schema.Literals([
   "to_do",
-  "agent_failed",
+  "automation_ended",
   "needs_responsible",
   "names_deactivated",
 ]);

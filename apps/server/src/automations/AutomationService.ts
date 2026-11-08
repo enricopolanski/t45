@@ -26,7 +26,7 @@ import {
   verifySignature,
   type WebhookRequest,
 } from "./webhook.ts";
-import { TaskService } from "../tasks/TaskService.ts";
+import { ChatService } from "../chats/ChatService.ts";
 
 /** Requests per hook per minute, counted before the enabled and signature checks. */
 const WEBHOOK_RATE_LIMIT_PER_MINUTE = 60;
@@ -58,7 +58,7 @@ const refusalOf = (run: Result.Result<ChatId, ChatRefused>) =>
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const automations = yield* AutomationRepository.AutomationRepository;
-  const tasks = yield* TaskService;
+  const chats = yield* ChatService;
   const rateWindows = yield* Ref.make<
     ReadonlyMap<AutomationId, { readonly start: number; readonly count: number }>
   >(new Map());
@@ -73,12 +73,12 @@ const make = Effect.gen(function* () {
     );
 
   const postRun = (automation: Automation, text: string) =>
-    tasks
-      .start({ type: "automation", automationId: automation.id }, automation.agentId, {
+    chats
+      .startAutomation({ type: "automation", automationId: automation.id }, automation.agentId, {
         title: automation.title,
         input: { text, attachments: [] },
       })
-      .pipe(Effect.result);
+      .pipe(Effect.catchTags({ NotFound: Effect.die }), Effect.result);
 
   const recordRun = (automation: Automation, text: string) =>
     Effect.gen(function* () {

@@ -17,7 +17,7 @@ import {
   titleOf,
   type Chat,
 } from "@t45/contracts/models/Chat";
-import type { ChatOrigin } from "@t45/contracts/models/Task";
+import type { ChatOrigin, Trigger } from "@t45/contracts/models/ChatOrigin";
 import type { Role } from "@t45/contracts/models/User";
 import { StringId } from "@t45/contracts/models/primitives";
 import {
@@ -31,8 +31,8 @@ import {
   type Chats,
 } from "@t45/contracts/resources/Chats";
 import { NotFound } from "@t45/contracts/resources/errors";
-import { isSettled } from "@t45/contracts/resources/Runner";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -71,7 +71,7 @@ interface Start {
   readonly title: string | null;
   readonly origin: ChatOrigin;
 }
-export interface Post {
+interface Post {
   readonly chatId: ChatId;
   readonly inputId: InputId;
   readonly from: string | null;
@@ -123,7 +123,7 @@ const readMessage = (
     );
     return {
       sessionId: Session.ID.make(sessionId),
-      state: isSettled(message) ? "settled" : "live",
+      state: row.isLive === 1 ? "live" : "settled",
       isTruncated: flag.cut,
       message,
     } satisfies ChatMessage;
@@ -139,6 +139,7 @@ const readBytes = (message: ChatMessage) =>
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const crypto = yield* Crypto.Crypto;
   const transaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     sql.withTransaction(effect).pipe(Effect.catchTags({ SqlError: Effect.die }));
   const repository = yield* ChatRepository.ChatRepository;
@@ -217,8 +218,10 @@ const make = Effect.gen(function* () {
 
   /** Recorded as interrupted at once, so a server start doesn't run it again. */
   const requestStop = Effect.fnUntraced(function* (chatId: ChatId) {
-    if (!(yield* repository.setStatus(chatId, "interrupted", null))) return;
+    if (!(yield* repository.setStatus(chatId, "interrupted", yield* nowIso))) return false;
+    yield* executions.settleMessages(chatId);
     yield* sql.afterCommit(publish(chatId, "chat").pipe(Effect.andThen(executions.stop(chatId))));
+    return true;
   }, transaction);
 
   /** Stops what runs for a deleted chat, then removes its files, disk and copy. */
@@ -339,8 +342,21 @@ const make = Effect.gen(function* () {
   }, transaction);
 
   return {
-    post,
-    remove,
+    startAutomation: Effect.fnUntraced(function* (
+      trigger: Trigger,
+      agentId: string,
+      { title, input }: { readonly title: string; readonly input: InputPayload },
+    ) {
+      const chatId = ChatId.make(yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+      yield* post({
+        chatId,
+        inputId: InputId.make(yield* crypto.randomUUIDv4().pipe(Effect.orDie)),
+        from: null,
+        input,
+        start: { agentId, title, origin: { kind: "automation", chatId, trigger } },
+      });
+      return chatId;
+    }),
     requestStop,
     consume: executions.consume,
     listTargets: (member: Member) =>
@@ -428,7 +444,6 @@ const make = Effect.gen(function* () {
           ): Effect.Effect<ReadonlyArray<ChatEvent>, ChatErrors> => {
             switch (change.kind) {
               case "missed":
-              case "replaced":
                 return snapshotOf.pipe(Effect.map((snapshot) => [snapshot]));
               case "deleted":
                 return Effect.fail(notFound());

@@ -23,8 +23,8 @@ import { FakeRunner } from "../runner/FakeRunner.testkit.ts";
 import * as AutomationRepository from "./AutomationRepository.ts";
 import * as AutomationService from "./AutomationService.ts";
 import * as AutomationsHandlers from "./Automations.handlers.ts";
-import { TaskService } from "../tasks/TaskService.ts";
-type Run = Parameters<TaskService["Service"]["start"]>[2];
+import { ChatService } from "../chats/ChatService.ts";
+type Run = Parameters<ChatService["Service"]["startAutomation"]>[2];
 
 const AT = "2026-09-09T12:00:00.000Z";
 const at = DateTime.makeUnsafe(AT);
@@ -36,8 +36,8 @@ const CLERK = "agent-clerk";
 const RETIRED = "agent-retired";
 
 const iso = (value: DateTime.Utc | null) => (value === null ? null : DateTime.formatIso(value));
-const encodeTask = Schema.encodeSync(Schema.toCodecJson(Automation));
-const runTitle = (automationId: string) => `Task ${automationId}`;
+const encodeAutomation = Schema.encodeSync(Schema.toCodecJson(Automation));
+const runTitle = (automationId: string) => `Automation ${automationId}`;
 
 const layerStore = AutomationRepository.layer.pipe(Layer.provideMerge(layerChats));
 
@@ -49,12 +49,12 @@ const seed = Effect.gen(function* () {
   yield* addAgent("Retired", { status: "archived" });
 });
 
-const addTask = (id: string, fields: Partial<Automation> = {}) =>
+const addAutomation = (id: string, fields: Partial<Automation> = {}) =>
   Effect.gen(function* () {
     const automations = yield* AutomationRepository.AutomationRepository;
     const automation: Automation = {
       id: AutomationId.make(id),
-      title: `Task ${id}`,
+      title: `Automation ${id}`,
       prompt: `Run ${id}`,
       agentId: CLERK,
       isEnabled: true,
@@ -115,7 +115,7 @@ const runOf = (chatId: ChatId) =>
     };
   });
 
-const tasksWithRuns = Effect.gen(function* () {
+const automationsWithRuns = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runs = yield* sql<{
     readonly title: string;
@@ -123,18 +123,18 @@ const tasksWithRuns = Effect.gen(function* () {
   return runs.map((chat) => chat.title);
 });
 
-const layerTasks = (afterPost: (run: Run) => Effect.Effect<void> = () => Effect.void) =>
+const layerAutomations = (afterPost: (run: Run) => Effect.Effect<void> = () => Effect.void) =>
   AutomationsHandlers.layer.pipe(
     Layer.provideMerge(AutomationService.layer),
     Layer.provide(
       Layer.effect(
-        TaskService,
+        ChatService,
         Effect.gen(function* () {
-          const posts = yield* TaskService;
-          return TaskService.of({
-            ...posts,
-            start: (trigger, agentId, run) =>
-              posts.start(trigger, agentId, run).pipe(Effect.tap(() => afterPost(run))),
+          const chats = yield* ChatService;
+          return ChatService.of({
+            ...chats,
+            startAutomation: (trigger, agentId, run) =>
+              chats.startAutomation(trigger, agentId, run).pipe(Effect.tap(() => afterPost(run))),
           });
         }),
       ),
@@ -161,18 +161,18 @@ const clientAs = (role: "admin" | "member") =>
 it.effect("posts a due slot to a new chat with no owner, then advances the slot", () =>
   Effect.gen(function* () {
     yield* seed;
-    yield* addTask("due");
-    yield* addTask("zz-sentinel");
+    yield* addAutomation("due");
+    yield* addAutomation("zz-sentinel");
     yield* TestClock.setTime(DateTime.toEpochMillis(at) + 1_000);
     const takeRun = yield* followRuns;
-    yield* Layer.build(layerTasks());
+    yield* Layer.build(layerAutomations());
 
     const run = yield* takeRun();
     assert.deepEqual((yield* takeRun()).title, runTitle("zz-sentinel"));
     assert.deepEqual(yield* runOf(run.chatId), {
-      origin: "task",
+      origin: "automation",
       agentId: CLERK,
-      title: "Task due",
+      title: "Automation due",
       inputs: [{ text: "Run due", attachments: [] }],
     });
     const automation = yield* get("due");
@@ -186,15 +186,15 @@ it.effect(
   () =>
     Effect.gen(function* () {
       yield* seed;
-      yield* addTask("due");
-      yield* addTask("zz-sentinel");
+      yield* addAutomation("due");
+      yield* addAutomation("zz-sentinel");
       yield* TestClock.setTime(DateTime.toEpochMillis(at) + 1_000);
       const takeRun = yield* followRuns;
 
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Layer.build(
-            layerTasks((run) =>
+            layerAutomations((run) =>
               run.input.text === "Run due"
                 ? Effect.die("The server stopped before the slot's commit")
                 : Effect.void,
@@ -203,12 +203,12 @@ it.effect(
           assert.deepEqual((yield* takeRun()).title, runTitle("zz-sentinel"));
         }),
       );
-      assert.deepEqual(yield* tasksWithRuns, [runTitle("zz-sentinel")]);
+      assert.deepEqual(yield* automationsWithRuns, [runTitle("zz-sentinel")]);
       assert.equal(iso((yield* get("due")).nextRunAt), AT);
 
-      yield* Layer.build(layerTasks());
+      yield* Layer.build(layerAutomations());
       assert.deepEqual((yield* takeRun()).title, runTitle("due"));
-      assert.deepEqual(yield* tasksWithRuns, [runTitle("due"), runTitle("zz-sentinel")]);
+      assert.deepEqual(yield* automationsWithRuns, [runTitle("due"), runTitle("zz-sentinel")]);
       assert.equal(iso((yield* get("due")).nextRunAt), "2026-09-09T12:01:01.000Z");
     }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
@@ -218,12 +218,12 @@ it.effect("re-reads each due automation, so one paused or postponed meanwhile do
     yield* seed;
     const automations = yield* AutomationRepository.AutomationRepository;
     for (const id of ["a-first", "b-paused", "c-postponed", "zz-sentinel"]) {
-      yield* addTask(id);
+      yield* addAutomation(id);
     }
     yield* TestClock.setTime(DateTime.toEpochMillis(at) + 1_000);
     const takeRun = yield* followRuns;
     yield* Layer.build(
-      layerTasks((run) =>
+      layerAutomations((run) =>
         run.input.text === "Run a-first"
           ? Effect.gen(function* () {
               yield* automations.modify(AutomationId.make("b-paused"), (automation) =>
@@ -249,18 +249,18 @@ it.effect("skips a fixed-time slot missed by over 10 minutes and runs one within
   Effect.gen(function* () {
     yield* seed;
     const now = DateTime.makeUnsafe("2026-07-01T09:11:00.000Z");
-    yield* addTask("missed", {
+    yield* addAutomation("missed", {
       schedule: daily("09:00"),
       nextRunAt: DateTime.makeUnsafe("2026-07-01T09:00:00.000Z"),
     });
-    yield* addTask("late", {
+    yield* addAutomation("late", {
       schedule: daily("09:02"),
       nextRunAt: DateTime.makeUnsafe("2026-07-01T09:02:00.000Z"),
     });
-    yield* addTask("zz-sentinel", { nextRunAt: now });
+    yield* addAutomation("zz-sentinel", { nextRunAt: now });
     yield* TestClock.setTime(DateTime.toEpochMillis(now));
     const takeRun = yield* followRuns;
-    yield* Layer.build(layerTasks());
+    yield* Layer.build(layerAutomations());
 
     assert.deepEqual(
       [(yield* takeRun()).title, (yield* takeRun()).title],
@@ -274,11 +274,11 @@ it.effect("skips a fixed-time slot missed by over 10 minutes and runs one within
 it.effect("catches an overdue interval up with one run, its next slot counted from now", () =>
   Effect.gen(function* () {
     yield* seed;
-    yield* addTask("overdue", { nextRunAt: DateTime.subtract(at, { hours: 1 }) });
-    yield* addTask("zz-sentinel");
+    yield* addAutomation("overdue", { nextRunAt: DateTime.subtract(at, { hours: 1 }) });
+    yield* addAutomation("zz-sentinel");
     yield* TestClock.setTime(DateTime.toEpochMillis(at));
     const takeRun = yield* followRuns;
-    yield* Layer.build(layerTasks());
+    yield* Layer.build(layerAutomations());
 
     assert.deepEqual((yield* takeRun()).title, runTitle("overdue"));
     yield* takeRun();
@@ -289,11 +289,11 @@ it.effect("catches an overdue interval up with one run, its next slot counted fr
 it.effect("records a refused run's message and still advances its slot", () =>
   Effect.gen(function* () {
     yield* seed;
-    yield* addTask("too-long", { prompt: "x".repeat(120_001) });
-    yield* addTask("zz-sentinel");
+    yield* addAutomation("too-long", { prompt: "x".repeat(120_001) });
+    yield* addAutomation("zz-sentinel");
     yield* TestClock.setTime(DateTime.toEpochMillis(at));
     const takeRun = yield* followRuns;
-    yield* Layer.build(layerTasks());
+    yield* Layer.build(layerAutomations());
 
     assert.deepEqual((yield* takeRun()).title, runTitle("zz-sentinel"));
     const tooLong = yield* get("too-long");
@@ -307,11 +307,11 @@ it.effect(
   () =>
     Effect.gen(function* () {
       yield* seed;
-      yield* addTask("retired", { agentId: RETIRED });
-      yield* addTask("zz-sentinel");
+      yield* addAutomation("retired", { agentId: RETIRED });
+      yield* addAutomation("zz-sentinel");
       yield* TestClock.setTime(DateTime.toEpochMillis(at));
       const takeRun = yield* followRuns;
-      yield* Layer.build(layerTasks());
+      yield* Layer.build(layerAutomations());
 
       assert.deepEqual((yield* takeRun()).title, runTitle("zz-sentinel"));
       const retired = yield* get("retired");
@@ -324,14 +324,16 @@ it.effect("Run now posts the prompt to a new chat and leaves the next slot alone
   Effect.gen(function* () {
     yield* seed;
     const due = DateTime.add(at, { minutes: 1 });
-    yield* addTask("report", { nextRunAt: due, lastError: "This message is too long." });
-    yield* addTask("retired", { agentId: RETIRED, nextRunAt: due });
-    yield* addTask("hook", {
+    yield* addAutomation("report", { nextRunAt: due, lastError: "This message is too long." });
+    yield* addAutomation("retired", { agentId: RETIRED, nextRunAt: due });
+    yield* addAutomation("hook", {
       schedule: { type: "webhook", signature: null },
       webhookToken: "token",
       nextRunAt: null,
     });
-    const admin = yield* clientAs("admin").pipe(Effect.provide(yield* Layer.build(layerTasks())));
+    const admin = yield* clientAs("admin").pipe(
+      Effect.provide(yield* Layer.build(layerAutomations())),
+    );
 
     const nextRun = yield* followRuns;
     yield* admin["automations.runNow"]({
@@ -339,9 +341,9 @@ it.effect("Run now posts the prompt to a new chat and leaves the next slot alone
     });
     const { chatId } = yield* nextRun();
     assert.deepEqual(yield* runOf(chatId), {
-      origin: "task",
+      origin: "automation",
       agentId: CLERK,
-      title: "Task report",
+      title: "Automation report",
       inputs: [{ text: "Run report", attachments: [] }],
     });
     const report = yield* get("report");
@@ -367,12 +369,14 @@ it.effect("Run now posts the prompt to a new chat and leaves the next slot alone
 it.effect("refuses members on every tag before reading or changing an automation", () =>
   Effect.gen(function* () {
     yield* seed;
-    const automation = yield* addTask("guarded", {
+    const automation = yield* addAutomation("guarded", {
       schedule: { type: "webhook", signature: null },
       webhookToken: "token",
       nextRunAt: null,
     });
-    const member = yield* clientAs("member").pipe(Effect.provide(yield* Layer.build(layerTasks())));
+    const member = yield* clientAs("member").pipe(
+      Effect.provide(yield* Layer.build(layerAutomations())),
+    );
     const { id } = automation;
     const settings = {
       title: "Mine now",
@@ -393,14 +397,16 @@ it.effect("refuses members on every tag before reading or changing an automation
       refused.map((error) => error._tag),
       refused.map(() => "AccessDenied"),
     );
-    assert.deepEqual(encodeTask(yield* get("guarded")), encodeTask(automation));
+    assert.deepEqual(encodeAutomation(yield* get("guarded")), encodeAutomation(automation));
   }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
 it.effect("keeps the next run through a title edit and restarts it when the schedule changes", () =>
   Effect.gen(function* () {
     yield* seed;
-    const admin = yield* clientAs("admin").pipe(Effect.provide(yield* Layer.build(layerTasks())));
+    const admin = yield* clientAs("admin").pipe(
+      Effect.provide(yield* Layer.build(layerAutomations())),
+    );
     const settings = {
       title: "Review",
       prompt: "Review the open pull requests.",
@@ -444,7 +450,9 @@ it.effect("keeps the next run through a title edit and restarts it when the sche
 it.effect("mints a webhook's token, rotates it, and keeps the rotated one through a save", () =>
   Effect.gen(function* () {
     yield* seed;
-    const admin = yield* clientAs("admin").pipe(Effect.provide(yield* Layer.build(layerTasks())));
+    const admin = yield* clientAs("admin").pipe(
+      Effect.provide(yield* Layer.build(layerAutomations())),
+    );
     const settings = {
       title: "Review PRs",
       prompt: "Review {{body.pull_request.url}}",
@@ -477,7 +485,9 @@ it.effect("mints a webhook's token, rotates it, and keeps the rotated one throug
 it.effect("refuses an archived agent, and answers NotFound for an unknown automation", () =>
   Effect.gen(function* () {
     yield* seed;
-    const admin = yield* clientAs("admin").pipe(Effect.provide(yield* Layer.build(layerTasks())));
+    const admin = yield* clientAs("admin").pipe(
+      Effect.provide(yield* Layer.build(layerAutomations())),
+    );
     const settings = {
       title: "Review",
       prompt: "Review the open pull requests.",

@@ -2,6 +2,7 @@ import { type Form, Model, OpenCode, Session, SessionMessage } from "@opencode/c
 import type { OpenCodeEvent } from "@opencode/protocol/groups/event";
 import {
   AnswerInvalid,
+  FileUnavailable,
   type ExecutionRequest,
   type ExecutionUpdate,
   isSettled,
@@ -127,12 +128,11 @@ class PendingReads {
 
 /**
  * Turns the events' hints into authoritative emits: the chat's sessions, each session's new or
- * changed messages with the files the agent generated, and the open questions. It remembers what
+ * changed messages and the open questions. It remembers what
  * it read so a pass only emits what changed, and tells when OpenCode has finished everything.
  */
 const createOpencodeReader = (
   client: OpencodeClient,
-  readNewGenerated: Effect.Success<ReturnType<typeof SandboxManager.start>>["readNewGenerated"],
   rootId: Session.ID,
   emit: (event: ExecutionUpdate) => Effect.Effect<void>,
 ) => {
@@ -208,7 +208,6 @@ const createOpencodeReader = (
         if (typeof child === "string") add(reports, child, message.id);
       }
     }
-    for (const file of yield* readNewGenerated) yield* emit({ _tag: "file", ...file });
     yield* emit({ _tag: "messages", sessionId: sessionID, messages });
   });
 
@@ -244,6 +243,7 @@ export const layer = RunnerRpcs.toLayer(
       string,
       {
         readonly opencodeClient: OpencodeClient;
+        readonly readFile: Effect.Success<ReturnType<typeof SandboxManager.start>>["readFile"];
         readonly writeFiles: (
           files: ExecutionRequest["files"],
         ) => Effect.Effect<void, SandboxManager.SandboxError>;
@@ -269,7 +269,7 @@ export const layer = RunnerRpcs.toLayer(
 
       const eventsStream = opencodeClient.event.subscribe();
 
-      const reader = createOpencodeReader(opencodeClient, sandbox.readNewGenerated, rootId, emit);
+      const reader = createOpencodeReader(opencodeClient, rootId, emit);
       let pendingReads = new PendingReads(true, true);
 
       const writeFiles = (files: ExecutionRequest["files"]) =>
@@ -301,7 +301,7 @@ export const layer = RunnerRpcs.toLayer(
             delivery: "queue",
           });
         }
-        const execution = { opencodeClient, writeFiles };
+        const execution = { opencodeClient, writeFiles, readFile: sandbox.readFile };
         activeExecutions.set(rootId, execution);
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
@@ -384,6 +384,13 @@ export const layer = RunnerRpcs.toLayer(
             Effect.andThen(Queue.end(queue)),
           ),
         ),
+      readFile: ({ rootId, path, maxBytes }) =>
+        Effect.suspend(() => {
+          const execution = activeExecutions.get(rootId);
+          return execution === undefined
+            ? Effect.fail(new FileUnavailable({ message: "The execution has ended." }))
+            : execution.readFile(path, maxBytes);
+        }),
       // Workflow tools wait on these writes; delivering a reply must not require another OpenCode event.
       writeFiles: ({ rootId, files }) =>
         Effect.suspend(() => {

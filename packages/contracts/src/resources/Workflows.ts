@@ -18,6 +18,7 @@ import {
   Workflow,
   WorkflowDefinition,
 } from "../models/Workflow.ts";
+import { Refused as ChatRefused } from "../models/Chat.ts";
 import { NotFound } from "./errors.ts";
 
 export const WorkflowErrors = Schema.Union([WorkflowRefused, NotFound]);
@@ -234,7 +235,7 @@ export const Workflows = RpcGroup.make(
   }),
   Rpc.make("runStepAutomation", {
     payload: { ...step, automationId: StringId },
-    error: WorkflowErrors,
+    error: Schema.Union([WorkflowErrors, ChatRefused]),
   }),
   Rpc.make("stopStepAutomation", {
     payload: { ...step, automationId: StringId },

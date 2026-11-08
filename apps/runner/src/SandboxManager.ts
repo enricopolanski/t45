@@ -1,7 +1,7 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { Config as OpenCodeConfig } from "@opencode/schema/config";
 import { T45_TOOLS_DIR } from "@t45/contracts/models/Agent";
-import type { ExecutionRequest } from "@t45/contracts/resources/Runner";
+import { FileUnavailable, type ExecutionRequest } from "@t45/contracts/resources/Runner";
 import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -35,11 +35,8 @@ const LIMITS = { cpus: 2, memoryMib: 2048, diskMib: 4096 };
 const DISK = "disk.raw";
 const ARCHIVE = "disk.tgz";
 
-/** Written again at every start, or left by the step tools for the last execution. */
+/** Written again at every start, including transient tool replies. */
 const STALE = ["/work/.opencode/skills", "/work/.t45", T45_TOOLS_DIR];
-
-/** Where the step tools leave the files they generate for T45. */
-const GENERATED = "/work/.t45/attached";
 
 /** The SDK types its network setter loosely; this is what it hands the callback. */
 type NetworkSettings = InstanceType<typeof NetworkBuilder>;
@@ -228,25 +225,40 @@ export const start = Effect.fn("SandboxManager.start")(function* (
         .env("OPENCODE_PASSWORD", Redacted.value(password)),
     ),
   );
-  const returned = new Set<string>();
   return {
     port: hostPort,
     password,
     write: (path: string, content: Uint8Array) => write(vm, `/work/${path}`, content),
-    /** The files in GENERATED it hasn't returned yet, each by its path under /work. */
-    readNewGenerated: Effect.gen(function* () {
-      const fs = vm.fs();
-      // The step tools make it as the agent, who couldn't write into one made here as root.
-      if (!(yield* sdk("exists", () => fs.exists(GENERATED)))) return [];
-      const files: Array<{ path: string; content: Uint8Array }> = [];
-      for (const entry of yield* sdk("list", () => fs.list(GENERATED))) {
-        if (entry.kind !== "file" || returned.has(entry.path)) continue;
-        returned.add(entry.path);
-        const content = yield* sdk("read", () => fs.read(entry.path));
-        files.push({ path: entry.path.slice("/work/".length), content });
-      }
-      return files;
-    }),
+    /** Reads a file inside the workspace, including its real name after resolving symlinks. */
+    readFile: (path: string, maxBytes: number) =>
+      Effect.gen(function* () {
+        const target = path.startsWith("/") ? path : `/work/${path}`;
+        const resolved = yield* sdk("realpath", () => vm.exec("realpath", ["--", target]));
+        if (!resolved.success)
+          return yield* new FileUnavailable({ message: "The file could not be found." });
+        const realPath = resolved.stdout().trimEnd();
+        if (!realPath.startsWith("/work/"))
+          return yield* new FileUnavailable({
+            message: "The file must be in your working folder.",
+          });
+        const fs = vm.fs();
+        const info = yield* sdk("stat", () => fs.stat(realPath));
+        if (info.kind !== "file" || info.size > maxBytes)
+          return yield* new FileUnavailable({
+            message: `Attach a file of at most ${maxBytes} bytes.`,
+          });
+        const content = yield* sdk("read", () => fs.read(realPath));
+        if (content.byteLength > maxBytes)
+          return yield* new FileUnavailable({
+            message: `Attach a file of at most ${maxBytes} bytes.`,
+          });
+        return { name: realPath.slice(realPath.lastIndexOf("/") + 1), content };
+      }).pipe(
+        Effect.catchTags({
+          SandboxError: () =>
+            Effect.fail(new FileUnavailable({ message: "The file could not be read." })),
+        }),
+      ),
     // Only a removed VM has flushed its disk.
     save: remove.pipe(Effect.andThen(disk.save)),
   };

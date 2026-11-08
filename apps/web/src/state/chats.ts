@@ -80,7 +80,7 @@ function withDelta<Part extends NativeAssistantPart>(
 }
 
 /**
- * A new copy of a live assistant message, keeping the text the browser streamed past it: OpenCode
+ * A new copy of an unfinished native assistant message, keeping the text the browser streamed past it: OpenCode
  * writes a part's text into its copy only once the part ends, so a part with text is final unless
  * the read cut it. Parts match by kind and order; one streamed that the copy doesn't have yet stays
  * at the end. Any other copy wins as it is.
@@ -89,7 +89,8 @@ function keepStreamed(
   streamed: ReadonlyArray<NativeAssistantPart>,
   incoming: ChatMessage,
 ): ChatMessage {
-  if (incoming.state !== "live" || incoming.message.type !== "assistant") return incoming;
+  if (incoming.message.type !== "assistant" || incoming.message.time.completed !== undefined)
+    return incoming;
   const local = {
     text: streamed.filter((part) => part.type === "text"),
     reasoning: streamed.filter((part) => part.type === "reasoning"),
@@ -109,13 +110,14 @@ function keepStreamed(
   return { ...incoming, message: { ...incoming.message, content: [...content, ...ahead] } };
 }
 
-/** What the browser streamed of a message: its own copy while live, or what waits unseen. */
+/** What the browser streamed beyond the unfinished native copy, or what waits unseen. */
 function streamedOf(
   held: ChatMessage | undefined,
   unseen: Unseen,
   id: NativeMessageId,
 ): ReadonlyArray<NativeAssistantPart> {
-  if (held?.state === "live" && held.message.type === "assistant") return held.message.content;
+  if (held?.message.type === "assistant" && held.message.time.completed === undefined)
+    return held.message.content;
   return unseen.get(id) ?? [];
 }
 

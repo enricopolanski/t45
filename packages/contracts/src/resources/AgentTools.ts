@@ -15,6 +15,9 @@ export const WorkflowDraft = Schema.Struct({
 });
 export type WorkflowDraft = typeof WorkflowDraft.Type;
 
+// The request ID survives a retry and also names its reply file in the sandbox.
+const requestId = Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/u));
+
 /**
  * A step tool call T45 applies, decoded from the tool's name as OpenCode shows it (the tools of
  * `STEP_TOOLS_MCP`, called directly) and the call's input.
@@ -23,31 +26,26 @@ export const StepToolCall = Schema.Union([
   Schema.Struct({
     tool: Schema.Literal("step_set_field"),
     input: Schema.Struct({
+      requestId,
       fieldKey: TrimmedNonEmptyString,
       value: Schema.Json,
     }),
   }),
   Schema.Struct({
     tool: Schema.Literal("step_comment"),
-    input: Schema.Struct({ body: TrimmedNonEmptyString }),
+    input: Schema.Struct({ requestId, body: TrimmedNonEmptyString }),
   }),
   Schema.Struct({
     tool: Schema.Literal("step_attach"),
-    input: Schema.Struct({ path: Schema.String, fieldKey: Schema.optionalKey(Schema.String) }),
-  }),
-  Schema.Struct({ tool: Schema.Literal("step_submit_task"), input: Schema.Struct({}) }),
-  Schema.Struct({
-    tool: Schema.Literal("step_give_up"),
-    input: Schema.Struct({ note: TrimmedNonEmptyString }),
+    input: Schema.Struct({
+      requestId,
+      path: Schema.String,
+      fieldKey: Schema.optionalKey(Schema.String),
+    }),
   }),
 ]);
 export type StepToolCall = typeof StepToolCall.Type;
 
-/** The step tools whose calls change the step, as OpenCode names them. */
-export const STEP_TOOL_NAMES = StepToolCall.members.map((member) => member.fields.tool.literal);
-
-// The request ID survives a retry and also names its reply file in the sandbox.
-const requestId = Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/u));
 export const WorkflowInstanceInputs = {
   get_workflow: Schema.Struct({ requestId }),
   list_tickets: Schema.Struct({ requestId, query: Schema.optionalKey(Schema.String) }),
@@ -81,8 +79,8 @@ export const WorkflowInstanceCall = Schema.Union([
   Schema.Struct({ tool: Schema.Literal("set_field"), input: WorkflowInstanceInputs.set_field }),
 ]);
 export type WorkflowInstanceCall = typeof WorkflowInstanceCall.Type;
-export const WorkflowInstanceResponse = Schema.Struct({
-  call: WorkflowInstanceCall,
+export const WorkflowToolResponse = Schema.Struct({
+  call: Schema.Union([WorkflowInstanceCall, StepToolCall]),
   text: Schema.String,
   isError: Schema.Boolean,
 });

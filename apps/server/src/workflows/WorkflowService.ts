@@ -3,11 +3,12 @@ import * as WorkflowAssistant from "./WorkflowAssistant.ts";
 import type { Workflows } from "@t45/contracts/resources/Workflows";
 import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
-import type { SessionMessage } from "@opencode/schema/session-message";
-import type { Task } from "@t45/contracts/models/Task";
-import { TaskService, type StepHooks } from "../tasks/TaskService.ts";
+import { ChatRepository } from "../chats/ChatRepository.ts";
+import { ChatEvents } from "../chats/ChatEvents.ts";
+import type { ChatId } from "@t45/contracts/models/Chat";
+import type { AutomationOrigin } from "@t45/contracts/models/ChatOrigin";
 import { canWorkSteps } from "@t45/contracts/models/Agent";
-import { type Attachment, AttachmentId } from "@t45/contracts/models/Attachment";
+import type { Attachment } from "@t45/contracts/models/Attachment";
 import {
   type Notification,
   NotificationId,
@@ -52,7 +53,6 @@ import {
   type WorkflowDefinition,
   Refused as WorkflowRefused,
 } from "@t45/contracts/models/Workflow";
-import { STEP_TOOL_NAMES, StepToolCall } from "@t45/contracts/resources/AgentTools";
 import type { AssignmentView } from "@t45/contracts/resources/Assignments";
 import { NotFound } from "@t45/contracts/resources/errors";
 import type { NotificationView } from "@t45/contracts/resources/Notifications";
@@ -98,31 +98,8 @@ const stepFileForChat = (file: Attachment) => ({
   sizeBytes: file.sizeBytes,
 });
 
-const INPUT_REFUSED = "The input doesn't fit the tool.";
-
-const ATTACH_UNREAD = "T45 couldn't read the attached file.";
-
-const decodeAttachReply = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ name: Schema.String, file: Schema.String })),
-);
-const decodeCall = Schema.decodeUnknownOption(StepToolCall);
+const encodeResult = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const sameStepView = Schema.toEquivalence(StepView);
-
-const textOf = (content: SessionMessage.ToolStateCompleted["content"]) =>
-  content.flatMap((part) => (part.type === "text" && part.text ? [part.text] : [])).join("\n");
-
-const callOf = (part: SessionMessage.AssistantTool) => {
-  const tool = STEP_TOOL_NAMES.find((name) => name === part.name);
-  if (tool === undefined || part.state.status !== "completed") return null;
-  return {
-    tool,
-    call: Option.getOrNull(decodeCall({ tool, input: part.state.input })),
-    attached:
-      tool === "step_attach"
-        ? Option.getOrNull(decodeAttachReply(textOf(part.state.content)))
-        : null,
-  };
-};
 
 interface Work {
   readonly workflow: Workflow;
@@ -176,7 +153,22 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const tasks = yield* TaskService;
+  const chats = yield* ChatService;
+  const chatRepository = yield* ChatRepository;
+  const changes = yield* (yield* ChatEvents).subscribe(
+    (change) => change.kind === "chat" || change.kind === "posted",
+  );
+  yield* changes.pipe(
+    Stream.runForEach((change) =>
+      Effect.gen(function* () {
+        if (change.kind === "missed") return yield* tickets.publishChange();
+        const origin = yield* chatRepository.origins.get(change.chatId);
+        if (origin?.kind === "automation" && origin.trigger.type === "step")
+          yield* tickets.publishChange(origin.trigger.ticketId);
+      }),
+    ),
+    Effect.forkScoped,
+  );
   const { transaction } = tickets;
 
   const found = <A>(effect: Effect.Effect<A | null>) =>
@@ -277,11 +269,11 @@ const make = Effect.gen(function* () {
       : new NotFound();
   });
 
-  const loadTaskStep = Effect.fnUntraced(function* (task: Task) {
-    if (task.trigger.type !== "step") return yield* new NotFound();
-    const work = yield* loadTicket(task.trigger.ticketId);
-    const step = stepIn(work, task.trigger.stepId);
-    const entry = step?.automations.find((entry) => entry.id === task.trigger.automationId);
+  const loadAutomationStep = Effect.fnUntraced(function* (origin: AutomationOrigin) {
+    if (origin.trigger.type !== "step") return yield* new NotFound();
+    const work = yield* loadTicket(origin.trigger.ticketId);
+    const step = stepIn(work, origin.trigger.stepId);
+    const entry = step?.automations.find((entry) => entry.id === origin.trigger.automationId);
     if (step === null || entry === undefined) return yield* new NotFound();
     return { work, step, entry };
   });
@@ -296,6 +288,10 @@ const make = Effect.gen(function* () {
     isActionable(step)
       ? Effect.void
       : Effect.fail(new WorkflowRefused({ reason: "step_not_actionable" }));
+  const requireWorkingStep = (work: Work, step: Step) =>
+    work.ticket.status.type === "open"
+      ? requireActionable(step)
+      : Effect.fail(new WorkflowRefused({ reason: "ticket_not_open" }));
 
   const requireReason = (reason: string) => {
     const trimmed = reason.trim();
@@ -319,22 +315,22 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const stepTasks = (work: Work, step: Step) =>
-    tasks.listByTrigger({ ticketId: work.ticket.id, stepId: step.id });
-  const cancelTask = (task: Task) =>
-    tasks.settle(task.chatId, { type: "cancelled", reason: "Work was cancelled." });
-  const takeFromAgent = Effect.fnUntraced(function* (
+  const stepRuns = (work: Work, step: Step) =>
+    chatRepository.origins.listByTrigger({ ticketId: work.ticket.id, stepId: step.id });
+  const stopStepRuns = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
-    disposition: "stop" | "cancel" = "cancel",
+    matches: (automationId: string) => boolean = () => true,
   ) {
-    for (const task of yield* stepTasks(work, step)) {
-      if (task.state.type !== "settled")
-        yield* disposition === "stop" ? tasks.requestStop(task.chatId) : cancelTask(task);
+    const stopped: Array<ChatId> = [];
+    for (const run of yield* stepRuns(work, step)) {
+      if (matches(run.trigger.automationId) && (yield* chats.requestStop(run.chatId)))
+        stopped.push(run.chatId);
     }
+    return stopped;
   });
 
-  const buildTaskContext = Effect.fnUntraced(function* (work: Work, step: Step) {
+  const buildAutomationContext = Effect.fnUntraced(function* (work: Work, step: Step) {
     const definition = definitionOf(work, step);
     const containing = ancestorSteps(work.ticket, step);
     const root = containing.at(-1) ?? step;
@@ -377,15 +373,15 @@ const make = Effect.gen(function* () {
         : [field.file.id],
     );
 
-  const formatTaskContext = (brief: unknown) =>
+  const formatAutomationContext = (brief: unknown) =>
     ["```json", JSON.stringify(brief, null, 2), "```"].join("\n");
 
-  const buildTaskInput = Effect.fnUntraced(function* (
+  const buildAutomationInput = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
     entry: StepAutomation,
   ) {
-    const brief = yield* buildTaskContext(work, step);
+    const brief = yield* buildAutomationContext(work, step);
     const instructions = brief.instructions.trim();
     const subject =
       brief.parents.length === 0
@@ -394,11 +390,11 @@ const make = Effect.gen(function* () {
     return {
       text: [
         `You contribute to ${subject} of "${brief.ticketTitle}" in the workflow "${brief.workflowName}". The step is below as JSON: its instructions, the fields of earlier steps it reads, its own fields, its comments and its files. That is all you can see of this ticket.`,
-        "Fill the step's fields with step_set_field, report progress or results with step_comment, and attach files with step_attach. When your contribution is complete, comment on any remaining work and call step_submit_task. If you cannot complete your contribution, fill what you can, then call step_give_up with a note on what is missing and why: the step's assignee can take over. Call one of them, then stop.",
+        "Fill the step's fields with step_set_field, report progress or results with step_comment, and attach files with step_attach. Each tool returns the actual operation result. Use a new UUID requestId per operation and reuse it with identical arguments when retrying. When your contribution is finished, end the conversation.",
         "You work in a folder of your own. Follow AGENTS.md if it is there.",
         instructions ? `Instructions for this step:\n${instructions}` : "",
-        formatTaskContext(brief),
-        `Your automation: ${entry.instructions}. Other people and automations may work on this step at the same time. step_submit_task submits only your contribution; do not wait for their work or unrelated fields and sub-steps to be complete.`,
+        formatAutomationContext(brief),
+        `Your automation: ${entry.instructions}. Other people and automations may work on this step at the same time. Do not wait for their work or unrelated fields and sub-steps to be complete.`,
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -410,25 +406,18 @@ const make = Effect.gen(function* () {
       ])).map(stepFileForChat),
     };
   });
-  const taskFailed = Effect.fnUntraced(function* (
-    work: Work,
-    step: Step,
-    agentId: string,
-    reason: string,
-  ) {
-    yield* tickets.insertComment(work.ticket.id, {
-      id: generateId(),
-      author: agentId,
-      body: reason,
-      createdAt: yield* DateTime.now,
-      stepId: step.id,
-    });
+  const automationEnded = Effect.fnUntraced(function* (chatId: ChatId, actorId: string | null) {
+    const origin = yield* chatRepository.origins.get(chatId);
+    if (origin?.kind !== "automation" || origin.trigger.type !== "step") return;
+    const loaded = yield* loadAutomationStep(origin).pipe(Effect.option);
+    if (Option.isNone(loaded)) return;
+    const { work, step } = loaded.value;
     yield* notify({
-      kind: "agent_failed",
+      kind: "automation_ended",
       to: step.assignee,
       workflow: work.workflow,
       step,
-      actorId: null,
+      actorId,
     });
   });
   const enterStep = Effect.fnUntraced(function* (
@@ -684,7 +673,7 @@ const make = Effect.gen(function* () {
       return yield* new WorkflowRefused({ reason: "ticket_not_open" });
     }
     const reason = yield* requireReason(input.reason);
-    for (const step of work.ticket.steps) yield* takeFromAgent(work, step);
+    for (const step of work.ticket.steps) yield* stopStepRuns(work, step);
     work.ticket = {
       ...work.ticket,
       status: { type: "cancelled", reason },
@@ -748,13 +737,13 @@ const make = Effect.gen(function* () {
       comments: yield* tickets.comments(step.id),
       files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
       automations: yield* Effect.gen(function* () {
-        const attempts = yield* stepTasks(work, step);
+        const attempts = yield* stepRuns(work, step);
         const canRun =
           work.ticket.status.type === "open" &&
           isInvolved(actor, work.workflow, work.ticket) &&
           isActionable(step);
         return step.automations.map((entry) => {
-          const latest = attempts.findLast((task) => task.trigger.automationId === entry.id);
+          const latest = attempts.findLast((run) => run.trigger.automationId === entry.id);
           if (latest === undefined)
             return {
               id: entry.id,
@@ -762,26 +751,13 @@ const make = Effect.gen(function* () {
               runLabel: canRun ? ("Run" as const) : null,
               canStop: false,
             };
-          const { state, chatStatus } = latest;
-          const statusLabel =
-            state.type === "settled"
-              ? state.outcome.type === "succeeded"
-                ? "Done"
-                : `${state.outcome.type === "failed" ? "Failed" : "Cancelled"}: ${state.outcome.reason}`
-              : chatStatus === "running"
-                ? "Running"
-                : chatStatus === "failed"
-                  ? "Failed"
-                  : chatStatus === "interrupted"
-                    ? step.status.type === "blocked"
-                      ? "Paused"
-                      : "Stopped"
-                    : "Not running";
+          const { chatStatus } = latest;
+          const statusLabel = chatStatus === "running" ? "Running" : "Ended";
           return {
             id: entry.id,
             statusLabel,
             runLabel: canRun ? ("Run again" as const) : null,
-            canStop: canRun && state.type === "active" && chatStatus === "running",
+            canStop: canRun && chatStatus === "running",
           };
         });
       }),
@@ -793,9 +769,7 @@ const make = Effect.gen(function* () {
     step: Step,
     input: Payload<"setStepField">,
   ) {
-    if (work.ticket.status.type !== "open")
-      return yield* new WorkflowRefused({ reason: "ticket_not_open" });
-    yield* requireActionable(step);
+    yield* requireWorkingStep(work, step);
     const field = yield* resolveField(work, step, input.fieldKey);
     const blank =
       (typeof input.value === "string" && input.value.trim() === "") ||
@@ -826,7 +800,7 @@ const make = Effect.gen(function* () {
     yield* requireActionable(step);
     const refusal = stepCompletionRefusal(definitionOf(work, step), work.ticket, step);
     if (refusal !== null) return yield* new WorkflowRefused({ reason: refusal });
-    yield* takeFromAgent(work, step);
+    yield* stopStepRuns(work, step);
     const completed = completeTicketStep(
       work.ticket,
       work.definition.steps,
@@ -863,7 +837,7 @@ const make = Effect.gen(function* () {
     const { work, step } = yield* loadForCommand(actorId, input.stepId);
     yield* requireActionable(step);
     const reason = yield* requireReason(input.reason);
-    yield* takeFromAgent(work, step, "stop");
+    yield* stopStepRuns(work, step);
     putStep(work, { ...step, status: { type: "blocked", at: yield* DateTime.now, reason } });
     yield* save(work);
   }, transaction);
@@ -897,10 +871,7 @@ const make = Effect.gen(function* () {
   ) {
     const fieldKey = input.fieldKey ?? null;
     if (fieldKey !== null) {
-      if (work.ticket.status.type !== "open") {
-        return yield* new WorkflowRefused({ reason: "ticket_not_open" });
-      }
-      yield* requireActionable(step);
+      yield* requireWorkingStep(work, step);
       if ((yield* resolveField(work, step, fieldKey)).type !== "file") {
         return yield* new WorkflowRefused({ reason: "invalid_field_value" });
       }
@@ -1046,30 +1017,23 @@ const make = Effect.gen(function* () {
   ) {
     const { work, step, entry } = yield* loadAutomation(actorId, input);
     yield* validateEntries([entry]);
-    for (const task of yield* stepTasks(work, step)) {
-      if (task.trigger.automationId === entry.id && task.state.type !== "settled")
-        yield* cancelTask(task);
-    }
-    yield* tasks
-      .start(
-        { type: "step", ticketId: work.ticket.id, stepId: step.id, automationId: entry.id },
-        entry.agentId,
-        {
-          title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
-          input: yield* buildTaskInput(work, step, entry),
-        },
-      )
-      .pipe(Effect.catch((error) => taskFailed(work, step, entry.agentId, error.message)));
+    yield* stopStepRuns(work, step, (id) => id === entry.id);
+    yield* chats.startAutomation(
+      { type: "step", ticketId: work.ticket.id, stepId: step.id, automationId: entry.id },
+      entry.agentId,
+      {
+        title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
+        input: yield* buildAutomationInput(work, step, entry),
+      },
+    );
   }, transaction);
   const stopStepAutomation = Effect.fnUntraced(function* (
     actorId: string,
     input: Payload<"stopStepAutomation">,
   ) {
     const { work, step, entry } = yield* loadAutomation(actorId, input);
-    for (const task of yield* stepTasks(work, step)) {
-      if (task.trigger.automationId === entry.id && task.state.type === "active")
-        yield* tasks.requestStop(task.chatId);
-    }
+    for (const chatId of yield* stopStepRuns(work, step, (id) => id === entry.id))
+      yield* automationEnded(chatId, actorId);
   }, transaction);
   const setStepAutomations = Effect.fnUntraced(function* (
     actorId: string,
@@ -1078,94 +1042,48 @@ const make = Effect.gen(function* () {
     const { work, step } = yield* loadForCommand(actorId, input.stepId);
     yield* requireActionable(step);
     yield* validateEntries(input.automations);
-    const current = yield* stepTasks(work, step);
     const same = (entry: StepAutomation, other: StepAutomation) =>
       entry.id === other.id &&
       entry.agentId === other.agentId &&
       entry.instructions === other.instructions;
-    for (const task of current) {
-      const before = step.automations.find((entry) => entry.id === task.trigger.automationId);
-      if (
-        task.state.type === "settled" ||
-        (before !== undefined && input.automations.some((entry) => same(entry, before)))
-      )
-        continue;
-      yield* cancelTask(task);
-    }
+    yield* stopStepRuns(work, step, (id) => {
+      const before = step.automations.find((entry) => entry.id === id);
+      return before === undefined || !input.automations.some((entry) => same(entry, before));
+    });
     putStep(work, { ...step, automations: input.automations });
     yield* save(work);
   }, transaction);
-  const taskHooks: StepHooks = {
-    prepare: (task, part, generated) =>
-      Effect.gen(function* () {
-        const parsed = callOf(part);
-        if (parsed === null) return null;
-        let attachmentId: AttachmentId | null = null;
-        const file = parsed.attached;
-        if (file !== null) {
-          const loaded = yield* loadTaskStep(task).pipe(Effect.option);
-          if (Option.isNone(loaded)) return null;
-          const bytes = generated.get(file.file);
-          if (bytes !== undefined) {
-            const stored = yield* files
-              .store({
-                name: file.name,
-                mimeType: STEP_FILE_TYPE,
-                bytes,
-                uploader: loaded.value.entry.agentId,
-              })
-              .pipe(Effect.catchTags({ AttachmentNameError: () => Effect.succeed(null) }));
-            attachmentId = stored?.id ?? null;
-          }
-        }
-        return {
-          apply: Effect.gen(function* () {
-            const loaded = yield* loadTaskStep(task).pipe(Effect.option);
-            if (Option.isNone(loaded)) return null;
-            const { work, step, entry } = loaded.value;
-            if (work.ticket.status.type !== "open" || !isActionable(step)) return null;
-            const call = parsed.call;
-            if (call?.tool === "step_submit_task") return { type: "succeeded" } as const;
-            if (call?.tool === "step_give_up")
-              return { type: "failed", reason: call.input.note } as const;
-            const execute = Effect.gen(function* () {
-              if (call === null) return INPUT_REFUSED;
-              if (call.tool === "step_set_field")
-                yield* setField(work, step, { stepId: step.id, ...call.input });
-              else if (call.tool === "step_comment")
-                yield* comment(work, step, { stepId: step.id, ...call.input }, entry.agentId);
-              else {
-                if (attachmentId === null) return ATTACH_UNREAD;
-                yield* attachFile(
-                  work,
-                  step,
-                  { stepId: step.id, attachmentId, ...call.input },
-                  entry.agentId,
-                );
-              }
-              return null;
-            });
-            const refusal = yield* execute.pipe(
-              transaction,
-              Effect.catchTags({
-                WorkflowRefused: (error) => Effect.succeed(error.message),
-                NotFound: () => Effect.succeed(ATTACH_UNREAD),
-              }),
-            );
-            if (refusal === null) return null;
-            return { type: "failed", reason: `${parsed.tool} was refused: ${refusal}` } as const;
-          }),
-        };
-      }),
-    changed: (task) =>
-      Effect.gen(function* () {
-        const loaded = yield* loadTaskStep(task).pipe(Effect.option);
-        if (Option.isNone(loaded)) return;
-        const { work, step, entry } = loaded.value;
-        if (task.state.type === "settled" && task.state.outcome.type === "failed")
-          yield* taskFailed(work, step, entry.agentId, task.state.outcome.reason);
-      }),
-  };
+  const applyStepTool = Effect.fnUntraced(function* (
+    chatId: ChatId,
+    call: WorkflowAssistant.PreparedStepToolCall,
+  ) {
+    const origin = yield* chatRepository.origins.get(chatId);
+    if (origin?.kind !== "automation" || (yield* chatRepository.get(chatId))?.status !== "running")
+      return yield* new NotFound();
+    const { work, step, entry } = yield* loadAutomationStep(origin);
+    switch (call.tool) {
+      case "step_set_field":
+        yield* setField(work, step, { stepId: step.id, ...call.input });
+        return encodeResult({
+          value: stepIn(work, step.id)?.values[call.input.fieldKey] ?? null,
+        });
+      case "step_comment":
+        yield* requireWorkingStep(work, step);
+        yield* comment(work, step, { stepId: step.id, ...call.input }, entry.agentId);
+        return encodeResult({ body: call.input.body });
+      case "step_attach": {
+        if (call.input.fieldKey === undefined) yield* requireWorkingStep(work, step);
+        const stored = call.attachment;
+        yield* attachFile(
+          work,
+          step,
+          { stepId: step.id, attachmentId: stored.id, ...call.input },
+          entry.agentId,
+        );
+        return encodeResult(toFile(stored));
+      }
+    }
+  });
 
   const memberCommand = <I extends { readonly stepId: string }, A, E>(
     mutate: (work: Work, step: Step, input: I, actorId: string) => Effect.Effect<A, E>,
@@ -1177,9 +1095,13 @@ const make = Effect.gen(function* () {
     }, transaction);
 
   const setStepField = memberCommand(setField);
-  const receiveWorkflow = yield* WorkflowAssistant.makeReceiver({ startTicket, setStepField });
-  yield* (yield* ChatService).consume((result) =>
-    tasks.receive(result, taskHooks).pipe(Effect.andThen(receiveWorkflow(result))),
+  const receiveWorkflow = yield* WorkflowAssistant.makeReceiver({
+    startTicket,
+    setStepField,
+    applyStepTool,
+  });
+  yield* chats.consume((result) =>
+    result.type === "ended" ? automationEnded(result.chatId, null) : receiveWorkflow(result),
   );
 
   return {

@@ -16,7 +16,7 @@ import * as AutomationRepository from "./AutomationRepository.ts";
 import * as AutomationService from "./AutomationService.ts";
 import { renderPrompt, type WebhookRequest } from "./webhook.ts";
 import * as WebhookRoute from "./webhookRoute.ts";
-import { TaskService } from "../tasks/TaskService.ts";
+import { ChatService } from "../chats/ChatService.ts";
 
 const AT = "2026-09-09T12:00:00.000Z";
 const at = DateTime.makeUnsafe(AT);
@@ -57,15 +57,20 @@ const lastError = (id: string) =>
     return (yield* automations.get(AutomationId.make(id)))?.lastError;
   });
 
-const serve = (options: { readonly start?: TaskService["Service"]["start"] } = {}) =>
+const serve = (
+  options: { readonly startAutomation?: ChatService["Service"]["startAutomation"] } = {},
+) =>
   Effect.gen(function* () {
-    const posts = yield* TaskService;
+    const chats = yield* ChatService;
     const context = yield* Layer.build(
       AutomationService.layer.pipe(
         Layer.provide(
           Layer.succeed(
-            TaskService,
-            TaskService.of({ ...posts, start: options.start ?? posts.start }),
+            ChatService,
+            ChatService.of({
+              ...chats,
+              startAutomation: options.startAutomation ?? chats.startAutomation,
+            }),
           ),
         ),
       ),
@@ -316,7 +321,9 @@ describe("webhook route", () => {
     Effect.gen(function* () {
       yield* seed;
       const path = yield* addHook("review");
-      const { request } = yield* serve({ start: () => Effect.die("the chat store is gone") });
+      const { request } = yield* serve({
+        startAutomation: () => Effect.die("the chat store is gone"),
+      });
 
       const response = yield* request(path, { body: pullRequest });
       assert.equal(response.status, 500);

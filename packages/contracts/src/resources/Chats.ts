@@ -47,7 +47,7 @@ export type ChatSession = typeof ChatSession.Type;
 
 /**
  * A message of a session exactly as OpenCode keeps it. `state` is T45's: `live` while OpenCode is
- * still writing it, `settled` once finished.
+ * still writing it, `settled` once finished or its execution has ended.
  * Reads cut long tool output and text and say so with `isTruncated`; `chats.getMessage` returns
  * it whole.
  */

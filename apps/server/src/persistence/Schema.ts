@@ -109,7 +109,7 @@ const statements = [
       skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
       PRIMARY KEY (agent_id, skill_id)
     )`,
-  // An Automation starts a Task with its agent: when `next_run_at`
+  // An Automation starts a chat with its agent: when `next_run_at`
   // comes, on Run now, or on a request to its webhook URL, whose secret is `webhook_token`.
   // `schedule_json` is the schedule, a webhook's signing secret included, and `last_error` why
   // its latest run was refused.
@@ -168,19 +168,11 @@ const statements = [
     )`,
   `CREATE INDEX workflow_comments_step ON workflow_comments(step_id, created_at)`,
 
-  // The step tool calls T45 applied, by `<assistant message id>/<tool part id>` in the step's
-  // chat; a call is applied and recorded together, so none is applied twice.
-  `CREATE TABLE task_calls (
-      chat_id TEXT NOT NULL REFERENCES chat_origins(chat_id),
-      call_key TEXT NOT NULL,
-      PRIMARY KEY (chat_id, call_key)
-    ) WITHOUT ROWID`,
-
   // In-app notifications: something new landed in a person's My work. Clicking a notification marks it read.
   `CREATE TABLE workflow_notifications (
       id TEXT PRIMARY KEY NOT NULL,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL CHECK (kind IN ('to_do', 'agent_failed', 'needs_responsible',
+      kind TEXT NOT NULL CHECK (kind IN ('to_do', 'automation_ended', 'needs_responsible',
         'names_deactivated')),
       workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
       step_id TEXT,
@@ -209,9 +201,8 @@ const statements = [
       owner_user_id TEXT REFERENCES users(id),
       workflow_id TEXT,
       trigger TEXT,
-      state TEXT,
-      CHECK ((owner_user_id IS NOT NULL AND trigger IS NULL AND state IS NULL)
-          OR (owner_user_id IS NULL AND workflow_id IS NULL AND trigger IS NOT NULL AND state IS NOT NULL))
+      CHECK ((owner_user_id IS NOT NULL AND trigger IS NULL)
+          OR (owner_user_id IS NULL AND workflow_id IS NULL AND trigger IS NOT NULL))
     )`,
   // Independent of provisional OpenCode messages: a lost execution cannot repeat a committed write.
   `CREATE TABLE workflow_operation_receipts (
@@ -225,29 +216,29 @@ const statements = [
   `CREATE INDEX origins_automation ON chat_origins(json_extract(trigger, '$.type'), json_extract(trigger, '$.automationId')) WHERE trigger IS NOT NULL`,
   // A chat's OpenCode sessions, every session of its VM, keyed by chat so one VM can't reach
   // another chat's copy. `info_json` is the session as OpenCode last returned it.
-  // `committed` once an execution that wrote it finished; the next execution drops what isn't.
   `CREATE TABLE chat_sessions (
       chat_id TEXT NOT NULL REFERENCES chats(id),
       session_id TEXT NOT NULL,
       parent_session_id TEXT,
       info_json TEXT NOT NULL,
-      committed INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (chat_id, session_id)
     )`,
   // Every message of a session, encoded as OpenCode returned it. `ordinal` is the session's order,
   // which native ids don't give. `committed` once its execution finished, as its saved disk has it.
+  // `is_live` ends with the execution even when OpenCode never completed the native message.
   `CREATE TABLE chat_messages (
       chat_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
       message_id TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
       json TEXT NOT NULL,
+      is_live INTEGER NOT NULL DEFAULT 0 CHECK (is_live IN (0, 1)),
       committed INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (chat_id, session_id, message_id),
       UNIQUE (chat_id, session_id, ordinal)
     )`,
   // The inputs sent to a chat, in order. An input is pending until its user message is stored, and
-  // an execution sends the pending ones. `payload_json` is the input as sent: its text, attachments
+  // an execution sends those absent from its saved disk. `payload_json` is the input as sent: its text, attachments
   // and context.
   `CREATE TABLE chat_inputs (
       chat_id TEXT NOT NULL REFERENCES chats(id),

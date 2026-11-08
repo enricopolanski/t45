@@ -29,7 +29,6 @@ import { ChatService, type Member } from "./ChatService.ts";
 import * as TicketRepository from "../workflows/TicketRepository.ts";
 import * as WorkflowRepository from "../workflows/WorkflowRepository.ts";
 
-import { TaskService } from "../tasks/TaskService.ts";
 import * as WorkflowService from "../workflows/WorkflowService.ts";
 
 export const testChatId = (n: number) =>
@@ -53,7 +52,6 @@ const layerPersistence = Layer.mergeAll(
 
 /** Chats over a fresh database. */
 export const layer = WorkflowService.layer.pipe(
-  Layer.provideMerge(TaskService.layer),
   Layer.provideMerge(ChatService.layer),
   Layer.provideMerge(FakeRunner.layer),
   Layer.provideMerge(layerPersistence),
@@ -115,9 +113,8 @@ export const seedChat = (chat: {
       chat.ownerUserId !== null
         ? { kind: "conversation", chatId: chat.id, ownerUserId: chat.ownerUserId, workflowId: null }
         : {
-            kind: "task",
+            kind: "automation",
             chatId: chat.id,
-            state: { type: "active" },
             trigger:
               ticket !== null && chat.stepId !== undefined
                 ? {
