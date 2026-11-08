@@ -2,6 +2,16 @@
 
 These rules apply when writing or reviewing T45 code and follow our [design principles](./design-principles.md).
 
+## Applying the rules
+
+Start code investigations with the relevant models in `packages/contracts/src/models`: read their data types, states, relationships, and business rules before tracing services, repositories, tools, or UI. Check which concepts each model is made to know about and whether it should own them. A field, union variant, or state can introduce a boundary leak before any service dependency makes it visible.
+
+Treat the current code as evidence of existing behavior, not proof that its design follows these rules. Existing names, schemas, dependencies, and passing tests can preserve a mistaken boundary. Evaluate the implementation against the principles before extending or extracting it.
+
+Identify which domain concept owns a decision before choosing its module or API. A rule being pure does not make it a rule of the model that currently carries its data. Keep a consumer's requirements with that consumer; promoting them into a shared contract can strengthen the coupling being removed.
+
+Distinguish required product behavior and guarantees from implementation choices. Preserve authorization, atomicity, and deduplication while correcting misplaced responsibilities. Describe intentional behavior changes explicitly; preserving behavior does not require preserving the current dependency graph, state representation, or API.
+
 ## Merging pull requests
 
 Squash pull requests into one commit on the target branch by default; use another merge strategy only when explicitly requested.
@@ -20,7 +30,9 @@ Keep pure business rules in models, or resources when the rule belongs to a view
 
 `packages/core` holds pure application behavior shared by web and server, such as parsing and formatting message references. Model invariants stay in contracts. Core depends on contracts; contracts never depend on core. UI behavior stays in web, and provider-specific formatting stays in server.
 
-Keep OpenCode integration complexity at its boundary: the runner's `ExecutionOrchestrator.ts` controls how an execution happens, the server's `ChatExecutions.ts` decides what T45 keeps, and `TaskService.ts` and workflow hooks apply task receipts. Store and send OpenCode's own shapes, imported from `@opencode/*`; do not declare them again. The UI displays domain decisions supplied by the server.
+Keep OpenCode integration complexity at its boundary: the runner's `ExecutionOrchestrator.ts` controls how an execution happens, and the server's `ChatExecutions.ts` decides what T45 keeps. Store and send OpenCode's own shapes, imported from `@opencode/*`; do not declare them again. The UI displays domain decisions supplied by the server.
+
+Tasks run LLM automations and produce results. The task model and service are independent of workflows and steps. Workflow MCP tools invoke workflow operations; the workflow domain owns submission, approval, eligibility, and the association between a task and a step. A task's outcome describes its work; the workflow decides whether that work satisfies its requirements.
 
 ## Persistence and transactions
 

@@ -1,5 +1,7 @@
 # Design principles
 
+These principles describe the intended design; the current implementation may violate them. Read the code to understand its behavior, then assess its responsibilities and dependencies against the principles. Existing structure is not a reason to preserve a boundary that puts knowledge with the wrong owner.
+
 ## 1. Make modules deep
 
 A deep module, in Ousterhout’s sense, hides substantial complexity behind a small, useful API. Callers describe their intent without assembling the implementation themselves. Judge depth by how many concepts and ordering rules callers can forget.
@@ -18,9 +20,9 @@ A module boundary separates the capabilities and guarantees other code may rely 
 **Example: transporting files between the runner and the server.** The runner owns sandbox execution and file transport; the server owns what those files mean to a workflow.
 
 - **Bad:** the runner recognizes `step_attach` and decides which workflow field receives a file.
-- **Good:** sandboxed agents can produce files through a shared convention, the runner transports those files, and server task and workflow code interprets tool receipts and applies their effects.
+- **Good:** sandboxed agents can produce files through a shared convention, the runner transports those files, and the workflow MCP integration decides which workflow fields or attachments receive them.
 
-Adding a workflow tool should therefore leave the runner unchanged. Sharing a data type can still be part of the contract: T45 imports OpenCode’s canonical shapes while keeping its protocol and lifecycle mechanics in the runner.
+Adding a workflow tool should therefore leave the runner and generic task code unchanged. Sharing a data type can still be part of the contract: T45 imports OpenCode's canonical shapes while keeping its protocol and lifecycle mechanics in the runner.
 
 ## 3. Give each decision and state one owner
 
