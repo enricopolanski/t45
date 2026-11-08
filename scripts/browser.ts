@@ -26,6 +26,11 @@ const command = Command.make("browser", {
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("Open a fresh browser as this local user's email."),
   ),
+  instanceId: Flag.String("instance-id").pipe(
+    Flag.withDescription("Send every request to this instance instead of the default app."),
+    Flag.optional,
+    Flag.map(Option.getOrUndefined),
+  ),
   steps: Flag.String("steps").pipe(
     Flag.withDescription("Run a steps module in a headless browser, then close it."),
     Flag.optional,
@@ -40,7 +45,9 @@ const command = Command.make("browser", {
         Effect.tryPromise(() => chromium.launch({ headless: input.steps !== undefined })),
         (browser) => Effect.promise(() => browser.close()),
       );
-      const context = yield* Effect.tryPromise(() => browser.newContext());
+      const extraHTTPHeaders =
+        input.instanceId === undefined ? {} : { "x-instance-id": input.instanceId };
+      const context = yield* Effect.tryPromise(() => browser.newContext({ extraHTTPHeaders }));
       const page = yield* Effect.tryPromise(() => context.newPage());
 
       yield* Effect.tryPromise(async () => {

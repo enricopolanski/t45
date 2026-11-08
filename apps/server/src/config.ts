@@ -49,9 +49,10 @@ export const layer = ConfigProvider.layerAdd(
   ConfigProvider.fromUnknown({ BUILD_SHA: process.env.BUILD_SHA }),
 );
 
-export const stateDir = Config.schema(Schema.NonEmptyString, "DATA_DIR").pipe(
-  Config.map((baseDir) => NodePath.resolve(baseDir, "userdata")),
-);
+const dataDir = Config.schema(Schema.NonEmptyString, "DATA_DIR");
+export const stateDir = dataDir.pipe(Config.map((dir) => NodePath.resolve(dir, "userdata")));
+/** Each development instance keeps a whole `DATA_DIR` in here. */
+export const instancesDir = dataDir.pipe(Config.map((dir) => NodePath.resolve(dir, "instances")));
 export const dbPath = stateDir.pipe(Config.map((dir) => NodePath.join(dir, "statev2.sqlite")));
 export const attachmentsDir = stateDir.pipe(Config.map((dir) => NodePath.join(dir, "attachments")));
 
