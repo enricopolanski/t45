@@ -45,14 +45,7 @@ export type WorkflowDefinitionView = typeof WorkflowDefinitionView.Type;
 
 /** A step without its values. */
 export const StepSummaryView = Schema.Struct(
-  Struct.pick(Step.fields, [
-    "id",
-    "stepDefinitionId",
-    "parentStepId",
-    "status",
-    "assignee",
-    "responsible",
-  ]),
+  Struct.pick(Step.fields, ["id", "stepDefinitionId", "parentStepId", "status", "assignee"]),
 );
 export type StepSummaryView = typeof StepSummaryView.Type;
 
@@ -71,7 +64,6 @@ export type WorkflowInstanceBoardView = typeof WorkflowInstanceBoardView.Type;
 
 const ticket = { ticketId: StringId };
 const step = { stepId: StringId };
-const reason = { ...step, reason: Schema.String };
 
 export const StepFileView = Schema.Struct(Struct.pick(Attachment.fields, ["id", "name"]));
 export type StepFileView = typeof StepFileView.Type;
@@ -236,8 +228,6 @@ export const Workflows = RpcGroup.make(
     error: WorkflowErrors,
   }),
   Rpc.make("markStepDone", { payload: step, error: WorkflowErrors }),
-  Rpc.make("approveStep", { payload: step, error: WorkflowErrors }),
-  Rpc.make("rejectStep", { payload: reason, error: WorkflowErrors }),
   Rpc.make("setStepAutomations", {
     payload: { ...step, automations: Step.fields.automations },
     error: WorkflowErrors,
@@ -255,7 +245,7 @@ export const Workflows = RpcGroup.make(
     payload: { ...step, assignee: Step.fields.assignee },
     error: WorkflowErrors,
   }),
-  Rpc.make("blockStep", { payload: reason, error: WorkflowErrors }),
+  Rpc.make("blockStep", { payload: { ...step, reason: Schema.String }, error: WorkflowErrors }),
   Rpc.make("unblockStep", { payload: step, error: WorkflowErrors }),
   Rpc.make("commentOnStep", {
     payload: { ...step, body: TrimmedNonEmptyString },

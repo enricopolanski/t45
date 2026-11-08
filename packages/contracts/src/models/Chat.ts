@@ -115,7 +115,6 @@ const REFUSALS = [
   "answer_invalid",
   "answer_files_need_text",
   "unavailable",
-  "task_settled",
 ] as const;
 export type Refusal = (typeof REFUSALS)[number];
 
@@ -149,8 +148,6 @@ export class Refused extends Schema.TaggedError<Refused>()("ChatRefused", {
         return "This answer doesn't fit the question.";
       case "answer_files_need_text":
         return "Files can only go with a written answer.";
-      case "task_settled":
-        return "This task has ended. Start a new task to try again.";
       case "unavailable":
         return "The chat's sandbox could not do this right now. Try again.";
     }

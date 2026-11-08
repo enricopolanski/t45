@@ -32,7 +32,7 @@ Keep pure business rules in models, or resources when the rule belongs to a view
 
 Keep OpenCode integration complexity at its boundary: the runner's `ExecutionOrchestrator.ts` controls how an execution happens, and the server's `ChatExecutions.ts` decides what T45 keeps. Store and send OpenCode's own shapes, imported from `@opencode/*`; do not declare them again. The UI displays domain decisions supplied by the server.
 
-Tasks run LLM automations and produce results. The task model and service are independent of workflows and steps. Workflow MCP tools invoke workflow operations; the workflow domain owns submission, approval, eligibility, and the association between a task and a step. A task's outcome describes its work; the workflow decides whether that work satisfies its requirements.
+Tasks run LLM automations and produce results. The task model and service are independent of workflows and steps. Workflow MCP tools invoke workflow operations; the workflow domain owns submission, eligibility, and the association between a task and a step. A task's outcome describes its work; the workflow decides whether that work satisfies its requirements.
 
 ## Persistence and transactions
 

@@ -1,24 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
-import type { Task } from "./Task.ts";
 
 import {
   type Step,
   type StepDefinition,
   type Ticket,
   type Workflow,
-  type StepAutomation,
-  automationsSubmitted,
   childSteps,
   completeTicketStep,
   currentStep,
   definitionChangeRefusal,
-  needsWorkAfterDefinitionChange,
   putTicketStep,
-  resolveAssignee,
-  resolveResponsible,
   stepAfterDefinitionChange,
-  stepPeopleOnEntry,
   subStepsToEnter,
   ticketStartRefusal,
 } from "./Workflow.ts";
@@ -43,24 +36,6 @@ const definition = (id: string, subSteps: ReadonlyArray<StepDefinition> = []): S
   subSteps,
 });
 
-it("requires every automation to submit before review", () => {
-  const entries: ReadonlyArray<StepAutomation> = [
-    { id: "entry01", agentId: "agent01", instructions: "Draft" },
-    { id: "entry02", agentId: "agent01", instructions: "Check" },
-  ];
-  const tasks = entries.map((entry): Pick<Task, "trigger" | "state"> => ({
-    trigger: { type: "step", ticketId: ticket.id, stepId: step.id, automationId: entry.id },
-    state: { type: "submitted" },
-  }));
-  assert.isFalse(automationsSubmitted(entries, tasks.slice(0, 1)));
-  assert.isFalse(
-    automationsSubmitted(
-      entries,
-      tasks.map((task) => ({ ...task, state: { type: "active" } })),
-    ),
-  );
-  assert.isTrue(automationsSubmitted(entries, tasks));
-});
 const root = definition("root001");
 const step: Step = {
   id: "step001",
@@ -68,7 +43,6 @@ const step: Step = {
   parentStepId: null,
   status: { type: "working", at },
   assignee: "worker01",
-  responsible: "owner01",
   values: {},
   automations: [],
 };
@@ -83,39 +57,7 @@ const ticket: Ticket = {
   createdAt: at,
 };
 
-describe("step people", () => {
-  it("uses a team's defaults before inherited people, without inventing an assignee", () => {
-    const configured = {
-      ...workflow,
-      defaultAssignments: {
-        [root.id]: { automations: [], assignee: "named01", responsible: "approver01" },
-      },
-    };
-    assert.deepEqual(stepPeopleOnEntry(configured, root, "previous01"), {
-      assignee: "named01",
-      responsible: "approver01",
-    });
-    assert.deepEqual(stepPeopleOnEntry(workflow, root, "previous01"), {
-      assignee: "previous01",
-      responsible: null,
-    });
-    assert.equal(resolveAssignee(null, "owner01", false).assignee, null);
-  });
-
-  it("replaces departed people with the responsible or the oldest active admin and requests the right notices", () => {
-    const resolved = resolveResponsible(workflow, "departed01", new Set(["admin02"]));
-    assert.equal(resolved.responsible, "admin02");
-    assert.deepEqual(resolved.notices, ["names_deactivated", "needs_responsible"]);
-    assert.deepEqual(resolveAssignee("departed02", resolved.responsible!, false), {
-      assignee: "admin02",
-      namesDeactivated: true,
-    });
-    assert.equal(
-      resolveResponsible(workflow, "approver01", new Set(["approver01", "admin02"])).responsible,
-      "approver01",
-    );
-  });
-
+describe("starting a ticket", () => {
   it("lets an organization admin start an unassigned first step while retaining authorization", () => {
     const blueprint = {
       id: workflow.definitionId,
@@ -130,7 +72,7 @@ describe("step people", () => {
     const configured = {
       ...workflow,
       defaultAssignments: {
-        [root.id]: { automations: [], assignee: "worker01", responsible: null },
+        [root.id]: { automations: [], assignee: "worker01" },
       },
     };
     assert.equal(
@@ -163,7 +105,7 @@ describe("ticket progression", () => {
     assert.equal(currentStep(completedRoot.ticket), null);
   });
 
-  it("the next root inherits the completed step's assignee unless its own default overrides it", () => {
+  it("completing a root leaves the ticket open for the next root", () => {
     const next = definition("next001");
     const result = completeTicketStep(ticket, [root, next], step, at);
     assert.equal(result.ticket.status.type, "open");
@@ -171,7 +113,6 @@ describe("ticket progression", () => {
     assert.equal(result.next?.id, next.id);
     const entered = { ...step, id: "nextstep01", stepDefinitionId: next.id };
     assert.equal(currentStep(putTicketStep(result.ticket, entered)), entered);
-    assert.equal(stepPeopleOnEntry(workflow, next, step.assignee).assignee, step.assignee);
   });
 });
 
@@ -187,12 +128,10 @@ describe("changing a shared definition", () => {
     assert.equal(completed.steps[0]?.id, step.id);
   });
 
-  it("new sub-steps invalidate a pending approval until those children are complete", () => {
-    const waiting: Step = { ...step, status: { type: "waiting_approval", at } };
+  it("enters sub-steps added to the current step as its children", () => {
     const childDefinition = definition("child01");
     const changedRoot = definition(root.id, [childDefinition]);
-    const waitingTicket = putTicketStep(ticket, waiting);
-    const additions = subStepsToEnter(waitingTicket, waiting, changedRoot);
+    const additions = subStepsToEnter(ticket, step, changedRoot);
     assert.deepEqual(
       additions.map((entry) => entry.definition.id),
       [childDefinition.id],
@@ -203,12 +142,9 @@ describe("changing a shared definition", () => {
       stepDefinitionId: childDefinition.id,
       parentStepId: step.id,
     };
-    const changedTicket = putTicketStep(waitingTicket, child);
-    assert.equal(needsWorkAfterDefinitionChange(changedTicket, waiting, changedRoot), true);
-    const complete = completeTicketStep(changedTicket, [changedRoot], child, at).ticket;
-    assert.equal(needsWorkAfterDefinitionChange(complete, waiting, changedRoot), false);
+    const changedTicket = putTicketStep(ticket, child);
     assert.deepEqual(
-      childSteps(complete, [changedRoot], waiting).map((entry) => entry.id),
+      childSteps(changedTicket, [changedRoot], step).map((entry) => entry.id),
       [child.id],
     );
   });

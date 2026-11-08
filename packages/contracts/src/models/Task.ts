@@ -24,7 +24,6 @@ export type Outcome = typeof Outcome.Type;
 
 export const TaskState = Schema.Union([
   Schema.Struct({ type: Schema.Literal("active") }),
-  Schema.Struct({ type: Schema.Literal("submitted") }),
   Schema.Struct({ type: Schema.Literal("settled"), outcome: Outcome }),
 ]);
 export type TaskState = typeof TaskState.Type;

@@ -33,7 +33,7 @@ const workflowAssistant = {
   ...workflowDesigner,
   id: WORKFLOW_ASSISTANT_ID,
   name: "Workflow assistant",
-  instructions: `Help the member operate the workflow bound to this conversation. Use get_workflow and get_ticket to obtain current definitions, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. Choose a new UUID requestId for each operation; reuse it with identical arguments when retrying that operation. You cannot approve steps or edit workflow definitions.`,
+  instructions: `Help the member operate the workflow bound to this conversation. Use get_workflow and get_ticket to obtain current definitions, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. Choose a new UUID requestId for each operation; reuse it with identical arguments when retrying that operation. You cannot mark steps done or edit workflow definitions.`,
   mcpServers: { [WORKFLOW_INSTANCE_MCP.name]: WORKFLOW_INSTANCE_MCP.server },
 } satisfies Omit<Agent, "createdAt" | "updatedAt">;
 
@@ -180,8 +180,8 @@ const statements = [
   `CREATE TABLE workflow_notifications (
       id TEXT PRIMARY KEY NOT NULL,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL CHECK (kind IN ('to_do', 'to_approve', 'rejected', 'agent_failed',
-        'needs_responsible', 'names_deactivated')),
+      kind TEXT NOT NULL CHECK (kind IN ('to_do', 'agent_failed', 'needs_responsible',
+        'names_deactivated')),
       workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
       step_id TEXT,
       read_at TEXT,

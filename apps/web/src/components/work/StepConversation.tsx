@@ -62,7 +62,7 @@ export function StepFiles({
   );
 }
 
-/** The step's comments: a rejection reason is a comment too. */
+/** The step's comments: a failed agent's reason is a comment too. */
 export function StepComments({
   view,
   canWrite,

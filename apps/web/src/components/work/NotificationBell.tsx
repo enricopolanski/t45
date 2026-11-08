@@ -13,8 +13,6 @@ import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popov
 
 const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
   to_do: "New step to do",
-  to_approve: "Waiting for your approval",
-  rejected: "Changes needed",
   agent_failed: "An agent couldn't finish",
   needs_responsible: "Needs a new responsible",
   names_deactivated: "Names someone who left",

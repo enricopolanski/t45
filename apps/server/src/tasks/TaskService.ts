@@ -1,7 +1,7 @@
 import type { Receive } from "../chats/ChatExecutions.ts";
 import type { SessionMessage } from "@opencode/schema/session-message";
-import { ChatId, InputId, Refused, type InputPayload } from "@t45/contracts/models/Chat";
-import type { Task, Trigger, Outcome, TaskState } from "@t45/contracts/models/Task";
+import { ChatId, InputId, type InputPayload } from "@t45/contracts/models/Chat";
+import type { Task, Trigger, Outcome } from "@t45/contracts/models/Task";
 import { NotFound } from "@t45/contracts/resources/errors";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -21,7 +21,7 @@ export interface StepHooks {
     task: Task,
     part: SessionMessage.AssistantTool,
     generated: ReadonlyMap<string, Uint8Array>,
-  ) => Effect.Effect<{ readonly apply: Effect.Effect<TaskState | null> } | null>;
+  ) => Effect.Effect<{ readonly apply: Effect.Effect<Outcome | null> } | null>;
   readonly changed: (task: Task) => Effect.Effect<void>;
 }
 
@@ -77,10 +77,11 @@ const make = Effect.gen(function* () {
         step.automations.some((entry) => entry.id === trigger.automationId)
       );
     });
-  const transition = Effect.fnUntraced(function* (task: Task, state: TaskState) {
+  const settleTask = Effect.fnUntraced(function* (task: Task, outcome: Outcome) {
     if (task.state.type === "settled") return null;
+    const state = { type: "settled", outcome } as const;
     yield* origins.setState(task.chatId, state);
-    if (state.type === "settled") yield* chats.remove(task.chatId);
+    yield* chats.remove(task.chatId);
     if (task.trigger.type === "step") yield* tickets.publishChange(task.trigger.ticketId);
     return { ...task, state };
   });
@@ -117,30 +118,19 @@ const make = Effect.gen(function* () {
       yield* transaction(
         Effect.gen(function* () {
           const task = yield* requireTask(chatId);
-          let state = task.state;
+          let isSettled = task.state.type === "settled";
           for (const call of prepared) {
             if (call.effect === null || !(yield* origins.recordCall(chatId, call.key))) continue;
-            if (state.type !== "active") continue;
-            const next = yield* call.effect.apply;
-            if (next === null) continue;
-            const changed = yield* transition(task, next);
-            if (changed !== null) yield* step.changed(changed);
-            state = next;
+            if (isSettled) continue;
+            const outcome = yield* call.effect.apply;
+            if (outcome === null) continue;
+            const settled = yield* settleTask(task, outcome);
+            if (settled !== null) yield* step.changed(settled);
+            isSettled = true;
           }
         }).pipe(Effect.orDie),
       );
     });
-
-  const prepareInput = (task: Task) =>
-    Effect.gen(function* () {
-      if (task.state.type === "settled") return yield* new Refused({ reason: "task_settled" });
-      if (!(yield* canRun(task))) return yield* new Refused({ reason: "unavailable" });
-      yield* origins.setState(task.chatId, { type: "active" });
-    });
-  const settle = Effect.fnUntraced(function* (id: ChatId, outcome: Outcome) {
-    const task = yield* get(id);
-    return task === null ? null : yield* transition(task, { type: "settled", outcome });
-  }, transaction);
 
   return {
     listByTrigger: origins.listByTrigger,
@@ -165,18 +155,11 @@ const make = Effect.gen(function* () {
         .pipe(Effect.catchTags({ NotFound: Effect.die }));
       return chatId;
     }, transaction),
-    continue: Effect.fnUntraced(function* (id: ChatId, input: InputPayload) {
-      const task = yield* requireTask(id);
-      yield* prepareInput(task);
-      yield* chats.post({
-        chatId: id,
-        inputId: InputId.make(yield* uuid),
-        from: null,
-        input,
-      });
-    }, transaction),
     requestStop: chats.requestStop,
-    settle,
+    settle: Effect.fnUntraced(function* (id: ChatId, outcome: Outcome) {
+      const task = yield* get(id);
+      if (task !== null) yield* settleTask(task, outcome);
+    }, transaction),
     receive: (result: Parameters<Receive>[0], steps: StepHooks) => {
       const { chatId } = result;
       if (result.type === "messages")
@@ -195,8 +178,8 @@ const make = Effect.gen(function* () {
                       ? "The agent ended without submitting its work."
                       : "The agent invocation failed.",
                 };
-          const changed = yield* transition(task, { type: "settled", outcome });
-          if (changed !== null) yield* steps.changed(changed);
+          const settled = yield* settleTask(task, outcome);
+          if (settled !== null) yield* steps.changed(settled);
         }),
       );
     },

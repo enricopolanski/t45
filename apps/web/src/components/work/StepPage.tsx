@@ -27,7 +27,6 @@ import { attachStepFile, StepFields } from "./StepFields";
 import { StepStatus } from "./StepStatus";
 import { StepSubSteps } from "./StepSubSteps";
 import { BackLink, WorkFrame } from "./WorkFrame";
-import { useSession } from "../../state/session";
 import {
   missingFields,
   type StepAct,
@@ -48,7 +47,6 @@ const stepViews = apiWatch("workflows.watchStep", { idleTtlMs: 0 });
 export function StepPage({ stepId }: { readonly stepId: string }) {
   const stepView = isStepId(stepId) ? stepViews({ stepId }) : null;
   const { data: view, error: loadError, refresh } = useApiQuery(stepView);
-  const viewerUserId = useSession()?.userId;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Set once Mark done is tried; from then on, what's missing shows and clears as it's filled.
@@ -97,17 +95,17 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     );
   }
 
-  const actions = stepActions(view.ticket, view.step, viewerUserId);
+  const actions = stepActions(view.ticket, view.step);
   const step = { stepId: view.step.id };
   const writes = view.ticket.status.type === "open";
-  const unpassed = view.subSteps.filter((step) => step.status.type !== "completed");
+  const incomplete = view.subSteps.filter((step) => step.status.type !== "completed");
   const empty = missingFields(view.fields);
   const missing = triedDone ? empty : [];
-  const unapproved = triedDone ? unpassed : [];
+  const unfinished = triedDone ? incomplete : [];
   const markDone = () => {
     setTriedDone(true);
     setError(null);
-    if (empty.length === 0 && unpassed.length === 0) {
+    if (empty.length === 0 && incomplete.length === 0) {
       void act(() => api("workflows.markStepDone", step));
     }
   };
@@ -127,8 +125,8 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         </div>
       </div>
       {error && <ErrorText text={error} />}
-      {missing.length > 0 || unapproved.length > 0 ? (
-        <MissingRecap missing={missing} unapproved={unapproved} />
+      {missing.length > 0 || unfinished.length > 0 ? (
+        <MissingRecap missing={missing} unfinished={unfinished} />
       ) : null}
       <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-4">
         <ItemDescription description={view.ticket.description} />
@@ -259,14 +257,14 @@ function AgentCard({
 
 /**
  * What still stops the step from being marked done: each empty field, which scrolls to it, and
- * each sub-step not yet approved.
+ * each unfinished sub-step.
  */
 function MissingRecap({
   missing,
-  unapproved,
+  unfinished,
 }: {
   readonly missing: ReturnType<typeof missingFields>;
-  readonly unapproved: ReadonlyArray<StepNameView>;
+  readonly unfinished: ReadonlyArray<StepNameView>;
 }) {
   const reveal = (key: string) => {
     const target = document.querySelector<HTMLElement>(`[data-field-key="${CSS.escape(key)}"]`);
@@ -291,9 +289,9 @@ function MissingRecap({
             </button>
           </li>
         ))}
-        {unapproved.map((subStep) => (
+        {unfinished.map((subStep) => (
           <li key={subStep.id} className="text-destructive">
-            Get {subStep.name} approved
+            Finish {subStep.name}
           </li>
         ))}
       </ul>
@@ -333,7 +331,7 @@ function ItemHeader({ view }: { readonly view: StepView }) {
   );
 }
 
-/** The open step's name, the steps it sits in, and why it's blocked or needs changes. */
+/** The open step's name, the steps it sits in, and why it's blocked. */
 function StepHeading({ view }: { readonly view: StepView }) {
   const { step } = view;
   return (
@@ -360,11 +358,6 @@ function StepHeading({ view }: { readonly view: StepView }) {
           <span className="font-medium">Blocked:</span> {step.status.reason}
         </p>
       ) : null}
-      {step.status.type === "rejected" ? (
-        <p className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
-          <span className="font-medium">Changes needed:</span> {step.status.reason}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -386,7 +379,6 @@ function ItemDetails({
 }) {
   const id = useId();
   const { step, ticket: item } = view;
-  const responsible = step.responsible;
   const dueDate = item.dueDate === null ? "" : DateTime.formatIso(item.dueDate).slice(0, 10);
   return (
     <CardFold as="aside" title="Details">
@@ -409,10 +401,6 @@ function ItemDetails({
           ) : (
             <ActorName actor={step.assignee} />
           )}
-        </dd>
-        <dt className="text-muted-foreground">Responsible</dt>
-        <dd className="min-w-0">
-          <ActorName actor={responsible} />
         </dd>
         <dt className="text-muted-foreground">
           <label htmlFor={`${id}-due`}>Due date</label>

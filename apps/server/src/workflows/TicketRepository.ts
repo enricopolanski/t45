@@ -87,8 +87,7 @@ const make = Effect.gen(function* () {
       const visible = sql`t.workflow_id = ${workflow.id}
         AND instr(lower(t.title), lower(${query.trim()})) > 0
         AND (${workflow.isPublic || oversees(actor, workflow)} OR EXISTS (
-          SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.assignee') = ${actor.id}
-            OR json_extract(s.value, '$.responsible') = ${actor.id}))`;
+          SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.assignee') = ${actor.id}))`;
       return Effect.gen(function* () {
         const rows = yield* sql`SELECT ${sql.literal(COLUMNS)} FROM tickets t WHERE ${visible}
           ORDER BY t.created_at DESC, t.id DESC LIMIT 100`;
@@ -100,16 +99,15 @@ const make = Effect.gen(function* () {
     },
     hasTicketsInvolving: (workflowId: string, userId: string) =>
       sql`SELECT 1 FROM tickets t WHERE t.workflow_id = ${workflowId} AND EXISTS (
-        SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.assignee') = ${userId}
-          OR json_extract(s.value, '$.responsible') = ${userId}) LIMIT 1`.pipe(
+        SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.assignee') = ${userId})
+        LIMIT 1`.pipe(
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
     workflowIdsInvolving: (userId: string) =>
       sql<{ readonly id: string }>`SELECT DISTINCT t.workflow_id AS id FROM tickets t
         WHERE EXISTS (SELECT 1 FROM json_each(t.steps) s
-          WHERE json_extract(s.value, '$.assignee') = ${userId}
-            OR json_extract(s.value, '$.responsible') = ${userId})`.pipe(
+          WHERE json_extract(s.value, '$.assignee') = ${userId})`.pipe(
         Effect.map((rows) => rows.map((row) => row.id)),
         Effect.orDie,
       ),
@@ -118,10 +116,9 @@ const make = Effect.gen(function* () {
     listOpenInvolving: (id: string) =>
       read(
         `${IS_OPEN} AND EXISTS (SELECT 1 FROM json_each(t.steps) s
-            WHERE json_extract(s.value, '$.assignee') = ?
-              OR json_extract(s.value, '$.responsible') = ?)
+            WHERE json_extract(s.value, '$.assignee') = ?)
           ORDER BY t.created_at, t.id`,
-        [id, id],
+        [id],
       ),
     hasTickets: (workflowId: string) =>
       sql`SELECT 1 FROM tickets WHERE workflow_id = ${workflowId} LIMIT 1`.pipe(

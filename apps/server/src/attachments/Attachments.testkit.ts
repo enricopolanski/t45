@@ -64,7 +64,6 @@ export const seedStep = (ticketId: string, assignee: string) =>
           parentStepId: null,
           status: { type: "working", at },
           assignee,
-          responsible: assignee,
           values: {},
           automations: [],
         },

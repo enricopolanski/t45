@@ -92,7 +92,7 @@ export function WorkflowPeople({ detail, busy, run }: Editing) {
           />
           {left(workflow.responsible) && (
             <ErrorText
-              text={`${actorName(directory, workflow.responsible)} has left. Steps that would go to them go to the longest-serving admin until you choose who is responsible now.`}
+              text={`${actorName(directory, workflow.responsible)} has left. Choose who is responsible now.`}
             />
           )}
         </div>
@@ -156,7 +156,7 @@ export function WorkflowStepPeople({ detail, busy, run }: Editing) {
       Object.entries(workflow.defaultAssignments).filter(([id]) => id !== stepId),
     );
     const defaultAssignments =
-      next.assignee === null && next.responsible === null && next.automations.length === 0
+      next.assignee === null && next.automations.length === 0
         ? others
         : { ...others, [stepId]: next };
     return run(() =>
@@ -178,42 +178,27 @@ export function WorkflowStepPeople({ detail, busy, run }: Editing) {
             ? "Whoever did the step before"
             : `Whoever has ${parentPath}`;
       const assignee = assignment?.assignee ? actorName(directory, assignment.assignee) : inherited;
-      const responsible = actorName(directory, assignment?.responsible ?? workflow.responsible);
       return (
         <details key={step.id} className="rounded-xl border border-border bg-card p-4">
           <summary className="cursor-pointer text-sm">
             <span className="font-medium">{name}</span>
             <span className="mt-1 block text-xs text-muted-foreground">
-              {assignee} · Approved by {responsible} · {assignment?.automations.length ?? 0}{" "}
-              automations · {step.subSteps.length} substeps
+              {assignee} · {assignment?.automations.length ?? 0} automations ·{" "}
+              {step.subSteps.length} substeps
             </span>
           </summary>
           <div className="mt-4 flex flex-col gap-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-muted-foreground">Assignee</span>
-                <PersonPicker
-                  aria-label={`${stepPath} assignee`}
-                  value={assignment?.assignee ?? null}
-                  onChange={(assignee) => void save(step.id, { assignee })}
-                  noneLabel={inherited}
-                  onClear={() => void save(step.id, { assignee: null })}
-                  placeholder="Choose an assignee"
-                  disabled={busy}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-muted-foreground">Responsible</span>
-                <PersonPicker
-                  aria-label={`${stepPath} responsible`}
-                  value={assignment?.responsible ?? null}
-                  onChange={(responsible) => void save(step.id, { responsible })}
-                  noneLabel="The workflow's responsible"
-                  onClear={() => void save(step.id, { responsible: null })}
-                  placeholder="Choose who approves"
-                  disabled={busy}
-                />
-              </div>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Assignee</span>
+              <PersonPicker
+                aria-label={`${stepPath} assignee`}
+                value={assignment?.assignee ?? null}
+                onChange={(assignee) => void save(step.id, { assignee })}
+                noneLabel={inherited}
+                onClear={() => void save(step.id, { assignee: null })}
+                placeholder="Choose an assignee"
+                disabled={busy}
+              />
             </div>
             <StepAutomationsEditor
               entries={assignment?.automations ?? EMPTY_AUTOMATIONS}
@@ -322,4 +307,4 @@ export function WorkflowDangerZone({ detail, busy, run }: Editing) {
 }
 
 const EMPTY_AUTOMATIONS: ReadonlyArray<StepAutomation> = [];
-const EMPTY_ASSIGNMENT = { assignee: null, responsible: null, automations: EMPTY_AUTOMATIONS };
+const EMPTY_ASSIGNMENT = { assignee: null, automations: EMPTY_AUTOMATIONS };

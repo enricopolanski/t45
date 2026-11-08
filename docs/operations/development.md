@@ -31,7 +31,7 @@ For agent checks, use `vp run browser --email alice@example.test --steps /tmp/ch
 
 Registration, approval, and deactivation rules still apply.
 
-The Playwright smoke check is mandatory in pre-commit. Start `vp run dev` first and leave it running for E2Es or pre-commit. Run the check on its own with `vp run --filter @t45/e2e test`. It opens the running development app at `http://localhost:5733` and checks that the login page renders. Playwright does not start servers or build the app. It uses the Chromium installed by setup; a missing browser fails the check. Browser traces on failure live under `e2e/test-results`.
+The Playwright smoke check is mandatory in pre-commit. Run it on its own with `vp run --filter @t45/e2e test`. It opens the development app at `http://localhost:5733` and checks that the login page renders. A running `vp run dev` is used as is; with none, Playwright starts one with a fresh home in the system temp folder (`t45-e2e`) and stops it after the run. It uses the Chromium installed by setup; a missing browser fails the check. Browser traces on failure live under `e2e/test-results`.
 
 ### State and ports
 

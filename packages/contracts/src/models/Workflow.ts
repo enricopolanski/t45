@@ -1,5 +1,4 @@
 import * as Schema from "effect/Schema";
-import type { Task } from "./Task.ts";
 import type * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Struct from "effect/Struct";
@@ -64,7 +63,7 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
     Schema.suspend((): Schema.Codec<StepDefinition> => StepDefinition),
   ).annotate({
     description:
-      "Steps that start with their parent and must all be approved before it can finish.",
+      "Steps that start with their parent and must all be completed before it can finish.",
   }),
 }) {}
 
@@ -117,15 +116,6 @@ export const StepAutomation = Schema.Struct({
 });
 export type StepAutomation = typeof StepAutomation.Type;
 
-export const automationsSubmitted = (
-  entries: ReadonlyArray<StepAutomation>,
-  tasks: ReadonlyArray<Pick<Task, "trigger" | "state">>,
-) =>
-  entries.length > 0 &&
-  entries.every((entry) =>
-    tasks.some((task) => task.trigger.automationId === entry.id && task.state.type === "submitted"),
-  );
-
 const StepAutomations = Schema.Array(StepAutomation).check(
   Schema.makeFilter((entries) => hasDistinctIds(entries.map((entry) => entry.id)), {
     expected: "distinct automation identities",
@@ -147,7 +137,6 @@ export class Workflow extends Schema.Opaque<Workflow>()(
       Schema.Struct({
         automations: StepAutomations,
         assignee: Schema.NullOr(StringId),
-        responsible: Schema.NullOr(StringId),
       }),
     ).check(Schema.isPropertyNames(StringId)),
     slug: Schema.NullOr(Slug),
@@ -158,17 +147,17 @@ export class Workflow extends Schema.Opaque<Workflow>()(
 
 const StepStatus = Schema.Union([
   Schema.Struct({
-    type: Schema.Literals(["working", "waiting_approval", "completed"]),
+    type: Schema.Literals(["working", "completed"]),
     at: Schema.DateTimeUtcFromString,
   }),
   Schema.Struct({
-    type: Schema.Literals(["blocked", "rejected"]),
+    type: Schema.Literal("blocked"),
     at: Schema.DateTimeUtcFromString,
     reason: TrimmedNonEmptyString,
   }),
 ]);
 
-/** One step or sub-step of one ticket, with the people resolved when the ticket entered it. */
+/** One step or sub-step of one ticket. */
 export class Step extends Schema.Opaque<Step>()(
   Schema.Struct({
     id: StringId.withConstructorDefault,
@@ -178,7 +167,6 @@ export class Step extends Schema.Opaque<Step>()(
     status: StepStatus,
     automations: StepAutomations,
     assignee: Schema.NullOr(StringId),
-    responsible: StringId,
     /** The values assigned to the fields of the step */
     values: Schema.Record(Schema.String, Schema.Json).check(
       Schema.isPropertyNames(Schema.toType(TrimmedNonEmptyString)),
@@ -250,11 +238,10 @@ const REFUSALS = {
   last_admin: "A workflow needs at least one active admin.",
   not_overseer: "Only the workflow's responsible and admins can do that.",
   cannot_start_ticket: "You can't start tickets in this workflow.",
-  not_step_responsible: "Only the step's responsible can do that.",
   workflow_archived: "This workflow is archived.",
   ticket_not_open: "This ticket is no longer open.",
   step_not_actionable: "This step can't do that right now.",
-  step_incomplete: "Fill in every field and get every sub-step approved first.",
+  step_incomplete: "Fill in every field and complete every sub-step first.",
   reason_required: "Give a reason.",
   invalid_field_value: "That value doesn't fit the field.",
   invalid_attachment: "That file can't be attached here.",
@@ -350,10 +337,9 @@ export const buildPreviousStepsFieldViews = (
   });
 };
 
-export const isActionable = (step: Step) =>
-  step.status.type === "working" || step.status.type === "rejected";
+export const isActionable = (step: Step) => step.status.type === "working";
 
-export const isLive = (step: Step) => isActionable(step) || step.status.type === "blocked";
+export const isLive = (step: Step) => step.status.type !== "completed";
 
 const fits = (steps: ReadonlyArray<StepDefinition>, ticket: Ticket, step: Step) => {
   const node = findStep(steps, step.stepDefinitionId);
@@ -374,8 +360,7 @@ export const oversees = (actor: WorkflowActor, workflow: Workflow) =>
   workflow.responsible === actor.id || isAdmin(actor, workflow);
 
 export const isInvolved = (actor: WorkflowActor, workflow: Workflow, ticket: Ticket) =>
-  ticket.steps.some((step) => step.assignee === actor.id || step.responsible === actor.id) ||
-  oversees(actor, workflow);
+  ticket.steps.some((step) => step.assignee === actor.id) || oversees(actor, workflow);
 
 export const canViewTicket = (actor: WorkflowActor, workflow: Workflow, ticket: Ticket) =>
   workflow.isPublic || isInvolved(actor, workflow, ticket);
@@ -384,17 +369,7 @@ export const canViewTicket = (actor: WorkflowActor, workflow: Workflow, ticket: 
 export const lastAdminRefusal = (activeAdminIds: ReadonlyArray<string>) =>
   activeAdminIds.length === 0 ? ("last_admin" as const) : null;
 
-/** Approval is a decision by the responsible person over an open ticket awaiting approval. */
-export const stepApprovalRefusal = (actorId: string, ticket: Ticket, step: Step) =>
-  ticket.status.type !== "open"
-    ? "ticket_not_open"
-    : step.status.type !== "waiting_approval"
-      ? "step_not_actionable"
-      : step.responsible !== actorId
-        ? "not_step_responsible"
-        : null;
-
-/** Every required field and every sub-step must be complete before requesting approval. */
+/** Every required field and every sub-step must be complete before the step is marked done. */
 export const stepCompletionRefusal = (
   definition: StepDefinition | null,
   ticket: Ticket,
@@ -423,41 +398,6 @@ export const fieldValueRefusal = (field: StepField, value: Schema.Json) => {
         ? field.repeatable && isRowIds(value)
         : fieldValueValidators[field.type](value);
   return valid ? null : ("invalid_field_value" as const);
-};
-
-/** Resolved from current membership, never persisted as a second source of people. */
-export const resolveResponsible = (
-  workflow: Workflow,
-  requested: string | null,
-  activePeople: ReadonlySet<string>,
-) => {
-  const notices: Array<"names_deactivated" | "needs_responsible"> = [];
-  if (requested !== null && requested !== workflow.responsible) {
-    if (activePeople.has(requested)) return { responsible: requested, notices };
-    notices.push("names_deactivated");
-  }
-  if (activePeople.has(workflow.responsible)) return { responsible: workflow.responsible, notices };
-  notices.push("needs_responsible");
-  return { responsible: workflow.adminUserIds.find((id) => activePeople.has(id)) ?? null, notices };
-};
-
-/** Clearing an assignment leaves it empty; only an unavailable assignee is replaced. */
-export const resolveAssignee = (
-  requested: string | null,
-  responsible: string,
-  canTakeWork: boolean,
-) =>
-  requested === null || canTakeWork
-    ? { assignee: requested, namesDeactivated: false }
-    : { assignee: responsible, namesDeactivated: true };
-
-export const stepPeopleOnEntry = (
-  workflow: Workflow,
-  definition: StepDefinition,
-  inherited: string | null,
-) => {
-  const defaults = workflow.defaultAssignments[definition.id];
-  return { responsible: defaults?.responsible ?? null, assignee: defaults?.assignee ?? inherited };
 };
 
 export const stepInTicket = (ticket: Ticket, stepId: string | null) =>
@@ -550,12 +490,3 @@ export const subStepsToEnter = (
       : subStepsToEnter(ticket, existing, child);
   });
 };
-
-export const needsWorkAfterDefinitionChange = (
-  ticket: Ticket,
-  step: Step,
-  definition: StepDefinition | null,
-) =>
-  step.status.type === "waiting_approval" &&
-  definition !== null &&
-  stepCompletionRefusal(definition, ticket, step) !== null;

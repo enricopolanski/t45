@@ -17,13 +17,6 @@ const REASONS = {
     send: (view: StepView, reason: string) =>
       api("workflows.blockStep", { stepId: view.step.id, reason }),
   },
-  reject: {
-    title: "Request changes",
-    placeholder: "What needs fixing",
-    confirmLabel: "Request changes",
-    send: (view: StepView, reason: string) =>
-      api("workflows.rejectStep", { stepId: view.step.id, reason }),
-  },
   cancel: {
     title: "Cancel this item",
     placeholder: "Why it stops here",
@@ -68,14 +61,6 @@ export function StepStatus({
           Mark done
         </MenuItem>
       ),
-      actions.canApprove && (
-        <MenuItem
-          key="approve"
-          onClick={() => void act(() => api("workflows.approveStep", { stepId }))}
-        >
-          Approve
-        </MenuItem>
-      ),
     ],
     [
       actions.canBlock && (
@@ -89,13 +74,6 @@ export function StepStatus({
           onClick={() => void act(() => api("workflows.unblockStep", { stepId }))}
         >
           Unblock
-        </MenuItem>
-      ),
-    ],
-    [
-      actions.canReject && (
-        <MenuItem key="reject" onClick={() => ask("reject")}>
-          Request changes
         </MenuItem>
       ),
     ],

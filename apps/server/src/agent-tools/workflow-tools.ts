@@ -12,7 +12,7 @@ const tools = [
   {
     name: "draft",
     description:
-      "Draft a reusable workflow blueprint for the person you are chatting with. A workflow is a repeatable process: each item passes its steps in order, and each step is approved before the next starts. A step has a name, instructions, fields with labels, and sub-steps that start with it and must all be approved before it can finish. Give each step a unique id and each field an id unique among its siblings, using at least six letters, digits, underscores or hyphens. Submit the complete draft for every revision. The draft appears in the chat with a Save blueprint button. The person saves the blueprint, then separately configures who works and approves each step and publishes a workflow from it.",
+      "Draft a reusable workflow blueprint for the person you are chatting with. A workflow is a repeatable process: each item passes its steps in order, and each step is completed before the next starts. A step has a name, instructions, fields with labels, and sub-steps that start with it and must all be completed before it can finish. Give each step a unique id and each field an id unique among its siblings, using at least six letters, digits, underscores or hyphens. Submit the complete draft for every revision. The draft appears in the chat with a Save blueprint button. The person saves the blueprint, then separately configures who works on each step and publishes a workflow from it.",
     inputSchema: { ...document.schema, $defs: document.definitions },
   },
 ];

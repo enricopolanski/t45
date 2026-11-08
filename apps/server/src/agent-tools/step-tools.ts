@@ -16,7 +16,7 @@ import { refuse, serve } from "./mcp-stdio.ts";
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 const APPLIED =
-  "T45 applies the call to the step; a refusal fails this task and notifies the responsible person.";
+  "T45 applies the call to the step; a refusal fails this task and notifies the step's assignee.";
 
 const descriptions: Record<StepToolCall["tool"], string> = {
   step_set_field:
@@ -28,7 +28,7 @@ const descriptions: Record<StepToolCall["tool"], string> = {
   step_submit_task:
     "Submit this task when your contribution is finished, even if other people or automations still have work on the step. Comment on any remaining work before submitting. This does not complete the shared step. When you cannot finish your contribution, call give_up instead. Stop after calling it.",
   step_give_up:
-    "Fail this task when you cannot finish its contribution. Fill what you can first, then explain what is missing and why. The responsible person is notified; other tasks continue. Stop after calling it.",
+    "Fail this task when you cannot finish its contribution. Fill what you can first, then explain what is missing and why. The step's assignee is notified; other tasks continue. Stop after calling it.",
 };
 
 const attach = (path: string) => {
