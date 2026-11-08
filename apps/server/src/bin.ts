@@ -4,11 +4,14 @@ import * as NodeHttp from "node:http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
+import * as RcMap from "effect/RcMap";
 import * as References from "effect/References";
-import { FetchHttpClient, HttpRouter } from "effect/http";
+import type * as Types from "effect/Types";
+import { FetchHttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import * as AppRpc from "./AppRpc.ts";
 import * as AgentRepository from "./agents/AgentRepository.ts";
@@ -59,7 +62,12 @@ const ChatServices = ChatService.layer.pipe(
 
 const Org = OrganizationRepository.layer.pipe(Layer.provideMerge(ChatServices));
 
-const RuntimeDependencies = Layer.effect(UserService, UserService.make).pipe(
+/**
+ * Groups the resources and services owned by one isolated app instance.
+ * They get built afresh under a common separate data instance:
+ * database, session state, execution state, background automation jobs
+ */
+const InstanceDependencies = Layer.effect(UserService, UserService.make).pipe(
   Layer.provide(Authentication.layer),
   Layer.provideMerge(WorkflowService.layer),
   Layer.provideMerge(AutomationService.layer),
@@ -76,6 +84,41 @@ const Routes = Layer.mergeAll(
   AppRpc.layer,
 );
 
+const makeInstance = (dataDir: string) =>
+  // `fresh` builds the instance layer ex-novo, doesn't reuse existing
+  Layer.build(Layer.fresh(InstanceDependencies)).pipe(
+    Effect.flatMap((services) =>
+      HttpRouter.toHttpEffect(Layer.fresh(Routes)).pipe(
+        Effect.map(Effect.provideContext(services)),
+        Effect.provideContext(services),
+      ),
+    ),
+    Effect.provide(
+      ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ DATA_DIR: dataDir }), {
+        asPrimary: true,
+      }),
+    ),
+  );
+
+/** Development only: serves a request carrying `x-instance-id` from that instance. */
+const makeInstanceMiddleware = Effect.gen(function* () {
+  const instancesDir = yield* ServerConfig.instancesDir;
+  const instances = yield* RcMap.make({
+    lookup: (instanceId: string) => makeInstance(`${instancesDir}/${instanceId}`),
+    idleTimeToLive: "10 minutes",
+  });
+  return (defaultInstance: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const instanceId = request.headers["x-instance-id"];
+      if (instanceId === undefined) return yield* defaultInstance;
+      if (/^[\w-]{1,128}$/u.test(instanceId)) {
+        return yield* Effect.flatten(RcMap.get(instances, instanceId));
+      }
+      return HttpServerResponse.text("Invalid x-instance-id", { status: 400 });
+    });
+});
+
 const Server = Layer.unwrap(
   Effect.gen(function* () {
     const host = yield* ServerConfig.host;
@@ -83,10 +126,16 @@ const Server = Layer.unwrap(
     const logLevel = yield* ServerConfig.logLevel;
     const logRequests = yield* ServerConfig.logRequests;
 
-    const ServedRoutes = HttpRouter.serve(Routes, {
-      disableLogger: !logRequests,
-      routerConfig: { maxParamLength: 512 },
-    }).pipe(Layer.tap(() => Effect.logInfo("T45 server is ready", { host, port })));
+    const ServedRoutes = Layer.unwrap(
+      Effect.gen(function* () {
+        const environment = yield* ServerConfig.environment;
+        const InstanceMiddleware = HttpRouter.middleware(makeInstanceMiddleware, { global: true });
+        return HttpRouter.serve(
+          environment._tag === "development" ? Layer.merge(Routes, InstanceMiddleware) : Routes,
+          { disableLogger: !logRequests },
+        );
+      }),
+    ).pipe(Layer.tap(() => Effect.logInfo("T45 server is ready", { host, port })));
     return ServedRoutes.pipe(
       Layer.provideMerge(
         NodeHttpServer.layer(() => NodeHttp.createServer(), {
@@ -95,9 +144,10 @@ const Server = Layer.unwrap(
           gracefulShutdownTimeout: 0,
         }),
       ),
-      Layer.provideMerge(RuntimeDependencies),
+      Layer.provideMerge(InstanceDependencies),
       Layer.provide(Logger.layer([Logger.consolePretty()])),
       Layer.provide(Layer.succeed(References.MinimumLogLevel, logLevel)),
+      Layer.provide(Layer.succeed(HttpRouter.RouterConfig, { maxParamLength: 512 })),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provideMerge(NodeServices.layer),
       Layer.provide(ServerConfig.layer),

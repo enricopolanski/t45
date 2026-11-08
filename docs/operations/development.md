@@ -37,6 +37,8 @@ The Playwright smoke check is mandatory in pre-commit. Start `vp run dev` first 
 
 Dev state lives in the gitignored `.t45/userdata` of the checkout you launch from, even when `DATA_DIR` is set; an explicit `--home-dir` wins. Never run a development server against the live `~/.t3/userdata`.
 
+A request with an `x-instance-id` header (letters, digits, `_` and `-`) runs against an instance: its own copy of the app, with its own database, attachments, sessions and background work in `.t45/instances/<id>/userdata`, created on first use. Requests without the header use `.t45/userdata`, and production ignores it. `vp run browser --email <email> --instance-id <id>` opens a browser on an instance; curl needs the header and a cookie jar per instance. E2E specs import `test` from `e2e/fixtures.ts`, which gives each test attempt a new instance and attaches its id to the report. Inspect an instance with `sqlite3 .t45/instances/<id>/userdata/statev2.sqlite`. An instance closes after 10 idle minutes, which stops its background work, so use `--home-dir` for a long throwaway session. Webhooks carry no header and reach the default state. Delete instances only while dev is stopped (`rm -rf .t45/instances`); an open instance keeps using its deleted files until it closes.
+
 Ports are fixed: server 13773, web 5733, runner 8790. If one is taken, for example by a dev run in another checkout, startup fails. `--port` or `PORT` moves only the server port. `--host` or `HOST` accepts loopback and wildcard bind addresses. `LOG_REQUESTS` controls request logging. `--dry-run` prints the configuration without starting services.
 
 The launcher passes the server's port as `PORT` so the web proxy targets it. Vite always listens on port 5733.
