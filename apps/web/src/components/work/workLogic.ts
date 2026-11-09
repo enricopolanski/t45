@@ -1,4 +1,4 @@
-import { type Agent, canWorkSteps } from "@t45/contracts/models/Agent";
+import { type Agent } from "@t45/contracts/models/Agent";
 import type { User } from "@t45/contracts/models/User";
 import type { Step, Ticket } from "@t45/contracts/models/Workflow";
 import type { FieldView } from "@t45/contracts/resources/Workflows";
@@ -90,11 +90,9 @@ export function actorName(directory: WorkDirectory, id: string | null) {
   );
 }
 
-/** Active people or agents eligible for step work. */
-export function assignableActors(directory: WorkDirectory, kind: "person" | "agent") {
-  return kind === "person"
-    ? directory.people
-        .filter((person) => person.state === "active")
-        .map((person) => ({ id: person.id, label: person.displayName }))
-    : directory.agents.filter(canWorkSteps).map((agent) => ({ id: agent.id, label: agent.name }));
+/** Active people eligible for step work. */
+export function assignablePeople(directory: WorkDirectory) {
+  return directory.people
+    .filter((person) => person.state === "active")
+    .map((person) => ({ id: person.id, label: person.displayName }));
 }

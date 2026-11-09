@@ -57,5 +57,13 @@ export const Automations = RpcGroup.make(
     error: Schema.Union([AutomationRefused, NotFound]),
   }),
 )
-  .prefix("automations.")
-  .middleware(AdminOnly);
+  // Middleware applies only to existing RPCs; adding listForSteps afterward keeps it member-accessible.
+  .middleware(AdminOnly)
+  .add(
+    Rpc.make("listForSteps", {
+      success: Schema.Array(
+        Schema.Struct(Struct.pick(Automation.fields, ["id", "title", "prompt", "agentId"])),
+      ),
+    }),
+  )
+  .prefix("automations.");

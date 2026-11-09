@@ -10,7 +10,7 @@ import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { PersonPicker } from "../work/ActorPicker";
+import { PersonPicker } from "../work/PersonPicker";
 import { WorkFrame } from "../work/WorkFrame";
 
 /** Configures a workflow from an existing shared definition. */

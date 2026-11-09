@@ -50,8 +50,7 @@ const make = Effect.gen(function* () {
     list: sql`SELECT ${columns}, (
         SELECT json_object('status', c.status, 'at', c.updated_at)
         FROM chat_origins o JOIN chats c ON c.id = o.chat_id
-        WHERE o.trigger IS NOT NULL AND json_extract(o.trigger, '$.type') = 'automation'
-          AND json_extract(o.trigger, '$.automationId') = automations.id
+        WHERE json_extract(o.trigger, '$.automationId') = automations.id
         ORDER BY c.created_at DESC, c.id DESC LIMIT 1
       ) AS "lastRun" FROM automations ORDER BY created_at, id`.pipe(
       Effect.flatMap(decodeSummaries),

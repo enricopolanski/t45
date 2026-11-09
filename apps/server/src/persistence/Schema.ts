@@ -135,13 +135,15 @@ const statements = [
       steps TEXT NOT NULL,
       is_archived INTEGER NOT NULL
     )`,
+  // The automationIds SQL comments in workflows and tickets deliberately change the raw-SQL
+  // fingerprint so databases containing the old embedded automation objects are refused.
   `CREATE TABLE workflows (
       id TEXT PRIMARY KEY NOT NULL,
       definition_id TEXT NOT NULL REFERENCES workflow_definitions(id),
       name TEXT NOT NULL,
       responsible_user_id TEXT NOT NULL,
       admin_user_ids TEXT NOT NULL,
-      default_assignments TEXT NOT NULL,
+      default_assignments TEXT NOT NULL, -- assignee and shared automationIds by step definition
       slug TEXT UNIQUE,
       is_public INTEGER NOT NULL,
       is_archived INTEGER NOT NULL
@@ -154,7 +156,7 @@ const statements = [
       description TEXT NOT NULL,
       due_date TEXT,
       status TEXT NOT NULL,
-      steps TEXT NOT NULL,
+      steps TEXT NOT NULL, -- runtime steps reference shared automationIds
       created_at TEXT NOT NULL
     )`,
   `CREATE INDEX tickets_workflow ON tickets(workflow_id, created_at)`,

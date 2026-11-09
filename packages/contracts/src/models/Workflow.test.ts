@@ -44,7 +44,7 @@ const step: Step = {
   status: { type: "working", at },
   assignee: "worker01",
   values: {},
-  automations: [],
+  automationIds: [],
 };
 const ticket: Ticket = {
   id: "ticket01",
@@ -72,7 +72,7 @@ describe("starting a ticket", () => {
     const configured = {
       ...workflow,
       defaultAssignments: {
-        [root.id]: { automations: [], assignee: "worker01" },
+        [root.id]: { automationIds: [], assignee: "worker01" },
       },
     };
     assert.equal(

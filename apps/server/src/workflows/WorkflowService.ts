@@ -1,3 +1,5 @@
+import type { Automation, AutomationId } from "@t45/contracts/models/Automation";
+import { AutomationRepository } from "../automations/AutomationRepository.ts";
 import type { CurrentActor } from "@t45/contracts/Authorization";
 import { ChatService } from "../chats/ChatService.ts";
 import * as WorkflowAssistant from "./WorkflowAssistant.ts";
@@ -18,7 +20,6 @@ import {
 import { generateId } from "@t45/contracts/models/primitives";
 import { Refused as UserRefused } from "@t45/contracts/models/User";
 import {
-  type StepAutomation,
   stepInTicket,
   childSteps,
   ancestorSteps,
@@ -115,6 +116,7 @@ const make = Effect.gen(function* () {
   const notifications = yield* NotificationRepository;
   const users = yield* UserRepository;
   const agents = yield* AgentRepository;
+  const automations = yield* AutomationRepository;
   const files = yield* AttachmentRepository;
   const buildCurrentStepFieldViews = (
     fields: ReadonlyArray<StepField>,
@@ -282,9 +284,9 @@ const make = Effect.gen(function* () {
     if (origin.trigger.type !== "step") return yield* new NotFound();
     const work = yield* loadTicket(origin.trigger.ticketId);
     const step = stepIn(work, origin.trigger.stepId);
-    const entry = step?.automations.find((entry) => entry.id === origin.trigger.automationId);
-    if (step === null || entry === undefined) return yield* new NotFound();
-    return { work, step, entry };
+    if (step === null || !step.automationIds.includes(origin.trigger.automationId))
+      return yield* new NotFound();
+    return { work, step };
   });
   const loadForCommand = Effect.fnUntraced(function* (actorId: string, stepId: string) {
     const loaded = yield* loadStep(stepId);
@@ -329,7 +331,7 @@ const make = Effect.gen(function* () {
   const stopStepRuns = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
-    matches: (automationId: string) => boolean = () => true,
+    matches: (automationId: AutomationId) => boolean = () => true,
   ) {
     const stopped: Array<ChatId> = [];
     for (const run of yield* stepRuns(work, step)) {
@@ -388,7 +390,7 @@ const make = Effect.gen(function* () {
   const buildAutomationInput = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
-    entry: StepAutomation,
+    automation: Automation,
   ) {
     const brief = yield* buildAutomationContext(work, step);
     const instructions = brief.instructions.trim();
@@ -403,7 +405,7 @@ const make = Effect.gen(function* () {
         "You work in a folder of your own. Follow AGENTS.md if it is there.",
         instructions ? `Instructions for this step:\n${instructions}` : "",
         formatAutomationContext(brief),
-        `Your automation: ${entry.instructions}. Other people and automations may work on this step at the same time. Do not wait for their work or unrelated fields and sub-steps to be complete.`,
+        `Your automation: ${automation.prompt}. Other people and automations may work on this step at the same time. Do not wait for their work or unrelated fields and sub-steps to be complete.`,
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -443,7 +445,7 @@ const make = Effect.gen(function* () {
       status: { type: "working", at: yield* DateTime.now },
       parentStepId: parent?.id ?? null,
       assignee: requested !== null && (yield* isActivePerson(requested)) ? requested : null,
-      automations: defaults?.automations ?? [],
+      automationIds: defaults?.automationIds ?? [],
       values: {},
     });
     putStep(work, step);
@@ -616,7 +618,7 @@ const make = Effect.gen(function* () {
     const workflow = yield* requireAdmin(actor, yield* found(workflows.get(workflowId)));
     if (changes.responsible !== undefined) yield* requireValidPerson(changes.responsible);
     for (const assignment of Object.values(changes.defaultAssignments ?? {})) {
-      yield* validateEntries(assignment.automations);
+      yield* validateAutomations(assignment.automationIds);
       if (assignment.assignee !== null) yield* requireValidPerson(assignment.assignee);
     }
     const adminUserIds = [...new Set(changes.adminUserIds ?? workflow.adminUserIds)];
@@ -752,11 +754,11 @@ const make = Effect.gen(function* () {
           work.ticket.status.type === "open" &&
           isInvolved(actor, work.workflow, work.ticket) &&
           isActionable(step);
-        return step.automations.map((entry) => {
-          const latest = attempts.findLast((run) => run.trigger.automationId === entry.id);
+        return step.automationIds.map((id) => {
+          const latest = attempts.findLast((run) => run.trigger.automationId === id);
           if (latest === undefined)
             return {
-              id: entry.id,
+              id,
               statusLabel: "Not run",
               runLabel: canRun ? ("Run" as const) : null,
               canStop: false,
@@ -764,7 +766,7 @@ const make = Effect.gen(function* () {
           const { chatStatus } = latest;
           const statusLabel = chatStatus === "running" ? "Running" : "Ended";
           return {
-            id: entry.id,
+            id,
             statusLabel,
             runLabel: canRun ? ("Run again" as const) : null,
             canStop: canRun && chatStatus === "running",
@@ -1009,36 +1011,37 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const validateEntries = Effect.fnUntraced(function* (entries: ReadonlyArray<StepAutomation>) {
-    for (const entry of entries) {
-      const agent = yield* agents.get(entry.agentId);
-      if (agent === null || !canWorkSteps(agent))
-        return yield* new WorkflowRefused({ reason: "invalid_automations" });
-    }
+  const requireStepAutomation = Effect.fnUntraced(function* (id: AutomationId) {
+    const automation = yield* automations.get(id);
+    const agent = automation === null ? null : yield* agents.get(automation.agentId);
+    if (automation === null || agent === null || !canWorkSteps(agent))
+      return yield* new WorkflowRefused({ reason: "invalid_automations" });
+    return automation;
   });
+  const validateAutomations = (ids: ReadonlyArray<AutomationId>) =>
+    Effect.forEach(ids, requireStepAutomation, { discard: true });
   const loadAutomation = Effect.fnUntraced(function* (
     actorId: string,
     input: Payload<"runStepAutomation">,
   ) {
     const loaded = yield* loadForCommand(actorId, input.stepId);
     yield* requireActionable(loaded.step);
-    const entry = loaded.step.automations.find((entry) => entry.id === input.automationId);
-    if (entry === undefined) return yield* new NotFound();
-    return { ...loaded, entry };
+    if (!loaded.step.automationIds.includes(input.automationId)) return yield* new NotFound();
+    return loaded;
   });
   const runStepAutomation = Effect.fnUntraced(function* (
     actorId: string,
     input: Payload<"runStepAutomation">,
   ) {
-    const { work, step, entry } = yield* loadAutomation(actorId, input);
-    yield* validateEntries([entry]);
-    yield* stopStepRuns(work, step, (id) => id === entry.id);
+    const { work, step } = yield* loadAutomation(actorId, input);
+    const automation = yield* requireStepAutomation(input.automationId);
+    yield* stopStepRuns(work, step, (id) => id === automation.id);
     yield* chats.startAutomation(
-      { type: "step", ticketId: work.ticket.id, stepId: step.id, automationId: entry.id },
-      entry.agentId,
+      { type: "step", ticketId: work.ticket.id, stepId: step.id, automationId: automation.id },
+      automation.agentId,
       {
         title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
-        input: yield* buildAutomationInput(work, step, entry),
+        input: yield* buildAutomationInput(work, step, automation),
       },
     );
   }, transaction);
@@ -1046,8 +1049,8 @@ const make = Effect.gen(function* () {
     actorId: string,
     input: Payload<"stopStepAutomation">,
   ) {
-    const { work, step, entry } = yield* loadAutomation(actorId, input);
-    for (const chatId of yield* stopStepRuns(work, step, (id) => id === entry.id))
+    const { work, step } = yield* loadAutomation(actorId, input);
+    for (const chatId of yield* stopStepRuns(work, step, (id) => id === input.automationId))
       yield* automationEnded(chatId, actorId);
   }, transaction);
   const setStepAutomations = Effect.fnUntraced(function* (
@@ -1056,16 +1059,9 @@ const make = Effect.gen(function* () {
   ) {
     const { work, step } = yield* loadForCommand(actorId, input.stepId);
     yield* requireActionable(step);
-    yield* validateEntries(input.automations);
-    const same = (entry: StepAutomation, other: StepAutomation) =>
-      entry.id === other.id &&
-      entry.agentId === other.agentId &&
-      entry.instructions === other.instructions;
-    yield* stopStepRuns(work, step, (id) => {
-      const before = step.automations.find((entry) => entry.id === id);
-      return before === undefined || !input.automations.some((entry) => same(entry, before));
-    });
-    putStep(work, { ...step, automations: input.automations });
+    yield* validateAutomations(input.automationIds);
+    yield* stopStepRuns(work, step, (id) => !input.automationIds.includes(id));
+    putStep(work, { ...step, automationIds: input.automationIds });
     yield* save(work);
   }, transaction);
   const memberCommand = <I extends { readonly stepId: string }, A, E>(
@@ -1083,8 +1079,7 @@ const make = Effect.gen(function* () {
       const automated = typeof caller !== "string" && caller.origin.kind === "automation";
       if (automated) {
         const assigned = yield* loadAutomationStep(caller.origin);
-        if (assigned.step.id !== step.id || assigned.entry.agentId !== caller.agentId)
-          return yield* new NotFound();
+        if (assigned.step.id !== step.id) return yield* new NotFound();
         actorId = caller.agentId;
       } else {
         actorId = yield* person(caller, work.workflow.id);

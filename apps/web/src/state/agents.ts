@@ -10,6 +10,7 @@ import { LoadFailed, mutate, useLoaded } from "./query";
 import { apiQuery } from "./rpc";
 
 export const agentsList = apiQuery("agents.list")(undefined);
+export const stepAutomationList = apiQuery("automations.listForSteps")(undefined);
 const skillsList = apiQuery("skills.list")(undefined);
 
 const agentForm = Atom.family((agentId: string | null) =>

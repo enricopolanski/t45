@@ -17,7 +17,7 @@ const rawStep = {
   status: { type: "working", at },
   assignee: "person01",
   values: {},
-  automations: [],
+  automationIds: [],
 };
 const rawTicket = {
   id: "ticket01",

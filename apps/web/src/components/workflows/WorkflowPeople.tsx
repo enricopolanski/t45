@@ -1,5 +1,6 @@
+import type { AutomationId } from "@t45/contracts/models/Automation";
 import { StepAutomationsEditor } from "../work/StepAutomationsEditor";
-import type { StepAutomation, StepDefinition, Workflow } from "@t45/contracts/models/Workflow";
+import type { StepDefinition, Workflow } from "@t45/contracts/models/Workflow";
 import { StringId } from "@t45/contracts/models/primitives";
 
 import type { WorkflowInstanceView } from "@t45/contracts/resources/Workflows";
@@ -24,7 +25,7 @@ import {
 } from "../ui/dialog";
 import { ErrorText } from "../ui/error-text";
 import { Label } from "../ui/label";
-import { PersonPicker } from "../work/ActorPicker";
+import { PersonPicker } from "../work/PersonPicker";
 import { useWorkDirectory } from "../work/useWorkDirectory";
 import { actorName } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
@@ -156,7 +157,7 @@ export function WorkflowStepPeople({ detail, busy, run }: Editing) {
       Object.entries(workflow.defaultAssignments).filter(([id]) => id !== stepId),
     );
     const defaultAssignments =
-      next.assignee === null && next.automations.length === 0
+      next.assignee === null && next.automationIds.length === 0
         ? others
         : { ...others, [stepId]: next };
     return run(() =>
@@ -183,7 +184,7 @@ export function WorkflowStepPeople({ detail, busy, run }: Editing) {
           <summary className="cursor-pointer text-sm">
             <span className="font-medium">{name}</span>
             <span className="mt-1 block text-xs text-muted-foreground">
-              {assignee} · {assignment?.automations.length ?? 0} automations ·{" "}
+              {assignee} · {assignment?.automationIds.length ?? 0} automations ·{" "}
               {step.subSteps.length} substeps
             </span>
           </summary>
@@ -201,9 +202,9 @@ export function WorkflowStepPeople({ detail, busy, run }: Editing) {
               />
             </div>
             <StepAutomationsEditor
-              entries={assignment?.automations ?? EMPTY_AUTOMATIONS}
+              automationIds={assignment?.automationIds ?? EMPTY_AUTOMATIONS}
               busy={busy}
-              onSave={(automations) => save(step.id, { automations })}
+              onSave={(automationIds) => save(step.id, { automationIds })}
             />
             {step.subSteps.length > 0 && (
               <div className="ml-3 flex flex-col gap-3 border-l pl-3">
@@ -306,5 +307,5 @@ export function WorkflowDangerZone({ detail, busy, run }: Editing) {
   );
 }
 
-const EMPTY_AUTOMATIONS: ReadonlyArray<StepAutomation> = [];
-const EMPTY_ASSIGNMENT = { assignee: null, automations: EMPTY_AUTOMATIONS };
+const EMPTY_AUTOMATIONS: ReadonlyArray<AutomationId> = [];
+const EMPTY_ASSIGNMENT = { assignee: null, automationIds: EMPTY_AUTOMATIONS };

@@ -14,6 +14,8 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 
+import { canWorkSteps } from "@t45/contracts/models/Agent";
+import * as Struct from "effect/Struct";
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { AutomationRepository } from "./AutomationRepository.ts";
 import { AutomationService } from "./AutomationService.ts";
@@ -40,6 +42,15 @@ export const layer = Automations.middleware(Authorization).toLayer(
 
     return Automations.of({
       "automations.list": () => automations.list,
+      "automations.listForSteps": () =>
+        Effect.gen(function* () {
+          const available = new Set(
+            (yield* agents.list).filter(canWorkSteps).map((agent) => agent.id),
+          );
+          return (yield* automations.list)
+            .filter((automation) => available.has(automation.agentId))
+            .map((automation) => Struct.pick(automation, ["id", "title", "prompt", "agentId"]));
+        }),
       "automations.create": (settings) =>
         Effect.gen(function* () {
           yield* requireActiveAgent(settings.agentId);

@@ -14,7 +14,7 @@ export const webhookPath = (automation: Pick<Automation, "id" | "webhookToken">)
     ? null
     : `${WEBHOOK_ROUTE_PREFIX}/${encodeURIComponent(automation.id)}/${automation.webhookToken}`;
 
-type ScheduleMode = "fixed" | "interval" | "webhook";
+type ScheduleMode = "manual" | "fixed" | "interval" | "webhook";
 export interface DraftState {
   readonly title: string;
   readonly prompt: string;
@@ -32,12 +32,12 @@ export interface DraftState {
   readonly signatureSecret: string;
 }
 
-/** A new automation: weekdays at nine, signed the way GitHub, the most common sender, signs. */
+/** A new automation runs on demand until a schedule is chosen. */
 export const EMPTY_DRAFT: DraftState = {
   title: "",
   prompt: "",
   isEnabled: true,
-  scheduleMode: "fixed",
+  scheduleMode: "manual",
   intervalMinutes: "15",
   timeOfDay: "09:00",
   weekdays: new Set([1, 2, 3, 4, 5]),
@@ -50,6 +50,7 @@ export const EMPTY_DRAFT: DraftState = {
 };
 
 export function scheduleFromDraft(draft: DraftState): Schedule {
+  if (draft.scheduleMode === "manual") return { type: "manual" };
   if (draft.scheduleMode === "webhook") {
     return {
       type: "webhook",
@@ -77,6 +78,7 @@ export function scheduleFromDraft(draft: DraftState): Schedule {
 const isSchedule = Schema.is(Schedule);
 
 const SCHEDULE_PROBLEMS = {
+  manual: { title: "Invalid schedule", description: "Choose how this automation runs." },
   fixed: { title: "Invalid time", description: "Pick a time and at least one day." },
   interval: { title: "Invalid interval", description: "Enter an interval of at least one minute." },
   webhook: {
@@ -119,6 +121,8 @@ export function automationToDraft(
     agentId: automation.agentId,
   };
   switch (schedule.type) {
+    case "manual":
+      return { ...draft, scheduleMode: "manual" };
     case "interval":
       return {
         ...draft,

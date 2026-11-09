@@ -11,9 +11,9 @@ import {
 } from "../ui/combobox";
 import { ActorAvatar, ActorName } from "./ActorAvatar";
 import { useWorkDirectory } from "./useWorkDirectory";
-import { actorName, assignableActors } from "./workLogic";
+import { actorName, assignablePeople } from "./workLogic";
 
-type Actor = ReturnType<typeof assignableActors>[number];
+type Actor = ReturnType<typeof assignablePeople>[number];
 
 /**
  * The step's assignee in its details, like a ticket's: clicking the name opens a searchable list
@@ -30,7 +30,7 @@ export function AssigneePicker({
   readonly onPick: (ref: string) => void;
 }) {
   const directory = useWorkDirectory();
-  const actors = assignableActors(directory, "person").filter((actor) => actor.id !== current);
+  const actors = assignablePeople(directory).filter((actor) => actor.id !== current);
   return (
     <Combobox<Actor>
       items={actors}

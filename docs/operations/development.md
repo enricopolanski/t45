@@ -71,6 +71,8 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 - **The agent image**, built with Docker and loaded into microsandbox as `t45-agent:dev`: `vp run --filter @t45/runner image`. Rebuild after changing `apps/runner/image`. Without it, chats fail and the server log names the reason, as in production.
 - **`mkfs.ext4` (e2fsprogs) and GNU tar** on the host, which make and pack VM disks. On macOS, install `e2fsprogs` and `gnu-tar` with Homebrew and put their `sbin` and `gnubin` folders first on `PATH`.
 
+Built-in MCP tools call the server’s regular workflow RPCs and attachment upload API with an execution token. `SERVER_URL` sets the server address reachable from agent VMs; by default it is `http://host.microsandbox.internal:<server port>`. Set it to a reachable server address when using a remote runner.
+
 The server and its built-in MCP tools are compiled together from `apps/server/src`; development watches that build and restarts the server after changes. T45 sends the tools with each execution of an agent that uses them, and the runner writes them to `/opt/t45`, so changing a tool does not require an image rebuild. The server reads them when it starts, so a chat gets changed tools at its first execution after the restart.
 
 Without `/dev/kvm` every chat's VM fails to start, and the runner's log names the reason.

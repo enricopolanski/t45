@@ -65,7 +65,7 @@ export const seedStep = (ticketId: string, assignee: string) =>
           status: { type: "working", at },
           assignee,
           values: {},
-          automations: [],
+          automationIds: [],
         },
       ],
       createdAt: at,

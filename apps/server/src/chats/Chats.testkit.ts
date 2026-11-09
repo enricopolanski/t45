@@ -1,3 +1,4 @@
+import * as AutomationRepository from "../automations/AutomationRepository.ts";
 import * as WorkflowDefinitionRepository from "../workflows/WorkflowDefinitionRepository.ts";
 import * as NotificationRepository from "../workflows/NotificationRepository.ts";
 import * as UserRepository from "../org/UserRepository.ts";
@@ -35,6 +36,7 @@ export const testChatId = (n: number) =>
   ChatId.make(`00000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
 
 const layerPersistence = Layer.mergeAll(
+  AutomationRepository.layer,
   ChatRepository.layer,
   UserRepository.layer,
   TicketRepository.layer,
@@ -121,7 +123,7 @@ export const seedChat = (chat: {
                     type: "step",
                     ticketId: ticket.id,
                     stepId: chat.stepId,
-                    automationId: chat.id,
+                    automationId: AutomationId.make(chat.id),
                   }
                 : {
                     type: "automation",

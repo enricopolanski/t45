@@ -10,7 +10,7 @@ export const Trigger = Schema.Union([
     type: Schema.Literal("step"),
     ticketId: StringId,
     stepId: StringId,
-    automationId: StringId,
+    automationId: AutomationId,
   }),
 ]);
 export type Trigger = typeof Trigger.Type;

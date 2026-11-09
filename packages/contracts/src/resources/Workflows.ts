@@ -3,6 +3,7 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
+import { AutomationId } from "../models/Automation.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 
@@ -259,15 +260,15 @@ export const Workflows = RpcGroup.make(
   }),
   Rpc.make("markStepDone", { payload: step, error: WorkflowErrors }),
   Rpc.make("setStepAutomations", {
-    payload: { ...step, automations: Step.fields.automations },
+    payload: { ...step, automationIds: Step.fields.automationIds },
     error: WorkflowErrors,
   }),
   Rpc.make("runStepAutomation", {
-    payload: { ...step, automationId: StringId },
+    payload: { ...step, automationId: AutomationId },
     error: Schema.Union([WorkflowErrors, ChatRefused]),
   }),
   Rpc.make("stopStepAutomation", {
-    payload: { ...step, automationId: StringId },
+    payload: { ...step, automationId: AutomationId },
     error: WorkflowErrors,
   }),
   /** Sets one ticket's step assignee; null clears it. */

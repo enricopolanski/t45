@@ -195,13 +195,13 @@ function AgentCard({
   return (
     <CardFold as="aside" title="Automations">
       <StepAutomationsEditor
-        entries={view.step.automations}
+        automationIds={view.step.automationIds}
         busy={busy}
         onSave={
           actions.canEditFields
-            ? async (automations) =>
+            ? async (automationIds) =>
                 (await act(() =>
-                  api("workflows.setStepAutomations", { stepId: view.step.id, automations }),
+                  api("workflows.setStepAutomations", { stepId: view.step.id, automationIds }),
                 )) === null
             : undefined
         }

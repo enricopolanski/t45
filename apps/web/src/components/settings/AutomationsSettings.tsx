@@ -1,10 +1,11 @@
+import { appAtomRegistry } from "../../state/atomRegistry";
 import { CopyIcon, MoreHorizontalIcon, PencilIcon, PlayIcon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 import { type Schedule, type Automation } from "@t45/contracts/models/Automation";
 import type { AutomationSummary } from "@t45/contracts/resources/Automations";
 
 import { formatRelativeTimeLabel, formatScheduledLabel } from "../../timestampFormat";
-import { agentsList } from "../../state/agents";
+import { agentsList, stepAutomationList } from "../../state/agents";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { api } from "../../rpc/api";
@@ -67,6 +68,7 @@ const webhookUrl = (automation: Automation) => {
 };
 
 function scheduleLabel(schedule: Schedule) {
+  if (schedule.type === "manual") return "On demand";
   if (schedule.type === "webhook") return "On webhook";
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
@@ -93,7 +95,7 @@ export function AutomationsSettings() {
     <SettingsPageContainer>
       <SettingsSection
         title="Automations"
-        description="Run agents on a schedule or when a webhook is received."
+        description="Define reusable agent jobs for steps, schedules and webhooks."
         action={
           <div className="flex gap-2">
             <Button
@@ -202,7 +204,7 @@ function AutomationRow({
                 ? "Listening"
                 : automation.nextRunAt
                   ? `Next run ${formatScheduledLabel(automation.nextRunAt, now)}`
-                  : "Not scheduled"}
+                  : "Ready"}
           </p>
           {automation.lastRun !== null && (
             <p>
@@ -329,6 +331,7 @@ function AutomationEditorDialog({
       await (automation
         ? api("automations.update", { id: automation.id, ...checked.settings })
         : api("automations.create", checked.settings));
+      appAtomRegistry.refresh(stepAutomationList);
       onSaved();
       onClose();
     } catch (error) {
@@ -348,8 +351,7 @@ function AutomationEditorDialog({
         <DialogHeader>
           <DialogTitle>{automation ? "Edit automation" : "New automation"}</DialogTitle>
           <DialogDescription>
-            Run a prompt automatically — on an interval, at a fixed time, or when a webhook is
-            called.
+            Changes apply everywhere this automation is used, on its next run.
           </DialogDescription>
         </DialogHeader>
 
@@ -402,7 +404,12 @@ function AutomationEditorDialog({
                   value={[draft.scheduleMode]}
                   onValueChange={(values) => {
                     const mode = values[0];
-                    if (mode === "fixed" || mode === "interval" || mode === "webhook")
+                    if (
+                      mode === "manual" ||
+                      mode === "fixed" ||
+                      mode === "interval" ||
+                      mode === "webhook"
+                    )
                       setDraft((current) => ({
                         ...current,
                         scheduleMode: mode,
@@ -413,13 +420,14 @@ function AutomationEditorDialog({
                       }));
                   }}
                 >
+                  <Toggle value="manual">On demand</Toggle>
                   <Toggle value="fixed">At a time</Toggle>
                   <Toggle value="interval">Every interval</Toggle>
                   <Toggle value="webhook">On webhook</Toggle>
                 </ToggleGroup>
               </div>
 
-              {draft.scheduleMode === "webhook" ? (
+              {draft.scheduleMode === "manual" ? null : draft.scheduleMode === "webhook" ? (
                 <div className="space-y-4">
                   <p className="text-xs text-muted-foreground">
                     {
@@ -523,7 +531,7 @@ function AutomationEditorDialog({
 
             <SwitchField
               label="Enabled"
-              description="Disabled automations stay saved but do not run."
+              description="Controls scheduled runs and incoming webhooks. You can still run the automation manually or from a step."
               checked={draft.isEnabled}
               onCheckedChange={(isEnabled) => patch({ isEnabled })}
             />

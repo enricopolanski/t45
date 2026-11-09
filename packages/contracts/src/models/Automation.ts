@@ -37,6 +37,7 @@ export const Signature = Schema.Struct({
 export type Signature = typeof Signature.Type;
 
 export const Schedule = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("manual") }),
   Schema.Struct({
     type: Schema.Literal("interval"),
     everyMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(MIN_INTERVAL_MS)),
@@ -69,7 +70,7 @@ export class Automation extends Schema.Opaque<Automation>()(
 ) {}
 
 const occurrenceAfter = (schedule: Schedule, from: DateTime.DateTime) => {
-  if (schedule.type === "webhook") return null;
+  if (schedule.type === "webhook" || schedule.type === "manual") return null;
   if (schedule.type === "interval") return DateTime.add(from, { milliseconds: schedule.everyMs });
   const hour = Number(schedule.timeOfDay.slice(0, 2));
   const minute = Number(schedule.timeOfDay.slice(3));

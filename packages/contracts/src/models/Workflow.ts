@@ -3,6 +3,7 @@ import type * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Struct from "effect/Struct";
 
+import { AutomationId } from "./Automation.ts";
 import { AttachmentId, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 
 const isFieldPathSegment = Schema.isPattern(/^[A-Za-z0-9_-]+$/);
@@ -109,19 +110,6 @@ export class WorkflowDefinition extends Schema.Opaque<WorkflowDefinition>()(
   }),
 ) {}
 
-export const StepAutomation = Schema.Struct({
-  id: StringId,
-  agentId: StringId,
-  instructions: Schema.String,
-});
-export type StepAutomation = typeof StepAutomation.Type;
-
-const StepAutomations = Schema.Array(StepAutomation).check(
-  Schema.makeFilter((entries) => hasDistinctIds(entries.map((entry) => entry.id)), {
-    expected: "distinct automation identities",
-  }),
-);
-
 /**
  * An actual instance. It references an original WorkflowDefinition and provides additional data.
  */
@@ -135,7 +123,7 @@ export class Workflow extends Schema.Opaque<Workflow>()(
     defaultAssignments: Schema.Record(
       Schema.String,
       Schema.Struct({
-        automations: StepAutomations,
+        automationIds: Schema.UniqueArray(AutomationId),
         assignee: Schema.NullOr(StringId),
       }),
     ).check(Schema.isPropertyNames(StringId)),
@@ -165,7 +153,7 @@ export class Step extends Schema.Opaque<Step>()(
     /** The step a sub-step belongs to; null for the workflow's own steps. */
     parentStepId: Schema.NullOr(StringId),
     status: StepStatus,
-    automations: StepAutomations,
+    automationIds: Schema.UniqueArray(AutomationId),
     assignee: Schema.NullOr(StringId),
     /** The values assigned to the fields of the step */
     values: Schema.Record(Schema.String, Schema.Json).check(
@@ -245,7 +233,7 @@ const REFUSALS = {
   reason_required: "Give a reason.",
   invalid_field_value: "That value doesn't fit the field.",
   invalid_attachment: "That file can't be attached here.",
-  invalid_automations: "Choose available agents and distinct automation identities.",
+  invalid_automations: "Choose automations whose agents can work on steps.",
 };
 
 export class Refused extends Schema.TaggedError<Refused>()("WorkflowRefused", {
