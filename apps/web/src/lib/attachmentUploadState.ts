@@ -1,4 +1,4 @@
-import { type ComposerAttachment, composerFileNeedsReattach } from "../composerDraftStore";
+import { type ComposerAttachment, composerAttachmentNeedsReattach } from "../composerDraftStore";
 
 export type AttachmentUploadState =
   | { readonly status: "uploading"; readonly progress: number }
@@ -11,9 +11,7 @@ export function attachmentUploadBlockReason(
 ): string | null {
   const count = (matches: (attachment: ComposerAttachment) => boolean) =>
     attachments.filter(matches).length;
-  const reattach = count(
-    (attachment) => attachment.type === "file" && composerFileNeedsReattach(attachment),
-  );
+  const reattach = count(composerAttachmentNeedsReattach);
   if (reattach > 0) {
     return reattach === 1
       ? "Attach the interrupted file again or remove it"

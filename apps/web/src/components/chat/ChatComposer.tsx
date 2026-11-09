@@ -58,8 +58,8 @@ import {
   type ComposerAttachment,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
-  composerFileMatchesReattachMarker,
-  composerFileNeedsReattach,
+  composerAttachmentMatchesReattachMarker,
+  composerAttachmentNeedsReattach,
   useComposerDraft,
   useComposerDraftStore,
 } from "../../composerDraftStore";
@@ -124,14 +124,7 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { ErrorText } from "../ui/error-text";
-import {
-  CircleAlertIcon,
-  FileIcon,
-  ImageIcon,
-  PaperclipIcon,
-  RefreshCwIcon,
-  XIcon,
-} from "lucide-react";
+import { FileIcon, ImageIcon, PaperclipIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import type { ComposerQuestion } from "./useChatQuestions";
 import { useFlickerFree } from "../../hooks/useFlickerFree";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -297,7 +290,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   useEffect(() => {
     for (const attachment of [...composerImages, ...composerFiles]) {
       // A needs-reattach file has no bytes to upload and no upload to verify.
-      if (attachment.type === "file" && composerFileNeedsReattach(attachment)) continue;
+      if (composerAttachmentNeedsReattach(attachment)) continue;
       startAttachmentUpload(attachment);
     }
   }, [composerFiles, composerImages]);
@@ -781,21 +774,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return false;
   };
 
-  // A failed upload remains actionable in the expanded attachment tray, but
-  // its collapsed thumbnail is enough to signal that the draft has images.
-  const hasUnsavedImage = composerImages.some(
-    (image) =>
-      attachmentDraft.nonPersistedImageIds.includes(image.id) &&
-      uploadsByAttachmentId[image.id]?.status !== "failed",
-  );
   // Banners dock above the surface rather than inside it, so they do not hold
   // the composer open; only surface-internal chrome does.
   const composerHasExpandedChrome =
     question !== null ||
     composerMenuOpen ||
     isServerUnreachable ||
-    composerSubmissionError !== null ||
-    hasUnsavedImage;
+    composerSubmissionError !== null;
   const canTrackComposerScrollGesture = !isMobileViewport;
   const canScrollCollapseComposer =
     canTrackComposerScrollGesture && !hasMultilinePrompt && !composerHasExpandedChrome;
@@ -828,6 +813,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           >
             <ComposerImageThumbnail
               file={image.file}
+              src={image.previewUrl}
               alt=""
               className="size-full object-cover"
               fallback={<ImageIcon className="m-auto size-3.5 text-icon-muted" />}
@@ -1042,7 +1028,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // A pick that matches a needs-reattach marker replaces it in the draft, so
     // it must not consume a slot; a draft full of markers would otherwise hit
     // the capacity error before the replacement path could run.
-    const reattachMarkers = composerFiles.filter(composerFileNeedsReattach);
+    const reattachMarkers = [...composerImages, ...composerFiles].filter(
+      composerAttachmentNeedsReattach,
+    );
     const replacedReattachMarkerIds = new Set<string>();
     const acceptedImages: File[] = [];
     const acceptedFiles: ComposerFileAttachment[] = [];
@@ -1051,18 +1039,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const attachmentKind = classifyComposerAttachmentFile(file);
       const fileMimeType =
         attachmentKind === "file" ? file.type || "application/octet-stream" : file.type;
-      const matchingReattachMarker =
-        attachmentKind === "file"
-          ? reattachMarkers.find(
-              (marker) =>
-                !replacedReattachMarkerIds.has(marker.id) &&
-                composerFileMatchesReattachMarker(marker, {
-                  name: file.name || "file",
-                  mimeType: fileMimeType,
-                  sizeBytes: file.size,
-                }),
-            )
-          : undefined;
+      const matchingReattachMarker = reattachMarkers.find(
+        (marker) =>
+          marker.type === attachmentKind &&
+          !replacedReattachMarkerIds.has(marker.id) &&
+          composerAttachmentMatchesReattachMarker(marker, {
+            name: file.name || "file",
+            mimeType: fileMimeType,
+            sizeBytes: file.size,
+          }),
+      );
       if (matchingReattachMarker) {
         replacedReattachMarkerIds.add(matchingReattachMarker.id);
       }
@@ -1505,6 +1491,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         >
                           <ComposerImageThumbnail
                             file={image.file}
+                            src={image.previewUrl}
                             alt={image.name}
                             className="h-full w-full object-cover"
                             fallback={
@@ -1514,24 +1501,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             }
                           />
                         </button>
-                        {attachmentDraft.nonPersistedImageIds.includes(image.id) && (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <span
-                                  role="img"
-                                  aria-label="Draft attachment may not persist"
-                                  className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-warning-foreground"
-                                >
-                                  <CircleAlertIcon className="size-3" />
-                                </span>
-                              }
-                            />
-                            <TooltipPopup side="top">
-                              Draft attachment could not be saved locally and may be lost on
-                              navigation.
-                            </TooltipPopup>
-                          </Tooltip>
+                        {composerAttachmentNeedsReattach(image) && (
+                          <span className="absolute inset-x-0 bottom-0 bg-background/85 px-1 text-center text-3xs text-foreground">
+                            Attach again
+                          </span>
                         )}
                         {upload?.status === "uploading" && (
                           <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-background/85 px-1 text-center text-3xs text-foreground">
@@ -1567,7 +1540,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 <div className="mb-3 flex flex-col gap-1">
                   {unreferencedFiles.map((file) => {
                     const upload = uploadsByAttachmentId[file.id];
-                    const needsReattach = composerFileNeedsReattach(file);
+                    const needsReattach = composerAttachmentNeedsReattach(file);
                     return (
                       <div
                         key={file.id}

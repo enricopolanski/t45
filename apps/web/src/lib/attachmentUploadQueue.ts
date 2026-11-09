@@ -61,16 +61,6 @@ export function readAttachmentUpload(id: string): AttachmentUploadState | undefi
   return useAttachmentUploadStore.getState().uploadsByAttachmentId[id];
 }
 
-/**
- * Persists a finished upload's id onto the draft that holds the file, so the file survives a
- * reload without its bytes, whether or not a composer is mounted.
- */
-function stampDraftFileUpload(attachment: ComposerAttachment, attachmentId: string): void {
-  if (attachment.type === "file") {
-    useComposerDraftStore.getState().setFileUpload(attachment.id, attachmentId);
-  }
-}
-
 type PersistedAttachmentVerification =
   | { readonly status: "verified" }
   | { readonly status: "missing" }
@@ -144,7 +134,9 @@ async function runUpload(job: UploadJob): Promise<void> {
         status: "ready",
         attachmentId: job.persistedAttachmentId,
       });
-      stampDraftFileUpload(job.attachment, job.persistedAttachmentId);
+      useComposerDraftStore
+        .getState()
+        .setAttachmentUpload(job.attachment.id, job.persistedAttachmentId);
       return;
     }
     if (
@@ -152,7 +144,7 @@ async function runUpload(job: UploadJob): Promise<void> {
       !job.attachment.file &&
       useComposerDraftStore
         .getState()
-        .markFileUploadMissing(job.attachment.id, job.persistedAttachmentId)
+        .markAttachmentUploadMissing(job.attachment.id, job.persistedAttachmentId)
     ) {
       clearUploadState(job.attachment.id);
       return;
@@ -231,7 +223,7 @@ async function runUpload(job: UploadJob): Promise<void> {
     return;
   }
   setUploadState(job.attachment.id, { status: "ready", attachmentId });
-  stampDraftFileUpload(job.attachment, attachmentId);
+  useComposerDraftStore.getState().setAttachmentUpload(job.attachment.id, attachmentId);
 }
 
 function pumpUploads(): void {
@@ -267,7 +259,8 @@ export function startAttachmentUpload(attachment: ComposerAttachment): void {
     return;
   }
   const existing = readAttachmentUpload(attachment.id);
-  if (existing?.status === "ready") stampDraftFileUpload(attachment, existing.attachmentId);
+  if (existing?.status === "ready")
+    useComposerDraftStore.getState().setAttachmentUpload(attachment.id, existing.attachmentId);
   if (existing?.status === "ready" || existing?.status === "failed") {
     return;
   }
@@ -278,7 +271,7 @@ export function startAttachmentUpload(attachment: ComposerAttachment): void {
   });
   const job: UploadJob = {
     attachment,
-    ...(attachment.type === "file" && attachment.uploadedAttachmentId
+    ...(attachment.uploadedAttachmentId
       ? { persistedAttachmentId: attachment.uploadedAttachmentId }
       : {}),
     settled,

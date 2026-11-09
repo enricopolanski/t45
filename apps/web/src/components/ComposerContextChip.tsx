@@ -3,7 +3,7 @@ import { createContext, use } from "react";
 import { formatAttachmentSize } from "~/lib/attachmentFiles";
 import {
   type ComposerAttachment,
-  composerFileNeedsReattach,
+  composerAttachmentNeedsReattach,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
 } from "~/composerDraftStore";
@@ -62,6 +62,13 @@ function ImageContextChip(props: {
   upload: AttachmentUploadState | undefined;
 }) {
   const { expandImage } = use(ComposerChipsContext);
+  if (composerAttachmentNeedsReattach(props.attachment))
+    return (
+      <UnresolvedChip
+        label={props.attachment.name}
+        tooltip="Attach this image again or remove it to send."
+      />
+    );
   return (
     <ChipTooltip tooltip={attachmentTooltip(props.attachment, props.upload)}>
       <ImageChipButton
@@ -79,7 +86,7 @@ function FileContextChip(props: {
   attachment: ComposerFileAttachment;
   upload: AttachmentUploadState | undefined;
 }) {
-  const needsReattach = composerFileNeedsReattach(props.attachment);
+  const needsReattach = composerAttachmentNeedsReattach(props.attachment);
   return (
     <FileChip
       name={props.attachment.name}

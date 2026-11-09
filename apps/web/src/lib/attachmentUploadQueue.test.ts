@@ -3,7 +3,7 @@ import { reachableAtom } from "../rpc/api";
 import { appAtomRegistry } from "../state/atomRegistry";
 
 import {
-  composerFileNeedsReattach,
+  composerAttachmentNeedsReattach,
   useComposerDraftStore,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
@@ -371,7 +371,7 @@ describe("attachmentUploadQueue", () => {
       const marker = useComposerDraftStore.getState().getComposerDraft(draftTarget)?.files[0];
       expect(readAttachmentUpload(file.id)).toBeUndefined();
       expect(marker?.uploadedAttachmentId).toBeUndefined();
-      expect(marker && composerFileNeedsReattach(marker)).toBe(true);
+      expect(marker && composerAttachmentNeedsReattach(marker)).toBe(true);
 
       const replacementBytes = new File([new Uint8Array([1, 2, 3])], file.name, {
         type: file.mimeType,
