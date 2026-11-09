@@ -174,13 +174,16 @@ const make = Effect.gen(function* () {
   );
   const { transaction } = tickets;
   const workflowAccess = yield* WorkflowAssistant.makeAccess;
-  const person = Effect.fnUntraced(function* (caller: Caller, workflowId: string) {
-    if (typeof caller === "string") return caller;
+  const loadWorkflow = Effect.fnUntraced(function* (caller: Caller, workflowId: string) {
+    if (typeof caller === "string") return yield* workflowAccess.load(caller, workflowId);
     if (caller.origin.kind !== "conversation" || caller.origin.workflowId !== workflowId)
       return yield* new NotFound();
-    yield* workflowAccess.load(caller.origin.ownerUserId, workflowId);
-    return caller.origin.ownerUserId;
+    return yield* workflowAccess.load(caller.origin.ownerUserId, workflowId);
   });
+  const resolvePerson = (caller: Caller, workflowId: string) =>
+    typeof caller === "string"
+      ? Effect.succeed(caller)
+      : loadWorkflow(caller, workflowId).pipe(Effect.map(({ actor }) => actor.id));
 
   const found = <A>(effect: Effect.Effect<A | null>) =>
     effect.pipe(
@@ -648,7 +651,7 @@ const make = Effect.gen(function* () {
   }, transaction);
 
   const startTicket = Effect.fnUntraced(function* (caller: Caller, input: Payload<"startTicket">) {
-    const actorId = yield* person(caller, input.workflowId);
+    const actorId = yield* resolvePerson(caller, input.workflowId);
     const workflow = yield* found(workflows.get(input.workflowId));
     const definition = yield* found(definitions.get(workflow.definitionId));
     const refusal = ticketStartRefusal(yield* actorOf(actorId), workflow, definition);
@@ -1082,29 +1085,23 @@ const make = Effect.gen(function* () {
         if (assigned.step.id !== step.id) return yield* new NotFound();
         actorId = caller.agentId;
       } else {
-        actorId = yield* person(caller, work.workflow.id);
+        actorId = yield* resolvePerson(caller, work.workflow.id);
         yield* requireInvolved(work, actorId);
       }
       return yield* mutate(work, step, input, actorId, automated);
     }, transaction);
 
   const getWorkflow = Effect.fnUntraced(function* (caller: Caller, workflowId: string) {
-    const { workflow, definition } = yield* workflowAccess.load(
-      yield* person(caller, workflowId),
-      workflowId,
-    );
+    const { workflow, definition } = yield* loadWorkflow(caller, workflowId);
     return { workflowId: workflow.id, name: workflow.name, blueprint: definition };
   });
   const listTickets = Effect.fnUntraced(function* (caller: Caller, input: Payload<"listTickets">) {
-    const { actor, workflow } = yield* workflowAccess.load(
-      yield* person(caller, input.workflowId),
-      input.workflowId,
-    );
+    const { actor, workflow } = yield* loadWorkflow(caller, input.workflowId);
     return yield* tickets.listForWorkflow(workflow, actor, input.query ?? "");
   });
   const getTicket = Effect.fnUntraced(function* (caller: Caller, input: Payload<"getTicket">) {
     const ticket = yield* found(tickets.get(input.ticketId));
-    const actorId = yield* person(caller, ticket.workflowId);
+    const actorId = yield* resolvePerson(caller, ticket.workflowId);
     const workflow = yield* found(workflows.get(ticket.workflowId));
     if (!canViewTicket(yield* actorOf(actorId), workflow, ticket)) return yield* new NotFound();
     return ticket;
