@@ -49,7 +49,7 @@ const make = Effect.gen(function* () {
       return saved;
     });
 
-  const endSessions = (user: User) => authentication.revokeAllForUser(user.id).pipe(Effect.orDie);
+  const endSessions = (user: User) => authentication.revokeAllForUser(user.id);
 
   return {
     ...authentication,

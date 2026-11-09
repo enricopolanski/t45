@@ -33,7 +33,6 @@ export const Authorization = {
           const session = yield* sessions.authenticate(token).pipe(
             Effect.catchTags({
               SessionInvalidError: () => denied,
-              SessionStoreError: Effect.die,
             }),
           );
           if (session.state !== "active") return yield* denied;

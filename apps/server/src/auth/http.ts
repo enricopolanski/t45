@@ -45,7 +45,7 @@ const readSession = Effect.gen(function* () {
 
 const signedIn = readSession.pipe(
   Effect.map((session) => session ?? refuse("unauthenticated")),
-  Effect.catchTags({ SessionStoreError: failed }),
+  Effect.catchDefect(failed),
 );
 
 /** Authenticates a raw route's request and requires an active member, like the RPC middleware. */
@@ -78,7 +78,7 @@ const sessionRoute = HttpRouter.add(
             deployVersion,
           },
     );
-  }).pipe(Effect.catchTags({ SessionStoreError: failed, HttpBodyError: failed })),
+  }).pipe(Effect.catch(failed), Effect.catchDefect(failed)),
 );
 
 const loginRoute = HttpRouter.add(
@@ -109,9 +109,9 @@ const loginRoute = HttpRouter.add(
           InvalidIdentityToken: () => Effect.succeed(refuse("invalid_credential")),
           UserDeactivatedError: () => Effect.succeed(refuse("deactivated")),
           IdentityProviderUnavailable: failed,
-          UserAuthInternalError: failed,
           CookiesError: failed,
         }),
+        Effect.catchDefect(failed),
       );
   }),
 );
@@ -133,7 +133,8 @@ const logoutRoute = HttpRouter.add(
             SESSION_COOKIE_OPTIONS,
           ),
         ),
-        Effect.catchTags({ SessionStoreError: failed, CookiesError: failed }),
+        Effect.catch(failed),
+        Effect.catchDefect(failed),
       );
   }),
 );

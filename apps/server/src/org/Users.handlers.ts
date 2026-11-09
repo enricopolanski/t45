@@ -45,9 +45,7 @@ export const layer = Users.middleware(Authorization).toLayer(
       "users.signOutElsewhere": () =>
         Effect.gen(function* () {
           const { userId, sessionId } = yield* CurrentUser;
-          const revokedCount = yield* service
-            .revokeAllForUser(userId, sessionId)
-            .pipe(Effect.catchTags({ SessionStoreError: Effect.die }));
+          const revokedCount = yield* service.revokeAllForUser(userId, sessionId);
           return { revokedCount };
         }),
     });
