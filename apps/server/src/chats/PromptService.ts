@@ -1,11 +1,11 @@
 import type { Form } from "@opencode/schema/form";
-import type { AttachmentId, ChatAttachment } from "@t45/contracts/models/Attachment";
-import {
-  type ChatContextId,
-  type ChatContextKind,
-  type ChatContextRecord,
-  type InputPayload,
-} from "@t45/contracts/models/Chat";
+import type {
+  AttachmentId,
+  ChatAttachment,
+  ChatContextId,
+  ChatContextKind,
+} from "@t45/contracts/models/Attachment";
+import type { InputPayload } from "@t45/contracts/models/Chat";
 import {
   collectComposerContextReferences,
   replaceComposerContextReferences,
@@ -27,7 +27,7 @@ export function format(input: InputPayload) {
       ? ATTACHMENT_ONLY_BOOTSTRAP_PROMPT
       : input.text;
   return appendAttachmentPaths(
-    expandContextReferences(text, input.context?.records ?? []),
+    expandContextReferences(text, input.attachments),
     input.attachments,
   ).trim();
 }
@@ -59,13 +59,15 @@ export function formatAnswers(input: {
 }
 
 /** Every reference becomes a marker; each referenced payload appears once in the envelope. */
-function expandContextReferences(text: string, records: ReadonlyArray<ChatContextRecord>) {
+function expandContextReferences(text: string, attachments: ReadonlyArray<ChatAttachment>) {
   const occurrences = collectComposerContextReferences(text);
   if (occurrences.length === 0) return text;
-  const recordsById = new Map(records.map((record) => [record.contextId, record]));
+  const attachmentsById = new Map(
+    attachments.map((attachment) => [attachment.contextId, attachment]),
+  );
   const body = replaceComposerContextReferences(text, (occurrence) =>
     formatContextMarker(
-      recordsById.get(occurrence.contextId)?.kind ?? occurrence.kind,
+      attachmentsById.get(occurrence.contextId)?.type ?? occurrence.kind,
       occurrence.label,
       occurrence.contextId,
     ),
@@ -75,9 +77,9 @@ function expandContextReferences(text: string, records: ReadonlyArray<ChatContex
   for (const occurrence of occurrences) {
     if (seen.has(occurrence.contextId)) continue;
     seen.add(occurrence.contextId);
-    const record = recordsById.get(occurrence.contextId);
+    const attachment = attachmentsById.get(occurrence.contextId);
     entries.push(
-      formatEnvelopeEntry(record?.kind ?? occurrence.kind, occurrence.contextId, record),
+      formatEnvelopeEntry(attachment?.type ?? occurrence.kind, occurrence.contextId, attachment),
     );
   }
   return `${body}\n\n<${CONTEXT_ENVELOPE_TAG}>\n${entries.join("\n")}\n</${CONTEXT_ENVELOPE_TAG}>`;
@@ -101,16 +103,16 @@ function escapeContextText(text: string) {
 function formatEnvelopeEntry(
   kind: ChatContextKind,
   contextId: ChatContextId,
-  record: ChatContextRecord | undefined,
+  attachment: ChatAttachment | undefined,
 ) {
   // Both attributes are schema-validated: a fixed kind and an id of `[a-z0-9_-]`.
   const open = `<${CONTEXT_ENTRY_TAG} kind="${kind}" id="${contextId}"`;
-  if (!record) return `${open} unavailable="true"/>`;
+  if (!attachment) return `${open} unavailable="true"/>`;
   const body = [
-    `name: ${record.name}`,
-    `mimeType: ${record.mimeType}`,
-    `sizeBytes: ${record.sizeBytes}`,
-    `attachmentId: ${record.attachmentId}`,
+    `name: ${attachment.name}`,
+    `mimeType: ${attachment.mimeType}`,
+    `sizeBytes: ${attachment.sizeBytes}`,
+    `attachmentId: ${attachment.id}`,
   ].join("\n");
   return `${open}>\n${escapeContextText(body)}\n</${CONTEXT_ENTRY_TAG}>`;
 }

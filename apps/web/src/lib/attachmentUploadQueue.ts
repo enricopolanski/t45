@@ -11,6 +11,7 @@ import { appAtomRegistry } from "../state/atomRegistry";
 import { attachmentUploadUrl, attachmentUrl, decodeUploadResult } from "./attachmentUrl";
 import { describeUploadRefusal } from "./failures";
 import type { AttachmentUploadState } from "./attachmentUploadState";
+import { contextIdFor } from "./composerContextReferences";
 
 const MAX_CONCURRENT_UPLOADS = 3;
 const UPLOAD_TIMEOUT_MS = 5 * 60_000;
@@ -360,6 +361,7 @@ export function getUploadedAttachments(
     attachments.push({
       type: attachment.type,
       id: upload.attachmentId,
+      contextId: contextIdFor(attachment.type, attachment.id),
       name: attachment.name,
       mimeType: attachment.mimeType,
       sizeBytes: attachment.sizeBytes,

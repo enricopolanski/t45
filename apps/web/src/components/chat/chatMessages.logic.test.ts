@@ -17,6 +17,7 @@ import {
 const attachment = {
   type: "file",
   id: "00000000-0000-4000-8000-000000000001.pdf",
+  contextId: "ctx-1",
   name: "report.pdf",
   mimeType: "application/pdf",
   sizeBytes: 12,
@@ -39,19 +40,6 @@ describe("userMessageContent", () => {
         t45: {
           text: "Summarize [report.pdf](t45-context:file/ctx-1)",
           attachments: [attachment],
-          context: {
-            records: [
-              {
-                contextId: "ctx-1",
-                label: "report.pdf",
-                kind: "file",
-                attachmentId: "00000000-0000-4000-8000-000000000001.pdf",
-                name: "report.pdf",
-                mimeType: "application/pdf",
-                sizeBytes: 12,
-              },
-            ],
-          },
         },
       },
     }).message;
@@ -59,18 +47,16 @@ describe("userMessageContent", () => {
     const content = userMessageContent(message);
     expect(content.text).toBe("Summarize [report.pdf](t45-context:file/ctx-1)");
     expect(content.attachments).toEqual([attachment]);
-    expect(content.context?.records.map((record) => record.contextId)).toEqual(["ctx-1"]);
   });
 
   it("reads a message T45 didn't send as OpenCode keeps it", () => {
     const message = userMessage("msg_1", "plain", {
-      metadata: { t45: { attachments: [attachment], context: "not a context" } },
+      metadata: { t45: { attachments: [attachment] } },
     }).message;
     if (message.type !== "user") throw new Error("Expected a user message.");
     expect(userMessageContent(message)).toEqual({
       text: "plain",
       attachments: [],
-      context: undefined,
     });
   });
 

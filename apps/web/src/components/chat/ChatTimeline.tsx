@@ -1,4 +1,5 @@
-import { type ChatContextRecord, type ChatId } from "@t45/contracts/models/Chat";
+import { type ChatId } from "@t45/contracts/models/Chat";
+import type { ChatAttachment } from "@t45/contracts/models/Attachment";
 import type { ChatMessage, ChatSession, PendingInput } from "@t45/contracts/resources/Chats";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import type { Session } from "@opencode/schema/session";
@@ -515,11 +516,10 @@ function UserMessageRow({ message }: { message: ChatMessage }) {
 
 /** A message on its way into the conversation, as the member's until the agent has it. */
 function SendingRow({ input }: { input: PendingInput }) {
-  // Its chips' records come with the message itself: until then they read as their labels.
+  // Pending inputs show attachment references as labels until the agent takes the message.
   const content = {
     text: inlineContextReferencesToLabels(input.text),
     attachments: input.attachments,
-    context: undefined,
   };
   return (
     <div className="chat-content-lane overflow-x-clip">
@@ -549,37 +549,31 @@ function UserBubble({
   );
   const gallery = images.map((image) => ({ src: attachmentUrl(image), name: image.name }));
   const openImage = (index: number) => onImageExpand({ images: gallery, index });
-  const recordsById = new Map<string, ChatContextRecord>(
-    (content.context?.records ?? []).map((record) => [record.contextId, record]),
+  const attachmentsById = new Map<string | undefined, ChatAttachment>(
+    content.attachments.map((attachment) => [attachment.contextId, attachment]),
   );
   const renderContextReference = (reference: MarkdownContextReference) => {
-    const record = recordsById.get(reference.contextId);
+    const attachment = attachmentsById.get(reference.contextId);
     const imageIndex =
-      reference.kind === "image" && record?.kind === "image"
-        ? images.findIndex((each) => each.id === record.attachmentId)
-        : -1;
-    if (record && imageIndex >= 0) {
+      reference.kind === "image" && attachment?.type === "image" ? images.indexOf(attachment) : -1;
+    if (attachment && imageIndex >= 0) {
       return (
         <ImageChipButton
-          name={record.name}
+          name={attachment.name}
           previewUrl={gallery[imageIndex]?.src}
-          size={formatAttachmentSize(record.sizeBytes)}
+          size={formatAttachmentSize(attachment.sizeBytes)}
           onClick={() => openImage(imageIndex)}
         />
       );
     }
-    const file =
-      reference.kind === "file" && record?.kind === "file"
-        ? files.find((each) => each.id === record.attachmentId)
-        : undefined;
-    if (file && record) {
-      const size = formatAttachmentSize(record.sizeBytes);
+    if (reference.kind === "file" && attachment?.type === "file") {
+      const size = formatAttachmentSize(attachment.sizeBytes);
       return (
         <FileChip
-          name={record.name}
+          name={attachment.name}
           size={size}
-          href={attachmentUrl(file)}
-          tooltip={`${record.name}\n${size}`}
+          href={attachmentUrl(attachment)}
+          tooltip={`${attachment.name}\n${size}`}
         />
       );
     }
@@ -589,12 +583,9 @@ function UserBubble({
   };
   // A file with a chip in the prose needs no row of its own; pictures always show.
   const chipped = new Set(
-    collectComposerContextReferences(content.text).flatMap((occurrence) => {
-      const record = recordsById.get(occurrence.contextId);
-      return record ? [record.attachmentId] : [];
-    }),
+    collectComposerContextReferences(content.text).map((occurrence) => occurrence.contextId),
   );
-  const unchippedFiles = files.filter((file) => !chipped.has(file.id));
+  const unchippedFiles = files.filter((file) => !file.contextId || !chipped.has(file.contextId));
 
   return (
     <div className="flex flex-col items-end gap-1">

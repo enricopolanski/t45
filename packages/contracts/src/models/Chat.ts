@@ -1,12 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import {
-  AttachmentId,
-  ChatAttachment,
-  limitRefusal,
-  MESSAGE_MAX_ATTACHMENTS,
-} from "./Attachment.ts";
+import { ChatAttachment, limitRefusal, MESSAGE_MAX_ATTACHMENTS } from "./Attachment.ts";
 import { NonNegativeInt, StringId, Title, TrimmedNonEmptyString } from "./primitives.ts";
 
 /**
@@ -41,52 +36,14 @@ export class Chat extends Schema.Opaque<Chat>()(
   }),
 ) {}
 
-const CONTEXT_ID_MAX_CHARS = 128;
-const CONTEXT_ID_PATTERN = /^[a-z0-9_-]+$/i;
-
-export const CHAT_CONTEXT_LABEL_MAX_CHARS = 200;
-
-/** Durable identity of one payload, shared by every reference to it. */
-export const ChatContextId = TrimmedNonEmptyString.check(
-  Schema.isMaxLength(CONTEXT_ID_MAX_CHARS),
-  Schema.isPattern(CONTEXT_ID_PATTERN),
-).pipe(Schema.brand("ChatContextId"));
-export type ChatContextId = typeof ChatContextId.Type;
-
-export const ChatContextKind = Schema.Literals(["image", "file"]);
-export type ChatContextKind = typeof ChatContextKind.Type;
-
-const ContextLabel = Schema.String.check(Schema.isMaxLength(CHAT_CONTEXT_LABEL_MAX_CHARS));
-
-/** An image or file referenced in a message, bound to its attachment by id. */
-export const ChatContextRecord = Schema.Struct({
-  contextId: ChatContextId,
-  label: ContextLabel,
-  kind: ChatContextKind,
-  attachmentId: AttachmentId,
-  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
-  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100)),
-  sizeBytes: NonNegativeInt,
-});
-export type ChatContextRecord = typeof ChatContextRecord.Type;
-
-const CHAT_CONTEXT_MAX_RECORDS = 200;
-
-/** Structured context riding on a user message. */
-export const ChatMessageContext = Schema.Struct({
-  records: Schema.Array(ChatContextRecord).check(
-    Schema.isMaxLength(CHAT_CONTEXT_MAX_RECORDS),
-    Schema.makeFilter(
-      (records) => new Set(records.map((record) => record.contextId)).size === records.length,
-    ),
-  ),
-});
-export type ChatMessageContext = typeof ChatMessageContext.Type;
-
 export const InputPayload = Schema.Struct({
   text: Schema.String,
-  attachments: Schema.Array(ChatAttachment),
-  context: Schema.optional(ChatMessageContext),
+  attachments: Schema.Array(ChatAttachment).check(
+    Schema.makeFilter((attachments) => {
+      const ids = attachments.flatMap((attachment) => attachment.contextId ?? []);
+      return new Set(ids).size === ids.length;
+    }),
+  ),
 });
 export type InputPayload = typeof InputPayload.Type;
 

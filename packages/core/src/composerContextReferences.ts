@@ -1,17 +1,14 @@
-import {
-  CHAT_CONTEXT_LABEL_MAX_CHARS,
-  ChatContextId,
-  ChatContextKind,
-} from "@t45/contracts/models/Chat";
+import { ChatContextId, ChatContextKind } from "@t45/contracts/models/Attachment";
 import * as Schema from "effect/Schema";
 
 /**
  * Canonical inline reference: `[label](t45-context:<kind>/<contextId>)`, or the image
  * form `![label](...)`. The link carries position and identity only; the payload lives in the
- * message's context records. Labels are display text and never identity.
+ * message's attachments. Labels are display text and never identity.
  */
 
 const COMPOSER_CONTEXT_HREF_PREFIX = "t45-context:";
+const CONTEXT_LABEL_MAX_CHARS = 200;
 const CONTEXT_LINK = /!?\[([^\]\n]*)\]\((t45-context:[^\s)]+)\)/g;
 const isComposerContextKind = Schema.is(ChatContextKind);
 const isComposerContextId = Schema.is(ChatContextId);
@@ -33,12 +30,12 @@ export function parseComposerContextHref(
 }
 
 /** Labels must survive a Markdown link: no brackets or line breaks, bounded, never empty. */
-export function sanitizeComposerContextLabel(label: string, kind: ChatContextKind): string {
+function sanitizeComposerContextLabel(label: string, kind: ChatContextKind): string {
   const cleaned = label
     .replace(/[[\]\\\r\n]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, CHAT_CONTEXT_LABEL_MAX_CHARS);
+    .slice(0, CONTEXT_LABEL_MAX_CHARS);
   return cleaned.length > 0 ? cleaned : kind;
 }
 

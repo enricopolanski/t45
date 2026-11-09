@@ -225,6 +225,7 @@ describe("attachmentUploadQueue", () => {
       {
         type: "image",
         id: uploadedId("image-1.png"),
+        contextId: "image_image-1",
         name: "image-1.png",
         mimeType: "image/png",
         sizeBytes: 3,
@@ -255,6 +256,7 @@ describe("attachmentUploadQueue", () => {
       {
         type: "file",
         id: uploadedId("report.pdf"),
+        contextId: "file_report",
         name: "report.pdf",
         mimeType: "application/pdf",
         sizeBytes: 3,

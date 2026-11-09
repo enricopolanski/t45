@@ -516,7 +516,6 @@ const make = Effect.gen(function* () {
       const payload = {
         text: input.text,
         attachments: input.attachments,
-        ...(input.context === undefined ? {} : { context: input.context }),
       };
       yield* post({
         chatId: input.chatId,

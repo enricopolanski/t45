@@ -10,7 +10,6 @@ import { ChatAttachment, MESSAGE_MAX_ATTACHMENTS } from "../models/Attachment.ts
 import {
   Chat,
   ChatId,
-  ChatMessageContext,
   Input,
   InputId,
   InputPayload,
@@ -185,8 +184,9 @@ export const Chats = RpcGroup.make(
       workflowId: Schema.optional(StringId),
       inputId: InputId,
       text: Schema.String.check(Schema.isMaxLength(MESSAGE_MAX_INPUT_CHARS)),
-      attachments: Schema.Array(ChatAttachment).check(Schema.isMaxLength(MESSAGE_MAX_ATTACHMENTS)),
-      context: Schema.optional(ChatMessageContext),
+      attachments: InputPayload.fields.attachments.check(
+        Schema.isMaxLength(MESSAGE_MAX_ATTACHMENTS),
+      ),
     },
     error: ChatErrors,
   }),

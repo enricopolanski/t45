@@ -1,4 +1,5 @@
-import { MESSAGE_MAX_INPUT_CHARS, ChatContextId } from "@t45/contracts/models/Chat";
+import { MESSAGE_MAX_INPUT_CHARS } from "@t45/contracts/models/Chat";
+import { ChatContextId } from "@t45/contracts/models/Attachment";
 import { formatComposerContextReference } from "@t45/core/composerContextReferences";
 import { describe, expect, it } from "vite-plus/test";
 

@@ -8,7 +8,6 @@ import {
   releaseDraftAttachments,
   startAttachmentUpload,
 } from "../../lib/attachmentUploadQueue";
-import { buildMessageContext } from "../../lib/composerContextReferences";
 import { api } from "../../rpc/api";
 import { chatErrorReason, chatSessionKey, chats } from "../../state/chats";
 import { toastFailure } from "../../state/query";
@@ -40,12 +39,6 @@ export async function sendChatMessage(send: {
       toastManager.add({ type: "error", title: "Retry or remove failed uploads before sending." });
       return;
     }
-    const context = buildMessageContext(
-      attachments.map((attachment, index) => ({
-        attachment,
-        attachmentId: uploaded[index]?.id ?? attachment.id,
-      })),
-    );
     try {
       await api("chats.send", {
         chatId,
@@ -54,7 +47,6 @@ export async function sendChatMessage(send: {
         inputId,
         text: send.prompt.trim(),
         attachments: uploaded,
-        ...(context === undefined ? {} : { context }),
       });
     } catch (error) {
       if (chatErrorReason(error) === "input_conflict") {

@@ -233,13 +233,13 @@ const statements = [
       UNIQUE (chat_id, session_id, ordinal)
     )`,
   // The inputs sent to a chat, in order. An input is pending until its user message is stored, and
-  // an execution sends those absent from its saved disk. `payload_json` is the input as sent: its text, attachments
-  // and context.
+  // an execution sends those absent from its saved disk. The SQL comment deliberately bumps the
+  // fingerprint to refuse databases whose inputs and message metadata used separate context records.
   `CREATE TABLE chat_inputs (
       chat_id TEXT NOT NULL REFERENCES chats(id),
       input_id TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
-      payload_json TEXT NOT NULL,
+      payload_json TEXT NOT NULL, -- text and attachments carrying inline contextId
       created_at TEXT NOT NULL,
       PRIMARY KEY (chat_id, input_id),
       UNIQUE (chat_id, ordinal)

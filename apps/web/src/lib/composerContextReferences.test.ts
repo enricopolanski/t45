@@ -1,11 +1,10 @@
-import { ChatContextId } from "@t45/contracts/models/Chat";
+import { ChatContextId } from "@t45/contracts/models/Attachment";
 import { formatComposerContextReference } from "@t45/core/composerContextReferences";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { ComposerFileAttachment } from "../composerDraftStore";
 import {
   attachmentContextReference,
-  buildMessageContext,
   collectInlineContextIds,
   ensureInlineContextReferences,
   inlineContextReferencesToLabels,
@@ -107,16 +106,5 @@ describe("reconcileAttachmentContextReferences", () => {
     expect(restored.filesToRestore).toEqual([file]);
     expect(restored.filesToRestore[0]?.file).toBe(file.file);
     expect(retained.size).toBe(0);
-    expect(
-      buildMessageContext([
-        { attachment: restored.filesToRestore[0]!, attachmentId: "uploaded-file" },
-      ])?.records,
-    ).toEqual([
-      expect.objectContaining({
-        kind: "file",
-        contextId: "file_file-1",
-        attachmentId: "uploaded-file",
-      }),
-    ]);
   });
 });

@@ -21,9 +21,20 @@ export function isAttachmentImageMimeType(mimeType: string): boolean {
 
 export { AttachmentId } from "./primitives.ts";
 
+/** Stable identity of an attachment's inline references, chosen before upload. */
+export const ChatContextId = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[a-z0-9_-]+$/i),
+).pipe(Schema.brand("ChatContextId"));
+export type ChatContextId = typeof ChatContextId.Type;
+
+export const ChatContextKind = Schema.Literals(["image", "file"]);
+export type ChatContextKind = typeof ChatContextKind.Type;
+
 export const ChatImageAttachment = Schema.Struct({
   type: Schema.Literal("image"),
   id: AttachmentId,
+  contextId: Schema.optional(ChatContextId),
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
   mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^image\//i)),
   sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(ATTACHMENT_MAX_IMAGE_BYTES)),
@@ -36,6 +47,7 @@ export type PastedTextAttachmentSource = typeof PastedTextAttachmentSource.Type;
 export const ChatFileAttachment = Schema.Struct({
   type: Schema.Literal("file"),
   id: AttachmentId,
+  contextId: Schema.optional(ChatContextId),
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
   mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100)),
   sizeBytes: NonNegativeInt.check(
