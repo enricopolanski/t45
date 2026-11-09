@@ -1,6 +1,7 @@
 import { toSlug } from "@t45/contracts/models/Workflow";
+import type { WorkflowInstanceView } from "@t45/contracts/resources/Workflows";
 import { Link } from "@tanstack/react-router";
-import { useId } from "react";
+import { useCallback, useId } from "react";
 
 import { api, type ApiInput } from "../../rpc/api";
 import { SavedInput } from "../SavedInput";
@@ -10,7 +11,7 @@ import { Label } from "../ui/label";
 import { WorkFrame } from "../work/WorkFrame";
 import { plural } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
-import { useWorkflowDetail } from "./useWorkflowDetail";
+import { useWorkflowData } from "./useWorkflowData";
 import { WorkflowDangerZone, WorkflowPeople, WorkflowStepPeople } from "./WorkflowPeople";
 
 /**
@@ -20,7 +21,13 @@ import { WorkflowDangerZone, WorkflowPeople, WorkflowStepPeople } from "./Workfl
  */
 export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) {
   const id = useId();
-  const { detail, busy, error, run } = useWorkflowDetail(workflowId);
+  const { detail, busy, error, run } = useWorkflowData(
+    useCallback(
+      (current: WorkflowInstanceView | null) =>
+        api("workflows.getInstance", { idOrSlug: current?.workflow.id ?? workflowId }),
+      [workflowId],
+    ),
+  );
 
   if (detail === null) {
     return (

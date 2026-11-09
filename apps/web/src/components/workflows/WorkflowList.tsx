@@ -1,38 +1,21 @@
-import type { WorkflowInstanceListEntryView } from "@t45/contracts/resources/Workflows";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 
 import { api } from "../../rpc/api";
-import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { WorkflowNavigation } from "./WorkflowNavigation";
 import { WorkFrame } from "../work/WorkFrame";
+import { useWorkflowData } from "./useWorkflowData";
+
+const loadWorkflows = () => api("workflows.listInstances", undefined);
 
 /**
  * The workflows I manage, and those I answer for as their responsible, who opens the board but
  * doesn't edit. Organization admins manage every workflow.
  */
 export function WorkflowList() {
-  const [workflows, setWorkflows] = useState<ReadonlyArray<WorkflowInstanceListEntryView> | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let current = true;
-    void api("workflows.listInstances", undefined).then(
-      (loaded) => {
-        if (current) setWorkflows(loaded);
-      },
-      (cause: unknown) => {
-        if (current) setError(describeFailure(cause));
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, []);
+  const { detail: workflows, error } = useWorkflowData(loadWorkflows);
   return (
     <WorkFrame
       title="Workflows"

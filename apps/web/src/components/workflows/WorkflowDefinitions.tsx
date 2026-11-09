@@ -1,7 +1,6 @@
-import type { WorkflowDefinition } from "@t45/contracts/models/Workflow";
 import type { WorkflowDefinitionView } from "@t45/contracts/resources/Workflows";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
@@ -13,26 +12,13 @@ import { Label } from "../ui/label";
 import { WorkFrame } from "../work/WorkFrame";
 import { plural } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
-import { useWorkflowDefinitionDetail } from "./useWorkflowDefinitionDetail";
+import { useWorkflowData } from "./useWorkflowData";
 import { WorkflowNavigation } from "./WorkflowNavigation";
 
+const loadDefinitions = () => api("workflows.listDefinitions", undefined);
+
 export function WorkflowDefinitions() {
-  const [definitions, setDefinitions] = useState<ReadonlyArray<WorkflowDefinition> | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let current = true;
-    void api("workflows.listDefinitions", undefined).then(
-      (loaded) => {
-        if (current) setDefinitions(loaded);
-      },
-      (cause: unknown) => {
-        if (current) setError(describeFailure(cause));
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, []);
+  const { detail: definitions, error } = useWorkflowData(loadDefinitions);
   return (
     <WorkFrame
       title="Workflow blueprints"
@@ -162,7 +148,10 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
     (loaded: WorkflowDefinitionView) => setName(loaded.definition.name),
     [],
   );
-  const { detail, busy, error, run } = useWorkflowDefinitionDetail(definitionId, adopt);
+  const { detail, busy, error, run } = useWorkflowData(
+    useCallback(() => api("workflows.getDefinition", { definitionId }), [definitionId]),
+    adopt,
+  );
   if (detail === null)
     return (
       <WorkFrame title="Workflow blueprint">

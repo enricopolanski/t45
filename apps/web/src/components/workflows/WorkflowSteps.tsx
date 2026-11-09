@@ -9,7 +9,7 @@ import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { PageBreadcrumbLink } from "../PageBreadcrumb";
 import { WorkFrame } from "../work/WorkFrame";
-import { useWorkflowDefinitionDetail } from "./useWorkflowDefinitionDetail";
+import { useWorkflowData } from "./useWorkflowData";
 import { WorkflowStepEditor } from "./WorkflowStepEditor";
 import { blankStep, cleanSteps, listEntries, stepPath, updateStep } from "./workflowLogic";
 
@@ -64,7 +64,10 @@ export function WorkflowSteps({
     setSteps(loaded.definition.steps);
     setDirty(false);
   }, []);
-  const { detail, busy, error, run } = useWorkflowDefinitionDetail(definitionId, adopt);
+  const { detail, busy, error, run } = useWorkflowData(
+    useCallback(() => api("workflows.getDefinition", { definitionId }), [definitionId]),
+    adopt,
+  );
 
   useBlocker({
     // Opening a sub-step stays on this page and keeps the unsaved steps.

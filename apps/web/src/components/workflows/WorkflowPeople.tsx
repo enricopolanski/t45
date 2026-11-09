@@ -29,12 +29,12 @@ import { PersonPicker } from "../work/PersonPicker";
 import { useWorkDirectory } from "../work/useWorkDirectory";
 import { actorName } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
-import type { useWorkflowDetail } from "./useWorkflowDetail";
+import type { useWorkflowData } from "./useWorkflowData";
 
 type Editing = {
   readonly detail: WorkflowInstanceView;
   readonly busy: boolean;
-  readonly run: ReturnType<typeof useWorkflowDetail>["run"];
+  readonly run: ReturnType<typeof useWorkflowData>["run"];
 };
 
 /**

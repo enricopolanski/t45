@@ -1,20 +1,23 @@
-import type { WorkflowInstanceView } from "@t45/contracts/resources/Workflows";
 import { useEffect, useState } from "react";
 
-import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 
-/** A workflow for an editing page: loads it, and runs the page's requests against it. */
-export function useWorkflowDetail(workflowId: string) {
-  const [detail, setDetail] = useState<WorkflowInstanceView | null>(null);
+/** Page-local data: load on entry, reload after a successful edit. Keep callbacks stable. */
+export function useWorkflowData<A>(
+  load: (current: A | null) => Promise<A>,
+  onLoad?: (loaded: A) => void,
+) {
+  const [detail, setDetail] = useState<A | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let current = true;
-    void api("workflows.getInstance", { idOrSlug: workflowId }).then(
+    void load(null).then(
       (loaded) => {
-        if (current) setDetail(loaded);
+        if (!current) return;
+        setDetail(loaded);
+        onLoad?.(loaded);
       },
       (cause: unknown) => {
         if (current) setError(describeFailure(cause));
@@ -23,17 +26,16 @@ export function useWorkflowDetail(workflowId: string) {
     return () => {
       current = false;
     };
-  }, [workflowId]);
+  }, [load, onLoad]);
 
   const run = async (request: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
     try {
       await request();
-      const loaded = await api("workflows.getInstance", {
-        idOrSlug: detail?.workflow.id ?? workflowId,
-      });
+      const loaded = await load(detail);
       setDetail(loaded);
+      onLoad?.(loaded);
       return true;
     } catch (cause) {
       setError(describeFailure(cause));
