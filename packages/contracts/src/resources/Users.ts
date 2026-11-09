@@ -6,7 +6,7 @@ import { StringId, NonNegativeInt } from "../models/primitives.ts";
 import { Avatar, InvalidAvatar } from "../models/Avatar.ts";
 import { DisplayName, Refused, Role, User } from "../models/User.ts";
 import { AdminOnly } from "../Authorization.ts";
-import { NotFound } from "./errors.ts";
+import { AccessDenied, NotFound } from "./errors.ts";
 
 export const UpdateProfileRequest = Schema.Struct({
   displayName: DisplayName,
@@ -18,11 +18,11 @@ const UserErrors = Schema.Union([Refused, NotFound]);
 
 export const Users = RpcGroup.make(
   Rpc.make("list", { success: Schema.Array(User) }),
-  Rpc.make("getProfile", { success: User, error: NotFound }),
+  Rpc.make("getProfile", { success: User, error: Schema.Union([NotFound, AccessDenied]) }),
   Rpc.make("updateProfile", {
     payload: UpdateProfileRequest,
     success: User,
-    error: Schema.Union([InvalidAvatar, NotFound]),
+    error: Schema.Union([InvalidAvatar, NotFound, AccessDenied]),
   }),
   Rpc.make("approve", {
     payload: { userId: StringId, role: Role },
@@ -45,5 +45,8 @@ export const Users = RpcGroup.make(
     success: User,
     error: UserErrors,
   }).middleware(AdminOnly),
-  Rpc.make("signOutElsewhere", { success: Schema.Struct({ revokedCount: NonNegativeInt }) }),
+  Rpc.make("signOutElsewhere", {
+    success: Schema.Struct({ revokedCount: NonNegativeInt }),
+    error: AccessDenied,
+  }),
 ).prefix("users.");

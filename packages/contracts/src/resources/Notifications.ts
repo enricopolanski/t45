@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema";
 
 import { Notification, NotificationId, hasValidTarget } from "../models/Notification.ts";
 import { NonNegativeInt, TrimmedNonEmptyString } from "../models/primitives.ts";
-import { NotFound } from "./errors.ts";
+import { AccessDenied, NotFound } from "./errors.ts";
 
 export const NotificationView = Schema.Struct({
   ...Notification.fields,
@@ -16,10 +16,14 @@ export type NotificationView = typeof NotificationView.Type;
 
 export const Notifications = RpcGroup.make(
   Rpc.make("list", {
+    error: AccessDenied,
     success: Schema.Struct({
       unread: NonNegativeInt,
       notifications: Schema.Array(NotificationView),
     }),
   }),
-  Rpc.make("markRead", { payload: { notificationId: NotificationId }, error: NotFound }),
+  Rpc.make("markRead", {
+    payload: { notificationId: NotificationId },
+    error: Schema.Union([NotFound, AccessDenied]),
+  }),
 ).prefix("notifications.");

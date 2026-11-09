@@ -19,9 +19,9 @@ import {
   WorkflowDefinition,
 } from "../models/Workflow.ts";
 import { Refused as ChatRefused } from "../models/Chat.ts";
-import { NotFound } from "./errors.ts";
+import { AccessDenied, NotFound } from "./errors.ts";
 
-export const WorkflowErrors = Schema.Union([WorkflowRefused, NotFound]);
+export const WorkflowErrors = Schema.Union([WorkflowRefused, NotFound, AccessDenied]);
 
 const WorkflowInstance = { workflow: Workflow, definition: WorkflowDefinition };
 
@@ -205,6 +205,35 @@ export const Workflows = RpcGroup.make(
     error: WorkflowErrors,
   }),
   Rpc.make("deleteInstance", { payload: workflow, error: WorkflowErrors }),
+  Rpc.make("getWorkflow", {
+    payload: workflow,
+    success: Schema.Struct({
+      workflowId: StringId,
+      name: Schema.String,
+      blueprint: WorkflowDefinition,
+    }),
+    error: WorkflowErrors,
+  }),
+  Rpc.make("listTickets", {
+    payload: { ...workflow, query: Schema.optionalKey(Schema.String) },
+    success: Schema.Struct({
+      total: Schema.Number,
+      tickets: Schema.Array(
+        Schema.Struct({
+          ...Struct.pick(Ticket.fields, ["id", "title", "status"]),
+          steps: Schema.Array(
+            Schema.Struct(Struct.pick(Step.fields, ["id", "stepDefinitionId", "status"])),
+          ),
+        }),
+      ),
+    }),
+    error: WorkflowErrors,
+  }),
+  Rpc.make("getTicket", {
+    payload: ticket,
+    success: Ticket,
+    error: WorkflowErrors,
+  }),
   Rpc.make("startTicket", {
     payload: {
       ...workflow,

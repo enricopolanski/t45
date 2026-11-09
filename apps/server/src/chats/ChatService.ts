@@ -21,7 +21,6 @@ import type { ChatOrigin, Trigger } from "@t45/contracts/models/ChatOrigin";
 import type { Role } from "@t45/contracts/models/User";
 import { StringId } from "@t45/contracts/models/primitives";
 import {
-  type ChatErrors,
   type ChatEvent,
   ChatList,
   ChatMessage,
@@ -358,7 +357,15 @@ const make = Effect.gen(function* () {
       return chatId;
     }),
     requestStop,
-    consume: executions.consume,
+    onEnd: executions.onEnd,
+    authenticateAgent: Effect.fnUntraced(function* (token: string) {
+      const chatId = executions.chatForToken(token);
+      if (chatId === null) return yield* notFound();
+      const chat = yield* repository.get(chatId);
+      const origin = yield* repository.origins.get(chatId);
+      if (chat?.status !== "running" || origin === null) return yield* notFound();
+      return { chatId, agentId: chat.agentId, origin };
+    }),
     listTargets: (member: Member) =>
       Effect.gen(function* () {
         const available = (yield* agents.list).filter(canChatWithMembers);
@@ -441,7 +448,7 @@ const make = Effect.gen(function* () {
           });
           const eventsOf = (
             change: ChatEvents.ChatChange | ChatEvents.Missed,
-          ): Effect.Effect<ReadonlyArray<ChatEvent>, ChatErrors> => {
+          ): Effect.Effect<ReadonlyArray<ChatEvent>, Refused | NotFound> => {
             switch (change.kind) {
               case "missed":
                 return snapshotOf.pipe(Effect.map((snapshot) => [snapshot]));

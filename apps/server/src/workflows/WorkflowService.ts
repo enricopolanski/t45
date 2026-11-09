@@ -1,3 +1,4 @@
+import type { CurrentActor } from "@t45/contracts/Authorization";
 import { ChatService } from "../chats/ChatService.ts";
 import * as WorkflowAssistant from "./WorkflowAssistant.ts";
 import type { Workflows } from "@t45/contracts/resources/Workflows";
@@ -74,6 +75,7 @@ import { TicketRepository } from "./TicketRepository.ts";
 import { WorkflowDefinitionRepository } from "./WorkflowDefinitionRepository.ts";
 import { WorkflowRepository } from "./WorkflowRepository.ts";
 
+type Caller = string | Extract<CurrentActor["Service"], { agentId: string }>;
 type WorkflowRpc = RpcGroup.Rpcs<typeof Workflows>;
 type Payload<Tag extends string> = Rpc.Payload<Rpc.ExtractTag<WorkflowRpc, `workflows.${Tag}`>>;
 
@@ -98,7 +100,6 @@ const stepFileForChat = (file: Attachment) => ({
   sizeBytes: file.sizeBytes,
 });
 
-const encodeResult = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const sameStepView = Schema.toEquivalence(StepView);
 
 interface Work {
@@ -170,6 +171,14 @@ const make = Effect.gen(function* () {
     Effect.forkScoped,
   );
   const { transaction } = tickets;
+  const workflowAccess = yield* WorkflowAssistant.makeAccess;
+  const person = Effect.fnUntraced(function* (caller: Caller, workflowId: string) {
+    if (typeof caller === "string") return caller;
+    if (caller.origin.kind !== "conversation" || caller.origin.workflowId !== workflowId)
+      return yield* new NotFound();
+    yield* workflowAccess(caller.origin.ownerUserId, workflowId);
+    return caller.origin.ownerUserId;
+  });
 
   const found = <A>(effect: Effect.Effect<A | null>) =>
     effect.pipe(
@@ -390,7 +399,7 @@ const make = Effect.gen(function* () {
     return {
       text: [
         `You contribute to ${subject} of "${brief.ticketTitle}" in the workflow "${brief.workflowName}". The step is below as JSON: its instructions, the fields of earlier steps it reads, its own fields, its comments and its files. That is all you can see of this ticket.`,
-        "Fill the step's fields with step_set_field, report progress or results with step_comment, and attach files with step_attach. Each tool returns the actual operation result. Use a new UUID requestId per operation and reuse it with identical arguments when retrying. When your contribution is finished, end the conversation.",
+        "Fill the step's fields with step_set_field, report progress or results with step_comment, and attach files with step_attach. Each tool returns the actual operation result. When your contribution is finished, end the conversation.",
         "You work in a folder of your own. Follow AGENTS.md if it is there.",
         instructions ? `Instructions for this step:\n${instructions}` : "",
         formatAutomationContext(brief),
@@ -636,7 +645,8 @@ const make = Effect.gen(function* () {
     yield* workflows.remove(workflow.id);
   }, transaction);
 
-  const startTicket = Effect.fnUntraced(function* (actorId: string, input: Payload<"startTicket">) {
+  const startTicket = Effect.fnUntraced(function* (caller: Caller, input: Payload<"startTicket">) {
+    const actorId = yield* person(caller, input.workflowId);
     const workflow = yield* found(workflows.get(input.workflowId));
     const definition = yield* found(definitions.get(workflow.definitionId));
     const refusal = ticketStartRefusal(yield* actorOf(actorId), workflow, definition);
@@ -851,27 +861,32 @@ const make = Effect.gen(function* () {
     yield* save(work);
   }, transaction);
 
-  const comment = (work: Work, step: Step, input: Payload<"commentOnStep">, actorId: string) =>
-    DateTime.now.pipe(
-      Effect.flatMap((createdAt) =>
-        tickets.insertComment(work.ticket.id, {
-          id: generateId(),
-          author: actorId,
-          body: input.body,
-          createdAt,
-          stepId: step.id,
-        }),
-      ),
-    );
+  const comment = Effect.fnUntraced(function* (
+    work: Work,
+    step: Step,
+    input: Payload<"commentOnStep">,
+    actorId: string,
+    automated: boolean,
+  ) {
+    if (automated) yield* requireWorkingStep(work, step);
+    yield* tickets.insertComment(work.ticket.id, {
+      id: generateId(),
+      author: actorId,
+      body: input.body,
+      createdAt: yield* DateTime.now,
+      stepId: step.id,
+    });
+  });
   const attachFile = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
     input: Payload<"attachStepFile">,
     actorId: string,
+    automated: boolean,
   ) {
     const fieldKey = input.fieldKey ?? null;
+    if (fieldKey !== null || automated) yield* requireWorkingStep(work, step);
     if (fieldKey !== null) {
-      yield* requireWorkingStep(work, step);
       if ((yield* resolveField(work, step, fieldKey)).type !== "file") {
         return yield* new WorkflowRefused({ reason: "invalid_field_value" });
       }
@@ -1053,58 +1068,58 @@ const make = Effect.gen(function* () {
     putStep(work, { ...step, automations: input.automations });
     yield* save(work);
   }, transaction);
-  const applyStepTool = Effect.fnUntraced(function* (
-    chatId: ChatId,
-    call: WorkflowAssistant.PreparedStepToolCall,
-  ) {
-    const origin = yield* chatRepository.origins.get(chatId);
-    if (origin?.kind !== "automation" || (yield* chatRepository.get(chatId))?.status !== "running")
-      return yield* new NotFound();
-    const { work, step, entry } = yield* loadAutomationStep(origin);
-    switch (call.tool) {
-      case "step_set_field":
-        yield* setField(work, step, { stepId: step.id, ...call.input });
-        return encodeResult({
-          value: stepIn(work, step.id)?.values[call.input.fieldKey] ?? null,
-        });
-      case "step_comment":
-        yield* requireWorkingStep(work, step);
-        yield* comment(work, step, { stepId: step.id, ...call.input }, entry.agentId);
-        return encodeResult({ body: call.input.body });
-      case "step_attach": {
-        if (call.input.fieldKey === undefined) yield* requireWorkingStep(work, step);
-        const stored = call.attachment;
-        yield* attachFile(
-          work,
-          step,
-          { stepId: step.id, attachmentId: stored.id, ...call.input },
-          entry.agentId,
-        );
-        return encodeResult(toFile(stored));
-      }
-    }
-  });
-
   const memberCommand = <I extends { readonly stepId: string }, A, E>(
-    mutate: (work: Work, step: Step, input: I, actorId: string) => Effect.Effect<A, E>,
+    mutate: (
+      work: Work,
+      step: Step,
+      input: I,
+      actorId: string,
+      automated: boolean,
+    ) => Effect.Effect<A, E>,
   ) =>
-    Effect.fnUntraced(function* (actorId: string, input: I) {
+    Effect.fnUntraced(function* (caller: Caller, input: I) {
       const { work, step } = yield* loadStep(input.stepId);
-      yield* requireInvolved(work, actorId);
-      return yield* mutate(work, step, input, actorId);
+      let actorId: string;
+      const automated = typeof caller !== "string" && caller.origin.kind === "automation";
+      if (automated) {
+        const assigned = yield* loadAutomationStep(caller.origin);
+        if (assigned.step.id !== step.id || assigned.entry.agentId !== caller.agentId)
+          return yield* new NotFound();
+        actorId = caller.agentId;
+      } else {
+        actorId = yield* person(caller, work.workflow.id);
+        yield* requireInvolved(work, actorId);
+      }
+      return yield* mutate(work, step, input, actorId, automated);
     }, transaction);
 
-  const setStepField = memberCommand(setField);
-  const receiveWorkflow = yield* WorkflowAssistant.makeReceiver({
-    startTicket,
-    setStepField,
-    applyStepTool,
+  const getWorkflow = Effect.fnUntraced(function* (caller: Caller, workflowId: string) {
+    const { workflow, definition } = yield* workflowAccess(
+      yield* person(caller, workflowId),
+      workflowId,
+    );
+    return { workflowId: workflow.id, name: workflow.name, blueprint: definition };
   });
-  yield* chats.consume((result) =>
-    result.type === "ended" ? automationEnded(result.chatId, null) : receiveWorkflow(result),
-  );
+  const listTickets = Effect.fnUntraced(function* (caller: Caller, input: Payload<"listTickets">) {
+    const { actor, workflow } = yield* workflowAccess(
+      yield* person(caller, input.workflowId),
+      input.workflowId,
+    );
+    return yield* tickets.listForWorkflow(workflow, actor, input.query ?? "");
+  });
+  const getTicket = Effect.fnUntraced(function* (caller: Caller, input: Payload<"getTicket">) {
+    const ticket = yield* found(tickets.get(input.ticketId));
+    const actorId = yield* person(caller, ticket.workflowId);
+    const workflow = yield* found(workflows.get(ticket.workflowId));
+    if (!canViewTicket(yield* actorOf(actorId), workflow, ticket)) return yield* new NotFound();
+    return ticket;
+  });
+  yield* chats.onEnd((chatId) => automationEnded(chatId, null));
 
   return {
+    getWorkflow,
+    listTickets,
+    getTicket,
     memberDeactivated,
     setStepAutomations,
     runStepAutomation,
@@ -1136,7 +1151,7 @@ const make = Effect.gen(function* () {
           tickets.watch(ticket, getStep(actorId, ticket.id, stepId)),
         ),
       ).pipe(Stream.changesWith(sameStepView)),
-    setStepField,
+    setStepField: memberCommand(setField),
     markStepDone,
     setStepAssignee,
     blockStep,

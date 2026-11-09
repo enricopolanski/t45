@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, expect, it } from "@effect/vitest";
 import { Refused, type User } from "@t45/contracts/models/User";
-import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
+import { Authorization, CurrentActor } from "@t45/contracts/Authorization";
 import { Users } from "@t45/contracts/resources/Users";
 import type { NotFound } from "@t45/contracts/resources/errors";
 import * as DateTime from "effect/DateTime";
@@ -1107,7 +1107,7 @@ describe("UserService", () => {
 
     /** A client calling the handlers as `currentUser`, with workflows answering deactivations. */
     const makeClient = (
-      currentUser: CurrentUser["Service"],
+      currentUser: Extract<CurrentActor["Service"], { userId: string }>,
       memberDeactivated: WorkflowService["Service"]["memberDeactivated"] = () => Effect.undefined,
     ) =>
       RpcTest.makeClient(Users.middleware(Authorization)).pipe(
@@ -1118,7 +1118,7 @@ describe("UserService", () => {
                 Layer.succeed(
                   Authorization,
                   Authorization.of((effect) =>
-                    Effect.provideService(effect, CurrentUser, currentUser),
+                    Effect.provideService(effect, CurrentActor, currentUser),
                   ),
                 ),
                 AdminOnly.layer,

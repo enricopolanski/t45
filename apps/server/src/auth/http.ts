@@ -7,6 +7,7 @@ import * as Option from "effect/Option";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import * as ServerConfig from "../config.ts";
+import { ChatService } from "../chats/ChatService.ts";
 import { UserService } from "../org/UserService.ts";
 
 const CREDENTIAL_RESPONSE_HEADERS = {
@@ -138,3 +139,19 @@ const logoutRoute = HttpRouter.add(
 );
 
 export const layer = Layer.mergeAll(sessionRoute, loginRoute, logoutRoute);
+
+/** The uploader's identity; uploads use the same credentials as workflow RPCs. */
+export const uploader = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  if (request.headers.authorization !== undefined) {
+    const chats = yield* ChatService;
+    return yield* chats
+      .authenticateAgent(request.headers.authorization.replace(/^Bearer /, ""))
+      .pipe(
+        Effect.map((actor) => actor.agentId),
+        Effect.catchTags({ NotFound: () => Effect.succeed(refuse("unauthenticated")) }),
+      );
+  }
+  const user = yield* member;
+  return HttpServerResponse.isHttpServerResponse(user) ? user : user.userId;
+});

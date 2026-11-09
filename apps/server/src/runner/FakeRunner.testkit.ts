@@ -6,7 +6,6 @@ import {
   type ExecutionRequest,
   type ExecutionUpdate,
   RunnerRpcs,
-  FileUnavailable,
 } from "@t45/contracts/resources/Runner";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -81,7 +80,6 @@ const make = () => {
     refuse: null as string | null,
     /** Every execution T45 asked for, refused ones included. */
     executions: [] as Array<Payload<"execute">>,
-    fileWrites: [] as Array<Payload<"writeFiles">>,
     sends: [] as Array<Payload<"send">>,
     answers: [] as Array<Payload<"answer">>,
     cancels: [] as Array<Payload<"cancel">>,
@@ -162,8 +160,6 @@ const make = () => {
           );
         }),
       ),
-    readFile: () => Effect.fail(new FileUnavailable({ message: "The file could not be found." })),
-    writeFiles: (payload) => Effect.sync(() => void fake.fileWrites.push(payload)),
     send: (payload) =>
       Effect.sync(() => {
         fake.sends.push(payload);

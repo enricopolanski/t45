@@ -18,7 +18,7 @@ import {
   Refused,
 } from "../models/Chat.ts";
 import { StringId, Title } from "../models/primitives.ts";
-import { NotFound } from "./errors.ts";
+import { AccessDenied, NotFound } from "./errors.ts";
 
 /**
  * What T45 keeps in the native user message an input becomes, under its `metadata`: the input as
@@ -114,8 +114,7 @@ export const ChatHistory = Schema.Struct({
 });
 export type ChatHistory = typeof ChatHistory.Type;
 
-export const ChatErrors = Schema.Union([Refused, NotFound]);
-export type ChatErrors = typeof ChatErrors.Type;
+const ChatErrors = Schema.Union([Refused, NotFound, AccessDenied]);
 
 export const ChatTarget = Schema.Struct({
   agentId: StringId,
@@ -125,7 +124,7 @@ export const ChatTarget = Schema.Struct({
 export type ChatTarget = typeof ChatTarget.Type;
 
 export const Chats = RpcGroup.make(
-  Rpc.make("listTargets", { success: Schema.Array(ChatTarget) }),
+  Rpc.make("listTargets", { success: Schema.Array(ChatTarget), error: AccessDenied }),
   Rpc.make("getHistory", {
     payload: { chatId: ChatId, sessionId: SessionId, before: SessionMessage.ID },
     success: ChatHistory,
@@ -143,6 +142,7 @@ export const Chats = RpcGroup.make(
    */
   Rpc.make("watchList", {
     success: ChatList,
+    error: AccessDenied,
     stream: true,
   }),
   /**

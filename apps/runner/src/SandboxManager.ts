@@ -1,7 +1,7 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { Config as OpenCodeConfig } from "@opencode/schema/config";
 import { T45_TOOLS_DIR } from "@t45/contracts/models/Agent";
-import { FileUnavailable, type ExecutionRequest } from "@t45/contracts/resources/Runner";
+import { type ExecutionRequest } from "@t45/contracts/resources/Runner";
 import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -35,8 +35,8 @@ const LIMITS = { cpus: 2, memoryMib: 2048, diskMib: 4096 };
 const DISK = "disk.raw";
 const ARCHIVE = "disk.tgz";
 
-/** Written again at every start, including transient tool replies. */
-const STALE = ["/work/.opencode/skills", "/work/.t45", T45_TOOLS_DIR];
+/** Agent setup is written again at every start. */
+const STALE = ["/work/.opencode/skills", T45_TOOLS_DIR];
 
 /** The SDK types its network setter loosely; this is what it hands the callback. */
 type NetworkSettings = InstanceType<typeof NetworkBuilder>;
@@ -54,7 +54,12 @@ const KEY_ENV = "OPENCODE_API_KEY";
  * provider. OpenCode's port binds to the host's loopback, so only the host reaches it.
  */
 const sandboxNetwork =
-  (openCodeKey: Redacted.Redacted, network: Agent["permissions"]["network"], hostPort: number) =>
+  (
+    openCodeKey: Redacted.Redacted,
+    network: Agent["permissions"]["network"],
+    hostPort: number,
+    serverUrl: string,
+  ) =>
   (settings: NetworkSettings) => {
     let policy = NetworkPolicy.builder().defaultEgress("deny").defaultIngress("allow");
     if (network === "provider") {
@@ -63,6 +68,15 @@ const sandboxNetwork =
       policy = policy.egress((rule) => rule.udp().tcp().port(53).allowHost());
       policy = policy.egress((rule) => rule.allowPublic());
     }
+    const endpoint = new URL(serverUrl);
+    policy = policy.egress((rule) => {
+      const target = rule
+        .tcp()
+        .port(Number(endpoint.port || (endpoint.protocol === "https:" ? 443 : 80)));
+      return endpoint.hostname === "host.microsandbox.internal"
+        ? target.allowHost()
+        : target.allowDomain(endpoint.hostname);
+    });
     return settings
       .policyFromBuilder(policy)
       .tls((tls) => tls)
@@ -144,6 +158,7 @@ export const start = Effect.fn("SandboxManager.start")(function* (
   rootId: string,
   agent: Agent,
   saved: Uint8Array | null,
+  serverUrl: string,
 ) {
   const runnerPort = yield* Config.Port("T45_RUNNER_PORT");
   const openCodeKey = yield* Config.schema(
@@ -201,7 +216,7 @@ export const start = Effect.fn("SandboxManager.start")(function* (
           // Removed by microsandbox once it stops, including when this runner dies.
           .ephemeral(true)
           .replace()
-          .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort))
+          .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort, serverUrl))
           .create(),
       );
       return { vm, remove: yield* Effect.cached(sdk("remove", () => vm.destroy())) };
@@ -229,36 +244,6 @@ export const start = Effect.fn("SandboxManager.start")(function* (
     port: hostPort,
     password,
     write: (path: string, content: Uint8Array) => write(vm, `/work/${path}`, content),
-    /** Reads a file inside the workspace, including its real name after resolving symlinks. */
-    readFile: (path: string, maxBytes: number) =>
-      Effect.gen(function* () {
-        const target = path.startsWith("/") ? path : `/work/${path}`;
-        const resolved = yield* sdk("realpath", () => vm.exec("realpath", ["--", target]));
-        if (!resolved.success)
-          return yield* new FileUnavailable({ message: "The file could not be found." });
-        const realPath = resolved.stdout().trimEnd();
-        if (!realPath.startsWith("/work/"))
-          return yield* new FileUnavailable({
-            message: "The file must be in your working folder.",
-          });
-        const fs = vm.fs();
-        const info = yield* sdk("stat", () => fs.stat(realPath));
-        if (info.kind !== "file" || info.size > maxBytes)
-          return yield* new FileUnavailable({
-            message: `Attach a file of at most ${maxBytes} bytes.`,
-          });
-        const content = yield* sdk("read", () => fs.read(realPath));
-        if (content.byteLength > maxBytes)
-          return yield* new FileUnavailable({
-            message: `Attach a file of at most ${maxBytes} bytes.`,
-          });
-        return { name: realPath.slice(realPath.lastIndexOf("/") + 1), content };
-      }).pipe(
-        Effect.catchTags({
-          SandboxError: () =>
-            Effect.fail(new FileUnavailable({ message: "The file could not be read." })),
-        }),
-      ),
     // Only a removed VM has flushed its disk.
     save: remove.pipe(Effect.andThen(disk.save)),
   };

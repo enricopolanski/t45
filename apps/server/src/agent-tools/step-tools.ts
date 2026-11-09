@@ -1,37 +1,69 @@
-// Step tools wait for T45 to apply the operation and return its saved result or refusal.
-import { StepToolCall } from "@t45/contracts/resources/AgentTools";
-import * as Result from "effect/Result";
+// @effect-diagnostics nodeBuiltinImport:off globalFetch:off - Runs inside the agent VM.
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
+import { AttachmentUploadResult } from "@t45/contracts/resources/Attachments";
 import * as Schema from "effect/Schema";
+import { apiHeaders, apiUrl, workflowTool, refuse, serve } from "./mcp-stdio.ts";
 
-import { waitForResponse } from "./operation-response.ts";
-import { refuse, serve } from "./mcp-stdio.ts";
-
-const descriptions: Record<StepToolCall["tool"], string> = {
-  step_set_field:
-    "Fill one of the step's fields by its key in the step's JSON in your first message: text and dates (YYYY-MM-DD) as strings, numbers as numbers, yes/no as booleans, selects as one of the field's options; null clears it. A field inside a group has a dotted key. A repeatable group's value is its row ids in order: add a row by setting the group to its ids plus a new one (letters, digits, - and _), then fill that row's fields as group.rowId.field.",
-  step_comment:
-    "Post a comment on the step assigned to you: progress, a question for the people on it, or your result.",
-  step_attach:
-    "Attach a file from your working folder to the step assigned to you, by its path relative to that folder. Give fieldKey to make it the value of a file field.",
-};
-
-const tools = StepToolCall.members.map(({ fields }) => {
-  const document = Schema.toJsonSchemaDocument(fields.input);
-  return {
-    name: fields.tool.literal.slice("step_".length),
-    description: `${descriptions[fields.tool.literal]} Use a new UUID requestId for each operation, and the same ID and arguments when retrying it.`,
-    inputSchema:
-      document.schema.type === "object"
-        ? { ...document.schema, $defs: document.definitions }
-        : { type: "object", properties: {} },
-  };
+const step = { stepId: process.env.T45_STEP_ID! };
+const attach = workflowTool(
+  "attach",
+  "workflows.attachStepFile",
+  "Attach a file from your working folder. Give fieldKey to fill a file field.",
+  step,
+);
+const AttachInput = Schema.Struct({
+  path: Schema.String,
+  fieldKey: Schema.optionalKey(Schema.String),
 });
+const decodeAttach = Schema.decodeUnknownSync(AttachInput);
+const decodeUpload = Schema.decodeUnknownSync(AttachmentUploadResult);
+const document = Schema.toJsonSchemaDocument(AttachInput);
 
-const decodeCall = Schema.decodeUnknownResult(StepToolCall);
-const call = (name: string, args: Record<string, unknown>) => {
-  const result = decodeCall({ tool: `step_${name}`, input: args });
-  if (Result.isFailure(result)) refuse(result.failure.message);
-  return waitForResponse(result.success);
-};
-
-serve({ name: "step-tools", tools, call, failure: "The step tool failed." });
+serve({
+  name: "step-tools",
+  tools: [
+    workflowTool(
+      "set_field",
+      "workflows.setStepField",
+      "Fill a step field by its key: text and dates (YYYY-MM-DD) as strings, numbers as numbers, yes/no as booleans, selects as an option; null clears it. Nested fields use dotted keys. Set repeatable groups to their row IDs, then fill group.rowId.field.",
+      step,
+    ),
+    workflowTool(
+      "comment",
+      "workflows.commentOnStep",
+      "Post a comment on your step: progress, a question, or your result.",
+      step,
+    ),
+    {
+      ...attach,
+      inputSchema: { ...document.schema, $defs: document.definitions },
+      call: async (input) => {
+        const { path, fieldKey } = decodeAttach(input);
+        const file = await NodeFSP.realpath(NodePath.resolve(path));
+        const root = await NodeFSP.realpath(process.cwd());
+        if (!file.startsWith(`${root}${NodePath.sep}`))
+          refuse("The file must be in your working folder.");
+        const stat = await NodeFSP.stat(file);
+        if (!stat.isFile() || stat.size > ATTACHMENT_MAX_FILE_BYTES)
+          refuse("Attach a file of at most 25 MB.");
+        const bytes = await NodeFSP.readFile(file);
+        const params = new URLSearchParams({
+          type: "file",
+          name: NodePath.basename(file),
+          mimeType: "application/octet-stream",
+        });
+        const response = await fetch(apiUrl(`/api/attachments?${params}`), {
+          method: "POST",
+          headers: apiHeaders,
+          body: bytes,
+        });
+        if (!response.ok) refuse(await response.text());
+        const { attachmentId } = decodeUpload(await response.json());
+        return attach.call({ attachmentId, ...(fieldKey === undefined ? {} : { fieldKey }) });
+      },
+    },
+  ],
+  failure: "The step tool failed.",
+});

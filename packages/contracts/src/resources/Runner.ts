@@ -30,6 +30,7 @@ export const ExecutionRequest = Schema.Struct({
       Schema.Struct(Struct.pick(Skill.fields, ["name", "description", "content", "files"])),
     ),
   }),
+  serverUrl: Schema.String,
   rootId: Session.ID,
   title: Schema.String,
   allowQuestions: Schema.Boolean,
@@ -81,10 +82,6 @@ export class QuestionGone extends Schema.TaggedError<QuestionGone>()("QuestionGo
 
 export class AnswerInvalid extends Schema.TaggedError<AnswerInvalid>()("AnswerInvalid", {}) {}
 
-export class FileUnavailable extends Schema.TaggedError<FileUnavailable>()("FileUnavailable", {
-  message: Schema.String,
-}) {}
-
 const question = { rootId: Session.ID, sessionId: Session.ID, formId: Form.ID };
 
 /** One execution per root session at a time; it lasts as long as its `execute` call. */
@@ -94,16 +91,6 @@ export const RunnerRpcs = RpcGroup.make(
     success: ExecutionUpdate,
     stream: true,
   }),
-  Rpc.make("readFile", {
-    payload: {
-      rootId: Session.ID,
-      path: Schema.String,
-      maxBytes: Schema.Int.check(Schema.isGreaterThan(0)),
-    },
-    success: Schema.Struct({ name: Schema.String, content: Schema.Uint8Array }),
-    error: FileUnavailable,
-  }),
-  Rpc.make("writeFiles", { payload: { rootId: Session.ID, files: Files } }),
   Rpc.make("send", { payload: { rootId: Session.ID, message: Message, files: Files } }),
   Rpc.make("answer", {
     payload: { ...question, answer: Form.Answer, files: Files },

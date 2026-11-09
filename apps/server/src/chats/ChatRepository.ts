@@ -9,7 +9,6 @@ import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import type * as Statement from "effect/sql/Statement";
 import { AutomationOrigin, ChatOrigin, Trigger } from "@t45/contracts/models/ChatOrigin";
-import { WorkflowToolResponse } from "@t45/contracts/resources/AgentTools";
 import { ChatSummary } from "@t45/contracts/resources/Chats";
 import { isSettled } from "@t45/contracts/resources/Runner";
 import type { Agent } from "@t45/contracts/models/Agent";
@@ -59,9 +58,6 @@ const decodeAutomatedRows = Schema.decodeUnknownEffect(
   ),
 );
 
-const decodeOperation = Schema.decodeEffect(Schema.fromJsonString(WorkflowToolResponse));
-const encodeOperation = Schema.encodeSync(Schema.fromJsonString(WorkflowToolResponse));
-
 const makeOrigins = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const select = (where: Statement.Fragment) =>
@@ -95,20 +91,6 @@ const makeOrigins = Effect.gen(function* () {
         ORDER BY c.created_at, c.id`.pipe(
         Effect.flatMap(decodeAutomatedRows),
         Effect.map((rows) => rows.map(({ origin, chatStatus }) => ({ ...origin, chatStatus }))),
-        Effect.orDie,
-      ),
-    operationReceipt: (chatId: ChatId, requestId: string) =>
-      sql<{
-        readonly response: string;
-      }>`SELECT response FROM workflow_operation_receipts WHERE chat_id = ${chatId} AND request_id = ${requestId}`.pipe(
-        Effect.flatMap(([row]) =>
-          row === undefined ? Effect.succeed(null) : decodeOperation(row.response),
-        ),
-        Effect.orDie,
-      ),
-    recordOperation: (chatId: ChatId, response: typeof WorkflowToolResponse.Type) =>
-      sql`INSERT INTO workflow_operation_receipts (chat_id, request_id, response) VALUES (${chatId}, ${response.call.input.requestId}, ${encodeOperation(response)})`.pipe(
-        Effect.asVoid,
         Effect.orDie,
       ),
   };

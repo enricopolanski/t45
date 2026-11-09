@@ -4,7 +4,7 @@ import { SessionMessage } from "@opencode/schema/session-message";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import { type Role } from "@t45/contracts/models/User";
-import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
+import { Authorization, CurrentActor } from "@t45/contracts/Authorization";
 import { Chats } from "@t45/contracts/resources/Chats";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -31,7 +31,7 @@ const clientFor = (userId: string, role: Role) =>
           Layer.succeed(
             Authorization,
             Authorization.of((effect) =>
-              Effect.provideService(effect, CurrentUser, {
+              Effect.provideService(effect, CurrentActor, {
                 sessionId: AuthSessionId.make(`session-${userId}`),
                 userId,
                 role,

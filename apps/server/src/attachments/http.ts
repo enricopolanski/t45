@@ -10,7 +10,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
-import { member } from "../auth/http.ts";
+import { member, uploader } from "../auth/http.ts";
 import { ChatService } from "../chats/ChatService.ts";
 import { TicketRepository } from "../workflows/TicketRepository.ts";
 import { canViewTicket } from "@t45/contracts/models/Workflow";
@@ -137,8 +137,8 @@ const attachmentUploadRoute = HttpRouter.add(
   "POST",
   ATTACHMENT_ROUTE_PREFIX,
   Effect.gen(function* () {
-    const currentUser = yield* member;
-    if (HttpServerResponse.isHttpServerResponse(currentUser)) return currentUser;
+    const actorId = yield* uploader;
+    if (HttpServerResponse.isHttpServerResponse(actorId)) return actorId;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
     if (Option.isNone(url)) {
@@ -162,7 +162,7 @@ const attachmentUploadRoute = HttpRouter.add(
     }
 
     const files = yield* AttachmentRepository;
-    return yield* files.upload(upload.value, currentUser.userId, request.stream).pipe(
+    return yield* files.upload(upload.value, actorId, request.stream).pipe(
       Effect.map((attachment) =>
         HttpServerResponse.jsonUnsafe(
           { attachmentId: attachment.id } satisfies AttachmentUploadResult,

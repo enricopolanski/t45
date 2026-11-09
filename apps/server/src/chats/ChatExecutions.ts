@@ -1,4 +1,3 @@
-import type { SessionMessage } from "@opencode/schema/session-message";
 import {
   STEP_TOOLS_MCP_NAME,
   WORKFLOW_DRAFTING_MCP_NAME,
@@ -9,6 +8,7 @@ import { type Chat, type ChatId, type Input, titleOf } from "@t45/contracts/mode
 import { InputMetadata } from "@t45/contracts/resources/Chats";
 import type { ExecutionRequest, ExecutionUpdate } from "@t45/contracts/resources/Runner";
 import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -27,17 +27,7 @@ import { ChatEvents } from "./ChatEvents.ts";
 import { inputMessageId, rootSessionId } from "./ChatIds.ts";
 import { ChatRepository } from "./ChatRepository.ts";
 import * as PromptService from "./PromptService.ts";
-
-/** Called on the execution's fiber, before it goes on. */
-export type Receive = (
-  result: { readonly chatId: ChatId } & (
-    | {
-        readonly type: "messages";
-        readonly messages: ReadonlyArray<SessionMessage.Info>;
-      }
-    | { readonly type: "ended" }
-  ),
-) => Effect.Effect<void>;
+import * as ServerConfig from "../config.ts";
 
 const encodeInputMetadata = Schema.encodeSync(InputMetadata);
 
@@ -52,6 +42,7 @@ const messageOf = (chatId: ChatId, { inputId, payload }: Posted) => ({
 /** The only one running a chat's executions; a stop asks it to end the current one. */
 interface Owner {
   stop: Deferred.Deferred<void>;
+  readonly token: string;
 }
 
 /**
@@ -61,6 +52,9 @@ interface Owner {
  */
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const crypto = yield* Crypto.Crypto;
+  const serverUrl = yield* ServerConfig.serverUrl;
+  const toolInstance = yield* ServerConfig.toolInstance;
   const repository = yield* ChatRepository;
   const changes = yield* ChatEvents;
   const runner = yield* RunnerService;
@@ -88,7 +82,7 @@ export const make = Effect.gen(function* () {
     Effect.orDie,
   );
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-  const receiver = yield* Deferred.make<Receive>();
+  const endHandler = yield* Deferred.make<(chatId: ChatId) => Effect.Effect<void>>();
   const owners = new Map<ChatId, Owner>();
 
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "questions") =>
@@ -123,7 +117,12 @@ export const make = Effect.gen(function* () {
     });
 
   /** Commits what a finished execution wrote; the chat stays owed while an input is pending. */
-  const end = (chatId: ChatId, receive: Receive, status: "failed" | null, disk?: Uint8Array) =>
+  const end = (
+    chatId: ChatId,
+    onEnd: (chatId: ChatId) => Effect.Effect<void>,
+    status: "failed" | null,
+    disk?: Uint8Array,
+  ) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
@@ -136,20 +135,43 @@ export const make = Effect.gen(function* () {
             if ((yield* repository.pendingInputs(chatId)).length > 0) return;
           }
           yield* repository.setStatus(chatId, status, yield* nowIso);
-          yield* receive({ chatId, type: "ended" });
+          yield* onEnd(chatId);
           yield* sql.afterCommit(publish(chatId, "chat"));
         }),
       )
       .pipe(Effect.orDie);
 
-  const requestOf = (chat: Chat) =>
+  const requestOf = (chat: Chat, token: string) =>
     Effect.gen(function* () {
       const agent = (yield* agents.get(chat.agentId))!;
       const origin = yield* repository.origins.get(chat.id);
       const inputs = yield* repository.executionInputs(chat.id);
       return {
         agent: {
-          ...Struct.pick(agent, ["instructions", "model", "mcpServers", "permissions", "files"]),
+          ...Struct.pick(agent, ["instructions", "model", "permissions", "files"]),
+          mcpServers: Object.fromEntries(
+            Object.entries(agent.mcpServers).map(([name, server]) => [
+              name,
+              (name === STEP_TOOLS_MCP_NAME || name === WORKFLOW_INSTANCE_MCP_NAME) &&
+              server.type === "local"
+                ? {
+                    ...server,
+                    environment: {
+                      ...server.environment,
+                      T45_SERVER_URL: serverUrl,
+                      T45_TOOL_TOKEN: token,
+                      T45_TOOL_INSTANCE: toolInstance,
+                      T45_STEP_ID:
+                        origin?.kind === "automation" && origin.trigger.type === "step"
+                          ? origin.trigger.stepId
+                          : "",
+                      T45_WORKFLOW_ID:
+                        origin?.kind === "conversation" ? (origin.workflowId ?? "") : "",
+                    },
+                  }
+                : server,
+            ]),
+          ),
           tools: Object.entries(agent.mcpServers).some(
             ([name, server]) =>
               [
@@ -164,6 +186,7 @@ export const make = Effect.gen(function* () {
             Struct.pick(skill, ["name", "description", "content", "files"]),
           ),
         },
+        serverUrl,
         rootId: rootSessionId(chat.id),
         title: titleOf(chat),
         allowQuestions: origin?.kind === "conversation",
@@ -189,11 +212,11 @@ export const make = Effect.gen(function* () {
       .pipe(Effect.orDie);
 
   /** No automatic retry: chat output may already have caused workflow or external tool effects. */
-  const execute = (chat: Chat, receive: Receive) =>
+  const execute = (chat: Chat, token: string, onEnd: (chatId: ChatId) => Effect.Effect<void>) =>
     Effect.gen(function* () {
       const chatId = chat.id;
       yield* clearQuestions(chatId);
-      const request = yield* requestOf(chat);
+      const request = yield* requestOf(chat, token);
       const handle = (event: ExecutionUpdate): Effect.Effect<void> => {
         switch (event._tag) {
           case "sessions":
@@ -215,12 +238,6 @@ export const make = Effect.gen(function* () {
               const saved = yield* repository.saveMessages(chatId, event.sessionId, event.messages);
               if (saved.inputsTaken) yield* publish(chatId, "inputs");
               if (saved.messageIds.length === 0) return;
-              const written = new Set(saved.messageIds);
-              yield* receive({
-                chatId,
-                type: "messages",
-                messages: event.messages.filter((message) => written.has(message.id)),
-              });
               yield* changes.publish({
                 chatId,
                 kind: "messages",
@@ -239,7 +256,7 @@ export const make = Effect.gen(function* () {
           case "heartbeat":
             return Effect.void;
           case "finished":
-            return end(chatId, receive, event.outcome, event.disk);
+            return end(chatId, onEnd, event.outcome, event.disk);
         }
       };
       yield* runner.execute(request).pipe(Stream.runForEach(handle));
@@ -253,7 +270,7 @@ export const make = Effect.gen(function* () {
               cause,
             });
             yield* clearQuestions(chat.id);
-            yield* end(chat.id, receive, "failed");
+            yield* end(chat.id, onEnd, "failed");
           }),
       ),
     );
@@ -261,11 +278,11 @@ export const make = Effect.gen(function* () {
   /** A stop ends the current execution and clears its transient questions. */
   const own = (chatId: ChatId, owner: Owner) =>
     Effect.gen(function* () {
-      const receive = yield* Deferred.await(receiver);
+      const onEnd = yield* Deferred.await(endHandler);
       while (true) {
         const chat = yield* owed(chatId);
         if (chat === null) return;
-        const stopped = yield* execute(chat, receive).pipe(
+        const stopped = yield* execute(chat, owner.token, onEnd).pipe(
           Effect.as(false),
           Effect.raceFirst(Deferred.await(owner.stop).pipe(Effect.as(true))),
         );
@@ -284,14 +301,15 @@ export const make = Effect.gen(function* () {
 
   /** Starts the chat's owner unless it has one, which gets the input just posted. */
   const deliver = (chatId: ChatId, posted?: Posted): Effect.Effect<void> =>
-    Effect.suspend(() => {
+    Effect.gen(function* () {
+      const token = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
       if (!owners.has(chatId)) {
-        const owner: Owner = { stop: Deferred.makeUnsafe<void>() };
+        const owner: Owner = { stop: Deferred.makeUnsafe<void>(), token };
         owners.set(chatId, owner);
-        return Effect.forkIn(own(chatId, owner), scope).pipe(Effect.asVoid);
+        return yield* Effect.forkIn(own(chatId, owner), scope).pipe(Effect.asVoid);
       }
-      if (posted === undefined) return Effect.void;
-      return filesOf(posted.payload.attachments.map((file) => file.id)).pipe(
+      if (posted === undefined) return;
+      return yield* filesOf(posted.payload.attachments.map((file) => file.id)).pipe(
         Effect.flatMap((files) =>
           runner.send({ rootId: rootSessionId(chatId), message: messageOf(chatId, posted), files }),
         ),
@@ -306,7 +324,10 @@ export const make = Effect.gen(function* () {
     deliver,
     settleMessages,
     filesOf,
-    consume: (receive: Receive) => Deferred.succeed(receiver, receive),
+    onEnd: (handler: (chatId: ChatId) => Effect.Effect<void>) =>
+      Deferred.succeed(endHandler, handler),
+    chatForToken: (token: string) =>
+      [...owners].find(([, owner]) => owner.token === token)?.[0] ?? null,
     /** The owner runs again only for an input posted since. */
     stop: (chatId: ChatId) =>
       Effect.suspend(() => {

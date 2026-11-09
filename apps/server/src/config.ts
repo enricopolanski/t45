@@ -12,6 +12,11 @@ export const logLevel = Config.LogLevel("LOG_LEVEL").pipe(Config.withDefault("In
 export const port = Config.Port("PORT").pipe(Config.withDefault(3773));
 export const host = Config.String("HOST").pipe(Config.withDefault("127.0.0.1"));
 export const logRequests = Config.Boolean("LOG_REQUESTS").pipe(Config.withDefault(false));
+/** Address the agent VMs use to call this server. Override for a remote runner. */
+export const serverUrl = Config.String("SERVER_URL").pipe(
+  Config.orElse(() => port.pipe(Config.map((port) => `http://host.microsandbox.internal:${port}`))),
+);
+export const toolInstance = Config.String("TOOL_INSTANCE").pipe(Config.withDefault(""));
 
 const decodeClerkIssuer = (publishableKey: string) =>
   `https://${atob(publishableKey.replace(/^pk_(?:test|live)_/u, "")).replace(/\$$/u, "")}`;
@@ -64,6 +69,7 @@ export const testLayer = (prefix: string) =>
       return ConfigProvider.fromUnknown({
         LOG_LEVEL: "Error",
         PORT: 0,
+        SERVER_URL: "http://127.0.0.1",
         HOST: "127.0.0.1",
         DATA_DIR: baseDir,
         LOG_REQUESTS: false,

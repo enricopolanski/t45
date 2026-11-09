@@ -3,7 +3,7 @@ import { type ChatId, Refused as ChatRefused } from "@t45/contracts/models/Chat"
 import { Automation, AutomationId } from "@t45/contracts/models/Automation";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
 
-import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
+import { Authorization, CurrentActor } from "@t45/contracts/Authorization";
 import { Automations } from "@t45/contracts/resources/Automations";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -146,7 +146,7 @@ const clientAs = (role: "admin" | "member") =>
     Effect.provide(
       Layer.merge(
         Layer.succeed(Authorization)((effect) =>
-          Effect.provideService(effect, CurrentUser, {
+          Effect.provideService(effect, CurrentActor, {
             sessionId: AuthSessionId.make(`${role}-session`),
             userId: role,
             role,

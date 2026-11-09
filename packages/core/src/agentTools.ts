@@ -7,8 +7,7 @@ import {
 } from "@t45/contracts/models/Agent";
 
 /**
- * Keep these tools outside Code Mode: T45 consumes their individual `<server>_<tool>` parts
- * to apply workflow effects and render draft cards.
+ * Keep these tools individually visible in the conversation; draft tool parts render blueprint cards.
  */
 export const WORKFLOW_DRAFTING_MCP = {
   name: WORKFLOW_DRAFTING_MCP_NAME,

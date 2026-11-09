@@ -33,7 +33,7 @@ const workflowAssistant = {
   ...workflowDesigner,
   id: WORKFLOW_ASSISTANT_ID,
   name: "Workflow assistant",
-  instructions: `Help the member operate the workflow bound to this conversation. Use get_workflow and get_ticket to obtain current definitions, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. Choose a new UUID requestId for each operation; reuse it with identical arguments when retrying that operation. You cannot mark steps done or edit workflow definitions.`,
+  instructions: `Help the member operate the workflow bound to this conversation. Use get_workflow and get_ticket to obtain current definitions, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. You cannot mark steps done or edit workflow definitions.`,
   mcpServers: { [WORKFLOW_INSTANCE_MCP.name]: WORKFLOW_INSTANCE_MCP.server },
 } satisfies Omit<Agent, "createdAt" | "updatedAt">;
 
@@ -204,13 +204,6 @@ const statements = [
       CHECK ((owner_user_id IS NOT NULL AND trigger IS NULL)
           OR (owner_user_id IS NULL AND workflow_id IS NULL AND trigger IS NOT NULL))
     )`,
-  // Independent of provisional OpenCode messages: a lost execution cannot repeat a committed write.
-  `CREATE TABLE workflow_operation_receipts (
-      chat_id TEXT NOT NULL REFERENCES chat_origins(chat_id),
-      request_id TEXT NOT NULL,
-      response TEXT NOT NULL,
-      PRIMARY KEY (chat_id, request_id)
-    ) WITHOUT ROWID`,
   `CREATE INDEX origins_owner ON chat_origins(owner_user_id) WHERE owner_user_id IS NOT NULL`,
   `CREATE INDEX origins_step ON chat_origins(json_extract(trigger, '$.ticketId'), json_extract(trigger, '$.stepId')) WHERE trigger IS NOT NULL`,
   `CREATE INDEX origins_automation ON chat_origins(json_extract(trigger, '$.type'), json_extract(trigger, '$.automationId')) WHERE trigger IS NOT NULL`,

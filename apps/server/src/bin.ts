@@ -82,7 +82,7 @@ const Routes = Layer.mergeAll(
   AppRpc.layer,
 );
 
-const makeInstance = (dataDir: string) =>
+const makeInstance = (dataDir: string, instanceId: string) =>
   // `fresh` builds the instance layer ex-novo, doesn't reuse existing
   Layer.build(Layer.fresh(InstanceDependencies)).pipe(
     Effect.flatMap((services) =>
@@ -92,9 +92,12 @@ const makeInstance = (dataDir: string) =>
       ),
     ),
     Effect.provide(
-      ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ DATA_DIR: dataDir }), {
-        asPrimary: true,
-      }),
+      ConfigProvider.layerAdd(
+        ConfigProvider.fromUnknown({ DATA_DIR: dataDir, TOOL_INSTANCE: instanceId }),
+        {
+          asPrimary: true,
+        },
+      ),
     ),
   );
 
@@ -102,7 +105,7 @@ const makeInstance = (dataDir: string) =>
 const makeInstanceMiddleware = Effect.gen(function* () {
   const instancesDir = yield* ServerConfig.instancesDir;
   const instances = yield* RcMap.make({
-    lookup: (instanceId: string) => makeInstance(`${instancesDir}/${instanceId}`),
+    lookup: (instanceId: string) => makeInstance(`${instancesDir}/${instanceId}`, instanceId),
     idleTimeToLive: "10 minutes",
   });
   return (defaultInstance: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
