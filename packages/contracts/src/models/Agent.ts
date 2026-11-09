@@ -1,5 +1,6 @@
 import { ConfigMCP } from "@opencode/schema/config/mcp";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 
 import { FilesByPath, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 
@@ -56,20 +57,18 @@ export const canWorkSteps = (agent: Pick<Agent, "status" | "mcpServers">) => {
   return agent.status === "active" && server !== undefined && server.disabled !== true;
 };
 
-const REFUSALS = ["name_taken", "model_unavailable", "skill_not_found"] as const;
-export type Refusal = (typeof REFUSALS)[number];
+const REFUSALS = {
+  name_taken: "Another agent already has that name.",
+  model_unavailable:
+    "OpenCode Go doesn't offer that model now. Choose another, or try again once it answers.",
+  skill_not_found: "That skill no longer exists.",
+};
+export type Refusal = keyof typeof REFUSALS;
 
 export class Refused extends Schema.TaggedError<Refused>()("AgentRefused", {
-  reason: Schema.Literals(REFUSALS),
+  reason: Schema.Literals(Struct.keys(REFUSALS)),
 }) {
   override get message(): string {
-    switch (this.reason) {
-      case "name_taken":
-        return "Another agent already has that name.";
-      case "model_unavailable":
-        return "OpenCode Go doesn't offer that model now. Choose another, or try again once it answers.";
-      case "skill_not_found":
-        return "That skill no longer exists.";
-    }
+    return REFUSALS[this.reason];
   }
 }

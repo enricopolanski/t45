@@ -1,6 +1,7 @@
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 
 import { makeId, StringId, Title, TrimmedNonEmptyString } from "./primitives.ts";
 
@@ -128,19 +129,16 @@ export const isMissed = (schedule: Schedule, slot: DateTime.DateTime, now: DateT
 
 export const isSameSchedule = Schema.toEquivalence(Schedule);
 
-const REFUSALS = ["agent_unavailable", "runs_on_request", "not_a_webhook"] as const;
+const REFUSALS = {
+  agent_unavailable: "This agent was archived or doesn't exist. Choose an active agent.",
+  runs_on_request: "Webhook automations run when their URL receives a request.",
+  not_a_webhook: "Only webhook automations have a URL token.",
+};
 
 export class Refused extends Schema.TaggedError<Refused>()("AutomationRefused", {
-  reason: Schema.Literals(REFUSALS),
+  reason: Schema.Literals(Struct.keys(REFUSALS)),
 }) {
   override get message(): string {
-    switch (this.reason) {
-      case "agent_unavailable":
-        return "This agent was archived or doesn't exist. Choose an active agent.";
-      case "runs_on_request":
-        return "Webhook automations run when their URL receives a request.";
-      case "not_a_webhook":
-        return "Only webhook automations have a URL token.";
-    }
+    return REFUSALS[this.reason];
   }
 }

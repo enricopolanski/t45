@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 
 import {
   AttachmentId,
@@ -101,56 +102,31 @@ export class Input extends Schema.Opaque<Input>()(
 export const MESSAGE_MAX_INPUT_CHARS = 120_000;
 const UNTITLED = "New chat";
 
-const REFUSALS = [
-  "id_taken",
-  "input_conflict",
-  "agent_unavailable",
-  "empty_input",
-  "input_too_long",
-  "too_many_files",
-  "images_too_large",
-  "file_unavailable",
-  "already_taken",
-  "question_gone",
-  "answer_invalid",
-  "answer_files_need_text",
-  "unavailable",
-] as const;
-export type Refusal = (typeof REFUSALS)[number];
+const REFUSALS = {
+  id_taken: "Another chat already has this id.",
+  input_conflict: "Another message was already sent with this id.",
+  agent_unavailable:
+    "This agent can't take this chat: it was archived or isn't set up for this work.",
+  empty_input: "A message needs text or an attachment.",
+  input_too_long: "This message is too long.",
+  too_many_files: `You can attach up to ${MESSAGE_MAX_ATTACHMENTS} files per message or question response.`,
+  images_too_large:
+    "Images can total up to 80 MiB per message or question response. Use smaller images or send fewer at once.",
+  file_unavailable: "An attached file is no longer available. Attach it again.",
+  already_taken: "The agent already took this message.",
+  question_gone: "This question is no longer waiting for an answer.",
+  answer_invalid: "This answer doesn't fit the question.",
+  answer_files_need_text: "Files can only go with a written answer.",
+  unavailable: "The chat's sandbox could not do this right now. Try again.",
+};
+export type Refusal = keyof typeof REFUSALS;
 
 /** A chat request T45 refused or could not carry out; `message` is for people. */
 export class Refused extends Schema.TaggedError<Refused>()("ChatRefused", {
-  reason: Schema.Literals(REFUSALS),
+  reason: Schema.Literals(Struct.keys(REFUSALS)),
 }) {
   override get message(): string {
-    switch (this.reason) {
-      case "id_taken":
-        return "Another chat already has this id.";
-      case "input_conflict":
-        return "Another message was already sent with this id.";
-      case "agent_unavailable":
-        return "This agent can't take this chat: it was archived or isn't set up for this work.";
-      case "empty_input":
-        return "A message needs text or an attachment.";
-      case "input_too_long":
-        return "This message is too long.";
-      case "too_many_files":
-        return `You can attach up to ${MESSAGE_MAX_ATTACHMENTS} files per message or question response.`;
-      case "images_too_large":
-        return "Images can total up to 80 MiB per message or question response. Use smaller images or send fewer at once.";
-      case "file_unavailable":
-        return "An attached file is no longer available. Attach it again.";
-      case "already_taken":
-        return "The agent already took this message.";
-      case "question_gone":
-        return "This question is no longer waiting for an answer.";
-      case "answer_invalid":
-        return "This answer doesn't fit the question.";
-      case "answer_files_need_text":
-        return "Files can only go with a written answer.";
-      case "unavailable":
-        return "The chat's sandbox could not do this right now. Try again.";
-    }
+    return REFUSALS[this.reason];
   }
 }
 
