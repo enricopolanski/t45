@@ -9,21 +9,17 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { use, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 
-import {
-  clampCollapsedComposerCursor,
-  collapseExpandedComposerCursor,
-  expandCollapsedComposerCursor,
-} from "~/composerPrompt";
+import { clampComposerCursor } from "~/composerPrompt";
 import {
   buildDocJson,
   buildTiptapContent,
-  collapsedToFlat,
+  markdownToFlat,
   caretTakesMarksBefore,
   COMPOSER_UNDO_GROUP_DELAY,
   type ComposerChangeKind,
   ComposerCodeExtension,
   ComposerTaskItemExtension,
-  flatTo,
+  flatToMarkdown,
   flatToPm,
   groupUndoByChangeKind,
   markAsClipboardEdit,
@@ -318,7 +314,6 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
     const snapshotChanged = !(
       previousSnapshot.value === next.value &&
       previousSnapshot.cursor === next.cursor &&
-      previousSnapshot.expandedCursor === next.expandedCursor &&
       previousSnapshot.contextIds.length === next.contextIds.length &&
       previousSnapshot.contextIds.every((id, index) => id === next.contextIds[index])
     );
@@ -578,7 +573,7 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
     if (
       !initialSelection &&
       previousSnapshot.value === value &&
-      previousSnapshot.cursor === clampCollapsedComposerCursor(value, cursor)
+      previousSnapshot.cursor === clampComposerCursor(value, cursor)
     ) {
       return;
     }
@@ -618,7 +613,7 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
     focusAt,
     focusAtEnd: () => {
       const { value: prompt } = snapshotRef.current;
-      focusAt(collapseExpandedComposerCursor(prompt, prompt.length));
+      focusAt(prompt.length);
     },
     readSelectionRange: () => {
       readSnapshot();
@@ -630,8 +625,8 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
       if (snapshot.value.length === 0) return true;
       const rest =
         edge === "start"
-          ? snapshot.value.slice(0, snapshot.expandedCursor)
-          : snapshot.value.slice(snapshot.expandedCursor);
+          ? snapshot.value.slice(0, snapshot.cursor)
+          : snapshot.value.slice(snapshot.cursor);
       if (!editor.state.selection.empty || rest.includes("\n")) return false;
       return editor.view.endOfTextblock(edge === "start" ? "up" : "down");
     },
@@ -716,47 +711,45 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
 }
 
 function snapshotAt(value: string, cursor: number) {
-  const clamped = clampCollapsedComposerCursor(value, cursor);
+  const clamped = clampComposerCursor(value, cursor);
   return {
     value,
     cursor: clamped,
-    expandedCursor: expandCollapsedComposerCursor(value, clamped),
     contextIds: collectInlineContextIds(value),
   };
 }
 
-const caretRange = ({ expandedCursor }: ComposerPromptSnapshot) => ({
-  start: expandedCursor,
-  end: expandedCursor,
+const caretRange = ({ cursor }: ComposerPromptSnapshot) => ({
+  start: cursor,
+  end: cursor,
 });
 
 /**
- * Puts the caret at the collapsed `cursor`. Native scrolling only happens for real input, so a
+ * Puts the caret at the Markdown `cursor`. Native scrolling only happens for real input, so a
  * caret placed by a controlled rewrite or a focus restore scrolls into view explicitly.
  */
 function placeCaret(editor: Editor, cursor: number, scroll: boolean) {
   const map = serializeEditorDoc(editor.state.doc);
-  const chain = editor.chain().setTextSelection(flatToPm(map, collapsedToFlat(map, cursor)));
+  const chain = editor.chain().setTextSelection(flatToPm(map, markdownToFlat(map, cursor)));
   (scroll ? chain.scrollIntoView() : chain).run();
 }
 
-/** The editor's prompt, caret and expanded selection range, in the store's coordinates. */
+/** The editor's prompt, caret and selection range, in the store's coordinates. */
 function readEditorSnapshot(editor: Editor) {
   const map = serializeEditorDoc(editor.state.doc);
   const { from, to } = editor.state.selection;
   const fromFlat = pmToFlat(map, from);
-  const expandedCursor = Math.max(0, Math.min(map.value.length, flatTo(map, fromFlat, "md")));
-  const expandedEnd = flatTo(map, pmToFlat(map, to), "md");
+  const cursor = Math.max(0, Math.min(map.value.length, flatToMarkdown(map, fromFlat)));
+  const end = flatToMarkdown(map, pmToFlat(map, to));
   return {
     snapshot: {
       value: map.value,
-      cursor: clampCollapsedComposerCursor(map.value, flatTo(map, fromFlat, "collapsed")),
-      expandedCursor,
+      cursor,
       contextIds: map.contextIds,
     },
     selectionRange: {
-      start: Math.min(expandedCursor, expandedEnd),
-      end: Math.max(expandedCursor, expandedEnd),
+      start: Math.min(cursor, end),
+      end: Math.max(cursor, end),
     },
   };
 }

@@ -28,13 +28,11 @@ import {
   buildComposerPromptHistoryEntries,
   type ComposerCommandItem,
   type ComposerPromptHistoryMessage,
-  collapseExpandedComposerCursor,
   type ComposerPromptHistoryPosition,
   composerStateAtPromptEnd,
   composerSubmitsOnKey,
   continueListOnEnter,
   detectComposerTrigger,
-  expandCollapsedComposerCursor,
   getComposerPromptLengthValidationMessage,
   indentListOnTab,
   replaceTextRange,
@@ -182,7 +180,7 @@ export interface ChatComposerHandle {
   insertTextAtEnd: (text: string) => boolean;
   /** Apply large-paste folding for text redirected from a blurred composer. */
   pasteTextAtEnd: (text: string) => boolean;
-  readSnapshot: () => { value: string; cursor: number; expandedCursor: number };
+  readSnapshot: () => { value: string; cursor: number };
   /** Put the caret at the start and close the menu after the chat view replaced the prompt. */
   resetCursorState: () => void;
 }
@@ -310,9 +308,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   // A chat switch starts the composer's transient state over.
   const [composerSession, setComposerSession] = useState(chatId);
-  const [composerCursor, setComposerCursor] = useState(() =>
-    collapseExpandedComposerCursor(prompt, prompt.length),
-  );
+  const [composerCursor, setComposerCursor] = useState(prompt.length);
   const {
     trigger: composerTrigger,
     setTrigger: setComposerTrigger,
@@ -512,7 +508,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
 
   const onPromptChange = (
-    { value: nextPrompt, cursor: nextCursor, expandedCursor, contextIds }: ComposerPromptSnapshot,
+    { value: nextPrompt, cursor: nextCursor, contextIds }: ComposerPromptSnapshot,
     cursorAdjacentToChip: boolean,
   ) => {
     expandComposerForEditorChange();
@@ -521,9 +517,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (!field.allowCustomAnswer) return;
       setComposerCursor(nextCursor);
       setComposerTrigger(
-        cursorAdjacentToChip ? null : detectComposerTrigger(nextPrompt, expandedCursor),
+        cursorAdjacentToChip ? null : detectComposerTrigger(nextPrompt, nextCursor),
       );
-      question.onTypeAnswer(field.key, nextPrompt, nextCursor, expandedCursor);
+      question.onTypeAnswer(field.key, nextPrompt, nextCursor);
       return;
     }
     promptRef.current = nextPrompt;
@@ -548,9 +544,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       addComposerDraftFiles(attachmentDraftTarget, attachmentChanges.filesToRestore);
     }
     setComposerCursor(nextCursor);
-    setComposerTrigger(
-      cursorAdjacentToChip ? null : detectComposerTrigger(nextPrompt, expandedCursor),
-    );
+    setComposerTrigger(cursorAdjacentToChip ? null : detectComposerTrigger(nextPrompt, nextCursor));
   };
 
   const applyPromptReplacement = (
@@ -559,7 +553,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     replacement: string,
     options?: {
       expectedText?: string;
-      expandedCursorAfterReplace?: number;
+      cursorAfterReplace?: number;
       focusEditorAfterReplace?: boolean;
     },
   ) => {
@@ -572,20 +566,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return false;
     }
     const next = replaceTextRange(currentText, rangeStart, rangeEnd, replacement);
-    const nextCursor = collapseExpandedComposerCursor(
-      next.text,
-      options?.expandedCursorAfterReplace ?? next.cursor,
-    );
-    const nextExpandedCursor = expandCollapsedComposerCursor(next.text, nextCursor);
+    const nextCursor = options?.cursorAfterReplace ?? next.cursor;
     promptRef.current = next.text;
     const field = question?.progress.field;
     if (question && field) {
-      question.onTypeAnswer(field.key, next.text, nextCursor, nextExpandedCursor);
+      question.onTypeAnswer(field.key, next.text, nextCursor);
     } else {
       setComposerDraftPrompt(chatId, next.text);
     }
     setComposerCursor(nextCursor);
-    setComposerTrigger(detectComposerTrigger(next.text, nextExpandedCursor));
+    setComposerTrigger(detectComposerTrigger(next.text, nextCursor));
     if (options?.focusEditorAfterReplace !== false) {
       window.requestAnimationFrame(() => {
         // Type-to-focus routes only the first key through here; once the
@@ -603,16 +593,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerEditorRef.current?.readSnapshot() ?? {
       value: promptRef.current,
       cursor: composerCursor,
-      expandedCursor: expandCollapsedComposerCursor(promptRef.current, composerCursor),
     };
 
   const resolveActiveComposerTrigger = () => {
     const snapshot = readComposerSnapshot();
     return {
       snapshot,
-      trigger: resolveComposerTrigger(
-        detectComposerTrigger(snapshot.value, snapshot.expandedCursor),
-      ),
+      trigger: resolveComposerTrigger(detectComposerTrigger(snapshot.value, snapshot.cursor)),
     };
   };
 
@@ -725,7 +712,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setPromptHistoryPosition(step.position);
     promptRef.current = step.prompt;
     setComposerDraftPrompt(chatId, step.prompt);
-    setComposerCursor(collapseExpandedComposerCursor(step.prompt, step.prompt.length));
+    setComposerCursor(step.prompt.length);
     setComposerTrigger(null);
     setMenuHighlight(null);
     return true;
@@ -784,7 +771,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             edit.end,
             edit.replacement,
             key === "Tab"
-              ? { expandedCursorAfterReplace: selection.start + edit.replacement.length }
+              ? { cursorAfterReplace: selection.start + edit.replacement.length }
               : undefined,
           )
         ) {
@@ -988,7 +975,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ) => {
     if (text.length === 0 || question !== null) return false;
     const current = promptRef.current;
-    const cursor = position === "cursor" ? readComposerSnapshot().expandedCursor : current.length;
+    const cursor = position === "cursor" ? readComposerSnapshot().cursor : current.length;
     const needsLeadingSpace =
       (options?.ensureLeadingBoundary ?? false) &&
       cursor > 0 &&

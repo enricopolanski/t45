@@ -4,15 +4,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildComposerPromptHistoryEntries,
-  clampCollapsedComposerCursor,
-  collapseExpandedComposerCursor,
   type ComposerCommandItem,
   type ComposerPromptHistoryPosition,
   composerStateAtPromptEnd,
   composerSubmitsOnKey,
   continueListOnEnter,
   detectComposerTrigger,
-  expandCollapsedComposerCursor,
   getComposerPromptLengthValidationMessage,
   indentListOnTab,
   parseStandaloneComposerSlashCommand,
@@ -90,19 +87,6 @@ describe("detectComposerTrigger", () => {
   });
 });
 
-describe("expandCollapsedComposerCursor", () => {
-  it("keeps cursor unchanged when no chip is present", () => {
-    expect(expandCollapsedComposerCursor("plain text", 5)).toBe(5);
-  });
-
-  it("maps a collapsed cursor after a chip to the expanded text cursor", () => {
-    const text = `run ${fileReference} then`;
-    expect(expandCollapsedComposerCursor(text, "run ".length + 2)).toBe(
-      `run ${fileReference} `.length,
-    );
-  });
-});
-
 describe("composerStateAtPromptEnd", () => {
   it("puts the caret at the end of a restored parked draft", () => {
     const prompt = carryDisplacedCustomAnswerIntoPrompt("first half\n", "second half");
@@ -112,43 +96,9 @@ describe("composerStateAtPromptEnd", () => {
     });
   });
 
-  it("collapses chips so the next keystroke lands after the draft", () => {
+  it("places the caret after a restored draft containing chips", () => {
     const prompt = carryDisplacedCustomAnswerIntoPrompt("", `see ${fileReference} please`);
-    expect(composerStateAtPromptEnd(prompt).cursor).toBe("see ".length + 1 + " please".length);
-    expect(composerStateAtPromptEnd(prompt).cursor).not.toBe(0);
-    expect(composerStateAtPromptEnd(prompt).cursor).not.toBe(prompt.length);
-  });
-});
-
-describe("collapseExpandedComposerCursor", () => {
-  it("keeps cursor unchanged when no chip is present", () => {
-    expect(collapseExpandedComposerCursor("plain text", 5)).toBe(5);
-  });
-
-  it("maps an expanded cursor after a chip back to the collapsed cursor", () => {
-    const text = `run ${fileReference} then`;
-    expect(collapseExpandedComposerCursor(text, `run ${fileReference} `.length)).toBe(
-      "run ".length + 2,
-    );
-  });
-
-  it("preserves the caret before trailing text after consecutive chips", () => {
-    const text = `${fileReference} a ${fileReference} tail`;
-    const expanded = `${fileReference} a ${fileReference} `.length;
-    expect(collapseExpandedComposerCursor(text, expanded)).toBe(6);
-    expect(expandCollapsedComposerCursor(text, 6)).toBe(expanded);
-  });
-});
-
-describe("clampCollapsedComposerCursor", () => {
-  it("clamps to collapsed prompt length when chips are present", () => {
-    const text = `open ${fileReference} then `;
-    expect(clampCollapsedComposerCursor(text, text.length)).toBe(
-      "open ".length + 1 + " then ".length,
-    );
-    expect(clampCollapsedComposerCursor(text, Number.POSITIVE_INFINITY)).toBe(
-      "open ".length + 1 + " then ".length,
-    );
+    expect(composerStateAtPromptEnd(prompt).cursor).toBe(prompt.length);
   });
 });
 
