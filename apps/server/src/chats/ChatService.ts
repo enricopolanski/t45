@@ -5,7 +5,6 @@ import {
   WORKFLOW_INSTANCE_MCP_NAME,
   type Agent,
 } from "@t45/contracts/models/Agent";
-import { oversees } from "@t45/contracts/models/Workflow";
 import { limitRefusal } from "@t45/contracts/models/Attachment";
 import {
   ChatId,
@@ -42,8 +41,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { makeAccess as makeWorkflowAccess } from "../workflows/WorkflowAssistant.ts";
 import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
-import { WorkflowDefinitionRepository } from "../workflows/WorkflowDefinitionRepository.ts";
-import { TicketRepository } from "../workflows/TicketRepository.ts";
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
 import { RunnerService } from "../runner/RunnerService.ts";
@@ -146,9 +143,7 @@ const make = Effect.gen(function* () {
   const runner = yield* RunnerService;
   const agents = yield* AgentRepository.AgentRepository;
   const workflows = yield* WorkflowRepository;
-  const definitions = yield* WorkflowDefinitionRepository;
-  const tickets = yield* TicketRepository;
-  const loadWorkflow = yield* makeWorkflowAccess;
+  const workflowAccess = yield* makeWorkflowAccess;
   const attachments = yield* AttachmentRepository.AttachmentRepository;
   const origins = repository.origins;
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "posted" | "deleted") =>
@@ -182,7 +177,7 @@ const make = Effect.gen(function* () {
         return yield* refuse("agent_unavailable");
       if (start.origin.kind === "conversation") {
         if (start.origin.workflowId !== null) {
-          yield* loadWorkflow(start.origin.ownerUserId, start.origin.workflowId);
+          yield* workflowAccess.load(start.origin.ownerUserId, start.origin.workflowId);
           if (!hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
         } else if (hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
       }
@@ -378,27 +373,14 @@ const make = Effect.gen(function* () {
           }));
         const assistants = available.filter(hasWorkflowTools);
         if (assistants.length === 0) return plain;
-        const usableDefinitions = new Set(
-          (yield* definitions.list)
-            .filter((definition) => definition.steps.length > 0)
-            .map((definition) => definition.id),
-        );
-        const involved = new Set(yield* tickets.workflowIdsInvolving(member.userId));
         const actor = { id: member.userId, isOrgAdmin: member.role === "admin" };
-        const bound = (yield* workflows.list)
-          .filter(
-            (workflow) =>
-              !workflow.isArchived &&
-              usableDefinitions.has(workflow.definitionId) &&
-              (workflow.isPublic || oversees(actor, workflow) || involved.has(workflow.id)),
-          )
-          .flatMap((workflow) =>
-            assistants.map((agent) => ({
-              agentId: agent.id,
-              name: assistants.length === 1 ? workflow.name : `${workflow.name} · ${agent.name}`,
-              workflowId: workflow.id,
-            })),
-          );
+        const bound = (yield* workflowAccess.list(actor)).flatMap((workflow) =>
+          assistants.map((agent) => ({
+            agentId: agent.id,
+            name: assistants.length === 1 ? workflow.name : `${workflow.name} · ${agent.name}`,
+            workflowId: workflow.id,
+          })),
+        );
         return [...plain, ...bound];
       }),
     access,
@@ -523,7 +505,7 @@ const make = Effect.gen(function* () {
       if (origin !== null) {
         const existing = yield* memberChat(member, input.chatId);
         if (origin.kind === "conversation" && origin.workflowId !== null)
-          yield* loadWorkflow(member.userId, origin.workflowId);
+          yield* workflowAccess.load(member.userId, origin.workflowId);
         if (
           (input.agentId !== undefined && existing.agentId !== input.agentId) ||
           (input.workflowId !== undefined &&
@@ -581,7 +563,7 @@ const make = Effect.gen(function* () {
         const chat = yield* memberChat(member, input.chatId);
         const origin = yield* origins.get(chat.id);
         if (origin?.kind === "conversation" && origin.workflowId !== null)
-          yield* loadWorkflow(member.userId, origin.workflowId);
+          yield* workflowAccess.load(member.userId, origin.workflowId);
         const asked = (yield* repository.questions(chat.id)).find(
           (question) => question.sessionId === input.sessionId && question.form.id === input.formId,
         );

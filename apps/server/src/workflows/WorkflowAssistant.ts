@@ -1,4 +1,4 @@
-import { oversees } from "@t45/contracts/models/Workflow";
+import { oversees, type WorkflowActor } from "@t45/contracts/models/Workflow";
 import { NotFound } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import { UserRepository } from "../org/UserRepository.ts";
@@ -12,7 +12,7 @@ export const makeAccess = Effect.gen(function* () {
   const workflows = yield* WorkflowRepository;
   const definitions = yield* WorkflowDefinitionRepository;
   const tickets = yield* TicketRepository;
-  return Effect.fnUntraced(function* (userId: string, workflowId: string) {
+  const load = Effect.fnUntraced(function* (userId: string, workflowId: string) {
     const user = yield* users.get(userId);
     const workflow = yield* workflows.get(workflowId);
     if (user?.state !== "active" || workflow === null || workflow.isArchived)
@@ -28,4 +28,19 @@ export const makeAccess = Effect.gen(function* () {
     if (definition === null || definition.steps.length === 0) return yield* new NotFound();
     return { actor, workflow, definition };
   });
+  const list = Effect.fnUntraced(function* (actor: WorkflowActor) {
+    const usableDefinitions = new Set(
+      (yield* definitions.list)
+        .filter((definition) => definition.steps.length > 0)
+        .map((definition) => definition.id),
+    );
+    const involved = new Set(yield* tickets.workflowIdsInvolving(actor.id));
+    return (yield* workflows.list).filter(
+      (workflow) =>
+        !workflow.isArchived &&
+        usableDefinitions.has(workflow.definitionId) &&
+        (workflow.isPublic || oversees(actor, workflow) || involved.has(workflow.id)),
+    );
+  });
+  return { load, list };
 });

@@ -178,7 +178,7 @@ const make = Effect.gen(function* () {
     if (typeof caller === "string") return caller;
     if (caller.origin.kind !== "conversation" || caller.origin.workflowId !== workflowId)
       return yield* new NotFound();
-    yield* workflowAccess(caller.origin.ownerUserId, workflowId);
+    yield* workflowAccess.load(caller.origin.ownerUserId, workflowId);
     return caller.origin.ownerUserId;
   });
 
@@ -1089,14 +1089,14 @@ const make = Effect.gen(function* () {
     }, transaction);
 
   const getWorkflow = Effect.fnUntraced(function* (caller: Caller, workflowId: string) {
-    const { workflow, definition } = yield* workflowAccess(
+    const { workflow, definition } = yield* workflowAccess.load(
       yield* person(caller, workflowId),
       workflowId,
     );
     return { workflowId: workflow.id, name: workflow.name, blueprint: definition };
   });
   const listTickets = Effect.fnUntraced(function* (caller: Caller, input: Payload<"listTickets">) {
-    const { actor, workflow } = yield* workflowAccess(
+    const { actor, workflow } = yield* workflowAccess.load(
       yield* person(caller, input.workflowId),
       input.workflowId,
     );
