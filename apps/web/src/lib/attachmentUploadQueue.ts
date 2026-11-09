@@ -6,8 +6,6 @@ import {
   type ComposerTarget,
   useComposerDraftStore,
 } from "../composerDraftStore";
-import { reachableAtom } from "../rpc/api";
-import { appAtomRegistry } from "../state/atomRegistry";
 import { attachmentUploadUrl, attachmentUrl, decodeUploadResult } from "./attachmentUrl";
 import { describeUploadRefusal } from "./failures";
 import type { AttachmentUploadState } from "./attachmentUploadState";
@@ -32,10 +30,8 @@ interface UploadJob {
   resolveSettled: () => void;
   cancelled: boolean;
   abort: (() => void) | null;
-  stopWatchingReachable: () => void;
 }
 
-// Failed jobs retain their source and reachability subscription until retry or release.
 const jobsByAttachmentId = new Map<string, UploadJob>();
 const queue: UploadJob[] = [];
 let activeUploads = 0;
@@ -240,11 +236,7 @@ function pumpUploads(): void {
         }
       })
       .finally(() => {
-        if (
-          jobsByAttachmentId.get(job.attachment.id) === job &&
-          readAttachmentUpload(job.attachment.id)?.status !== "failed"
-        ) {
-          job.stopWatchingReachable();
+        if (jobsByAttachmentId.get(job.attachment.id) === job) {
           jobsByAttachmentId.delete(job.attachment.id);
         }
         activeUploads -= 1;
@@ -278,29 +270,9 @@ export function startAttachmentUpload(attachment: ComposerAttachment): void {
     resolveSettled,
     cancelled: false,
     abort: null,
-    stopWatchingReachable: () => {},
   };
 
   jobsByAttachmentId.set(attachment.id, job);
-  const isReachable = () => appAtomRegistry.get(reachableAtom);
-  let wasReachable = isReachable();
-  job.stopWatchingReachable = appAtomRegistry.subscribe(reachableAtom, () => {
-    const reachable = isReachable();
-    const recovered = reachable && !wasReachable;
-    wasReachable = reachable;
-    if (!recovered) return;
-    // The upload's failure can arrive after the server is reachable again.
-    // Wait for that attempt, then retry only if this job still owns the file.
-    void job.settled.then(() => {
-      if (
-        jobsByAttachmentId.get(job.attachment.id) === job &&
-        readAttachmentUpload(job.attachment.id)?.status === "failed" &&
-        isReachable()
-      ) {
-        retryAttachmentUpload(attachment);
-      }
-    });
-  });
   queue.push(job);
   setUploadState(attachment.id, { status: "uploading", progress: 0 });
   pumpUploads();
@@ -313,7 +285,6 @@ function cancelAttachmentUpload(id: string): void {
     return;
   }
   job.cancelled = true;
-  job.stopWatchingReachable();
   jobsByAttachmentId.delete(id);
   const queuedIndex = queue.indexOf(job);
   if (queuedIndex !== -1) {

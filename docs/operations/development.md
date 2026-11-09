@@ -99,7 +99,7 @@ vp lint <files>
 vp run --filter <package> typecheck
 ```
 
-Every commit runs the root `pre-commit` task: workspace format/lint checks, typechecking, unused code, unit tests and mandatory browser E2Es. The parent tasks and browser E2Es are uncached so every invocation runs the browsers; other checks retain their caches. Run it manually with `vpr pre-commit`, or `vpr --no-cache pre-commit` to force every check fresh. Pre-commit never downloads browsers or installs system packages: if Chromium is missing, re-run `sh scripts/setup.sh`. The shared bundle task finishes before server tests and client packaging; packaging replaces only `dist/client`, so recursive tests can run safely in parallel. There is no PR CI.
+Every commit first runs `vp staged` to fix staged files and include those fixes in the commit while preserving unstaged edits. It then runs the root `pre-commit` task: `vp check --fix` across the working tree, typechecking, unused code, unit tests and mandatory browser E2Es. Manual runs fix files but leave staging to you. The parent tasks and browser E2Es are uncached so every invocation runs the browsers; other checks retain their caches. Run it manually with `vpr pre-commit`, or `vpr --no-cache pre-commit` to force every check fresh. Pre-commit never downloads browsers or installs system packages: if Chromium is missing, re-run `sh scripts/setup.sh`. The shared bundle task finishes before server tests and client packaging; packaging replaces only `dist/client`, so recursive tests can run safely in parallel. There is no PR CI.
 
 ### Verifying setup and build changes
 

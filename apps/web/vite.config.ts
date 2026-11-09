@@ -19,11 +19,7 @@ const buildSourcemap: boolean | "hidden" =
       ? "hidden"
       : true;
 
-const isolatedUnitTestFiles = [
-  "src/authBootstrap.test.ts",
-  // Replaces the atom registry; under isolate:false that mock leaks into later files.
-  "src/lib/attachmentUploadQueue.test.ts",
-] as const;
+const isolatedUnitTestFiles = ["src/authBootstrap.test.ts"] as const;
 
 const unitTestProject = {
   extends: true,
