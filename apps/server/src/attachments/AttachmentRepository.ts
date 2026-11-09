@@ -94,12 +94,6 @@ export class AttachmentRepository extends Context.Service<
       uploader: string,
       body: Stream.Stream<Uint8Array, E>,
     ) => Effect.Effect<Attachment, AttachmentSizeError | AttachmentNameError | E>;
-    readonly store: (input: {
-      readonly name: string;
-      readonly mimeType: string;
-      readonly bytes: Uint8Array;
-      readonly uploader: string;
-    }) => Effect.Effect<Attachment, AttachmentNameError>;
     readonly get: (id: AttachmentId) => Effect.Effect<Attachment | null>;
     readonly forIds: (ids: ReadonlyArray<AttachmentId>) => Effect.Effect<ReadonlyArray<Attachment>>;
     readonly forStep: (stepId: string) => Effect.Effect<ReadonlyArray<Attachment>>;
@@ -238,17 +232,6 @@ const make = Effect.gen(function* () {
     get,
 
     upload,
-    store: (input) =>
-      upload(
-        {
-          type: "file",
-          name: input.name,
-          mimeType: input.mimeType,
-          sizeBytes: input.bytes.byteLength,
-        },
-        input.uploader,
-        Stream.succeed(input.bytes),
-      ).pipe(Effect.catchTags({ AttachmentSizeError: Effect.die })),
 
     forIds: (ids) =>
       select(sql.in("id", ids)).pipe(

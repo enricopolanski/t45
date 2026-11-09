@@ -12,6 +12,7 @@ import { AuthSessionId } from "@t45/contracts/resources/Session";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import { HttpRouter } from "effect/http";
 
 import { UserService } from "../org/UserService.ts";
@@ -242,12 +243,11 @@ describe("attachment routes", () => {
           agentId,
         });
         const files = yield* AttachmentRepository.AttachmentRepository;
-        const sent = yield* files.store({
-          name: "notes.txt",
-          mimeType: "text/plain",
-          bytes: new TextEncoder().encode("hello"),
-          uploader: "user-1",
-        });
+        const sent = yield* files.upload(
+          { type: "file", name: "notes.txt", mimeType: "text/plain", sizeBytes: 5 },
+          "user-1",
+          Stream.succeed(new TextEncoder().encode("hello")),
+        );
         yield* files.bindToChat(chatId, [sentFile(sent)], "user-1");
         return sent;
       }),
@@ -269,12 +269,11 @@ describe("attachment routes", () => {
           const member = yield* Fixture.addUser("user-1");
           const step = yield* Attachments.seedStep("ticket-1", member);
           const files = yield* AttachmentRepository.AttachmentRepository;
-          const stored = yield* files.store({
-            name: "w2.pdf",
-            mimeType: "application/pdf",
-            bytes: new TextEncoder().encode("w2"),
-            uploader: member,
-          });
+          const stored = yield* files.upload(
+            { type: "file", name: "w2.pdf", mimeType: "application/pdf", sizeBytes: 2 },
+            member,
+            Stream.succeed(new TextEncoder().encode("w2")),
+          );
           const claimed = yield* files.claimForStep({
             id: stored.id,
             actor: member,

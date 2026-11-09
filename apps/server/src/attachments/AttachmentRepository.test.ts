@@ -62,12 +62,11 @@ const uploadText = (uploader: string) =>
 const stepFile = (stepId: string, fieldKey: string | null = null) =>
   Effect.gen(function* () {
     const files = yield* AttachmentRepository;
-    const stored = yield* files.store({
-      name: "w2.pdf",
-      mimeType: "application/pdf",
-      bytes: new Uint8Array([4, 2]),
-      uploader: alice,
-    });
+    const stored = yield* files.upload(
+      { type: "file", name: "w2.pdf", mimeType: "application/pdf", sizeBytes: 2 },
+      alice,
+      Stream.succeed(new Uint8Array([4, 2])),
+    );
     const claimed = yield* files.claimForStep({
       id: stored.id,
       actor: alice,
@@ -143,17 +142,16 @@ describe("AttachmentRepository", () => {
     () =>
       Effect.gen(function* () {
         const { files } = yield* setup;
-        const store = (name: string) =>
-          files.store({
-            name,
-            mimeType: "text/plain",
-            bytes: new Uint8Array([1]),
-            uploader: alice,
-          });
-        assert.equal((yield* store("C:\\scans/2025\\cu\u0007.pdf")).name, "cu.pdf");
-        assert.equal((yield* store(`${"a".repeat(300)}.txt`)).name, "a".repeat(200));
+        const upload = (name: string) =>
+          files.upload(
+            { type: "file", name, mimeType: "text/plain", sizeBytes: 1 },
+            alice,
+            Stream.succeed(new Uint8Array([1])),
+          );
+        assert.equal((yield* upload("C:\\scans/2025\\cu\u0007.pdf")).name, "cu.pdf");
+        assert.equal((yield* upload(`${"a".repeat(300)}.txt`)).name, "a".repeat(200));
         for (const name of ["..", "scans/", " . "]) {
-          assert.equal((yield* Effect.flip(store(name)))._tag, "AttachmentNameError");
+          assert.equal((yield* Effect.flip(upload(name)))._tag, "AttachmentNameError");
         }
       }).pipe(Effect.provide(Attachments.layer)),
   );
