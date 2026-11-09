@@ -9,7 +9,6 @@ import {
   MESSAGE_MAX_ATTACHMENTS,
   ATTACHMENT_MAX_FILE_BYTES,
   ATTACHMENT_MAX_IMAGE_BYTES,
-  type ChatFileAttachment,
 } from "@t45/contracts/models/Attachment";
 import { type ChatId, MESSAGE_MAX_INPUT_CHARS } from "@t45/contracts/models/Chat";
 import { useAtomValue } from "@effect/atom-react";
@@ -1014,7 +1013,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const addComposerAttachments = async (
     files: File[],
     options?: {
-      readonly source?: ChatFileAttachment["source"];
+      readonly isPastedText?: boolean;
       readonly selection?: { start: number; end: number };
       readonly skipImageInlineChip?: boolean;
     },
@@ -1099,7 +1098,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           mimeType: fileMimeType,
           sizeBytes: attachmentFile.size,
           file: attachmentFile,
-          ...(options?.source ? { source: options.source } : {}),
         });
       }
       if (!matchingReattachMarker) {
@@ -1123,7 +1121,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           options?.selection,
         );
       }
-      if (options?.source?._tag === "pasted-text" && storedFiles.length > 0) {
+      if (options?.isPastedText && storedFiles.length > 0) {
         const attached = storedFiles[0]!;
         toastManager.add({
           type: "info",
@@ -1256,7 +1254,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
 
     void addComposerAttachments([foldedFile], {
-      source: { _tag: "pasted-text" },
+      isPastedText: true,
       ...(selection ? { selection } : {}),
     });
     return true;

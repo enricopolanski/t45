@@ -1,7 +1,4 @@
-import {
-  MESSAGE_MAX_ATTACHMENTS,
-  PastedTextAttachmentSource,
-} from "@t45/contracts/models/Attachment";
+import { MESSAGE_MAX_ATTACHMENTS } from "@t45/contracts/models/Attachment";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import {
   formatComposerContextReference,
@@ -106,7 +103,6 @@ const PersistedFile = Schema.Struct({
   mimeType: Schema.String,
   sizeBytes: Schema.Number,
   uploadedAttachmentId: Schema.optionalKey(Schema.String),
-  source: Schema.optional(PastedTextAttachmentSource),
 });
 
 const PersistedDraft = Schema.Struct({

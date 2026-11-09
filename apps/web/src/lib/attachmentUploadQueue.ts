@@ -365,7 +365,6 @@ export function getUploadedAttachments(
       name: attachment.name,
       mimeType: attachment.mimeType,
       sizeBytes: attachment.sizeBytes,
-      ...(attachment.type === "file" && attachment.source ? { source: attachment.source } : {}),
     });
   }
   return attachments;
