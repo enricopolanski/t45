@@ -307,6 +307,19 @@ const make = Effect.gen(function* () {
       ? requireActionable(step)
       : Effect.fail(new WorkflowRefused({ reason: "ticket_not_open" }));
 
+  const loadStepFor = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
+    if (typeof caller !== "string" && caller.origin.kind === "automation") {
+      const { work, step } = yield* loadAutomationStep(caller.origin);
+      if (step.id !== stepId) return yield* new NotFound();
+      yield* requireWorkingStep(work, step);
+      return { work, step, actorId: caller.agentId };
+    }
+    const { work, step } = yield* loadStep(stepId);
+    const actorId = yield* resolvePerson(caller, work.workflow.id);
+    yield* requireInvolved(work, actorId);
+    return { work, step, actorId };
+  });
+
   const requireReason = (reason: string) => {
     const trimmed = reason.trim();
     return trimmed
@@ -779,11 +792,11 @@ const make = Effect.gen(function* () {
     };
   });
 
-  const setField = Effect.fnUntraced(function* (
-    work: Work,
-    step: Step,
+  const setStepField = Effect.fnUntraced(function* (
+    caller: Caller,
     input: Payload<"setStepField">,
   ) {
+    const { work, step } = yield* loadStepFor(caller, input.stepId);
     yield* requireWorkingStep(work, step);
     const field = yield* resolveField(work, step, input.fieldKey);
     const blank =
@@ -808,7 +821,7 @@ const make = Effect.gen(function* () {
       values: value === null ? others : { ...others, [input.fieldKey]: value },
     });
     yield* save(work);
-  });
+  }, transaction);
 
   const markStepDone = Effect.fnUntraced(function* (actorId: string, stepId: string) {
     const { work, step } = yield* loadForCommand(actorId, stepId);
@@ -866,14 +879,11 @@ const make = Effect.gen(function* () {
     yield* save(work);
   }, transaction);
 
-  const comment = Effect.fnUntraced(function* (
-    work: Work,
-    step: Step,
+  const commentOnStep = Effect.fnUntraced(function* (
+    caller: Caller,
     input: Payload<"commentOnStep">,
-    actorId: string,
-    automated: boolean,
   ) {
-    if (automated) yield* requireWorkingStep(work, step);
+    const { work, step, actorId } = yield* loadStepFor(caller, input.stepId);
     yield* tickets.insertComment(work.ticket.id, {
       id: generateId(),
       author: actorId,
@@ -881,17 +891,15 @@ const make = Effect.gen(function* () {
       createdAt: yield* DateTime.now,
       stepId: step.id,
     });
-  });
-  const attachFile = Effect.fnUntraced(function* (
-    work: Work,
-    step: Step,
+  }, transaction);
+  const attachStepFile = Effect.fnUntraced(function* (
+    caller: Caller,
     input: Payload<"attachStepFile">,
-    actorId: string,
-    automated: boolean,
   ) {
+    const { work, step, actorId } = yield* loadStepFor(caller, input.stepId);
     const fieldKey = input.fieldKey ?? null;
-    if (fieldKey !== null || automated) yield* requireWorkingStep(work, step);
     if (fieldKey !== null) {
+      yield* requireWorkingStep(work, step);
       if ((yield* resolveField(work, step, fieldKey)).type !== "file") {
         return yield* new WorkflowRefused({ reason: "invalid_field_value" });
       }
@@ -912,7 +920,7 @@ const make = Effect.gen(function* () {
     if (fieldKey === null) return yield* tickets.publishChange(work.ticket.id);
     putStep(work, { ...step, values: { ...step.values, [fieldKey]: claimed.id } });
     yield* save(work);
-  });
+  }, transaction);
 
   const removeStepFile = Effect.fnUntraced(function* (
     actorId: string,
@@ -1067,30 +1075,6 @@ const make = Effect.gen(function* () {
     putStep(work, { ...step, automationIds: input.automationIds });
     yield* save(work);
   }, transaction);
-  const memberCommand = <I extends { readonly stepId: string }, A, E>(
-    mutate: (
-      work: Work,
-      step: Step,
-      input: I,
-      actorId: string,
-      automated: boolean,
-    ) => Effect.Effect<A, E>,
-  ) =>
-    Effect.fnUntraced(function* (caller: Caller, input: I) {
-      const { work, step } = yield* loadStep(input.stepId);
-      let actorId: string;
-      const automated = typeof caller !== "string" && caller.origin.kind === "automation";
-      if (automated) {
-        const assigned = yield* loadAutomationStep(caller.origin);
-        if (assigned.step.id !== step.id) return yield* new NotFound();
-        actorId = caller.agentId;
-      } else {
-        actorId = yield* resolvePerson(caller, work.workflow.id);
-        yield* requireInvolved(work, actorId);
-      }
-      return yield* mutate(work, step, input, actorId, automated);
-    }, transaction);
-
   const getWorkflow = Effect.fnUntraced(function* (caller: Caller, workflowId: string) {
     const { workflow, definition } = yield* loadWorkflow(caller, workflowId);
     return { workflowId: workflow.id, name: workflow.name, blueprint: definition };
@@ -1143,13 +1127,13 @@ const make = Effect.gen(function* () {
           tickets.watch(ticket, getStep(actorId, ticket.id, stepId)),
         ),
       ).pipe(Stream.changesWith(sameStepView)),
-    setStepField: memberCommand(setField),
+    setStepField,
     markStepDone,
     setStepAssignee,
     blockStep,
     unblockStep,
-    commentOnStep: memberCommand(comment),
-    attachStepFile: memberCommand(attachFile),
+    commentOnStep,
+    attachStepFile,
     removeStepFile,
     listAssignments,
     listNotifications,
