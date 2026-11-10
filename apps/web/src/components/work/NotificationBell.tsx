@@ -13,10 +13,7 @@ import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popov
 
 const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
   to_do: "New step to do",
-  to_approve: "Waiting for your approval",
-  rejected: "Changes needed",
-  agent_failed: "An agent couldn't finish",
-  needs_responsible: "Needs a new responsible",
+  automation_ended: "Automation ended",
   names_deactivated: "Names someone who left",
 };
 
@@ -42,10 +39,10 @@ export function NotificationBell() {
       void navigate({ to: "/my-work/$stepId", params: { stepId: notification.stepId } });
       return;
     }
-    // A notice about a whole workflow opens its editor, where it gets fixed.
+    // A notice about a whole project opens its editor, where it gets fixed.
     void navigate({
-      to: "/settings/workflows/$workflowId/edit",
-      params: { workflowId: notification.workflowId },
+      to: "/settings/projects/$projectId/edit",
+      params: { projectId: notification.projectId },
     });
   };
 
@@ -94,7 +91,7 @@ export function NotificationBell() {
                   {NOTIFICATION_LABELS[notification.kind]}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {[notification.ticketTitle, notification.stepName, notification.workflowName]
+                  {[notification.ticketTitle, notification.stepName, notification.projectName]
                     .filter((part) => part !== null)
                     .join(" · ")}
                 </span>

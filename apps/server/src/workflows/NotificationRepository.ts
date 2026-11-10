@@ -13,7 +13,7 @@ const Row = Schema.Struct({
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
 const encodeRow = Schema.encodeEffect(Row);
 
-const COLUMNS = `id, kind, step_id AS "stepId", workflow_id AS "workflowId",
+const COLUMNS = `id, kind, step_id AS "stepId", project_id AS "projectId",
   read_at IS NOT NULL AS "isRead", created_at AS "createdAt"`;
 
 export class NotificationRepository extends Context.Service<
@@ -26,14 +26,13 @@ export class NotificationRepository extends Context.Service<
     readonly hasUnreadNotice: (input: {
       readonly userId: string;
       readonly kind: NotificationKind;
-      readonly workflowId: string;
+      readonly projectId: string;
     }) => Effect.Effect<boolean>;
     readonly markRead: (input: {
       readonly id: string;
       readonly userId: string;
       readonly at: DateTime.Utc;
     }) => Effect.Effect<void>;
-    readonly removeApproval: (stepId: string) => Effect.Effect<void>;
   }
 >()("t45/workflows/NotificationRepository") {}
 
@@ -50,9 +49,9 @@ export const layer = Layer.effect(
       insert: (userId, notification) =>
         Effect.gen(function* () {
           const row = yield* encodeRow(notification);
-          yield* sql`INSERT INTO workflow_notifications (id, user_id, kind, workflow_id, step_id,
+          yield* sql`INSERT INTO workflow_notifications (id, user_id, kind, project_id, step_id,
             created_at)
-            VALUES (${row.id}, ${userId}, ${row.kind}, ${row.workflowId},
+            VALUES (${row.id}, ${userId}, ${row.kind}, ${row.projectId},
               ${row.stepId}, ${row.createdAt})`;
         }).pipe(Effect.orDie),
       list: (userId, limit) =>
@@ -69,7 +68,7 @@ export const layer = Layer.effect(
         ),
       hasUnreadNotice: (input) =>
         sql`SELECT id FROM workflow_notifications WHERE user_id = ${input.userId}
-          AND kind = ${input.kind} AND workflow_id = ${input.workflowId}
+          AND kind = ${input.kind} AND project_id = ${input.projectId}
           AND step_id IS NULL AND read_at IS NULL LIMIT 1`.pipe(
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
@@ -77,11 +76,6 @@ export const layer = Layer.effect(
       markRead: (input) =>
         sql`UPDATE workflow_notifications SET read_at = ${DateTime.formatIso(input.at)}
           WHERE id = ${input.id} AND user_id = ${input.userId} AND read_at IS NULL`.pipe(
-          Effect.asVoid,
-          Effect.orDie,
-        ),
-      removeApproval: (stepId) =>
-        sql`DELETE FROM workflow_notifications WHERE step_id = ${stepId} AND kind = 'to_approve'`.pipe(
           Effect.asVoid,
           Effect.orDie,
         ),

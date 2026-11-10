@@ -1,7 +1,4 @@
-import {
-  MESSAGE_MAX_ATTACHMENTS,
-  PastedTextAttachmentSource,
-} from "@t45/contracts/models/Attachment";
+import { MESSAGE_MAX_ATTACHMENTS } from "@t45/contracts/models/Attachment";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import {
   formatComposerContextReference,
@@ -18,14 +15,14 @@ import {
   ensureInlineContextReferences,
   removeContextReferences,
 } from "./lib/composerContextReferences";
-import { readFileAsDataUrl } from "./lib/imageCompression";
+import { attachmentUrl } from "./lib/attachmentUrl";
 import { browserStorage, createDeferredStorage } from "./lib/storage";
 import { randomUUID } from "./lib/utils";
 import type { QuestionDraftKey } from "./questionDrafts";
 import { type ChatFileAttachment, type ChatImageAttachment } from "./types";
 
 const COMPOSER_DRAFT_STORAGE_KEY = "t45:composer-drafts:v1";
-const COMPOSER_DRAFT_STORAGE_VERSION = 15;
+const COMPOSER_DRAFT_STORAGE_VERSION = 16;
 
 const COMPOSER_PERSIST_DEBOUNCE_MS = 300;
 
@@ -65,18 +62,10 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
   });
 }
 
-const PersistedImage = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  mimeType: Schema.String,
-  sizeBytes: Schema.Number,
-  dataUrl: Schema.String,
-});
-type PersistedImage = typeof PersistedImage.Type;
-
 export interface ComposerImageAttachment extends Omit<ChatImageAttachment, "previewUrl"> {
   previewUrl: string;
-  file: File;
+  file: File | null;
+  uploadedAttachmentId?: string;
 }
 
 export interface ComposerFileAttachment extends Omit<ChatFileAttachment, "previewUrl"> {
@@ -87,32 +76,31 @@ export interface ComposerFileAttachment extends Omit<ChatFileAttachment, "previe
 export type ComposerAttachment = ComposerImageAttachment | ComposerFileAttachment;
 
 /**
- * A hydrated draft file whose upload never finished before the reload has
+ * A hydrated draft attachment whose upload never finished before the reload has
  * neither bytes (`file` is only ever null after hydration) nor a server-side
  * upload. The composer renders it as a needs-reattach row: the user must
  * attach the file again or remove it before sending.
  */
-export function composerFileNeedsReattach(file: ComposerFileAttachment): boolean {
+export function composerAttachmentNeedsReattach(file: ComposerAttachment): boolean {
   return file.file === null && file.uploadedAttachmentId === undefined;
 }
 
 /**
- * A draft's file as it persists: its `File` handle cannot serialize, so one whose upload never
+ * A draft attachment as it persists: its `File` handle cannot serialize, so one whose upload never
  * finished persists without an upload id and hydrates as a needs-reattach row instead of vanishing.
  */
-const PersistedFile = Schema.Struct({
+const PersistedAttachment = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   mimeType: Schema.String,
   sizeBytes: Schema.Number,
   uploadedAttachmentId: Schema.optionalKey(Schema.String),
-  source: Schema.optional(PastedTextAttachmentSource),
 });
 
 const PersistedDraft = Schema.Struct({
   prompt: Schema.String,
-  images: Schema.Array(PersistedImage),
-  files: Schema.Array(PersistedFile),
+  images: Schema.Array(PersistedAttachment),
+  files: Schema.Array(PersistedAttachment),
   inputId: Schema.NullOr(Schema.String),
 });
 type PersistedDraft = typeof PersistedDraft.Type;
@@ -122,18 +110,11 @@ const PersistedComposerDraftStoreState = Schema.Struct({
 });
 type PersistedComposerDraftStoreState = typeof PersistedComposerDraftStoreState.Type;
 
-const PersistedComposerDraftStoreStorage = Schema.Struct({
-  version: Schema.Number,
-  state: PersistedComposerDraftStoreState,
-});
-
 /** What the composer holds for a chat (`ChatId`) or a question field (`QuestionDraftKey`). */
 export interface ComposerDraft {
   prompt: string;
   images: ComposerImageAttachment[];
   files: ComposerFileAttachment[];
-  nonPersistedImageIds: string[];
-  persistedImages: PersistedImage[];
   /**
    * The id a send of this content went out under. Any edit drops it, so a send repeated after a
    * lost answer, or after a reload, reuses it only while the content is unchanged and T45 keeps
@@ -142,8 +123,7 @@ export interface ComposerDraft {
   inputId: string | null;
 }
 
-const holdsAttachments = (draft: ComposerDraft) =>
-  draft.images.length + draft.files.length + draft.persistedImages.length > 0;
+const holdsAttachments = (draft: ComposerDraft) => draft.images.length + draft.files.length > 0;
 
 const isEmptyDraft = (draft: ComposerDraft) =>
   draft.prompt.length === 0 && !holdsAttachments(draft);
@@ -169,9 +149,8 @@ interface ComposerDraftStoreState {
     options?: { appendReference?: boolean },
   ) => string[];
   removeFile: (target: ComposerTarget, fileId: string) => void;
-  setFileUpload: (fileId: string, attachmentId: string) => void;
-  markFileUploadMissing: (fileId: string, attachmentId: string) => boolean;
-  syncPersistedImages: (target: ComposerTarget, images: PersistedImage[]) => Promise<void>;
+  setAttachmentUpload: (fileId: string, attachmentId: string) => void;
+  markAttachmentUploadMissing: (fileId: string, attachmentId: string) => boolean;
   clearComposerContent: (target: ComposerTarget) => void;
   /** The id to send the draft's content under: the one a send of it already used, else a new one. */
   claimInputId: (target: ComposerTarget) => string;
@@ -195,29 +174,24 @@ const EMPTY_DRAFT: ComposerDraft = Object.freeze({
   prompt: "",
   images: [],
   files: [],
-  nonPersistedImageIds: [],
-  persistedImages: [],
   inputId: null,
 });
 
 type AttachmentSignature = Pick<ComposerFileAttachment, "mimeType" | "sizeBytes" | "name">;
 
-/**
- * Duplicate detection by metadata, not `File.lastModified`: an image hydrated from
- * localStorage gets a fresh `lastModified`.
- */
+/** Metadata identifies re-picked files after a reload, when their original bytes are absent. */
 function attachmentDedupKey(attachment: AttachmentSignature): string {
   return `${attachment.mimeType}\u0000${attachment.sizeBytes}\u0000${attachment.name}`;
 }
 
-export function composerFileMatchesReattachMarker(
+export function composerAttachmentMatchesReattachMarker(
   marker: AttachmentSignature,
   file: AttachmentSignature,
 ): boolean {
   return attachmentDedupKey(marker) === attachmentDedupKey(file);
 }
 
-/** Hydrated images preview from their data URL, which has nothing to revoke. */
+/** Restored images use server URLs, which have nothing to revoke. */
 function revokeObjectPreviewUrl(previewUrl: string): void {
   if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
 }
@@ -242,7 +216,9 @@ const decodePersistedDraft = Schema.decodeUnknownOption(PersistedDraft);
 function persistedDraft(draft: ComposerDraft): PersistedDraft {
   return {
     prompt: draft.prompt,
-    images: draft.persistedImages,
+    images: draft.images.map(
+      ({ type: _type, file: _file, previewUrl: _preview, ...saved }) => saved,
+    ),
     files: draft.files.map(({ type: _type, file: _file, ...persisted }) => persisted),
     inputId: draft.inputId,
   };
@@ -277,46 +253,18 @@ function decodePersistedState(persisted: unknown): PersistedComposerDraftStoreSt
   };
 }
 
-const decodeStoredComposerDrafts = Schema.decodeSync(
-  Schema.fromJsonString(PersistedComposerDraftStoreStorage),
-);
-
-/** The image ids the stored draft really holds: a write over the storage quota leaves them out. */
-function readPersistedImageIds(key: string): ReadonlySet<string> {
-  try {
-    composerDebouncedStorage.flush();
-  } catch {}
-  try {
-    const stored = composerStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
-    const persisted = stored === null ? null : decodeStoredComposerDrafts(stored);
-    if (persisted?.version !== COMPOSER_DRAFT_STORAGE_VERSION) return new Set();
-    return new Set((persisted.state.draftsByTarget[key]?.images ?? []).map(({ id }) => id));
-  } catch {
-    return new Set();
-  }
-}
-
-/** Persisted images are FileReader data URLs, which are always base64. */
-function hydrateImage({ dataUrl, ...image }: PersistedImage): ComposerImageAttachment[] {
-  const comma = dataUrl.indexOf(",");
-  const payload = comma === -1 ? "" : dataUrl.slice(comma + 1);
-  if (payload.length === 0) return [];
-  try {
-    const bytes = Uint8Array.from(atob(payload), (char) => char.charCodeAt(0));
-    const file = new File([bytes], image.name, { type: image.mimeType });
-    return [{ ...image, type: "image", previewUrl: dataUrl, file }];
-  } catch {
-    return [];
-  }
-}
-
 function hydrateDraft(draft: PersistedDraft): ComposerDraft {
   return {
     prompt: draft.prompt,
-    images: draft.images.flatMap(hydrateImage),
+    images: draft.images.map((image) => ({
+      ...image,
+      type: "image",
+      file: null,
+      previewUrl: image.uploadedAttachmentId
+        ? attachmentUrl({ id: image.uploadedAttachmentId, name: image.name })
+        : "",
+    })),
     files: draft.files.map((file) => ({ ...file, type: "file", file: null })),
-    nonPersistedImageIds: [],
-    persistedImages: [...draft.images],
     inputId: draft.inputId,
   };
 }
@@ -328,16 +276,104 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         target: ComposerTarget,
         update: (draft: ComposerDraft) => ComposerDraft,
       ) => set((state) => updatedDraft(state, target, update));
-      const updateDraftHoldingFile = (
+      const updateDraftHoldingAttachment = (
         fileId: string,
-        update: (draft: ComposerDraft) => ComposerDraft,
+        update: (file: ComposerAttachment) => ComposerAttachment,
       ) =>
         set((state) => {
           const key = Object.keys(state.draftsByTarget).find((candidate) =>
-            state.draftsByTarget[candidate]!.files.some((file) => file.id === fileId),
+            [
+              ...state.draftsByTarget[candidate]!.images,
+              ...state.draftsByTarget[candidate]!.files,
+            ].some((file) => file.id === fileId),
           );
-          return key === undefined ? state : updatedDraft(state, key, update);
+          return key === undefined
+            ? state
+            : updatedDraft(state, key, (draft) => {
+                const current = [...draft.images, ...draft.files];
+                const next = current.map((file) => (file.id === fileId ? update(file) : file));
+                return next.every((file, index) => file === current[index])
+                  ? draft
+                  : {
+                      ...draft,
+                      images: next.filter((file) => file.type === "image"),
+                      files: next.filter((file) => file.type === "file"),
+                    };
+              });
         });
+      const addAttachments = (
+        target: ComposerTarget,
+        files: ComposerAttachment[],
+        appendReference = false,
+      ) => {
+        let acceptedIds: string[] = [];
+        updateDraft(target, (draft) => {
+          const current = [...draft.images, ...draft.files];
+          const knownIds = new Set(current.map((file) => file.id));
+          const knownFiles = new Map(
+            current.map((file) => [`${file.type}:${attachmentDedupKey(file)}`, file]),
+          );
+          const previewUrls = new Set(draft.images.map((image) => image.previewUrl));
+          const accepted: ComposerAttachment[] = [];
+          const replacements = new Map<string, ComposerAttachment>();
+          for (const file of files) {
+            if (knownIds.has(file.id)) {
+              if (file.type === "image" && !previewUrls.has(file.previewUrl))
+                revokeObjectPreviewUrl(file.previewUrl);
+              continue;
+            }
+            const key = `${file.type}:${attachmentDedupKey(file)}`;
+            const duplicate = knownFiles.get(key);
+            if (duplicate) {
+              if (composerAttachmentNeedsReattach(duplicate)) {
+                replacements.set(duplicate.id, file);
+                knownIds.add(file.id);
+                knownFiles.set(key, file);
+                if (file.type === "image") previewUrls.add(file.previewUrl);
+              } else if (file.type === "image" && !previewUrls.has(file.previewUrl)) {
+                revokeObjectPreviewUrl(file.previewUrl);
+              }
+              continue;
+            }
+            if (
+              draft.images.length + draft.files.length + accepted.length >=
+              MESSAGE_MAX_ATTACHMENTS
+            ) {
+              if (file.type === "image") revokeObjectPreviewUrl(file.previewUrl);
+              continue;
+            }
+            accepted.push(file);
+            knownIds.add(file.id);
+            knownFiles.set(key, file);
+            if (file.type === "image") previewUrls.add(file.previewUrl);
+          }
+          acceptedIds = accepted.map((file) => file.id);
+          if (accepted.length === 0 && replacements.size === 0) return draft;
+          const prompt = replaceComposerContextReferences(draft.prompt, (occurrence) => {
+            const original = current.find(
+              (file) => attachmentContextReference(file).contextId === occurrence.contextId,
+            );
+            const replacement = original && replacements.get(original.id);
+            return replacement
+              ? formatComposerContextReference(attachmentContextReference(replacement))
+              : occurrence.source;
+          });
+          const next = [...current.map((file) => replacements.get(file.id) ?? file), ...accepted];
+          return {
+            ...draft,
+            prompt: appendReference
+              ? ensureInlineContextReferences(
+                  prompt,
+                  [...accepted, ...replacements.values()].map(attachmentContextReference),
+                )
+              : prompt,
+            images: next.filter((file) => file.type === "image"),
+            files: next.filter((file) => file.type === "file"),
+            inputId: null,
+          };
+        });
+        return acceptedIds;
+      };
       return {
         draftsByTarget: {},
         getComposerDraft: (target) => get().draftsByTarget[target] ?? null,
@@ -352,34 +388,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           updateDraft(target, (draft) =>
             draft.prompt === prompt ? draft : { ...draft, prompt, inputId: null },
           ),
-        addImages: (target, images) => {
-          let accepted: ComposerImageAttachment[] = [];
-          updateDraft(target, (draft) => {
-            const ids = new Set(draft.images.map((image) => image.id));
-            const keys = new Set(draft.images.map(attachmentDedupKey));
-            const previewUrls = new Set(draft.images.map((image) => image.previewUrl));
-            accepted = [];
-            for (const image of images) {
-              const key = attachmentDedupKey(image);
-              const full =
-                draft.images.length + draft.files.length + accepted.length >=
-                MESSAGE_MAX_ATTACHMENTS;
-              if (ids.has(image.id) || keys.has(key) || full) {
-                if (!previewUrls.has(image.previewUrl)) revokeObjectPreviewUrl(image.previewUrl);
-                continue;
-              }
-              accepted.push(image);
-              ids.add(image.id);
-              keys.add(key);
-              previewUrls.add(image.previewUrl);
-            }
-            return accepted.length === 0
-              ? draft
-              : { ...draft, images: [...draft.images, ...accepted], inputId: null };
-          });
-          if (accepted.length > 0) void persistImages(target);
-          return accepted.map((image) => image.id);
-        },
+        addImages: (target, images) => addAttachments(target, images),
         removeImage: (target, imageId) => {
           updateDraft(target, (draft) => {
             const image = draft.images.find((candidate) => candidate.id === imageId);
@@ -389,67 +398,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...draft,
               prompt: removeContextReferences(draft.prompt, contextIdFor("image", imageId)),
               images: draft.images.filter((candidate) => candidate !== image),
-              nonPersistedImageIds: draft.nonPersistedImageIds.filter((id) => id !== imageId),
-              persistedImages: draft.persistedImages.filter((saved) => saved.id !== imageId),
               inputId: null,
             };
           });
-          void persistImages(target);
         },
-        addFiles: (target, files, options) => {
-          let acceptedIds: string[] = [];
-          updateDraft(target, (draft) => {
-            const knownIds = new Set(draft.files.map((file) => file.id));
-            const knownFiles = new Map(draft.files.map((file) => [attachmentDedupKey(file), file]));
-            const accepted: ComposerFileAttachment[] = [];
-            const replacements = new Map<string, ComposerFileAttachment>();
-            for (const file of files) {
-              if (knownIds.has(file.id)) continue;
-              const key = attachmentDedupKey(file);
-              const duplicate = knownFiles.get(key);
-              if (duplicate) {
-                if (composerFileNeedsReattach(duplicate)) {
-                  replacements.set(duplicate.id, file);
-                  knownIds.add(file.id);
-                  knownFiles.set(key, file);
-                }
-                continue;
-              }
-              if (
-                draft.images.length + draft.files.length + accepted.length >=
-                MESSAGE_MAX_ATTACHMENTS
-              ) {
-                break;
-              }
-              accepted.push(file);
-              knownIds.add(file.id);
-              knownFiles.set(key, file);
-            }
-            acceptedIds = accepted.map((file) => file.id);
-            if (accepted.length === 0 && replacements.size === 0) return draft;
-            const prompt = replaceComposerContextReferences(draft.prompt, (occurrence) => {
-              const original = draft.files.find(
-                (file) => attachmentContextReference(file).contextId === occurrence.contextId,
-              );
-              const replacement = original && replacements.get(original.id);
-              return replacement
-                ? formatComposerContextReference(attachmentContextReference(replacement))
-                : occurrence.source;
-            });
-            return {
-              ...draft,
-              prompt: options?.appendReference
-                ? ensureInlineContextReferences(
-                    prompt,
-                    [...accepted, ...replacements.values()].map(attachmentContextReference),
-                  )
-                : prompt,
-              files: [...draft.files.map((file) => replacements.get(file.id) ?? file), ...accepted],
-              inputId: null,
-            };
-          });
-          return acceptedIds;
-        },
+        addFiles: (target, files, options) =>
+          addAttachments(target, files, options?.appendReference),
         removeFile: (target, fileId) =>
           updateDraft(target, (draft) =>
             draft.files.some((file) => file.id === fileId)
@@ -461,61 +415,21 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 }
               : draft,
           ),
-        setFileUpload: (fileId, attachmentId) =>
-          updateDraftHoldingFile(fileId, (draft) =>
-            draft.files.some(
-              (file) => file.id === fileId && file.uploadedAttachmentId !== attachmentId,
-            )
-              ? {
-                  ...draft,
-                  files: draft.files.map((file) =>
-                    file.id === fileId ? { ...file, uploadedAttachmentId: attachmentId } : file,
-                  ),
-                }
-              : draft,
+        setAttachmentUpload: (fileId, attachmentId) =>
+          updateDraftHoldingAttachment(fileId, (file) =>
+            file.uploadedAttachmentId === attachmentId
+              ? file
+              : { ...file, uploadedAttachmentId: attachmentId },
           ),
-        markFileUploadMissing: (fileId, attachmentId) => {
+        markAttachmentUploadMissing: (fileId, attachmentId) => {
           let marked = false;
-          updateDraftHoldingFile(fileId, (draft) => {
-            marked = draft.files.some(
-              (file) =>
-                file.id === fileId &&
-                file.file === null &&
-                file.uploadedAttachmentId === attachmentId,
-            );
-            if (!marked) return draft;
-            return {
-              ...draft,
-              files: draft.files.map((file) => {
-                if (file.id !== fileId) return file;
-                const { uploadedAttachmentId: _expired, ...marker } = file;
-                return marker;
-              }),
-            };
+          updateDraftHoldingAttachment(fileId, (file) => {
+            if (file.file !== null || file.uploadedAttachmentId !== attachmentId) return file;
+            marked = true;
+            const { uploadedAttachmentId: _expired, ...marker } = file;
+            return marker.type === "image" ? { ...marker, previewUrl: "" } : marker;
           });
           return marked;
-        },
-        syncPersistedImages: async (target, images) => {
-          const ids = new Set(images.map((image) => image.id));
-          updateDraft(target, (draft) =>
-            draft.images.length === 0
-              ? draft
-              : {
-                  ...draft,
-                  persistedImages: images,
-                  nonPersistedImageIds: draft.nonPersistedImageIds.filter((id) => !ids.has(id)),
-                },
-          );
-          await Promise.resolve();
-          const saved = readPersistedImageIds(target);
-          updateDraft(target, (draft) => {
-            const draftIds = new Set(draft.images.map((image) => image.id));
-            return {
-              ...draft,
-              persistedImages: images.filter(({ id }) => draftIds.has(id) && saved.has(id)),
-              nonPersistedImageIds: [...draftIds].filter((id) => !saved.has(id)),
-            };
-          });
         },
         clearComposerContent: (target) => updateDraft(target, () => EMPTY_DRAFT),
         claimInputId: (target) => {
@@ -556,50 +470,6 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 );
 
 export const useComposerDraftStore = composerDraftStore;
-
-const persistRuns = new Map<ComposerTarget, symbol>();
-
-/**
- * Saves the bytes of a draft's unsaved images, so they survive a reload; a newer call for the
- * draft takes over. One the browser can't read, or that the storage quota can't hold, is marked
- * as not saved.
- */
-async function persistImages(target: ComposerTarget) {
-  const before = composerDraftStore.getState().getComposerDraft(target);
-  const saved = new Set(before?.persistedImages.map((image) => image.id));
-  const unsaved = before?.images.filter((image) => !saved.has(image.id)) ?? [];
-  if (unsaved.length === 0) return;
-  const run = Symbol();
-  persistRuns.set(target, run);
-  const read = await Promise.all(
-    unsaved.map((image) =>
-      readFileAsDataUrl(image.file).then(
-        (dataUrl) => ({
-          id: image.id,
-          name: image.name,
-          mimeType: image.mimeType,
-          sizeBytes: image.sizeBytes,
-          dataUrl,
-        }),
-        () => null,
-      ),
-    ),
-  );
-  if (persistRuns.get(target) !== run) return;
-  persistRuns.delete(target);
-  const draft = composerDraftStore.getState().getComposerDraft(target);
-  if (!draft) return;
-  const byId = new Map(
-    [...draft.persistedImages, ...read.filter((image) => image !== null)].map((image) => [
-      image.id,
-      image,
-    ]),
-  );
-  await composerDraftStore.getState().syncPersistedImages(
-    target,
-    draft.images.flatMap((image) => byId.get(image.id) ?? []),
-  );
-}
 
 export function useComposerDraft(target: ComposerTarget): ComposerDraft {
   return useComposerDraftStore((state) => state.draftsByTarget[target] ?? EMPTY_DRAFT);

@@ -5,7 +5,6 @@ import { Fieldset as FieldsetPrimitive } from "@base-ui/react/fieldset";
 import type * as React from "react";
 
 import { cn } from "~/lib/utils";
-import { Switch } from "./switch";
 
 const LABEL = {
   sm: "inline-flex items-center gap-2 text-base/4.5 font-medium text-foreground sm:text-sm/4",
@@ -47,27 +46,6 @@ function Field({
   );
 }
 
-function SwitchField({
-  label,
-  description,
-  ...props
-}: Omit<React.ComponentProps<typeof Switch>, "className"> & {
-  label: React.ReactNode;
-  description?: React.ReactNode;
-}) {
-  return (
-    <FieldPrimitive.Root className="flex items-center justify-between gap-4" data-slot="field">
-      <div className="min-w-0 space-y-1">
-        <FieldPrimitive.Label className={LABEL.sm} data-slot="label">
-          {label}
-        </FieldPrimitive.Label>
-        {description ? <FieldDescription>{description}</FieldDescription> : null}
-      </div>
-      <Switch {...props} />
-    </FieldPrimitive.Root>
-  );
-}
-
 function Fieldset({ disabled, ...props }: Omit<FieldsetPrimitive.Root.Props, "className">) {
   return (
     <FieldsetPrimitive.Root
@@ -80,4 +58,4 @@ function Fieldset({ disabled, ...props }: Omit<FieldsetPrimitive.Root.Props, "cl
   );
 }
 
-export { Field, Fieldset, SwitchField };
+export { Field, Fieldset };

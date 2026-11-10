@@ -1,9 +1,14 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { ContactIcon, InboxIcon, KanbanSquareIcon, MessagesSquareIcon } from "lucide-react";
-import type { WorkflowInstanceListEntryView } from "@t45/contracts/resources/Workflows";
+import {
+  BotIcon,
+  ContactIcon,
+  InboxIcon,
+  KanbanSquareIcon,
+  MessagesSquareIcon,
+} from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { api } from "../../rpc/api";
+import { api, type ApiSuccess } from "../../rpc/api";
 import {
   SidebarContent,
   SidebarGroup,
@@ -23,7 +28,7 @@ export type NavLink = {
     | "/my-work"
     | "/chats"
     | "/people"
-    | "/settings/workflows"
+    | "/settings/projects"
     | "/settings/agents"
     | "/settings/automations"
     | "/settings/organization";
@@ -34,10 +39,14 @@ const MAIN_LINKS: ReadonlyArray<NavLink> = [
   { label: "My work", icon: <InboxIcon />, to: "/my-work" },
   { label: "Chat", icon: <MessagesSquareIcon />, to: "/chats" },
   { label: "People", icon: <ContactIcon />, to: "/people" },
+  { label: "Agents", icon: <BotIcon />, to: "/settings/agents" },
   { label: "Boards", icon: <KanbanSquareIcon />, to: "/boards" },
 ];
 
-/** The app's main sidebar, for everyone: My work, Chat, People, and Boards (or the one board). */
+/**
+ * The app's main sidebar, for everyone: My work, Chat, People, Agents, and Boards (or the one
+ * board).
+ */
 export function AppNavSidebar() {
   return (
     <>
@@ -87,12 +96,10 @@ function BoardsItem({
       <SidebarMenuItem>
         <SidebarMenuButton
           onClick={onNavigate}
-          render={
-            <Link to="/boards/$slug" params={{ slug: only.workflow.slug ?? only.workflow.id }} />
-          }
+          render={<Link to="/boards/$slug" params={{ slug: only.slug ?? only.id }} />}
         >
           {link.icon}
-          <span>{only.workflow.name}</span>
+          <span>{only.name}</span>
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
@@ -109,17 +116,12 @@ function BoardsItem({
       {boards.length > 0 ? (
         <SidebarMenuSub>
           {boards.map((board) => (
-            <SidebarMenuItem key={board.workflow.id}>
+            <SidebarMenuItem key={board.id}>
               <SidebarMenuButton
                 onClick={onNavigate}
-                render={
-                  <Link
-                    to="/boards/$slug"
-                    params={{ slug: board.workflow.slug ?? board.workflow.id }}
-                  />
-                }
+                render={<Link to="/boards/$slug" params={{ slug: board.slug ?? board.id }} />}
               >
-                <span>{board.workflow.name}</span>
+                <span>{board.name}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}
@@ -130,35 +132,30 @@ function BoardsItem({
 }
 
 /**
- * The boards the viewer can open: every unarchived workflow with steps the server lists for them.
- * Re-read on the workflow pages, where workflows are created, given steps, and archived.
+ * The boards the viewer can open: those of the projects with a step they are a member of. Re-read
+ * on the project pages, where projects get their people, adopt versions, and are archived.
  */
 function useOpenBoards() {
-  const [boards, setBoards] = useState<ReadonlyArray<WorkflowInstanceListEntryView>>([]);
-  const workflowsPath = useLocation({
+  const [boards, setBoards] = useState<ApiSuccess<"workflows.listBoards">>([]);
+  const projectsPath = useLocation({
     select: (location) =>
-      location.pathname.startsWith("/settings/workflows") || location.pathname.startsWith("/boards")
+      location.pathname.startsWith("/settings/projects") || location.pathname.startsWith("/boards")
         ? location.pathname
         : null,
   });
   useEffect(() => {
     let current = true;
-    void api("workflows.listInstances", undefined).then(
-      (workflows) => {
-        if (!current) return;
-        setBoards(
-          workflows.filter(
-            (entry) => !entry.workflow.isArchived && entry.definition.steps.length > 0,
-          ),
-        );
+    void api("workflows.listBoards", undefined).then(
+      (listed) => {
+        if (current) setBoards(listed);
       },
       () => undefined,
     );
     return () => {
       current = false;
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-read on each workflow page.
-  }, [workflowsPath]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-read on each project page.
+  }, [projectsPath]);
   return boards;
 }
 

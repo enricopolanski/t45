@@ -65,15 +65,3 @@ export function formatRelativeTimeLabel(instant: DateTime.Utc, now = Date.now())
   const hours = Math.floor(minutes / 60);
   return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
-
-/** Like the relative label in the past, and `in 5m` for an instant in the future (a run's next start). */
-export function formatScheduledLabel(instant: DateTime.Utc, now = Date.now()): string {
-  const diffMs = DateTime.toEpochMillis(instant) - now;
-  if (diffMs <= 0) return formatRelativeTimeLabel(instant, now);
-  const minutes = Math.ceil(diffMs / 60_000);
-  if (minutes < 2) return "in under a minute";
-  if (minutes < 60) return `in ${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `in ${hours}h`;
-  return `in ${Math.round(hours / 24)}d`;
-}

@@ -10,10 +10,10 @@ export const notifications = apiQuery("notifications.list")(undefined).pipe(
   Atom.refreshOnWindowFocus,
 );
 
-const startable = apiQuery("workflows.listStartableInstances")(undefined);
+const startable = apiQuery("workflows.listStartableProjects")(undefined);
 
-export const useMyWork = () => useLoaded(myWork).sections;
-export const useStartableWorkflows = () => useLoaded(startable);
+export const useMyWork = () => useLoaded(myWork);
+export const useStartableProjects = () => useLoaded(startable);
 
 export function workChanged() {
   appAtomRegistry.refresh(myWork);

@@ -7,11 +7,12 @@ import baseConfig from "./vite.base.config.ts";
 export default mergeConfig(
   baseConfig,
   defineConfig({
+    staged: { "*": "vp check --fix" },
     run: {
       cache: true,
       tasks: {
         "pre-commit": {
-          command: "vp check && vp run typecheck && vp run knip && vp run test",
+          command: "vp check --fix && vp run typecheck && vp run knip && vp run test",
           cache: false,
         },
         test: {

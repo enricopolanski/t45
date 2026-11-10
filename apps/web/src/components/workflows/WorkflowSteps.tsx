@@ -1,5 +1,5 @@
 import type { DraftStep } from "./workflowLogic";
-import type { WorkflowDefinitionView } from "@t45/contracts/resources/Workflows";
+import type { WorkflowView } from "@t45/contracts/resources/Workflows";
 import { useBlocker } from "@tanstack/react-router";
 import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -9,9 +9,17 @@ import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { PageBreadcrumbLink } from "../PageBreadcrumb";
 import { WorkFrame } from "../work/WorkFrame";
-import { useWorkflowDefinitionDetail } from "./useWorkflowDefinitionDetail";
+import { useWorkflowData } from "./useWorkflowData";
 import { WorkflowStepEditor } from "./WorkflowStepEditor";
-import { blankStep, cleanSteps, listEntries, stepPath, updateStep } from "./workflowLogic";
+import {
+  blankStep,
+  cleanSteps,
+  editsBetween,
+  inputSourcesFor,
+  listEntries,
+  stepPath,
+  updateStep,
+} from "./workflowLogic";
 
 /** The steps leading to an open sub-step, each a way back to it; the first goes to all steps. */
 function StepTrail({
@@ -44,27 +52,31 @@ function StepTrail({
 }
 
 /**
- * Edits a definition's shared steps and fields. A
- * sub-step, at any depth, opens on its own (`openStepKey`), with the trail back. Leaving with
- * unsaved changes asks first; moving between steps here keeps them.
+ * Edits the steps and fields of a workflow's newest version. Saving a draft overwrites it; saving
+ * over a version a project adopted starts the next one. A sub-step, at any depth, opens on its own
+ * (`openStepKey`), with the trail back. Leaving with unsaved changes asks first; moving between
+ * steps here keeps them.
  */
 export function WorkflowSteps({
-  definitionId,
+  workflowId,
   openStepKey,
   onOpenStep,
 }: {
-  readonly definitionId: string;
+  readonly workflowId: string;
   readonly openStepKey: string | null;
   readonly onOpenStep: (key: string | null) => void;
 }) {
   const [steps, setSteps] = useState<ReadonlyArray<DraftStep>>([]);
   const [dirty, setDirty] = useState(false);
   /** Takes the server's steps as they are, dropping unsaved edits. */
-  const adopt = useCallback((loaded: WorkflowDefinitionView) => {
-    setSteps(loaded.definition.steps);
+  const resetToLoaded = useCallback((loaded: WorkflowView) => {
+    setSteps(loaded.version.steps);
     setDirty(false);
   }, []);
-  const { detail, busy, error, run } = useWorkflowDefinitionDetail(definitionId, adopt);
+  const { detail, busy, error, run } = useWorkflowData(
+    useCallback(() => api("workflows.getWorkflow", { workflowId }), [workflowId]),
+    resetToLoaded,
+  );
 
   useBlocker({
     // Opening a sub-step stays on this page and keeps the unsaved steps.
@@ -84,8 +96,8 @@ export function WorkflowSteps({
     );
   }
 
-  const { definition, canManage } = detail;
-  const disabled = busy || !canManage;
+  const { workflow, version, canEdit } = detail;
+  const disabled = busy || !canEdit || workflow.isArchived;
   const edit = (next: ReadonlyArray<DraftStep>) => {
     setSteps(next);
     setDirty(true);
@@ -93,9 +105,10 @@ export function WorkflowSteps({
   const addStep = () => edit([...steps, blankStep()]);
   const save = () => {
     void run(() =>
-      api("workflows.updateDefinition", {
-        definitionId: definition.id,
-        steps: cleanSteps(steps),
+      api("workflows.saveWorkflowDraft", {
+        versionId: version.id,
+        revision: version.revision,
+        edits: editsBetween(version.steps, cleanSteps(steps)),
       }),
     );
   };
@@ -107,10 +120,10 @@ export function WorkflowSteps({
       title="Steps"
       parent={
         <PageBreadcrumbLink
-          to="/settings/workflow-blueprints/$definitionId"
-          params={{ definitionId: definition.id }}
+          to="/settings/workflows/$workflowId"
+          params={{ workflowId: workflow.id }}
         >
-          {definition.name}
+          {workflow.name}
         </PageBreadcrumbLink>
       }
       actions={
@@ -125,12 +138,14 @@ export function WorkflowSteps({
       }
     >
       <p className="text-sm text-muted-foreground">
-        These steps and fields are shared by every workflow using this blueprint. Assign people in
-        each workflow's settings.
+        {version.isFrozen
+          ? `Version ${version.number} is in use and no longer changes: saving starts version ${version.number + 1}. `
+          : `Version ${version.number} is a draft until a project adopts it. `}
+        Tickets keep the version they started on.
       </p>
-      {!canManage ? (
+      {!canEdit ? (
         <p className="text-sm text-muted-foreground">
-          Editing requires admin access to every workflow using this blueprint.
+          Only this workflow's creator, its editors and organization admins can edit it.
         </p>
       ) : null}
       <section aria-label="Step Editor" className="flex flex-col gap-2.5">
@@ -143,6 +158,7 @@ export function WorkflowSteps({
               <WorkflowStepEditor
                 key={open.id}
                 step={open}
+                inputSources={inputSourcesFor(steps, open.id)}
                 position={null}
                 onChange={(next) => edit(updateStep(steps, open.id, () => next))}
                 onOpenSubStep={onOpenStep}
@@ -162,6 +178,7 @@ export function WorkflowSteps({
                   >
                     <WorkflowStepEditor
                       step={place.entry}
+                      inputSources={inputSourcesFor(steps, place.entry.id)}
                       position={place}
                       onChange={place.replace}
                       onOpenSubStep={onOpenStep}

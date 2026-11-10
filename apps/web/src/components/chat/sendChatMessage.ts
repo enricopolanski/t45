@@ -8,7 +8,6 @@ import {
   releaseDraftAttachments,
   startAttachmentUpload,
 } from "../../lib/attachmentUploadQueue";
-import { buildMessageContext } from "../../lib/composerContextReferences";
 import { api } from "../../rpc/api";
 import { chatErrorReason, chatSessionKey, chats } from "../../state/chats";
 import { toastFailure } from "../../state/query";
@@ -20,7 +19,7 @@ export const sendsInFlight = new Set<ChatId>();
 export async function sendChatMessage(send: {
   readonly chatId: ChatId;
   readonly agentId: Agent["id"] | null;
-  readonly workflowId?: string | null;
+  readonly projectId?: string | null;
   readonly prompt: string;
   readonly attachments: ReadonlyArray<ComposerAttachment>;
   readonly setBusy: (busy: boolean) => void;
@@ -40,21 +39,14 @@ export async function sendChatMessage(send: {
       toastManager.add({ type: "error", title: "Retry or remove failed uploads before sending." });
       return;
     }
-    const context = buildMessageContext(
-      attachments.map((attachment, index) => ({
-        attachment,
-        attachmentId: uploaded[index]?.id ?? attachment.id,
-      })),
-    );
     try {
       await api("chats.send", {
         chatId,
         ...(send.agentId === null ? {} : { agentId: send.agentId }),
-        ...(send.workflowId == null ? {} : { workflowId: send.workflowId }),
+        ...(send.projectId == null ? {} : { projectId: send.projectId }),
         inputId,
         text: send.prompt.trim(),
         attachments: uploaded,
-        ...(context === undefined ? {} : { context }),
       });
     } catch (error) {
       if (chatErrorReason(error) === "input_conflict") {

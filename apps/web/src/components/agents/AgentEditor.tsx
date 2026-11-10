@@ -1,13 +1,19 @@
 import type { AgentModels } from "@t45/contracts/resources/Agents";
-import type { Agent } from "@t45/contracts/models/Agent";
+import {
+  type Agent,
+  type AppTool,
+  PROJECT_TOOLS_MCP_NAME,
+  STEP_TOOLS_MCP_NAME,
+  WORKFLOW_DRAFTING_MCP_NAME,
+} from "@t45/contracts/models/Agent";
 import type { StringId } from "@t45/contracts/models/primitives";
 import type { Skill } from "@t45/contracts/models/Skill";
-import { STEP_TOOLS_MCP, WORKFLOW_DRAFTING_MCP, WORKFLOW_INSTANCE_MCP } from "@t45/core/agentTools";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState, useTransition } from "react";
 
 import { describeFailure } from "../../lib/failures";
 import { saveAgent, useAgentForm } from "../../state/agents";
+import { useIsAdmin } from "../../state/session";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Field } from "../ui/field";
@@ -17,160 +23,58 @@ import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { ErrorText } from "../ui/error-text";
 import { Section } from "../Section";
-import { fileRecord, fileRows, FilesEditor, RowsEditor } from "./FilesEditor";
+import { fileRecord, fileRows, FilesEditor } from "./FilesEditor";
 
-type McpServer = Agent["mcpServers"][string];
-
-/**
- * An MCP server as the form edits it: the command line or URL, and KEY=VALUE lines. `server` is
- * the one it was made from, whose settings the form doesn't show, such as Code Mode, it keeps.
- */
-type McpDraft = {
+const APP_TOOLS: ReadonlyArray<{
+  readonly tool: AppTool;
   readonly name: string;
-  readonly type: "local" | "remote";
-  readonly target: string;
-  readonly entries: string;
-  readonly server: McpServer | null;
-};
-
-const toDraft = ([name, server]: [string, McpServer]): McpDraft =>
-  server.type === "local"
-    ? {
-        name,
-        type: "local",
-        target: server.command.join(" "),
-        entries: Object.entries(server.environment ?? {})
-          .map(([key, value]) => `${key}=${value}`)
-          .join("\n"),
-        server,
-      }
-    : {
-        name,
-        type: "remote",
-        target: server.url,
-        entries: Object.entries(server.headers ?? {})
-          .map(([key, value]) => `${key}: ${value}`)
-          .join("\n"),
-        server,
-      };
-
-/** Environment lines split at their first `=`, header lines at their first `:`. */
-const parseEntries = (text: string, separator: string): Record<string, string> =>
-  Object.fromEntries(
-    text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.includes(separator))
-      .map((line) => {
-        const at = line.indexOf(separator);
-        return [line.slice(0, at).trim(), line.slice(at + 1).trim()];
-      })
-      .filter(([key]) => !!key),
-  );
-
-const fromDraft = ({ name, type, target, entries, server }: McpDraft): [string, McpServer] => [
-  name,
-  type === "local"
-    ? {
-        ...(server?.type === "local" ? server : {}),
-        type,
-        command: target.trim().split(/\s+/),
-        environment: parseEntries(entries, "="),
-      }
-    : {
-        ...(server?.type === "remote" ? server : {}),
-        type,
-        url: target.trim(),
-        headers: parseEntries(entries, ":"),
-      },
+  readonly description: string;
+}> = [
+  {
+    tool: WORKFLOW_DRAFTING_MCP_NAME,
+    name: "Workflow drafting",
+    description: "Its chats draft workflows for the member to save.",
+  },
+  {
+    tool: PROJECT_TOOLS_MCP_NAME,
+    name: "Project operations",
+    description: "Its chats belong to a project: it reads tickets, starts them and fills fields.",
+  },
+  {
+    tool: STEP_TOOLS_MCP_NAME,
+    name: "Step tools",
+    description: "Workflow automations can run it on a step, where it fills fields and comments.",
+  },
 ];
 
-const PRESETS = [
-  { mcp: WORKFLOW_DRAFTING_MCP, label: "Add workflow drafting" },
-  { mcp: WORKFLOW_INSTANCE_MCP, label: "Add workflow operations" },
-  { mcp: STEP_TOOLS_MCP, label: "Add step tools" },
-] as const;
-
-function McpServersEditor({
-  servers,
-  onChange,
+function AppToolPicker({
+  selected,
+  disabled,
 }: {
-  readonly servers: ReadonlyArray<McpDraft>;
-  readonly onChange: (servers: ReadonlyArray<McpDraft>) => void;
+  readonly selected: ReadonlyArray<AppTool>;
+  readonly disabled: boolean;
 }) {
   return (
-    <RowsEditor
-      rows={servers}
-      onChange={onChange}
-      blank={{ name: "", type: "local", target: "", entries: "", server: null }}
-      addLabel="Add MCP server"
-      actions={PRESETS.map(({ mcp, label }) =>
-        servers.some((server) => server.name === mcp.name) ? null : (
-          <Button
-            key={mcp.name}
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => onChange([...servers, toDraft([mcp.name, mcp.server])])}
-          >
-            {label}
-          </Button>
-        ),
-      )}
-    >
-      {(server, edit, remove) => (
-        <div className="flex flex-col gap-2 rounded-md border border-border p-2">
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem_auto]">
-            <Input
-              aria-label="MCP server name"
-              placeholder="Name, such as files"
-              required
-              pattern="[A-Za-z0-9_\-]+"
-              value={server.name}
-              onChange={(event) => edit({ name: event.target.value })}
-            />
-            <Select
-              value={server.type}
-              onValueChange={(value) => edit({ type: value === "remote" ? "remote" : "local" })}
-            >
-              <SelectTrigger aria-label="MCP server type">
-                <SelectValue>
-                  {(value: string) => (value === "remote" ? "Remote URL" : "Local command")}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                <SelectItem value="local">Local command</SelectItem>
-                <SelectItem value="remote">Remote URL</SelectItem>
-              </SelectPopup>
-            </Select>
-            {remove}
-          </div>
-          <Input
-            aria-label={server.type === "local" ? "MCP server command" : "MCP server URL"}
-            placeholder={
-              server.type === "local"
-                ? "Command, such as npx -y @modelcontextprotocol/server-filesystem ."
-                : "URL, such as https://mcp.example.com/mcp"
-            }
-            required
-            pattern=".*\S.*"
-            value={server.target}
-            onChange={(event) => edit({ target: event.target.value })}
+    <div className="flex flex-col gap-1">
+      {APP_TOOLS.map(({ tool, name, description }) => (
+        <label
+          key={tool}
+          className="flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
+        >
+          <Checkbox
+            name="appTools"
+            value={tool}
+            aria-label={`Use ${name}`}
+            defaultChecked={selected.includes(tool)}
+            disabled={disabled}
           />
-          <Textarea
-            aria-label={server.type === "local" ? "MCP server environment" : "MCP server headers"}
-            placeholder={
-              server.type === "local"
-                ? "Environment, one KEY=value per line"
-                : "Headers, one Name: value per line"
-            }
-            rows={2}
-            value={server.entries}
-            onChange={(event) => edit({ entries: event.target.value })}
-          />
-        </div>
-      )}
-    </RowsEditor>
+          <span className="min-w-0">
+            <span className="block text-sm">{name}</span>
+            <span className="block text-xs text-muted-foreground">{description}</span>
+          </span>
+        </label>
+      ))}
+    </div>
   );
 }
 
@@ -183,14 +87,20 @@ function SkillPicker({
   readonly selected: ReadonlyArray<StringId>;
   readonly disabled: boolean;
 }) {
+  const isAdmin = useIsAdmin();
   if (skills.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No skills yet.{" "}
-        <Link to="/settings/agents/skills/new" className="underline">
-          Create one
-        </Link>
-        .
+        No skills yet.
+        {isAdmin ? (
+          <>
+            {" "}
+            <Link to="/settings/agents/skills/new" className="underline">
+              Create one
+            </Link>
+            .
+          </>
+        ) : null}
       </p>
     );
   }
@@ -262,9 +172,6 @@ function AgentForm({
 }) {
   const navigate = useNavigate();
   const [files, setFiles] = useState(() => fileRows(agent?.files ?? {}));
-  const [servers, setServers] = useState<ReadonlyArray<McpDraft>>(() =>
-    Object.entries(agent?.mcpServers ?? {}).map(toDraft),
-  );
   const [error, setError] = useState<string | null>(null);
   const [busy, startTransition] = useTransition();
   return (
@@ -277,8 +184,6 @@ function AgentForm({
         const model = form.get("model") ?? agent?.model;
         if (typeof model !== "string" || model === "") {
           setError("Choose a model.");
-        } else if (new Set(servers.map((server) => server.name)).size < servers.length) {
-          setError("Give each MCP server its own name.");
         } else {
           startTransition(async () => {
             setError(null);
@@ -289,9 +194,10 @@ function AgentForm({
                 model,
                 files: fileRecord(files),
                 skills: form.getAll("skills").map(String),
-                mcpServers: Object.fromEntries(servers.map(fromDraft)),
+                appTools: APP_TOOLS.map(({ tool }) => tool).filter((tool) =>
+                  form.getAll("appTools").includes(tool),
+                ),
                 permissions: { network: form.get("network") === "open" ? "open" : "provider" },
-                // Members chat with an agent only once an admin makes it available.
                 isConversational: form.has("isConversational"),
               });
               await navigate({ to: "/settings/agents" });
@@ -347,7 +253,7 @@ function AgentForm({
         </Section>
         <Section
           title="Chat"
-          description="Allow members to start conversations with this agent. It can also run automations; workflow automations require the step tools."
+          description="Allow whoever can use this agent to start conversations with it. It can also run automations; workflow automations require the step tools."
           card
         >
           <label className="flex items-center justify-between gap-3 text-sm">
@@ -367,12 +273,8 @@ function AgentForm({
         >
           <SkillPicker skills={skills} selected={agent?.skills ?? []} disabled={busy} />
         </Section>
-        <Section
-          title="MCP servers"
-          description={`Added to opencode.json in every chat's folder. Workflow drafting lets its chats draft workflows (only from the server named ${WORKFLOW_DRAFTING_MCP.name}); step tools let it take or help with workflow steps.`}
-          card
-        >
-          <McpServersEditor servers={servers} onChange={setServers} />
+        <Section title="Tools" description="What the agent can do in T45." card>
+          <AppToolPicker selected={agent?.appTools ?? []} disabled={busy} />
         </Section>
         <Section
           title="Files"
@@ -401,8 +303,8 @@ function AgentForm({
 }
 
 /**
- * The page that builds an agent: who it is, its instructions, what runs it and where, and the
- * skills, MCP servers, and files every chat's folder starts with.
+ * The page that builds an agent: who it is, its instructions, what runs it and where, its tools,
+ * and the skills and files every chat's folder starts with.
  */
 export function AgentEditor({ agentId }: { readonly agentId: string | null }) {
   return <AgentForm {...useAgentForm(agentId)} />;

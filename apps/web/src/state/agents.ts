@@ -10,6 +10,7 @@ import { LoadFailed, mutate, useLoaded } from "./query";
 import { apiQuery } from "./rpc";
 
 export const agentsList = apiQuery("agents.list")(undefined);
+export const stepAutomationList = apiQuery("automations.listForSteps")(undefined);
 const skillsList = apiQuery("skills.list")(undefined);
 
 const agentForm = Atom.family((agentId: string | null) =>
@@ -44,8 +45,8 @@ export const chatTargets = apiQuery("chats.listTargets")(undefined);
 export const agentActions = {
   archive: (agentId: string) =>
     mutate(api("agents.archive", { agentId }), agentsList, "Couldn't archive the agent"),
-  restore: (agentId: string) =>
-    mutate(api("agents.restore", { agentId }), agentsList, "Couldn't restore the agent"),
+  publish: (agentId: string) =>
+    mutate(api("agents.publish", { agentId }), agentsList, "Couldn't publish the agent"),
 };
 
 export const saveAgent = (agentId: string | null, draft: ApiInput<"agents.create">) =>

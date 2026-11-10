@@ -17,13 +17,6 @@ const REASONS = {
     send: (view: StepView, reason: string) =>
       api("workflows.blockStep", { stepId: view.step.id, reason }),
   },
-  reject: {
-    title: "Request changes",
-    placeholder: "What needs fixing",
-    confirmLabel: "Request changes",
-    send: (view: StepView, reason: string) =>
-      api("workflows.rejectStep", { stepId: view.step.id, reason }),
-  },
   cancel: {
     title: "Cancel this item",
     placeholder: "Why it stops here",
@@ -35,8 +28,8 @@ const REASONS = {
 
 /**
  * The open step's status, like a ticket's: a button naming where it stands that opens the moves
- * the viewer can make from there. Those who oversee the workflow also cancel the item there, and
- * reopen it once cancelled. Without a move to make, the status shows as a badge.
+ * the viewer can make from there. Those who oversee the project also cancel the item there, for
+ * good. Without a move to make, the status shows as a badge.
  */
 export function StepStatus({
   view,
@@ -68,14 +61,6 @@ export function StepStatus({
           Mark done
         </MenuItem>
       ),
-      actions.canApprove && (
-        <MenuItem
-          key="approve"
-          onClick={() => void act(() => api("workflows.approveStep", { stepId }))}
-        >
-          Approve
-        </MenuItem>
-      ),
     ],
     [
       actions.canBlock && (
@@ -93,24 +78,9 @@ export function StepStatus({
       ),
     ],
     [
-      actions.canReject && (
-        <MenuItem key="reject" onClick={() => ask("reject")}>
-          Request changes
-        </MenuItem>
-      ),
-    ],
-    [
       actions.canCancelTicket && (
         <MenuItem key="cancel" variant="destructive" onClick={() => ask("cancel")}>
           Cancel item
-        </MenuItem>
-      ),
-      actions.canReopenTicket && (
-        <MenuItem
-          key="reopen"
-          onClick={() => void act(() => api("workflows.reopenTicket", { ticketId: item.id }))}
-        >
-          Reopen item
         </MenuItem>
       ),
     ],

@@ -13,7 +13,7 @@ const SUBAGENT = Session.ID.make("ses_child");
 
 it.effect.each([
   { title: "the conversational agent on screen", conversational: true },
-  { title: "an eligible fallback for a task-only agent", conversational: false },
+  { title: "an eligible fallback for an automation-only agent", conversational: false },
 ])("opens a new chat with $title", ({ conversational }) =>
   Effect.gen(function* () {
     const fake = yield* makeFakeApi;
@@ -45,9 +45,9 @@ it.effect.each([
     expect(request.tag).toBe("chats.listTargets");
     request.succeed([
       ...(conversational
-        ? [{ agentId: CHAT_SUMMARY.agentId, name: "Analyst", workflowId: null }]
+        ? [{ agentId: CHAT_SUMMARY.agentId, name: "Analyst", projectId: null }]
         : []),
-      { agentId: "fallback", name: "Assistant", workflowId: null },
+      { agentId: "fallback", name: "Assistant", projectId: null },
     ]);
     yield* Fiber.join(opening);
 

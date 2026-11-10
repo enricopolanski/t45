@@ -9,9 +9,9 @@ import { PageContent } from "../PageContent";
 import { PageBreadcrumb } from "../PageBreadcrumb";
 
 /**
- * The page shell of the work, workflow and agent pages: a header with the page's location, then
- * the content, starting with the page's actions. The content loads on its own, so the header stays
- * while it does.
+ * The page shell of the work, project, workflow and agent pages: a header with the page's location,
+ * then the content, starting with the page's actions. The content loads on its own, so the header
+ * stays while it does.
  */
 export function WorkFrame({
   title,

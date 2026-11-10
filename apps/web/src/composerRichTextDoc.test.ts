@@ -9,12 +9,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildDocJson,
   caretTakesMarksBefore,
-  collapsedToFlat,
+  markdownToFlat,
   COMPOSER_UNDO_GROUP_DELAY,
   type ComposerChangeKind,
   ComposerCodeExtension,
   ComposerTaskItemExtension,
-  flatTo,
+  flatToMarkdown,
   flatToPm,
   groupUndoByChangeKind,
   markAsClipboardEdit,
@@ -186,6 +186,7 @@ describe("composer rich text document model", () => {
     "- [ ] parent\n  - [ ] child\n- [ ]",
     "para\n- [ ] task\npara",
     `**before ${CHIP} after**`,
+    `${CHIP} a ${CHIP} tail`,
   ])("maps editable positions in %s", (value) => {
     const doc = ProseMirrorNode.fromJSON(schema, buildDocJson(value));
     const map = serializeEditorDoc(doc);
@@ -193,7 +194,7 @@ describe("composer rich text document model", () => {
       const position = flatToPm(map, flat);
       expect(doc.resolve(position).parent.isTextblock).toBe(true);
       expect(pmToFlat(map, position)).toBe(flat);
-      expect(collapsedToFlat(map, flatTo(map, flat, "collapsed"))).toBe(flat);
+      expect(markdownToFlat(map, flatToMarkdown(map, flat))).toBe(flat);
     }
   });
 
@@ -292,7 +293,7 @@ describe("composer rich text document model", () => {
     expect(serializeEditorDoc(rebuilt).value).toBe(map.value);
     for (let flat = 0; flat <= map.docLength; flat += 1) {
       expect(pmToFlat(map, flatToPm(map, flat))).toBe(flat);
-      expect(collapsedToFlat(map, flatTo(map, flat, "collapsed"))).toBe(flat);
+      expect(markdownToFlat(map, flatToMarkdown(map, flat))).toBe(flat);
       if (flat < map.docLength && !/\s/.test(doc.textContent[flat]!)) {
         expect(rebuilt.resolve(flat + 1).nodeAfter!.marks.map((mark) => mark.type.name)).toEqual(
           doc.resolve(flat + 1).nodeAfter!.marks.map((mark) => mark.type.name),
@@ -311,12 +312,12 @@ describe("composer rich text document model", () => {
     expect(roundTrip("- [X] done").value).toBe("- [x] done");
   });
 
-  it("maps every document offset through collapsed coordinates and back", () => {
+  it("maps every document offset through Markdown coordinates and back", () => {
     const value = `hi **bold** ${CHIP} bye`;
     const map = roundTrip(value);
     expect(map.value).toBe(value);
     for (let flat = 0; flat <= map.docLength; flat += 1) {
-      expect(collapsedToFlat(map, flatTo(map, flat, "collapsed"))).toBe(flat);
+      expect(markdownToFlat(map, flatToMarkdown(map, flat))).toBe(flat);
     }
   });
 
@@ -325,10 +326,10 @@ describe("composer rich text document model", () => {
     const map = roundTrip(value);
     expect(map.value).toBe(value);
     // document text is "a bold c" (flat), markdown has the markers.
-    expect(flatTo(map, 2, "md")).toBe(4);
-    expect(flatTo(map, 6, "md")).toBe(10);
-    expect(collapsedToFlat(map, 3)).toBe(2);
-    expect(collapsedToFlat(map, 9)).toBe(6);
+    expect(flatToMarkdown(map, 2)).toBe(4);
+    expect(flatToMarkdown(map, 6)).toBe(10);
+    expect(markdownToFlat(map, 3)).toBe(2);
+    expect(markdownToFlat(map, 9)).toBe(6);
   });
 });
 

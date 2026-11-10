@@ -15,7 +15,7 @@ export const RpcApi = Skills.merge(
   Organization,
   Chats,
   Automations,
-  Workflows,
   Assignments,
   Notifications,
+  Workflows,
 ).middleware(Authorization);

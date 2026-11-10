@@ -50,13 +50,13 @@ export default function ChatView({
   chatId,
   sessionId,
   newAgentId,
-  newWorkflowId,
+  newProjectId,
 }: {
   readonly chatId: ChatId;
   /** A subagent session of the chat to show, read only; null for the chat itself. */
   readonly sessionId: Session.ID | null;
   readonly newAgentId: Agent["id"] | null;
-  readonly newWorkflowId: string | null;
+  readonly newProjectId: string | null;
 }) {
   const readOnly = sessionId !== null;
   const newChat = useNewChat();
@@ -111,9 +111,9 @@ export default function ChatView({
   const queuedInputs = sendingInput === null ? pendingInputs : pendingInputs.slice(1);
 
   const newAgent = useApiQuery(isNew ? chatTargets : null).data?.find(
-    (target) => target.agentId === newAgentId && target.workflowId === newWorkflowId,
+    (target) => target.agentId === newAgentId && target.projectId === newProjectId,
   );
-  const agentName = chatInfo?.workflowName ?? chatInfo?.agentName ?? newAgent?.name ?? null;
+  const agentName = chatInfo?.projectName ?? chatInfo?.agentName ?? newAgent?.name ?? null;
   const title = chatInfo !== null ? titleOf(chatInfo) : isNew ? titleOf({ title: null }) : "";
 
   // A failure already shown in the conversation needs no banner.
@@ -287,7 +287,7 @@ export default function ChatView({
     void sendChatMessage({
       chatId,
       agentId: isNew ? newAgentId : null,
-      workflowId: isNew ? newWorkflowId : null,
+      projectId: isNew ? newProjectId : null,
       prompt,
       attachments,
       setBusy: setSendBusy,

@@ -14,7 +14,7 @@ import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 
 /**
- * Asks for a reason before acting: rejecting, blocking, and cancelling all record one. Opened by
+ * Asks for a reason before acting: blocking and cancelling both record one. Opened by
  * its caller; `onConfirm` answers with an error message, or null on success.
  */
 export function ReasonDialog({

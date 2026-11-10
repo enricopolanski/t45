@@ -203,12 +203,7 @@ export function useChatQuestions({
     promptRef.current = "";
     composerRef.current?.resetCursorState();
   };
-  const onTypeAnswer = (
-    fieldKey: string,
-    value: string,
-    nextCursor: number,
-    expandedCursor: number,
-  ) => {
+  const onTypeAnswer = (fieldKey: string, value: string, nextCursor: number) => {
     if (!asked) return;
     const field = asked.fields.find((entry) => entry.key === fieldKey);
     if (!field?.allowCustomAnswer) return;
@@ -217,11 +212,7 @@ export function useChatQuestions({
       typeAnswer(current, value),
     );
     const snapshot = composerRef.current?.readSnapshot();
-    if (
-      snapshot?.value !== value ||
-      snapshot.cursor !== nextCursor ||
-      snapshot.expandedCursor !== expandedCursor
-    ) {
+    if (snapshot?.value !== value || snapshot.cursor !== nextCursor) {
       composerRef.current?.focusAt(nextCursor);
     }
   };

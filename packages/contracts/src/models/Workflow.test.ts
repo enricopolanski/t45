@@ -1,66 +1,64 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
-import type { Task } from "./Task.ts";
 
+import { STEP_TOOLS_MCP_NAME } from "./Agent.ts";
+import { AutomationId } from "./Automation.ts";
 import {
   type Step,
   type StepDefinition,
   type Ticket,
-  type Workflow,
-  type StepAutomation,
-  automationsSubmitted,
-  childSteps,
+  type Project,
+  type WorkflowEdit,
+  type WorkflowVersion,
+  applyWorkflowEdits,
+  canAttachAgent,
+  canSeeStep,
   completeTicketStep,
   currentStep,
-  definitionChangeRefusal,
-  needsWorkAfterDefinitionChange,
+  hasValidInputs,
+  occupiedStep,
   putTicketStep,
-  resolveAssignee,
-  resolveResponsible,
-  stepAfterDefinitionChange,
-  stepPeopleOnEntry,
-  subStepsToEnter,
+  stepEntryRefusal,
+  stepIds,
+  stepsAssignedUnder,
+  ticketAccess,
   ticketStartRefusal,
 } from "./Workflow.ts";
 
 const at = DateTime.makeUnsafe("2026-10-26T12:00:00.000Z");
-const workflow: Workflow = {
-  id: "workflow01",
-  definitionId: "definition01",
+const project: Project = {
+  id: "project01",
+  workflowId: "workflow01",
+  workflowVersionId: "version01",
   name: "Review",
-  responsible: "owner01",
   adminUserIds: ["admin01", "admin02"],
-  defaultAssignments: {},
+  defaultAssignees: {},
   slug: null,
-  isPublic: false,
   isArchived: false,
 };
-const definition = (id: string, subSteps: ReadonlyArray<StepDefinition> = []): StepDefinition => ({
+const definition = (
+  id: string,
+  subSteps: ReadonlyArray<StepDefinition> = [],
+  extra: Partial<StepDefinition> = {},
+): StepDefinition => ({
   id,
   name: id,
   instructions: "",
   fields: [],
   subSteps,
+  inputs: [],
+  automationIds: [],
+  ...extra,
+});
+const versionOf = (steps: ReadonlyArray<StepDefinition>): WorkflowVersion => ({
+  id: "version01",
+  workflowId: project.workflowId,
+  number: 1,
+  revision: 0,
+  isFrozen: true,
+  steps,
 });
 
-it("requires every automation to submit before review", () => {
-  const entries: ReadonlyArray<StepAutomation> = [
-    { id: "entry01", agentId: "agent01", instructions: "Draft" },
-    { id: "entry02", agentId: "agent01", instructions: "Check" },
-  ];
-  const tasks = entries.map((entry): Pick<Task, "trigger" | "state"> => ({
-    trigger: { type: "step", ticketId: ticket.id, stepId: step.id, automationId: entry.id },
-    state: { type: "submitted" },
-  }));
-  assert.isFalse(automationsSubmitted(entries, tasks.slice(0, 1)));
-  assert.isFalse(
-    automationsSubmitted(
-      entries,
-      tasks.map((task) => ({ ...task, state: { type: "active" } })),
-    ),
-  );
-  assert.isTrue(automationsSubmitted(entries, tasks));
-});
 const root = definition("root001");
 const step: Step = {
   id: "step001",
@@ -68,79 +66,123 @@ const step: Step = {
   parentStepId: null,
   status: { type: "working", at },
   assignee: "worker01",
-  responsible: "owner01",
   values: {},
-  automations: [],
 };
 const ticket: Ticket = {
   id: "ticket01",
-  workflowId: workflow.id,
+  projectId: project.id,
+  workflowVersionId: "version01",
   title: "Review",
   description: "",
-  dueDate: null,
   status: { type: "open" },
   steps: [step],
   createdAt: at,
 };
 
-describe("step people", () => {
-  it("uses a team's defaults before inherited people, without inventing an assignee", () => {
-    const configured = {
-      ...workflow,
-      defaultAssignments: {
-        [root.id]: { automations: [], assignee: "named01", responsible: "approver01" },
-      },
-    };
-    assert.deepEqual(stepPeopleOnEntry(configured, root, "previous01"), {
-      assignee: "named01",
-      responsible: "approver01",
-    });
-    assert.deepEqual(stepPeopleOnEntry(workflow, root, "previous01"), {
-      assignee: "previous01",
-      responsible: null,
-    });
-    assert.equal(resolveAssignee(null, "owner01", false).assignee, null);
-  });
-
-  it("replaces departed people with the responsible or the oldest active admin and requests the right notices", () => {
-    const resolved = resolveResponsible(workflow, "departed01", new Set(["admin02"]));
-    assert.equal(resolved.responsible, "admin02");
-    assert.deepEqual(resolved.notices, ["names_deactivated", "needs_responsible"]);
-    assert.deepEqual(resolveAssignee("departed02", resolved.responsible!, false), {
-      assignee: "admin02",
-      namesDeactivated: true,
-    });
+describe("starting a ticket", () => {
+  it("is for the members of the adopted version's first step, whatever else they manage", () => {
+    const adopted = versionOf([root, definition("next001")]);
+    assert.equal(ticketStartRefusal(new Set([root.id]), project, adopted), null);
+    assert.equal(ticketStartRefusal(new Set(["next001"]), project, adopted), "cannot_start_ticket");
+    assert.equal(ticketStartRefusal(new Set([root.id]), project, null), "not_adopted");
     assert.equal(
-      resolveResponsible(workflow, "approver01", new Set(["approver01", "admin02"])).responsible,
-      "approver01",
+      ticketStartRefusal(new Set([root.id]), { ...project, isArchived: true }, adopted),
+      "project_archived",
     );
   });
+});
 
-  it("lets an organization admin start an unassigned first step while retaining authorization", () => {
-    const blueprint = {
-      id: workflow.definitionId,
-      name: "Review",
-      steps: [root],
-      isArchived: false,
+describe("seeing a ticket", () => {
+  const second = definition("second01", [definition("child01")]);
+  const version = versionOf([root, second]);
+  const done: Step = { ...step, status: { type: "completed", at } };
+  const inSecond: Step = { ...step, id: "step002", stepDefinitionId: second.id };
+  const child: Step = {
+    ...step,
+    id: "step003",
+    stepDefinitionId: "child01",
+    parentStepId: "step002",
+  };
+  const open: Ticket = { ...ticket, steps: [done, inSecond, child] };
+  const sees = (memberOf: ReadonlyArray<string>, shown: Ticket) => {
+    const access = ticketAccess(new Set(memberOf), version, shown);
+    return shown.steps.filter((each) => canSeeStep(access, shown, each)).map((each) => each.id);
+  };
+
+  it("shows an open ticket to the members of the step it is in, with its sub-steps", () => {
+    assert.deepEqual(sees([second.id], open), ["step002", "step003"]);
+    // The step it left is out of its members' sight, and so is one it hasn't reached.
+    assert.deepEqual(sees([root.id], open), []);
+    assert.deepEqual(sees([root.id], ticket), ["step001"]);
+    assert.deepEqual(sees([second.id], ticket), []);
+    assert.deepEqual(sees([root.id, second.id], open), ["step002", "step003"]);
+  });
+
+  it("shows a closed ticket whole to a member of every step, else its last step to that step's", () => {
+    const finished: Ticket = {
+      ...open,
+      status: { type: "done" },
+      steps: [done, { ...inSecond, status: { type: "completed", at } }, child],
     };
-    assert.equal(
-      ticketStartRefusal({ id: "admin01", isOrgAdmin: true }, workflow, blueprint),
-      null,
+    assert.deepEqual(sees([root.id, second.id], finished), ["step001", "step002", "step003"]);
+    assert.deepEqual(sees([second.id], finished), ["step002", "step003"]);
+    assert.deepEqual(sees([root.id], finished), []);
+  });
+
+  it("takes a cancelled ticket's last step to be where it stopped", () => {
+    const cancelled: Ticket = { ...ticket, status: { type: "cancelled", reason: "Withdrawn" } };
+    assert.equal(occupiedStep(cancelled)?.id, "step001");
+    assert.deepEqual(sees([root.id], cancelled), ["step001"]);
+    // The step it never reached shows nothing to its members.
+    assert.deepEqual(sees([second.id], cancelled), []);
+  });
+
+  it("finds the steps that keep someone a member: theirs under the step, completed ones too", () => {
+    const assigned = (userId: string) =>
+      stepsAssignedUnder(open, second.id, userId).map((each) => each.id);
+    assert.deepEqual(assigned("worker01"), ["step002", "step003"]);
+    assert.deepEqual(assigned("other001"), []);
+    assert.deepEqual(
+      stepsAssignedUnder(open, root.id, "worker01").map((each) => each.id),
+      ["step001"],
     );
-    const configured = {
-      ...workflow,
-      defaultAssignments: {
-        [root.id]: { automations: [], assignee: "worker01", responsible: null },
-      },
-    };
-    assert.equal(
-      ticketStartRefusal({ id: "worker01", isOrgAdmin: false }, configured, blueprint),
-      null,
+  });
+});
+
+describe("step inputs", () => {
+  const total = { id: "total01", label: "Total", type: "number" } as const;
+  const input = { stepId: "first01", fieldId: total.id };
+  const first = definition("first01", [], { fields: [total] });
+  const reader = definition("child01", [], { inputs: [input] });
+
+  it("reads fields of steps under an earlier step only", () => {
+    assert.isTrue(hasValidInputs([first, definition("second01", [reader])]));
+    // Not a sibling's, not its own step's, not a later step's, and not a field that isn't there.
+    assert.isFalse(hasValidInputs([definition("second01", [first, reader])]));
+    assert.isFalse(hasValidInputs([definition("second01", [reader]), first]));
+    assert.isFalse(
+      hasValidInputs([
+        first,
+        definition("second01", [], { inputs: [{ ...input, fieldId: "gone01" }] }),
+      ]),
     );
-    assert.equal(
-      ticketStartRefusal({ id: "outsider01", isOrgAdmin: false }, configured, blueprint),
-      "cannot_start_ticket",
-    );
+  });
+
+  it("lets a step start only when its inputs, and its sub-steps', have a value", () => {
+    const second = definition("second01", [reader]);
+    const steps = [first, second];
+    const filled = (value: number | null): Ticket => ({
+      ...ticket,
+      steps: [
+        {
+          ...step,
+          stepDefinitionId: first.id,
+          values: value === null ? {} : { [total.id]: value },
+        },
+      ],
+    });
+    assert.equal(stepEntryRefusal(steps, filled(0), second), null);
+    assert.equal(stepEntryRefusal(steps, filled(null), second), "inputs_missing");
   });
 });
 
@@ -163,7 +205,7 @@ describe("ticket progression", () => {
     assert.equal(currentStep(completedRoot.ticket), null);
   });
 
-  it("the next root inherits the completed step's assignee unless its own default overrides it", () => {
+  it("completing a root leaves the ticket open for the next root", () => {
     const next = definition("next001");
     const result = completeTicketStep(ticket, [root, next], step, at);
     assert.equal(result.ticket.status.type, "open");
@@ -171,56 +213,113 @@ describe("ticket progression", () => {
     assert.equal(result.next?.id, next.id);
     const entered = { ...step, id: "nextstep01", stepDefinitionId: next.id };
     assert.equal(currentStep(putTicketStep(result.ticket, entered)), entered);
-    assert.equal(stepPeopleOnEntry(workflow, next, step.assignee).assignee, step.assignee);
   });
 });
 
-describe("changing a shared definition", () => {
-  it("refuses removing or reparenting active work, while retaining completed history", () => {
-    assert.equal(definitionChangeRefusal(ticket, []), "tickets_cannot_move");
-    assert.equal(
-      definitionChangeRefusal(ticket, [definition("parent01", [root])]),
-      "tickets_cannot_move",
-    );
-    const completed = completeTicketStep(ticket, [root], step, at).ticket;
-    assert.equal(definitionChangeRefusal(completed, []), null);
-    assert.equal(completed.steps[0]?.id, step.id);
-  });
+describe("editing a version's steps", () => {
+  const child = definition("child01");
+  const steps = [definition("first01", [child]), definition("second01")];
+  const apply = (edits: ReadonlyArray<WorkflowEdit>, used = stepIds(steps)) =>
+    applyWorkflowEdits(steps, edits, used);
 
-  it("new sub-steps invalidate a pending approval until those children are complete", () => {
-    const waiting: Step = { ...step, status: { type: "waiting_approval", at } };
-    const childDefinition = definition("child01");
-    const changedRoot = definition(root.id, [childDefinition]);
-    const waitingTicket = putTicketStep(ticket, waiting);
-    const additions = subStepsToEnter(waitingTicket, waiting, changedRoot);
+  it("renames and moves a step under the id it had", () => {
+    const edited = apply([
+      { type: "rename_step", stepId: "first01", name: "Intake" },
+      { type: "move_step", stepId: "first01", index: 1 },
+    ]);
     assert.deepEqual(
-      additions.map((entry) => entry.definition.id),
-      [childDefinition.id],
+      edited?.map((step) => [step.id, step.name]),
+      [
+        ["second01", "second01"],
+        ["first01", "Intake"],
+      ],
     );
-    const child = {
-      ...step,
-      id: "childstep01",
-      stepDefinitionId: childDefinition.id,
-      parentStepId: step.id,
-    };
-    const changedTicket = putTicketStep(waitingTicket, child);
-    assert.equal(needsWorkAfterDefinitionChange(changedTicket, waiting, changedRoot), true);
-    const complete = completeTicketStep(changedTicket, [changedRoot], child, at).ticket;
-    assert.equal(needsWorkAfterDefinitionChange(complete, waiting, changedRoot), false);
     assert.deepEqual(
-      childSteps(complete, [changedRoot], waiting).map((entry) => entry.id),
+      edited?.[1]?.subSteps.map((step) => step.id),
       [child.id],
     );
   });
 
-  it("removes values only for fields removed from the definition", () => {
-    const withValues = { ...step, values: { kept001: "retained", removed01: "obsolete" } };
-    const changed: StepDefinition = {
-      ...root,
-      fields: [{ id: "kept001", label: "Kept", type: "text" }],
-    };
-    assert.deepEqual(stepAfterDefinitionChange(withValues, changed).values, {
-      kept001: "retained",
+  it("adds a step only under an id the workflow never had", () => {
+    const add = (stepId: string): WorkflowEdit => ({
+      type: "add_step",
+      stepId,
+      parentStepId: "second01",
+      index: 0,
+      name: "Check",
     });
+    assert.deepEqual(
+      apply([add("added01")])?.[1]?.subSteps.map((step) => step.id),
+      ["added01"],
+    );
+    // A removed step doesn't come back under another parent.
+    assert.equal(apply([{ type: "remove_step", stepId: "child01" }, add("child01")]), null);
+    assert.equal(apply([add("gone001")], [...stepIds(steps), "gone001"]), null);
+    assert.equal(apply([add("added01"), add("added01")]), null);
+  });
+
+  it("changes a step's fields by their ids, and refuses what doesn't fit", () => {
+    const field = { id: "field01", label: "Total", type: "number" } as const;
+    const added = apply([{ type: "add_field", stepId: "child01", index: 0, field }]);
+    assert.deepEqual(added?.[0]?.subSteps[0]?.fields, [field]);
+    assert.equal(
+      apply([
+        { type: "add_field", stepId: "child01", index: 0, field },
+        { type: "add_field", stepId: "child01", index: 0, field },
+      ]),
+      null,
+    );
+    assert.equal(apply([{ type: "remove_field", stepId: "child01", fieldId: "field01" }]), null);
+    assert.equal(apply([{ type: "move_step", stepId: "first01", index: 2 }]), null);
+    assert.equal(apply([{ type: "rename_step", stepId: "missing1", name: "Lost" }]), null);
+  });
+
+  it("binds an input to a step once, and unbinds only what is bound", () => {
+    const input = { stepId: "first01", fieldId: "field01" };
+    const bind = { type: "bind_input", stepId: "second01", input } as const;
+    const unbind = { ...bind, type: "unbind_input" } as const;
+    assert.deepEqual(apply([bind])?.[1]?.inputs, [input]);
+    assert.equal(apply([bind, bind]), null);
+    assert.equal(apply([unbind]), null);
+    assert.deepEqual(apply([bind, unbind])?.[1]?.inputs, []);
+  });
+
+  it("attaches an automation to a step once, and detaches only what is attached", () => {
+    const automationId = AutomationId.make("automation01");
+    const attach = { type: "attach_automation", stepId: "second01", automationId } as const;
+    const detach = { ...attach, type: "detach_automation" } as const;
+    assert.deepEqual(apply([attach])?.[1]?.automationIds, [automationId]);
+    assert.equal(apply([attach, attach]), null);
+    assert.equal(apply([detach]), null);
+    assert.deepEqual(apply([attach, detach])?.[1]?.automationIds, []);
+  });
+});
+
+describe("attaching an agent's automation to a workflow", () => {
+  const workflow = {
+    id: "workflow01",
+    name: "Review",
+    creatorUserId: "creator01",
+    editorUserIds: ["editor01"],
+    isArchived: false,
+  };
+  const agent = {
+    status: "active",
+    appTools: [STEP_TOOLS_MCP_NAME],
+    creatorUserId: "creator01",
+    isPublished: false,
+  } as const;
+
+  it("keeps a private agent to its creator's own workflows", () => {
+    assert.isTrue(canAttachAgent(agent, workflow, "creator01"));
+    // Another editor can't use it, and its creator can't bring it to someone else's workflow.
+    assert.isFalse(canAttachAgent(agent, workflow, "editor01"));
+    assert.isFalse(canAttachAgent({ ...agent, creatorUserId: "editor01" }, workflow, "editor01"));
+    assert.isTrue(canAttachAgent({ ...agent, isPublished: true }, workflow, "editor01"));
+  });
+
+  it("refuses an agent that can't work on steps", () => {
+    assert.isFalse(canAttachAgent({ ...agent, appTools: [] }, workflow, "creator01"));
+    assert.isFalse(canAttachAgent({ ...agent, status: "archived" }, workflow, "creator01"));
   });
 });

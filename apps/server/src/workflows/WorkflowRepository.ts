@@ -1,4 +1,4 @@
-import { Refused, Workflow } from "@t45/contracts/models/Workflow";
+import { Workflow, WorkflowVersion } from "@t45/contracts/models/Workflow";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -7,17 +7,23 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 const Row = Schema.Struct({
   ...Workflow.fields,
-  adminUserIds: Schema.fromJsonString(Workflow.fields.adminUserIds),
-  defaultAssignments: Schema.fromJsonString(Workflow.fields.defaultAssignments),
-  isPublic: Schema.BooleanFromBit,
+  editorUserIds: Schema.fromJsonString(Workflow.fields.editorUserIds),
   isArchived: Schema.BooleanFromBit,
 });
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
 const encodeRow = Schema.encodeEffect(Row);
+const VersionRow = Schema.Struct({
+  ...WorkflowVersion.fields,
+  isFrozen: Schema.BooleanFromBit,
+  steps: Schema.fromJsonString(WorkflowVersion.fields.steps),
+});
+const decodeVersions = Schema.decodeUnknownEffect(Schema.Array(VersionRow));
+const encodeVersion = Schema.encodeEffect(VersionRow);
 
-const COLUMNS = `id, definition_id AS "definitionId", name, responsible_user_id AS "responsible",
-  admin_user_ids AS "adminUserIds", default_assignments AS "defaultAssignments", slug,
-  is_public AS "isPublic", is_archived AS "isArchived"`;
+const COLUMNS = `id, name, creator_user_id AS "creatorUserId", editor_user_ids AS "editorUserIds",
+  is_archived AS "isArchived"`;
+const VERSION_COLUMNS = `id, workflow_id AS "workflowId", number, revision,
+  is_frozen AS "isFrozen", steps`;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -25,43 +31,50 @@ const make = Effect.gen(function* () {
     sql
       .unsafe(`SELECT ${COLUMNS} FROM workflows WHERE ${where}`, [...params])
       .pipe(Effect.flatMap(decodeRows), Effect.orDie);
-  const first = Effect.map(([workflow]: ReadonlyArray<Workflow>) => workflow ?? null);
+  const readVersions = (where: string, params: ReadonlyArray<string>) =>
+    sql
+      .unsafe(`SELECT ${VERSION_COLUMNS} FROM workflow_versions WHERE ${where}`, [...params])
+      .pipe(Effect.flatMap(decodeVersions), Effect.orDie);
 
   return {
     list: read("1 = 1 ORDER BY name COLLATE NOCASE, id", []),
-    get: (id: string) => read("id = ?", [id]).pipe(first),
-    getByIdOrSlug: (idOrSlug: string) =>
-      read("id = ? OR slug = ? ORDER BY id = ? DESC LIMIT 1", [idOrSlug, idOrSlug, idOrSlug]).pipe(
-        first,
+    get: (id: string) => read("id = ?", [id]).pipe(Effect.map(([workflow]) => workflow ?? null)),
+    /** The workflows with a version in which a step runs the automation. */
+    listAttaching: (automationId: string) =>
+      read(
+        `EXISTS (SELECT 1 FROM workflow_versions v, json_tree(v.steps) node
+          WHERE v.workflow_id = workflows.id AND node.path LIKE '%.automationIds'
+            AND node.atom = ?)`,
+        [automationId],
       ),
-    listForDefinition: (definitionId: string) =>
-      read("definition_id = ? ORDER BY name COLLATE NOCASE, id", [definitionId]),
-    insert: (workflow: Workflow) =>
+    /** Inserts the workflow, or replaces the one with its id. */
+    save: (workflow: Workflow) =>
       Effect.gen(function* () {
         const row = yield* encodeRow(workflow);
-        yield* sql`INSERT INTO workflows (id, definition_id, name, responsible_user_id,
-              admin_user_ids, default_assignments, slug, is_public, is_archived)
-            VALUES (${row.id}, ${row.definitionId}, ${row.name}, ${row.responsible},
-              ${row.adminUserIds}, ${row.defaultAssignments}, ${row.slug},
-              ${row.isPublic}, ${row.isArchived})`;
+        yield* sql`INSERT INTO workflows (id, name, creator_user_id, editor_user_ids, is_archived)
+            VALUES (${row.id}, ${row.name}, ${row.creatorUserId}, ${row.editorUserIds},
+              ${row.isArchived})
+            ON CONFLICT (id) DO UPDATE SET name = excluded.name,
+              editor_user_ids = excluded.editor_user_ids, is_archived = excluded.is_archived`;
       }).pipe(Effect.orDie),
-    update: (workflow: Workflow) =>
-      Effect.gen(function* () {
-        if (workflow.slug !== null) {
-          const taken = yield* sql`SELECT id FROM workflows
-              WHERE (slug = ${workflow.slug} OR id = ${workflow.slug}) AND id <> ${workflow.id}
-              LIMIT 1`.pipe(Effect.orDie);
-          if (taken.length > 0) return yield* new Refused({ reason: "slug_taken" });
-        }
-        const row = yield* encodeRow(workflow).pipe(Effect.orDie);
-        yield* sql`UPDATE workflows SET name = ${row.name},
-              responsible_user_id = ${row.responsible}, admin_user_ids = ${row.adminUserIds},
-              default_assignments = ${row.defaultAssignments}, slug = ${row.slug},
-              is_public = ${row.isPublic}, is_archived = ${row.isArchived}
-            WHERE id = ${row.id}`.pipe(Effect.orDie);
-      }),
-    remove: (id: string) =>
-      sql`DELETE FROM workflows WHERE id = ${id}`.pipe(Effect.asVoid, Effect.orDie),
+    versions: {
+      get: (id: string) =>
+        readVersions("id = ?", [id]).pipe(Effect.map(([version]) => version ?? null)),
+      /** Every version of the workflow, oldest first: never empty for a workflow that exists. */
+      listForWorkflow: (workflowId: string) =>
+        readVersions("workflow_id = ? ORDER BY number", [workflowId]),
+      /** Inserts the version, or replaces the steps, revision and frozen state of the one with its id. */
+      save: (version: WorkflowVersion) =>
+        Effect.gen(function* () {
+          const row = yield* encodeVersion(version);
+          yield* sql`INSERT INTO workflow_versions (id, workflow_id, number, revision, is_frozen,
+                steps)
+              VALUES (${row.id}, ${row.workflowId}, ${row.number}, ${row.revision},
+                ${row.isFrozen}, ${row.steps})
+              ON CONFLICT (id) DO UPDATE SET revision = excluded.revision,
+                is_frozen = excluded.is_frozen, steps = excluded.steps`;
+        }).pipe(Effect.orDie),
+    },
   };
 });
 

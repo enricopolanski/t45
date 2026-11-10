@@ -2,11 +2,9 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import {
-  Step,
   Ticket,
-  WorkflowDefinition,
+  WorkflowVersion,
   lastAdminRefusal,
-  stepApprovalRefusal,
   stepCompletionRefusal,
 } from "./models/Workflow.ts";
 
@@ -18,23 +16,20 @@ const rawStep = {
   parentStepId: null,
   status: { type: "working", at },
   assignee: "person01",
-  responsible: "person02",
   values: {},
-  automations: [],
 };
 const rawTicket = {
   id: "ticket01",
-  workflowId: "workflow01",
+  projectId: "project01",
+  workflowVersionId: "version01",
   title: "Review",
   description: "",
-  dueDate: null,
   status: { type: "open" },
   steps: [rawStep],
   createdAt: at,
 };
 const decodeTicket = Schema.decodeUnknownSync(Schema.toCodecJson(Ticket));
-const decodeStep = Schema.decodeUnknownSync(Schema.toCodecJson(Step));
-const decodeSteps = Schema.decodeUnknownSync(WorkflowDefinition.fields.steps);
+const decodeSteps = Schema.decodeUnknownSync(WorkflowVersion.fields.steps);
 const definition = {
   id: "def001",
   name: "Review",
@@ -44,21 +39,6 @@ const definition = {
 };
 
 describe("workflow rules", () => {
-  it("does not approve another person's step or a closed ticket", () => {
-    const ticket = decodeTicket(rawTicket);
-    const step = decodeStep({ ...rawStep, status: { type: "waiting_approval", at } });
-    assert.equal(stepApprovalRefusal("person02", ticket, step), null);
-    assert.equal(stepApprovalRefusal("person01", ticket, step), "not_step_responsible");
-    assert.equal(
-      stepApprovalRefusal(
-        "person02",
-        decodeTicket({ ...rawTicket, status: { type: "done" } }),
-        step,
-      ),
-      "ticket_not_open",
-    );
-  });
-
   it("requires filled fields and completed children, while false is a filled value", () => {
     const [stepDefinition] = decodeSteps([definition]);
     assert.ok(stepDefinition);
@@ -100,7 +80,7 @@ describe("workflow rules", () => {
     );
   });
 
-  it("requires an active workflow admin", () => {
+  it("requires an active project admin", () => {
     assert.equal(lastAdminRefusal([]), "last_admin");
     assert.equal(lastAdminRefusal(["person02"]), null);
   });

@@ -80,7 +80,6 @@ const make = () => {
     refuse: null as string | null,
     /** Every execution T45 asked for, refused ones included. */
     executions: [] as Array<Payload<"execute">>,
-    fileWrites: [] as Array<Payload<"writeFiles">>,
     sends: [] as Array<Payload<"send">>,
     answers: [] as Array<Payload<"answer">>,
     cancels: [] as Array<Payload<"cancel">>,
@@ -161,7 +160,6 @@ const make = () => {
           );
         }),
       ),
-    writeFiles: (payload) => Effect.sync(() => void fake.fileWrites.push(payload)),
     send: (payload) =>
       Effect.sync(() => {
         fake.sends.push(payload);

@@ -20,8 +20,7 @@ import * as AttachmentRepository from "./attachments/AttachmentRepository.ts";
 import * as AttachmentsHttp from "./attachments/http.ts";
 import * as Authentication from "./auth/Authentication.ts";
 import * as AuthHttp from "./auth/http.ts";
-import * as AutomationService from "./automations/AutomationService.ts";
-import * as WebhookRoute from "./automations/webhookRoute.ts";
+import * as AutomationRepository from "./automations/AutomationRepository.ts";
 import * as ChatRepository from "./chats/ChatRepository.ts";
 import { ChatService } from "./chats/ChatService.ts";
 import * as ServerConfig from "./config.ts";
@@ -30,13 +29,13 @@ import * as OrgHttp from "./org/http.ts";
 import * as OrganizationRepository from "./org/OrganizationRepository.ts";
 import * as UserRepository from "./org/UserRepository.ts";
 import { UserService } from "./org/UserService.ts";
+import * as CommandLogRepository from "./persistence/CommandLogRepository.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { RunnerService } from "./runner/RunnerService.ts";
-import { TaskService } from "./tasks/TaskService.ts";
 import * as NotificationRepository from "./workflows/NotificationRepository.ts";
 import * as TicketRepository from "./workflows/TicketRepository.ts";
-import * as WorkflowDefinitionRepository from "./workflows/WorkflowDefinitionRepository.ts";
 import * as WorkflowRepository from "./workflows/WorkflowRepository.ts";
+import * as ProjectRepository from "./workflows/ProjectRepository.ts";
 import * as WorkflowService from "./workflows/WorkflowService.ts";
 
 const Store = Layer.mergeAll(
@@ -48,10 +47,11 @@ const Store = Layer.mergeAll(
 ).pipe(Layer.provideMerge(SqlitePersistence.layer));
 
 const WorkflowRepositories = Layer.mergeAll(
-  WorkflowDefinitionRepository.layer,
   WorkflowRepository.layer,
+  ProjectRepository.layer,
   TicketRepository.layer,
   NotificationRepository.layer,
+  CommandLogRepository.layer,
 );
 
 const ChatServices = ChatService.layer.pipe(
@@ -65,26 +65,24 @@ const Org = OrganizationRepository.layer.pipe(Layer.provideMerge(ChatServices));
 /**
  * Groups the resources and services owned by one isolated app instance.
  * They get built afresh under a common separate data instance:
- * database, session state, execution state, background automation jobs
+ * database, session state, execution state, background jobs
  */
 const InstanceDependencies = Layer.effect(UserService, UserService.make).pipe(
   Layer.provide(Authentication.layer),
   Layer.provideMerge(WorkflowService.layer),
-  Layer.provideMerge(AutomationService.layer),
-  Layer.provideMerge(TaskService.layer),
+  Layer.provideMerge(AutomationRepository.layer),
   Layer.provideMerge(Org),
 );
 
 const Routes = Layer.mergeAll(
   AuthHttp.layer,
   OrgHttp.layer,
-  WebhookRoute.layer,
   AttachmentsHttp.layer,
   HttpServer.layer,
   AppRpc.layer,
 );
 
-const makeInstance = (dataDir: string) =>
+const makeInstance = (dataDir: string, instanceId: string) =>
   // `fresh` builds the instance layer ex-novo, doesn't reuse existing
   Layer.build(Layer.fresh(InstanceDependencies)).pipe(
     Effect.flatMap((services) =>
@@ -94,9 +92,12 @@ const makeInstance = (dataDir: string) =>
       ),
     ),
     Effect.provide(
-      ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ DATA_DIR: dataDir }), {
-        asPrimary: true,
-      }),
+      ConfigProvider.layerAdd(
+        ConfigProvider.fromUnknown({ DATA_DIR: dataDir, TOOL_INSTANCE: instanceId }),
+        {
+          asPrimary: true,
+        },
+      ),
     ),
   );
 
@@ -104,7 +105,7 @@ const makeInstance = (dataDir: string) =>
 const makeInstanceMiddleware = Effect.gen(function* () {
   const instancesDir = yield* ServerConfig.instancesDir;
   const instances = yield* RcMap.make({
-    lookup: (instanceId: string) => makeInstance(`${instancesDir}/${instanceId}`),
+    lookup: (instanceId: string) => makeInstance(`${instancesDir}/${instanceId}`, instanceId),
     idleTimeToLive: "10 minutes",
   });
   return (defaultInstance: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>

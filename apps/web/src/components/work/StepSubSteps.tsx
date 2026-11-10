@@ -7,7 +7,7 @@ import { actorName, STEP_STATE_LABELS } from "./workLogic";
 
 /**
  * The step's sub-steps, each opening as a step of its own; the step can't be marked done until
- * every one is approved. Shown only when the step has sub-steps.
+ * every one is completed. Shown only when the step has sub-steps.
  */
 export function StepSubSteps({ view }: { readonly view: StepView }) {
   const directory = useWorkDirectory();

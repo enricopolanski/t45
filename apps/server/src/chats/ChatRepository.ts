@@ -8,9 +8,9 @@ import { Form } from "@opencode/schema/form";
 import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import type * as Statement from "effect/sql/Statement";
-import { ChatOrigin, Task, TaskState, Trigger } from "@t45/contracts/models/Task";
-import { WorkflowInstanceResponse } from "@t45/contracts/resources/AgentTools";
+import { AutomationOrigin, ChatOrigin, Trigger } from "@t45/contracts/models/ChatOrigin";
 import { ChatSummary } from "@t45/contracts/resources/Chats";
+import { isSettled } from "@t45/contracts/resources/Runner";
 import type { Agent } from "@t45/contracts/models/Agent";
 import {
   Chat,
@@ -44,29 +44,26 @@ export interface MessageRow {
   readonly messageId: string;
   readonly ordinal: number;
   readonly json: string;
+  readonly isLive: number;
 }
 
 const decodeOrigin = Schema.decodeUnknownEffect(Schema.fromJsonString(ChatOrigin));
 const encodeTrigger = Schema.encodeSync(Schema.fromJsonString(Trigger));
-const encodeState = Schema.encodeSync(Schema.fromJsonString(TaskState));
-const decodeTaskRows = Schema.decodeUnknownEffect(
+const decodeAutomatedRows = Schema.decodeUnknownEffect(
   Schema.Array(
     Schema.Struct({
-      task: Schema.fromJsonString(Task),
-      chatStatus: Schema.NullOr(Schema.Union([ChatStatus, Schema.Literal("deleted")])),
+      origin: Schema.fromJsonString(AutomationOrigin),
+      chatStatus: Schema.NullOr(ChatStatus),
     }),
   ),
 );
-
-const decodeOperation = Schema.decodeEffect(Schema.fromJsonString(WorkflowInstanceResponse));
-const encodeOperation = Schema.encodeSync(Schema.fromJsonString(WorkflowInstanceResponse));
 
 const makeOrigins = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const select = (where: Statement.Fragment) =>
     sql<{ readonly origin: string }>`SELECT json_object('chatId', chat_id,
-      'kind', CASE WHEN owner_user_id IS NULL THEN 'task' ELSE 'conversation' END,
-      'ownerUserId', owner_user_id, 'workflowId', workflow_id, 'trigger', json(trigger), 'state', json(state)) AS origin
+      'kind', CASE WHEN owner_user_id IS NULL THEN 'automation' ELSE 'conversation' END,
+      'ownerUserId', owner_user_id, 'projectId', project_id, 'trigger', json(trigger)) AS origin
       FROM chat_origins WHERE ${where}`.pipe(
       Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeOrigin(row.origin))),
       Effect.orDie,
@@ -76,54 +73,24 @@ const makeOrigins = Effect.gen(function* () {
   return {
     get,
     insert: (origin: ChatOrigin) =>
-      sql`INSERT INTO chat_origins (chat_id, owner_user_id, workflow_id, trigger, state)
+      sql`INSERT INTO chat_origins (chat_id, owner_user_id, project_id, trigger)
       VALUES (${origin.chatId}, ${origin.kind === "conversation" ? origin.ownerUserId : null},
-        ${origin.kind === "conversation" ? origin.workflowId : null},
-        ${origin.kind === "task" ? encodeTrigger(origin.trigger) : null},
-        ${origin.kind === "task" ? encodeState(origin.state) : null})`.pipe(
+        ${origin.kind === "conversation" ? origin.projectId : null},
+        ${origin.kind === "automation" ? encodeTrigger(origin.trigger) : null})`.pipe(
         Effect.asVoid,
         Effect.orDie,
       ),
-    setState: (chatId: ChatId, state: TaskState) =>
-      sql`UPDATE chat_origins SET state = ${encodeState(state)}
-      WHERE chat_id = ${chatId} AND trigger IS NOT NULL`.pipe(Effect.asVoid, Effect.orDie),
     listByTrigger: (reference: { readonly ticketId: string; readonly stepId: string }) =>
-      sql`SELECT json_object('kind', 'task', 'chatId', o.chat_id,
-          'trigger', json(o.trigger), 'state', json(o.state)) AS task,
-          CASE WHEN c.deleted_at IS NOT NULL THEN 'deleted' ELSE c.status END AS "chatStatus"
+      sql`SELECT json_object('kind', 'automation', 'chatId', o.chat_id,
+          'trigger', json(o.trigger)) AS origin,
+          c.status AS "chatStatus"
         FROM chat_origins o JOIN chats c ON c.id = o.chat_id
         WHERE o.trigger IS NOT NULL
           AND json_extract(o.trigger, '$.ticketId') = ${reference.ticketId}
           AND json_extract(o.trigger, '$.stepId') = ${reference.stepId}
         ORDER BY c.created_at, c.id`.pipe(
-        Effect.flatMap(decodeTaskRows),
-        Effect.map((rows) => rows.map(({ task, chatStatus }) => ({ ...task, chatStatus }))),
-        Effect.orDie,
-      ),
-    operationReceipt: (chatId: ChatId, requestId: string) =>
-      sql<{
-        readonly response: string;
-      }>`SELECT response FROM workflow_operation_receipts WHERE chat_id = ${chatId} AND request_id = ${requestId}`.pipe(
-        Effect.flatMap(([row]) =>
-          row === undefined ? Effect.succeed(null) : decodeOperation(row.response),
-        ),
-        Effect.orDie,
-      ),
-    recordOperation: (chatId: ChatId, response: typeof WorkflowInstanceResponse.Type) =>
-      sql`INSERT INTO workflow_operation_receipts (chat_id, request_id, response) VALUES (${chatId}, ${response.call.input.requestId}, ${encodeOperation(response)})`.pipe(
-        Effect.asVoid,
-        Effect.orDie,
-      ),
-    recordedCalls: (chatId: ChatId, keys: ReadonlyArray<string>) =>
-      sql<{ readonly key: string }>`SELECT call_key AS key FROM task_calls
-        WHERE chat_id = ${chatId} AND ${sql.in("call_key", keys)}`.pipe(
-        Effect.map((rows) => new Set(rows.map((row) => row.key))),
-        Effect.orDie,
-      ),
-    recordCall: (chatId: ChatId, key: string) =>
-      sql`INSERT INTO task_calls (chat_id, call_key) VALUES (${chatId}, ${key})
-      ON CONFLICT DO NOTHING RETURNING call_key`.pipe(
-        Effect.map((rows) => rows.length > 0),
+        Effect.flatMap(decodeAutomatedRows),
+        Effect.map((rows) => rows.map(({ origin, chatStatus }) => ({ ...origin, chatStatus }))),
         Effect.orDie,
       ),
   };
@@ -134,7 +101,7 @@ const CHAT_COLUMNS = `id, agent_id AS "agentId", title, status, updated_at AS "l
 const decodeChat = Schema.decodeUnknownEffect(Chat);
 const decodeSummaries = Schema.decodeUnknownEffect(Schema.Array(ChatSummary));
 
-const MESSAGE_COLUMNS = `session_id AS "sessionId", message_id AS "messageId", ordinal, json`;
+const MESSAGE_COLUMNS = `session_id AS "sessionId", message_id AS "messageId", ordinal, json, is_live AS "isLive"`;
 
 const SESSION_COLUMNS = `session_id AS "sessionId", parent_session_id AS "parentSessionId",
   info_json AS "info"`;
@@ -178,13 +145,14 @@ const make = Effect.gen(function* () {
       .join("\n");
   const sessionColumns = sql.literal(SESSION_COLUMNS);
   /** The chat's inputs whose user message isn't stored: what its next execution sends. */
-  const pendingInputs = (chatId: ChatId) =>
+  const pendingInputs = (chatId: ChatId, savedOnly = false) =>
     sql`SELECT ${inputColumns} FROM chat_inputs AS input
       WHERE input.chat_id = ${chatId} AND NOT EXISTS (
         SELECT 1 FROM chat_messages AS message
         WHERE message.chat_id = input.chat_id
           AND message.session_id = ${rootSessionId(chatId)}
           AND message.message_id = ${inputMessageId(chatId, "")} || input.input_id
+          AND (${savedOnly ? 1 : 0} = 0 OR message.committed = 1)
       ) ORDER BY input.ordinal`.pipe(Effect.orDie, Effect.flatMap(inputsOf));
 
   const get = (chatId: ChatId) =>
@@ -207,9 +175,9 @@ const make = Effect.gen(function* () {
           ${row.at}, ${row.at})`.pipe(Effect.asVoid, Effect.orDie),
     list: (member: Member) =>
       sql`SELECT c.id, c.agent_id AS "agentId", c.title, c.status, c.updated_at AS "lastActivityAt",
-          a.name AS "agentName", o.workflow_id AS "workflowId", w.name AS "workflowName"
+          a.name AS "agentName", o.project_id AS "projectId", p.name AS "projectName"
         FROM chats c JOIN chat_origins o ON o.chat_id = c.id
-          LEFT JOIN agents a ON a.id = c.agent_id LEFT JOIN workflows w ON w.id = o.workflow_id
+          LEFT JOIN agents a ON a.id = c.agent_id LEFT JOIN projects p ON p.id = o.project_id
         WHERE c.deleted_at IS NULL AND o.owner_user_id = ${member.userId}
         ORDER BY c.updated_at DESC, c.id DESC`.pipe(Effect.flatMap(decodeSummaries), Effect.orDie),
     exists: (chatId: ChatId) =>
@@ -281,7 +249,8 @@ const make = Effect.gen(function* () {
         SELECT ${chatId}, ${input.inputId},
           COALESCE((SELECT MAX(ordinal) + 1 FROM chat_inputs WHERE chat_id = ${chatId}), 0),
           ${encodePayload(input.payload)}, ${input.at}`.pipe(Effect.asVoid, Effect.orDie),
-    pendingInputs,
+    pendingInputs: (chatId: ChatId) => pendingInputs(chatId),
+    executionInputs: (chatId: ChatId) => pendingInputs(chatId, true),
     deleteInput: (chatId: ChatId, inputId: InputId) =>
       sql`DELETE FROM chat_inputs WHERE chat_id = ${chatId} AND input_id = ${inputId}`.pipe(
         Effect.asVoid,
@@ -304,26 +273,17 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
-    /** Drops what an execution that didn't finish wrote, and the questions it asked. */
-    discardUncommitted: (chatId: ChatId) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const messages = yield* sql`DELETE FROM chat_messages
-              WHERE chat_id = ${chatId} AND committed = 0 RETURNING message_id`;
-            const sessions = yield* sql`DELETE FROM chat_sessions
-              WHERE chat_id = ${chatId} AND committed = 0 RETURNING session_id`;
-            const asked = questions.delete(chatId);
-            return messages.length + sessions.length > 0 || asked;
-          }),
-        )
-        .pipe(Effect.orDie),
     /** Keeps what a finished execution wrote, as its saved disk has it. */
     commit: (chatId: ChatId) =>
-      Effect.gen(function* () {
-        yield* sql`UPDATE chat_messages SET committed = 1 WHERE chat_id = ${chatId}`;
-        yield* sql`UPDATE chat_sessions SET committed = 1 WHERE chat_id = ${chatId}`;
-      }).pipe(Effect.orDie),
+      sql`UPDATE chat_messages SET committed = 1 WHERE chat_id = ${chatId}`.pipe(
+        Effect.asVoid,
+        Effect.orDie,
+      ),
+    /** Ends message activity without changing the native transcript or tool results. */
+    settleMessages: (chatId: ChatId) =>
+      sql<{ readonly sessionId: string; readonly messageId: string }>`UPDATE chat_messages
+        SET is_live = 0 WHERE chat_id = ${chatId} AND is_live = 1
+        RETURNING session_id AS "sessionId", message_id AS "messageId"`.pipe(Effect.orDie),
     /**
      * Writes messages OpenCode returned for a session, each new one after the ones it has;
      * `inputsTaken` when one is an input's user message, which takes it out of the pending ones.
@@ -337,15 +297,16 @@ const make = Effect.gen(function* () {
         .withTransaction(
           Effect.gen(function* () {
             const written: Array<string> = [];
+            const running = (yield* get(chatId))?.status === "running";
             for (const message of messages) {
               const changed = yield* sql<{ readonly id: string }>`INSERT INTO chat_messages
-                  (chat_id, session_id, message_id, ordinal, json)
+                  (chat_id, session_id, message_id, ordinal, json, is_live)
                 VALUES (${chatId}, ${sessionId}, ${message.id},
                   (SELECT COALESCE(MAX(ordinal) + 1, 0) FROM chat_messages
                     WHERE chat_id = ${chatId} AND session_id = ${sessionId}),
-                  ${encodeMessage(message)})
+                  ${encodeMessage(message)}, ${running && !isSettled(message) ? 1 : 0})
                 ON CONFLICT (chat_id, session_id, message_id) DO UPDATE SET
-                  json = excluded.json
+                  json = excluded.json, is_live = excluded.is_live
                   WHERE chat_messages.json IS NOT excluded.json
                 RETURNING message_id AS id`;
               if (changed.length > 0) written.push(message.id);

@@ -3,6 +3,7 @@
  */
 import { Skill as OpenCodeSkill } from "@opencode/schema/skill";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 
 import { FilesByPath, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 
@@ -29,16 +30,13 @@ export class Skill extends Schema.Opaque<Skill>()(
   }),
 ) {}
 
-const REFUSALS = ["name_taken"] as const;
-export type Refusal = (typeof REFUSALS)[number];
+const REFUSALS = { name_taken: "Another skill already has that name." };
+export type Refusal = keyof typeof REFUSALS;
 
 export class Refused extends Schema.TaggedError<Refused>()("SkillRefused", {
-  reason: Schema.Literals(REFUSALS),
+  reason: Schema.Literals(Struct.keys(REFUSALS)),
 }) {
   override get message(): string {
-    switch (this.reason) {
-      case "name_taken":
-        return "Another skill already has that name.";
-    }
+    return REFUSALS[this.reason];
   }
 }

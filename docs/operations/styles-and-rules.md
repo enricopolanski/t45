@@ -12,6 +12,12 @@ Identify which domain concept owns a decision before choosing its module or API.
 
 Distinguish required product behavior and guarantees from implementation choices. Preserve authorization, atomicity, and deduplication while correcting misplaced responsibilities. Describe intentional behavior changes explicitly; preserving behavior does not require preserving the current dependency graph, state representation, or API.
 
+## Stay within agreed scope
+
+Do not add behaviors, edge cases, acceptance scenarios, or supporting infrastructure that have not been agreed and included in the plan. A plausible concern is not a requirement. Apply this rule when planning, implementing, reviewing, and writing tests. Make routine implementation choices within the agreed scope; if a discovered issue requires additional product behavior or guarantees, explain the concrete need and agree the scope change before adding it.
+
+For example, a request to preserve automation transcripts, skip notifications when there is no assignee, and notify on manual stop does not authorize a streaming-history archive, crash-recovery redesign, new transcript UI, reassignment policies, or notifications for additional cancellation paths. Avoid expanding those three requirements into an elaborate scenario suite and new test infrastructure. Plan and verify the requested behavior without inventing additional obligations.
+
 ## Merging pull requests
 
 Squash pull requests into one commit on the target branch by default; use another merge strategy only when explicitly requested.
@@ -32,7 +38,7 @@ Keep pure business rules in models, or resources when the rule belongs to a view
 
 Keep OpenCode integration complexity at its boundary: the runner's `ExecutionOrchestrator.ts` controls how an execution happens, and the server's `ChatExecutions.ts` decides what T45 keeps. Store and send OpenCode's own shapes, imported from `@opencode/*`; do not declare them again. The UI displays domain decisions supplied by the server.
 
-Tasks run LLM automations and produce results. The task model and service are independent of workflows and steps. Workflow MCP tools invoke workflow operations; the workflow domain owns submission, approval, eligibility, and the association between a task and a step. A task's outcome describes its work; the workflow decides whether that work satisfies its requirements.
+Automations execute in chats; their origin is a separate join. Workflow MCP tools apply workflow operations and return their actual results. Execution ending does not complete a step: the workflow owns step completion. Retain automation transcripts when execution ends or is stopped.
 
 ## Persistence and transactions
 
@@ -89,5 +95,7 @@ Prefer inferred types over annotations; do not use `any`.
 Comments describe how a thing is used and explain important rationale that the code and its dependencies do not reveal.
 
 Reuse established UI primitives and the nearest equivalent implementation before introducing new markup or conventions. Keep helper inputs limited to variation required by actual callers.
+
+Every refactor starts by asking whether the existing code is still needed. Check its callers and the behavior it provides before moving it, extracting it, or adding an abstraction around it. Delete redundant logic and dependencies when existing capabilities already provide the required behavior.
 
 After a refactor, remove obsolete fields and configuration, and check that module names, comments, fixtures, and test titles describe the resulting behavior.

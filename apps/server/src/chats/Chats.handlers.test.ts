@@ -4,7 +4,7 @@ import { SessionMessage } from "@opencode/schema/session-message";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import { type Role } from "@t45/contracts/models/User";
-import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
+import { Authorization, CurrentActor } from "@t45/contracts/Authorization";
 import { Chats } from "@t45/contracts/resources/Chats";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -31,7 +31,7 @@ const clientFor = (userId: string, role: Role) =>
           Layer.succeed(
             Authorization,
             Authorization.of((effect) =>
-              Effect.provideService(effect, CurrentUser, {
+              Effect.provideService(effect, CurrentActor, {
                 sessionId: AuthSessionId.make(`session-${userId}`),
                 userId,
                 role,
@@ -122,7 +122,7 @@ it.effect("answers NotFound for a deleted chat, even to its owner", () =>
   }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
 );
 
-it.effect("keeps task chats internal for members and admins", () =>
+it.effect("keeps automation chats internal for members and admins", () =>
   Effect.gen(function* () {
     yield* seed;
     const member = yield* clientFor("user-alice", "member");

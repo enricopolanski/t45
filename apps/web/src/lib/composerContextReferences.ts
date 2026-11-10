@@ -1,21 +1,15 @@
-import type {
-  ChatContextId,
-  ChatContextKind,
-  ChatMessageContext,
-} from "@t45/contracts/models/Chat";
+import type { ChatContextId, ChatContextKind } from "@t45/contracts/models/Attachment";
 import {
   collectComposerContextReferences,
   type ComposerContextReferenceOccurrence,
   formatComposerContextReference,
   replaceComposerContextReferences,
-  sanitizeComposerContextLabel,
 } from "@t45/core/composerContextReferences";
 
 import type { ComposerAttachment, ComposerFileAttachment } from "~/composerDraftStore";
 
 /**
- * Prompt-string operations on inline context references, wire-record conversion
- * at the send boundary, and attachment undo reconciliation.
+ * Prompt-string operations on inline context references and attachment undo reconciliation.
  */
 
 export type ComposerContextReference = Pick<
@@ -114,28 +108,6 @@ export function attachmentContextReference(
     kind: attachment.type,
     contextId: contextIdFor(attachment.type, attachment.id),
     label: attachment.name,
-  };
-}
-
-/** Binds a draft attachment to the id the receiving side will know it by. */
-export interface BoundComposerAttachment {
-  attachment: ComposerAttachment;
-  attachmentId: string;
-}
-
-export function buildMessageContext(
-  attachments: ReadonlyArray<BoundComposerAttachment>,
-): ChatMessageContext | undefined {
-  if (attachments.length === 0) return undefined;
-  return {
-    records: attachments.map(({ attachment, attachmentId }) => ({
-      ...attachmentContextReference(attachment),
-      label: sanitizeComposerContextLabel(attachment.name, attachment.type),
-      attachmentId,
-      name: attachment.name,
-      mimeType: attachment.mimeType,
-      sizeBytes: attachment.sizeBytes,
-    })),
   };
 }
 

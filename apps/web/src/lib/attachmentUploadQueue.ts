@@ -6,11 +6,10 @@ import {
   type ComposerTarget,
   useComposerDraftStore,
 } from "../composerDraftStore";
-import { reachableAtom } from "../rpc/api";
-import { appAtomRegistry } from "../state/atomRegistry";
 import { attachmentUploadUrl, attachmentUrl, decodeUploadResult } from "./attachmentUrl";
 import { describeUploadRefusal } from "./failures";
 import type { AttachmentUploadState } from "./attachmentUploadState";
+import { contextIdFor } from "./composerContextReferences";
 
 const MAX_CONCURRENT_UPLOADS = 3;
 const UPLOAD_TIMEOUT_MS = 5 * 60_000;
@@ -31,10 +30,8 @@ interface UploadJob {
   resolveSettled: () => void;
   cancelled: boolean;
   abort: (() => void) | null;
-  stopWatchingReachable: () => void;
 }
 
-// Failed jobs retain their source and reachability subscription until retry or release.
 const jobsByAttachmentId = new Map<string, UploadJob>();
 const queue: UploadJob[] = [];
 let activeUploads = 0;
@@ -58,16 +55,6 @@ function clearUploadState(id: string): void {
 
 export function readAttachmentUpload(id: string): AttachmentUploadState | undefined {
   return useAttachmentUploadStore.getState().uploadsByAttachmentId[id];
-}
-
-/**
- * Persists a finished upload's id onto the draft that holds the file, so the file survives a
- * reload without its bytes, whether or not a composer is mounted.
- */
-function stampDraftFileUpload(attachment: ComposerAttachment, attachmentId: string): void {
-  if (attachment.type === "file") {
-    useComposerDraftStore.getState().setFileUpload(attachment.id, attachmentId);
-  }
 }
 
 type PersistedAttachmentVerification =
@@ -143,7 +130,9 @@ async function runUpload(job: UploadJob): Promise<void> {
         status: "ready",
         attachmentId: job.persistedAttachmentId,
       });
-      stampDraftFileUpload(job.attachment, job.persistedAttachmentId);
+      useComposerDraftStore
+        .getState()
+        .setAttachmentUpload(job.attachment.id, job.persistedAttachmentId);
       return;
     }
     if (
@@ -151,7 +140,7 @@ async function runUpload(job: UploadJob): Promise<void> {
       !job.attachment.file &&
       useComposerDraftStore
         .getState()
-        .markFileUploadMissing(job.attachment.id, job.persistedAttachmentId)
+        .markAttachmentUploadMissing(job.attachment.id, job.persistedAttachmentId)
     ) {
       clearUploadState(job.attachment.id);
       return;
@@ -230,7 +219,7 @@ async function runUpload(job: UploadJob): Promise<void> {
     return;
   }
   setUploadState(job.attachment.id, { status: "ready", attachmentId });
-  stampDraftFileUpload(job.attachment, attachmentId);
+  useComposerDraftStore.getState().setAttachmentUpload(job.attachment.id, attachmentId);
 }
 
 function pumpUploads(): void {
@@ -247,11 +236,7 @@ function pumpUploads(): void {
         }
       })
       .finally(() => {
-        if (
-          jobsByAttachmentId.get(job.attachment.id) === job &&
-          readAttachmentUpload(job.attachment.id)?.status !== "failed"
-        ) {
-          job.stopWatchingReachable();
+        if (jobsByAttachmentId.get(job.attachment.id) === job) {
           jobsByAttachmentId.delete(job.attachment.id);
         }
         activeUploads -= 1;
@@ -266,7 +251,8 @@ export function startAttachmentUpload(attachment: ComposerAttachment): void {
     return;
   }
   const existing = readAttachmentUpload(attachment.id);
-  if (existing?.status === "ready") stampDraftFileUpload(attachment, existing.attachmentId);
+  if (existing?.status === "ready")
+    useComposerDraftStore.getState().setAttachmentUpload(attachment.id, existing.attachmentId);
   if (existing?.status === "ready" || existing?.status === "failed") {
     return;
   }
@@ -277,36 +263,16 @@ export function startAttachmentUpload(attachment: ComposerAttachment): void {
   });
   const job: UploadJob = {
     attachment,
-    ...(attachment.type === "file" && attachment.uploadedAttachmentId
+    ...(attachment.uploadedAttachmentId
       ? { persistedAttachmentId: attachment.uploadedAttachmentId }
       : {}),
     settled,
     resolveSettled,
     cancelled: false,
     abort: null,
-    stopWatchingReachable: () => {},
   };
 
   jobsByAttachmentId.set(attachment.id, job);
-  const isReachable = () => appAtomRegistry.get(reachableAtom);
-  let wasReachable = isReachable();
-  job.stopWatchingReachable = appAtomRegistry.subscribe(reachableAtom, () => {
-    const reachable = isReachable();
-    const recovered = reachable && !wasReachable;
-    wasReachable = reachable;
-    if (!recovered) return;
-    // The upload's failure can arrive after the server is reachable again.
-    // Wait for that attempt, then retry only if this job still owns the file.
-    void job.settled.then(() => {
-      if (
-        jobsByAttachmentId.get(job.attachment.id) === job &&
-        readAttachmentUpload(job.attachment.id)?.status === "failed" &&
-        isReachable()
-      ) {
-        retryAttachmentUpload(attachment);
-      }
-    });
-  });
   queue.push(job);
   setUploadState(attachment.id, { status: "uploading", progress: 0 });
   pumpUploads();
@@ -319,7 +285,6 @@ function cancelAttachmentUpload(id: string): void {
     return;
   }
   job.cancelled = true;
-  job.stopWatchingReachable();
   jobsByAttachmentId.delete(id);
   const queuedIndex = queue.indexOf(job);
   if (queuedIndex !== -1) {
@@ -360,10 +325,10 @@ export function getUploadedAttachments(
     attachments.push({
       type: attachment.type,
       id: upload.attachmentId,
+      contextId: contextIdFor(attachment.type, attachment.id),
       name: attachment.name,
       mimeType: attachment.mimeType,
       sizeBytes: attachment.sizeBytes,
-      ...(attachment.type === "file" && attachment.source ? { source: attachment.source } : {}),
     });
   }
   return attachments;

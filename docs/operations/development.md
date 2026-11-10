@@ -31,13 +31,13 @@ For agent checks, use `vp run browser --email alice@example.test --steps /tmp/ch
 
 Registration, approval, and deactivation rules still apply.
 
-The Playwright smoke check is mandatory in pre-commit. Start `vp run dev` first and leave it running for E2Es or pre-commit. Run the check on its own with `vp run --filter @t45/e2e test`. It opens the running development app at `http://localhost:5733` and checks that the login page renders. Playwright does not start servers or build the app. It uses the Chromium installed by setup; a missing browser fails the check. Browser traces on failure live under `e2e/test-results`.
+The Playwright E2Es are mandatory in pre-commit. Run them on their own with `vp run --filter @t45/e2e test`. They drive the development app at `http://localhost:5733` as the people of an organization, each in a browser of their own, and start no agent. A running `vp run dev` is used as is; with none, Playwright starts one with a fresh home in the system temp folder (`t45-e2e`) and stops it after the run. They use the Chromium installed by setup; a missing browser fails the check. Browser traces on failure live under `e2e/test-results`.
 
 ### State and ports
 
 Dev state lives in the gitignored `.t45/userdata` of the checkout you launch from, even when `DATA_DIR` is set; an explicit `--home-dir` wins. Never run a development server against the live `~/.t3/userdata`.
 
-A request with an `x-instance-id` header (letters, digits, `_` and `-`) runs against an instance: its own copy of the app, with its own database, attachments, sessions and background work in `.t45/instances/<id>/userdata`, created on first use. Requests without the header use `.t45/userdata`, and production ignores it. `vp run browser --email <email> --instance-id <id>` opens a browser on an instance; curl needs the header and a cookie jar per instance. E2E specs import `test` from `e2e/fixtures.ts`, which gives each test attempt a new instance and attaches its id to the report. Inspect an instance with `sqlite3 .t45/instances/<id>/userdata/statev2.sqlite`. An instance closes after 10 idle minutes, which stops its background work, so use `--home-dir` for a long throwaway session. Webhooks carry no header and reach the default state. Delete instances only while dev is stopped (`rm -rf .t45/instances`); an open instance keeps using its deleted files until it closes.
+A request with an `x-instance-id` header (letters, digits, `_` and `-`) runs against an instance: its own copy of the app, with its own database, attachments, sessions and background work in `.t45/instances/<id>/userdata`, created on first use. Requests without the header use `.t45/userdata`, and production ignores it. `vp run browser --email <email> --instance-id <id>` opens a browser on an instance; curl needs the header and a cookie jar per instance. E2E specs import `test` from `e2e/fixtures.ts`, which gives each test attempt a new instance and attaches its id to the report; its `signIn` opens a browser for one person on that instance. Inspect an instance with `sqlite3 .t45/instances/<id>/userdata/statev2.sqlite`. An instance closes after 10 idle minutes, which stops its background work, so use `--home-dir` for a long throwaway session. Delete instances only while dev is stopped (`rm -rf .t45/instances`); an open instance keeps using its deleted files until it closes.
 
 Ports are fixed: server 13773, web 5733, runner 8790. If one is taken, for example by a dev run in another checkout, startup fails. `--port` or `PORT` moves only the server port. `--host` or `HOST` accepts loopback and wildcard bind addresses. `LOG_REQUESTS` controls request logging. `--dry-run` prints the configuration without starting services.
 
@@ -71,6 +71,8 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 - **The agent image**, built with Docker and loaded into microsandbox as `t45-agent:dev`: `vp run --filter @t45/runner image`. Rebuild after changing `apps/runner/image`. Without it, chats fail and the server log names the reason, as in production.
 - **`mkfs.ext4` (e2fsprogs) and GNU tar** on the host, which make and pack VM disks. On macOS, install `e2fsprogs` and `gnu-tar` with Homebrew and put their `sbin` and `gnubin` folders first on `PATH`.
 
+Built-in MCP tools call the server’s regular workflow RPCs and attachment upload API with an execution token. `SERVER_URL` sets the server address reachable from agent VMs; by default it is `http://host.microsandbox.internal:<server port>`. Set it to a reachable server address when using a remote runner.
+
 The server and its built-in MCP tools are compiled together from `apps/server/src`; development watches that build and restarts the server after changes. T45 sends the tools with each execution of an agent that uses them, and the runner writes them to `/opt/t45`, so changing a tool does not require an image rebuild. The server reads them when it starts, so a chat gets changed tools at its first execution after the restart.
 
 Without `/dev/kvm` every chat's VM fails to start, and the runner's log names the reason.
@@ -97,7 +99,7 @@ vp lint <files>
 vp run --filter <package> typecheck
 ```
 
-Every commit runs the root `pre-commit` task: workspace format/lint checks, typechecking, unused code, unit tests and mandatory browser E2Es. The parent tasks and browser E2Es are uncached so every invocation runs the browsers; other checks retain their caches. Run it manually with `vpr pre-commit`, or `vpr --no-cache pre-commit` to force every check fresh. Pre-commit never downloads browsers or installs system packages: if Chromium is missing, re-run `sh scripts/setup.sh`. The shared bundle task finishes before server tests and client packaging; packaging replaces only `dist/client`, so recursive tests can run safely in parallel. There is no PR CI.
+Every commit first runs `vp staged` to fix staged files and include those fixes in the commit while preserving unstaged edits. It then runs the root `pre-commit` task: `vp check --fix` across the working tree, typechecking, unused code, unit tests and mandatory browser E2Es. Manual runs fix files but leave staging to you. The parent tasks and browser E2Es are uncached so every invocation runs the browsers; other checks retain their caches. Run it manually with `vpr pre-commit`, or `vpr --no-cache pre-commit` to force every check fresh. Pre-commit never downloads browsers or installs system packages: if Chromium is missing, re-run `sh scripts/setup.sh`. The shared bundle task finishes before server tests and client packaging; packaging replaces only `dist/client`, so recursive tests can run safely in parallel. There is no PR CI.
 
 ### Verifying setup and build changes
 

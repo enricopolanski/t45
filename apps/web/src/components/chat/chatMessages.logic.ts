@@ -1,6 +1,5 @@
 import { type ChatAttachment } from "@t45/contracts/models/Attachment";
 import { type ChatMessage, InputMetadata } from "@t45/contracts/resources/Chats";
-import { type ChatMessageContext } from "@t45/contracts/models/Chat";
 import { WORKFLOW_DRAFT_TOOL_NAME, WorkflowDraft } from "@t45/contracts/resources/AgentTools";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -17,7 +16,6 @@ const decodeInputMetadata = Schema.decodeUnknownOption(InputMetadata);
 export interface UserMessageContent {
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
-  readonly context: ChatMessageContext | undefined;
 }
 
 type UserMessage = Extract<NativeMessage, { type: "user" }>;
@@ -29,8 +27,8 @@ export function userMessageContent(message: UserMessage): UserMessageContent {
   const known = contentByMessage.get(message);
   if (known) return known;
   const content = Option.match(decodeInputMetadata(message.metadata), {
-    onNone: () => ({ text: message.text, attachments: [], context: undefined }),
-    onSome: ({ t45 }) => ({ text: t45.text, attachments: t45.attachments, context: t45.context }),
+    onNone: () => ({ text: message.text, attachments: [] }),
+    onSome: ({ t45 }) => t45,
   });
   contentByMessage.set(message, content);
   return content;

@@ -9,7 +9,9 @@ export const layer = Chats.middleware(Authorization).toLayer(
   Effect.gen(function* () {
     const chats = yield* ChatService;
     const asMember =
-      <I, A, E>(call: (input: I, member: CurrentUser["Service"]) => Effect.Effect<A, E>) =>
+      <I, A, E>(
+        call: (input: I, member: Effect.Success<typeof CurrentUser>) => Effect.Effect<A, E>,
+      ) =>
       (input: I) =>
         Effect.flatMap(CurrentUser, (member) => call(input, member));
 

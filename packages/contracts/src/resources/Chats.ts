@@ -10,7 +10,6 @@ import { ChatAttachment, MESSAGE_MAX_ATTACHMENTS } from "../models/Attachment.ts
 import {
   Chat,
   ChatId,
-  ChatMessageContext,
   Input,
   InputId,
   InputPayload,
@@ -18,7 +17,7 @@ import {
   Refused,
 } from "../models/Chat.ts";
 import { StringId, Title } from "../models/primitives.ts";
-import { NotFound } from "./errors.ts";
+import { AccessDenied, NotFound } from "./errors.ts";
 
 /**
  * What T45 keeps in the native user message an input becomes, under its `metadata`: the input as
@@ -33,8 +32,8 @@ const SessionId = Session.ID.check(Schema.isMaxLength(512));
 export const ChatSummary = Schema.Struct({
   ...Chat.fields,
   agentName: Schema.NullOr(Schema.String),
-  workflowId: Schema.NullOr(StringId),
-  workflowName: Schema.NullOr(Schema.String),
+  projectId: Schema.NullOr(StringId),
+  projectName: Schema.NullOr(Schema.String),
 });
 export type ChatSummary = typeof ChatSummary.Type;
 
@@ -47,7 +46,7 @@ export type ChatSession = typeof ChatSession.Type;
 
 /**
  * A message of a session exactly as OpenCode keeps it. `state` is T45's: `live` while OpenCode is
- * still writing it, `settled` once finished.
+ * still writing it, `settled` once finished or its execution has ended.
  * Reads cut long tool output and text and say so with `isTruncated`; `chats.getMessage` returns
  * it whole.
  */
@@ -114,18 +113,17 @@ export const ChatHistory = Schema.Struct({
 });
 export type ChatHistory = typeof ChatHistory.Type;
 
-export const ChatErrors = Schema.Union([Refused, NotFound]);
-export type ChatErrors = typeof ChatErrors.Type;
+const ChatErrors = Schema.Union([Refused, NotFound, AccessDenied]);
 
 export const ChatTarget = Schema.Struct({
   agentId: StringId,
   name: Schema.String,
-  workflowId: Schema.NullOr(StringId),
+  projectId: Schema.NullOr(StringId),
 });
 export type ChatTarget = typeof ChatTarget.Type;
 
 export const Chats = RpcGroup.make(
-  Rpc.make("listTargets", { success: Schema.Array(ChatTarget) }),
+  Rpc.make("listTargets", { success: Schema.Array(ChatTarget), error: AccessDenied }),
   Rpc.make("getHistory", {
     payload: { chatId: ChatId, sessionId: SessionId, before: SessionMessage.ID },
     success: ChatHistory,
@@ -143,6 +141,7 @@ export const Chats = RpcGroup.make(
    */
   Rpc.make("watchList", {
     success: ChatList,
+    error: AccessDenied,
     stream: true,
   }),
   /**
@@ -182,11 +181,12 @@ export const Chats = RpcGroup.make(
     payload: {
       chatId: ChatId,
       agentId: Schema.optional(StringId),
-      workflowId: Schema.optional(StringId),
+      projectId: Schema.optional(StringId),
       inputId: InputId,
       text: Schema.String.check(Schema.isMaxLength(MESSAGE_MAX_INPUT_CHARS)),
-      attachments: Schema.Array(ChatAttachment).check(Schema.isMaxLength(MESSAGE_MAX_ATTACHMENTS)),
-      context: Schema.optional(ChatMessageContext),
+      attachments: InputPayload.fields.attachments.check(
+        Schema.isMaxLength(MESSAGE_MAX_ATTACHMENTS),
+      ),
     },
     error: ChatErrors,
   }),

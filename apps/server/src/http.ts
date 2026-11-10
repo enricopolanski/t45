@@ -8,8 +8,6 @@ import {
   HttpStaticServer,
 } from "effect/http";
 
-import { WEBHOOK_ROUTE_PREFIX } from "@t45/contracts/resources/Automations";
-
 const COMPRESSIBLE_TYPES = new Set([
   "application/json",
   "application/javascript",
@@ -42,9 +40,6 @@ const sameOrigin = HttpRouter.middleware(
   (httpEffect) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      if (request.url.startsWith(`${WEBHOOK_ROUTE_PREFIX}/`)) {
-        return yield* HttpMiddleware.withLoggerDisabled(httpEffect);
-      }
       if (SAFE_METHODS.has(request.method) || isSameOrigin(request)) {
         return yield* httpEffect;
       }

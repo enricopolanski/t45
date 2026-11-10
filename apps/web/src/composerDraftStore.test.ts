@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   type ComposerFileAttachment,
   type ComposerImageAttachment,
-  composerFileNeedsReattach,
+  composerAttachmentNeedsReattach,
   partializeComposerDraftStoreState,
   useComposerDraftStore,
 } from "./composerDraftStore";
@@ -260,8 +260,8 @@ describe("composerDraftStore file attachments", () => {
 
   it("persists uploaded file references without including file contents", () => {
     const store = useComposerDraftStore.getState();
-    store.addFiles(chatId, [{ ...makeFile("file-1"), source: { _tag: "pasted-text" as const } }]);
-    store.setFileUpload("file-1", "pending-report-pdf");
+    store.addFiles(chatId, [makeFile("file-1")]);
+    store.setAttachmentUpload("file-1", "pending-report-pdf");
 
     const persistApi = useComposerDraftStore.persist as unknown as {
       getOptions: () => {
@@ -281,7 +281,6 @@ describe("composerDraftStore file attachments", () => {
         mimeType: "application/pdf",
         sizeBytes: 6,
         uploadedAttachmentId: "pending-report-pdf",
-        source: { _tag: "pasted-text" },
       },
     ]);
 
@@ -295,14 +294,13 @@ describe("composerDraftStore file attachments", () => {
         sizeBytes: 6,
         file: null,
         uploadedAttachmentId: "pending-report-pdf",
-        source: { _tag: "pasted-text" },
       },
     ]);
   });
 
   it("persists a pending file as a needs-reattach marker instead of dropping it", () => {
     const store = useComposerDraftStore.getState();
-    // No setFileUpload: the upload never finished, so there is no attachment
+    // No setAttachmentUpload: the upload never finished, so there is no attachment
     // id and the File handle cannot serialize.
     store.addFiles(chatId, [makeFile("file-pending")]);
 
@@ -338,7 +336,7 @@ describe("composerDraftStore file attachments", () => {
         file: null,
       },
     ]);
-    expect(hydratedFiles?.every(composerFileNeedsReattach)).toBe(true);
+    expect(hydratedFiles?.every(composerAttachmentNeedsReattach)).toBe(true);
   });
 
   it("marks only the matching byte-less upload as missing", () => {
@@ -354,11 +352,11 @@ describe("composerDraftStore file attachments", () => {
       mimeType: "text/plain",
     };
     store.addFiles(chatId, [hydrated, local]);
-    store.setFileUpload(hydrated.id, "pending-new");
-    store.setFileUpload(local.id, "pending-local");
+    store.setAttachmentUpload(hydrated.id, "pending-new");
+    store.setAttachmentUpload(local.id, "pending-local");
 
-    expect(store.markFileUploadMissing(hydrated.id, "pending-old")).toBe(false);
-    expect(store.markFileUploadMissing(local.id, "pending-local")).toBe(false);
+    expect(store.markAttachmentUploadMissing(hydrated.id, "pending-old")).toBe(false);
+    expect(store.markAttachmentUploadMissing(local.id, "pending-local")).toBe(false);
 
     expect(store.getComposerDraft(chatId)?.files).toMatchObject([
       {
@@ -372,9 +370,9 @@ describe("composerDraftStore file attachments", () => {
       },
     ]);
 
-    expect(store.markFileUploadMissing(hydrated.id, "pending-new")).toBe(true);
+    expect(store.markAttachmentUploadMissing(hydrated.id, "pending-new")).toBe(true);
     const marker = store.getComposerDraft(chatId)?.files[0];
-    expect(marker && composerFileNeedsReattach(marker)).toBe(true);
+    expect(marker && composerAttachmentNeedsReattach(marker)).toBe(true);
     expect(marker?.uploadedAttachmentId).toBeUndefined();
   });
 
@@ -418,7 +416,7 @@ describe("composerDraftStore file attachments", () => {
     // server-side upload.
     const marker: ComposerFileAttachment = { ...makeFile("file-marker"), file: null };
     store.addFiles(chatId, [marker]);
-    expect(store.getComposerDraft(chatId)?.files.every(composerFileNeedsReattach)).toBe(true);
+    expect(store.getComposerDraft(chatId)?.files.every(composerAttachmentNeedsReattach)).toBe(true);
 
     // Following the "Attach again" instruction produces a fresh id with the
     // exact metadata the dedup key hashes.
@@ -428,7 +426,7 @@ describe("composerDraftStore file attachments", () => {
     const files = store.getComposerDraft(chatId)?.files;
     expect(files?.map((file) => file.id)).toEqual(["file-repicked"]);
     expect(files?.[0]?.file).not.toBeNull();
-    expect(files?.some(composerFileNeedsReattach)).toBe(false);
+    expect(files?.some(composerAttachmentNeedsReattach)).toBe(false);
   });
 
   it("still dedupes a re-pick against a file that does not need reattaching", () => {
@@ -581,7 +579,10 @@ describe("composer draft persistence", () => {
           name: "image.png",
           mimeType: "image/png",
           sizeBytes: 49_152,
-          dataUrl: `data:image/png;base64,${"AQID".repeat(16_384)}`,
+          type: "image" as const,
+          file: null,
+          uploadedAttachmentId: "pending-image",
+          previewUrl: "/api/attachments/pending-image/image.png",
         },
       ];
       let attachmentReads = 0;
@@ -590,7 +591,7 @@ describe("composer draft persistence", () => {
           ...state.draftsByTarget,
           [heavyKey]: {
             ...state.draftsByTarget[heavyKey]!,
-            get persistedImages() {
+            get images() {
               attachmentReads += 1;
               return attachments;
             },
@@ -613,7 +614,7 @@ describe("composer draft persistence", () => {
       resetComposerDraftStore();
       await useComposerDraftStore.persist.rehydrate();
       expect(draftFor(typingChatId)?.prompt).toBe("Draft 20");
-      expect(draftFor(heavyChatId)?.persistedImages).toEqual(attachments);
+      expect(draftFor(heavyChatId)?.images).toEqual(attachments);
     } finally {
       stringify.mockRestore();
       await useComposerDraftStore.persist.clearStorage();

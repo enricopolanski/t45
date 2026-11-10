@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { WorkflowBoardPage } from "../components/workflows/WorkflowBoardPage";
+import { ProjectBoardPage } from "../components/workflows/ProjectBoardPage";
 
 function BoardRouteView() {
   const { slug } = Route.useParams();
-  return <WorkflowBoardPage key={slug} workflowId={slug} />;
+  return <ProjectBoardPage key={slug} projectId={slug} />;
 }
 
 export const Route = createFileRoute("/boards/$slug")({

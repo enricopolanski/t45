@@ -1,4 +1,4 @@
-import { ChatContextId } from "@t45/contracts/models/Chat";
+import { ChatContextId } from "@t45/contracts/models/Attachment";
 import { describe, expect, it } from "vite-plus/test";
 
 import { parseInlineTokens, type InlineToken } from "./inlineTokens";

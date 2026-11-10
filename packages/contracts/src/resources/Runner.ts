@@ -1,3 +1,4 @@
+import { ConfigMCP } from "@opencode/schema/config/mcp";
 import { Form } from "@opencode/schema/form";
 import { Session } from "@opencode/schema/session";
 import { SessionInbox } from "@opencode/schema/session-inbox";
@@ -22,14 +23,17 @@ export type Message = typeof Message.Type;
 
 export const ExecutionRequest = Schema.Struct({
   agent: Schema.Struct({
-    ...Struct.pick(Agent.fields, ["instructions", "model", "mcpServers", "permissions"]),
+    ...Struct.pick(Agent.fields, ["instructions", "model", "permissions"]),
+    /** The servers of the agent's app tools, for the VM's OpenCode configuration. */
+    mcpServers: Schema.Record(Schema.String, Schema.toEncoded(ConfigMCP.Server)),
     files: FilesByPath(AGENT_SETUP_PATHS),
-    /** T45's tools by file name, for `T45_TOOLS_DIR`; none for agents without its servers. */
+    /** T45's tools by file name, for `T45_TOOLS_DIR`; none for agents without app tools. */
     tools: Schema.Record(Schema.String, Schema.String),
     skills: Schema.Array(
       Schema.Struct(Struct.pick(Skill.fields, ["name", "description", "content", "files"])),
     ),
   }),
+  serverUrl: Schema.String,
   rootId: Session.ID,
   title: Schema.String,
   allowQuestions: Schema.Boolean,
@@ -55,8 +59,6 @@ export const ExecutionUpdate = Schema.Union([
     delta: Schema.String,
   }),
   Schema.TaggedStruct("questions", { forms: Schema.Array(Form.Info) }),
-  /** Before the messages that name it. */
-  Schema.TaggedStruct("file", { path: Schema.String, content: Schema.Uint8Array }),
   /** Keeps the call's connection from going idle while the agent waits. */
   Schema.TaggedStruct("heartbeat", {}),
   Schema.TaggedStruct("finished", {
@@ -92,7 +94,6 @@ export const RunnerRpcs = RpcGroup.make(
     success: ExecutionUpdate,
     stream: true,
   }),
-  Rpc.make("writeFiles", { payload: { rootId: Session.ID, files: Files } }),
   Rpc.make("send", { payload: { rootId: Session.ID, message: Message, files: Files } }),
   Rpc.make("answer", {
     payload: { ...question, answer: Form.Answer, files: Files },

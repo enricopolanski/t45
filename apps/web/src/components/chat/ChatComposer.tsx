@@ -9,7 +9,6 @@ import {
   MESSAGE_MAX_ATTACHMENTS,
   ATTACHMENT_MAX_FILE_BYTES,
   ATTACHMENT_MAX_IMAGE_BYTES,
-  type ChatFileAttachment,
 } from "@t45/contracts/models/Attachment";
 import { type ChatId, MESSAGE_MAX_INPUT_CHARS } from "@t45/contracts/models/Chat";
 import { useAtomValue } from "@effect/atom-react";
@@ -28,13 +27,11 @@ import {
   buildComposerPromptHistoryEntries,
   type ComposerCommandItem,
   type ComposerPromptHistoryMessage,
-  collapseExpandedComposerCursor,
   type ComposerPromptHistoryPosition,
   composerStateAtPromptEnd,
   composerSubmitsOnKey,
   continueListOnEnter,
   detectComposerTrigger,
-  expandCollapsedComposerCursor,
   getComposerPromptLengthValidationMessage,
   indentListOnTab,
   replaceTextRange,
@@ -61,8 +58,8 @@ import {
   type ComposerAttachment,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
-  composerFileMatchesReattachMarker,
-  composerFileNeedsReattach,
+  composerAttachmentMatchesReattachMarker,
+  composerAttachmentNeedsReattach,
   useComposerDraft,
   useComposerDraftStore,
 } from "../../composerDraftStore";
@@ -127,14 +124,7 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { ErrorText } from "../ui/error-text";
-import {
-  CircleAlertIcon,
-  FileIcon,
-  ImageIcon,
-  PaperclipIcon,
-  RefreshCwIcon,
-  XIcon,
-} from "lucide-react";
+import { FileIcon, ImageIcon, PaperclipIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import type { ComposerQuestion } from "./useChatQuestions";
 import { useFlickerFree } from "../../hooks/useFlickerFree";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -182,7 +172,7 @@ export interface ChatComposerHandle {
   insertTextAtEnd: (text: string) => boolean;
   /** Apply large-paste folding for text redirected from a blurred composer. */
   pasteTextAtEnd: (text: string) => boolean;
-  readSnapshot: () => { value: string; cursor: number; expandedCursor: number };
+  readSnapshot: () => { value: string; cursor: number };
   /** Put the caret at the start and close the menu after the chat view replaced the prompt. */
   resetCursorState: () => void;
 }
@@ -300,7 +290,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   useEffect(() => {
     for (const attachment of [...composerImages, ...composerFiles]) {
       // A needs-reattach file has no bytes to upload and no upload to verify.
-      if (attachment.type === "file" && composerFileNeedsReattach(attachment)) continue;
+      if (composerAttachmentNeedsReattach(attachment)) continue;
       startAttachmentUpload(attachment);
     }
   }, [composerFiles, composerImages]);
@@ -310,9 +300,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   // A chat switch starts the composer's transient state over.
   const [composerSession, setComposerSession] = useState(chatId);
-  const [composerCursor, setComposerCursor] = useState(() =>
-    collapseExpandedComposerCursor(prompt, prompt.length),
-  );
+  const [composerCursor, setComposerCursor] = useState(prompt.length);
   const {
     trigger: composerTrigger,
     setTrigger: setComposerTrigger,
@@ -512,7 +500,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
 
   const onPromptChange = (
-    { value: nextPrompt, cursor: nextCursor, expandedCursor, contextIds }: ComposerPromptSnapshot,
+    { value: nextPrompt, cursor: nextCursor, contextIds }: ComposerPromptSnapshot,
     cursorAdjacentToChip: boolean,
   ) => {
     expandComposerForEditorChange();
@@ -521,9 +509,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (!field.allowCustomAnswer) return;
       setComposerCursor(nextCursor);
       setComposerTrigger(
-        cursorAdjacentToChip ? null : detectComposerTrigger(nextPrompt, expandedCursor),
+        cursorAdjacentToChip ? null : detectComposerTrigger(nextPrompt, nextCursor),
       );
-      question.onTypeAnswer(field.key, nextPrompt, nextCursor, expandedCursor);
+      question.onTypeAnswer(field.key, nextPrompt, nextCursor);
       return;
     }
     promptRef.current = nextPrompt;
@@ -548,9 +536,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       addComposerDraftFiles(attachmentDraftTarget, attachmentChanges.filesToRestore);
     }
     setComposerCursor(nextCursor);
-    setComposerTrigger(
-      cursorAdjacentToChip ? null : detectComposerTrigger(nextPrompt, expandedCursor),
-    );
+    setComposerTrigger(cursorAdjacentToChip ? null : detectComposerTrigger(nextPrompt, nextCursor));
   };
 
   const applyPromptReplacement = (
@@ -559,7 +545,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     replacement: string,
     options?: {
       expectedText?: string;
-      expandedCursorAfterReplace?: number;
+      cursorAfterReplace?: number;
       focusEditorAfterReplace?: boolean;
     },
   ) => {
@@ -572,20 +558,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return false;
     }
     const next = replaceTextRange(currentText, rangeStart, rangeEnd, replacement);
-    const nextCursor = collapseExpandedComposerCursor(
-      next.text,
-      options?.expandedCursorAfterReplace ?? next.cursor,
-    );
-    const nextExpandedCursor = expandCollapsedComposerCursor(next.text, nextCursor);
+    const nextCursor = options?.cursorAfterReplace ?? next.cursor;
     promptRef.current = next.text;
     const field = question?.progress.field;
     if (question && field) {
-      question.onTypeAnswer(field.key, next.text, nextCursor, nextExpandedCursor);
+      question.onTypeAnswer(field.key, next.text, nextCursor);
     } else {
       setComposerDraftPrompt(chatId, next.text);
     }
     setComposerCursor(nextCursor);
-    setComposerTrigger(detectComposerTrigger(next.text, nextExpandedCursor));
+    setComposerTrigger(detectComposerTrigger(next.text, nextCursor));
     if (options?.focusEditorAfterReplace !== false) {
       window.requestAnimationFrame(() => {
         // Type-to-focus routes only the first key through here; once the
@@ -603,16 +585,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerEditorRef.current?.readSnapshot() ?? {
       value: promptRef.current,
       cursor: composerCursor,
-      expandedCursor: expandCollapsedComposerCursor(promptRef.current, composerCursor),
     };
 
   const resolveActiveComposerTrigger = () => {
     const snapshot = readComposerSnapshot();
     return {
       snapshot,
-      trigger: resolveComposerTrigger(
-        detectComposerTrigger(snapshot.value, snapshot.expandedCursor),
-      ),
+      trigger: resolveComposerTrigger(detectComposerTrigger(snapshot.value, snapshot.cursor)),
     };
   };
 
@@ -725,7 +704,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setPromptHistoryPosition(step.position);
     promptRef.current = step.prompt;
     setComposerDraftPrompt(chatId, step.prompt);
-    setComposerCursor(collapseExpandedComposerCursor(step.prompt, step.prompt.length));
+    setComposerCursor(step.prompt.length);
     setComposerTrigger(null);
     setMenuHighlight(null);
     return true;
@@ -784,7 +763,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             edit.end,
             edit.replacement,
             key === "Tab"
-              ? { expandedCursorAfterReplace: selection.start + edit.replacement.length }
+              ? { cursorAfterReplace: selection.start + edit.replacement.length }
               : undefined,
           )
         ) {
@@ -795,21 +774,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return false;
   };
 
-  // A failed upload remains actionable in the expanded attachment tray, but
-  // its collapsed thumbnail is enough to signal that the draft has images.
-  const hasUnsavedImage = composerImages.some(
-    (image) =>
-      attachmentDraft.nonPersistedImageIds.includes(image.id) &&
-      uploadsByAttachmentId[image.id]?.status !== "failed",
-  );
   // Banners dock above the surface rather than inside it, so they do not hold
   // the composer open; only surface-internal chrome does.
   const composerHasExpandedChrome =
     question !== null ||
     composerMenuOpen ||
     isServerUnreachable ||
-    composerSubmissionError !== null ||
-    hasUnsavedImage;
+    composerSubmissionError !== null;
   const canTrackComposerScrollGesture = !isMobileViewport;
   const canScrollCollapseComposer =
     canTrackComposerScrollGesture && !hasMultilinePrompt && !composerHasExpandedChrome;
@@ -842,6 +813,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           >
             <ComposerImageThumbnail
               file={image.file}
+              src={image.previewUrl}
               alt=""
               className="size-full object-cover"
               fallback={<ImageIcon className="m-auto size-3.5 text-icon-muted" />}
@@ -988,7 +960,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ) => {
     if (text.length === 0 || question !== null) return false;
     const current = promptRef.current;
-    const cursor = position === "cursor" ? readComposerSnapshot().expandedCursor : current.length;
+    const cursor = position === "cursor" ? readComposerSnapshot().cursor : current.length;
     const needsLeadingSpace =
       (options?.ensureLeadingBoundary ?? false) &&
       cursor > 0 &&
@@ -1027,7 +999,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const addComposerAttachments = async (
     files: File[],
     options?: {
-      readonly source?: ChatFileAttachment["source"];
+      readonly isPastedText?: boolean;
       readonly selection?: { start: number; end: number };
       readonly skipImageInlineChip?: boolean;
     },
@@ -1056,7 +1028,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // A pick that matches a needs-reattach marker replaces it in the draft, so
     // it must not consume a slot; a draft full of markers would otherwise hit
     // the capacity error before the replacement path could run.
-    const reattachMarkers = composerFiles.filter(composerFileNeedsReattach);
+    const reattachMarkers = [...composerImages, ...composerFiles].filter(
+      composerAttachmentNeedsReattach,
+    );
     const replacedReattachMarkerIds = new Set<string>();
     const acceptedImages: File[] = [];
     const acceptedFiles: ComposerFileAttachment[] = [];
@@ -1065,18 +1039,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const attachmentKind = classifyComposerAttachmentFile(file);
       const fileMimeType =
         attachmentKind === "file" ? file.type || "application/octet-stream" : file.type;
-      const matchingReattachMarker =
-        attachmentKind === "file"
-          ? reattachMarkers.find(
-              (marker) =>
-                !replacedReattachMarkerIds.has(marker.id) &&
-                composerFileMatchesReattachMarker(marker, {
-                  name: file.name || "file",
-                  mimeType: fileMimeType,
-                  sizeBytes: file.size,
-                }),
-            )
-          : undefined;
+      const matchingReattachMarker = reattachMarkers.find(
+        (marker) =>
+          marker.type === attachmentKind &&
+          !replacedReattachMarkerIds.has(marker.id) &&
+          composerAttachmentMatchesReattachMarker(marker, {
+            name: file.name || "file",
+            mimeType: fileMimeType,
+            sizeBytes: file.size,
+          }),
+      );
       if (matchingReattachMarker) {
         replacedReattachMarkerIds.add(matchingReattachMarker.id);
       }
@@ -1112,7 +1084,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           mimeType: fileMimeType,
           sizeBytes: attachmentFile.size,
           file: attachmentFile,
-          ...(options?.source ? { source: options.source } : {}),
         });
       }
       if (!matchingReattachMarker) {
@@ -1136,7 +1107,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           options?.selection,
         );
       }
-      if (options?.source?._tag === "pasted-text" && storedFiles.length > 0) {
+      if (options?.isPastedText && storedFiles.length > 0) {
         const attached = storedFiles[0]!;
         toastManager.add({
           type: "info",
@@ -1269,7 +1240,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
 
     void addComposerAttachments([foldedFile], {
-      source: { _tag: "pasted-text" },
+      isPastedText: true,
       ...(selection ? { selection } : {}),
     });
     return true;
@@ -1520,6 +1491,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         >
                           <ComposerImageThumbnail
                             file={image.file}
+                            src={image.previewUrl}
                             alt={image.name}
                             className="h-full w-full object-cover"
                             fallback={
@@ -1529,24 +1501,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             }
                           />
                         </button>
-                        {attachmentDraft.nonPersistedImageIds.includes(image.id) && (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <span
-                                  role="img"
-                                  aria-label="Draft attachment may not persist"
-                                  className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-warning-foreground"
-                                >
-                                  <CircleAlertIcon className="size-3" />
-                                </span>
-                              }
-                            />
-                            <TooltipPopup side="top">
-                              Draft attachment could not be saved locally and may be lost on
-                              navigation.
-                            </TooltipPopup>
-                          </Tooltip>
+                        {composerAttachmentNeedsReattach(image) && (
+                          <span className="absolute inset-x-0 bottom-0 bg-background/85 px-1 text-center text-3xs text-foreground">
+                            Attach again
+                          </span>
                         )}
                         {upload?.status === "uploading" && (
                           <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-background/85 px-1 text-center text-3xs text-foreground">
@@ -1582,7 +1540,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 <div className="mb-3 flex flex-col gap-1">
                   {unreferencedFiles.map((file) => {
                     const upload = uploadsByAttachmentId[file.id];
-                    const needsReattach = composerFileNeedsReattach(file);
+                    const needsReattach = composerAttachmentNeedsReattach(file);
                     return (
                       <div
                         key={file.id}

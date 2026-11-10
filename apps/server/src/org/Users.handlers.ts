@@ -33,8 +33,8 @@ export const layer = Users.middleware(Authorization).toLayer(
       "users.approve": (request) => service.approve(request),
       "users.decline": (request) => service.decline(request),
       "users.changeRole": (request) => service.changeRole(request),
-      // Workflows can refuse the deactivation, which rolls it back, or hand the member's open
-      // steps on; their revoked sessions are announced only once it all commits.
+      // Workflows can refuse the deactivation, which rolls it back; the member's revoked sessions
+      // are announced only once it all commits.
       "users.deactivate": (request) =>
         service.deactivate(request).pipe(
           Effect.tap(() => workflows.memberDeactivated(request.userId)),
@@ -45,9 +45,7 @@ export const layer = Users.middleware(Authorization).toLayer(
       "users.signOutElsewhere": () =>
         Effect.gen(function* () {
           const { userId, sessionId } = yield* CurrentUser;
-          const revokedCount = yield* service
-            .revokeAllForUser(userId, sessionId)
-            .pipe(Effect.catchTags({ SessionStoreError: Effect.die }));
+          const revokedCount = yield* service.revokeAllForUser(userId, sessionId);
           return { revokedCount };
         }),
     });

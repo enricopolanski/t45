@@ -1,13 +1,17 @@
-import { type Agent, Refused } from "@t45/contracts/models/Agent";
+import { type Agent, canManage, canUse, isBuiltIn, Refused } from "@t45/contracts/models/Agent";
 import { NotFound } from "@t45/contracts/resources/errors";
-import { Agents } from "@t45/contracts/resources/Agents";
-import { Authorization } from "@t45/contracts/Authorization";
+import { Agents, AgentSummary } from "@t45/contracts/resources/Agents";
+import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
+import { AutomationRepository } from "../automations/AutomationRepository.ts";
+import { CommandLogRepository } from "../persistence/CommandLogRepository.ts";
+import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 import { AgentRepository } from "./AgentRepository.ts";
 import { SkillRepository } from "./SkillRepository.ts";
 
@@ -22,14 +26,24 @@ export const layer = Agents.middleware(Authorization).toLayer(
   Effect.gen(function* () {
     const agents = yield* AgentRepository;
     const skills = yield* SkillRepository;
+    const automations = yield* AutomationRepository;
+    const workflows = yield* WorkflowRepository;
+    const commandLog = yield* CommandLogRepository;
     const httpClient = yield* HttpClient.HttpClient;
     const crypto = yield* Crypto.Crypto;
 
-    const find = (agentId: string) =>
-      agents.get(agentId).pipe(
-        Effect.filterOrElse(
-          (agent) => agent !== null,
-          () => new NotFound(),
+    /** An agent the member doesn't manage is as good as missing. */
+    const find = Effect.fnUntraced(function* (agentId: string) {
+      const member = yield* CurrentUser;
+      const agent = yield* agents.get(agentId);
+      if (agent === null || !canManage(agent, member)) return yield* new NotFound();
+      return agent;
+    });
+    const findCustom = (agentId: string) =>
+      find(agentId).pipe(
+        Effect.filterOrFail(
+          (agent) => !isBuiltIn(agent.id),
+          () => new Refused({ reason: "built_in" }),
         ),
       );
     const models = yield* httpClient.get(MODELS_URL).pipe(
@@ -61,7 +75,13 @@ export const layer = Agents.middleware(Authorization).toLayer(
     const save = (agent: Agent) => agents.save(agent).pipe(Effect.as(agent));
 
     return Agents.of({
-      "agents.list": () => agents.list,
+      "agents.list": () =>
+        Effect.gen(function* () {
+          const member = yield* CurrentUser;
+          return (yield* agents.list)
+            .filter((agent) => canUse(agent, member.userId) || canManage(agent, member))
+            .map((agent) => Struct.pick(agent, Struct.keys(AgentSummary.fields)));
+        }),
       "agents.listModels": () =>
         models.pipe(
           Effect.map((models) => ({ models, reason: null })),
@@ -70,11 +90,21 @@ export const layer = Agents.middleware(Authorization).toLayer(
       "agents.get": ({ agentId }) => find(agentId),
       "agents.archive": ({ agentId }) =>
         Effect.gen(function* () {
-          const agent = yield* find(agentId);
+          const agent = yield* findCustom(agentId);
           if (agent.status === "archived") return agent;
-          return yield* save({ ...agent, status: "archived", updatedAt: yield* DateTime.now }).pipe(
-            Effect.orDie,
+          // An agent that a step of some workflow version reaches, through an automation that
+          // isn't archived, stays active. Checked in the archive's own transaction.
+          const archived = yield* agents.modify(
+            agent.id,
+            Effect.fnUntraced(function* (current) {
+              for (const automation of yield* automations.listForAgent(current.id)) {
+                if ((yield* workflows.listAttaching(automation.id)).length > 0)
+                  return yield* new Refused({ reason: "attached_to_workflow" });
+              }
+              return { ...current, status: "archived" as const, updatedAt: yield* DateTime.now };
+            }),
           );
+          return archived ?? (yield* new NotFound());
         }),
       "agents.create": (draft) =>
         Effect.gen(function* () {
@@ -84,20 +114,42 @@ export const layer = Agents.middleware(Authorization).toLayer(
           return yield* save({
             id: yield* crypto.randomUUIDv4().pipe(Effect.orDie),
             ...draft,
+            creatorUserId: (yield* CurrentUser).userId,
+            isPublished: false,
             status: "active",
             createdAt: now,
             updatedAt: now,
           });
         }),
-      "agents.restore": ({ agentId }) =>
+      "agents.publish": ({ agentId }) =>
         Effect.gen(function* () {
-          const agent = yield* find(agentId);
-          if (agent.status === "active") return agent;
-          return yield* save({ ...agent, status: "active", updatedAt: yield* DateTime.now });
+          const { userId } = yield* CurrentUser;
+          const agent = yield* agents.get(agentId);
+          if (agent === null || agent.creatorUserId !== userId) return yield* new NotFound();
+          // The log entry commits with the publication it records.
+          const published = yield* agents
+            .modify(
+              agent.id,
+              Effect.fnUntraced(function* (current) {
+                if (current.isPublished) return current;
+                const now = yield* DateTime.now;
+                yield* commandLog.append({
+                  command: "agents.publish",
+                  userId,
+                  agentId: null,
+                  chatId: null,
+                  details: { agentId: current.id },
+                  createdAt: now,
+                });
+                return { ...current, isPublished: true, updatedAt: now };
+              }),
+            )
+            .pipe(Effect.orDie);
+          return published ?? (yield* new NotFound());
         }),
       "agents.update": ({ agentId, ...draft }) =>
         Effect.gen(function* () {
-          const agent = yield* find(agentId);
+          const agent = yield* findCustom(agentId);
           if (draft.model !== agent.model) yield* requireOfferedModel(draft.model);
           yield* requireSkills(draft.skills);
           return yield* save({ ...agent, ...draft, updatedAt: yield* DateTime.now });

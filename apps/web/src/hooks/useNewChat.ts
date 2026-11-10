@@ -21,14 +21,14 @@ interface ChatRouter {
       readonly search: {
         readonly session?: Session.ID;
         readonly agent?: Agent["id"];
-        readonly workflow?: string;
+        readonly project?: string;
       };
     };
   };
   readonly navigate: (options: {
     readonly to: "/chats/$chatId";
     readonly params: { readonly chatId: ChatId };
-    readonly search: { readonly agent: Agent["id"]; readonly workflow?: string };
+    readonly search: { readonly agent: Agent["id"]; readonly project?: string };
   }) => Promise<void>;
 }
 
@@ -40,28 +40,27 @@ function targetOnScreen(router: ChatRouter, viewOf: ViewOf) {
   if (!isChatId(chatId)) return undefined;
   const view = viewOf(chatSessionKey(chatId, router.state.location.search.session));
   return view.status === "ready"
-    ? { agentId: view.chat.agentId, workflowId: view.chat.workflowId }
+    ? { agentId: view.chat.agentId, projectId: view.chat.projectId }
     : {
         agentId: router.state.location.search.agent,
-        workflowId: router.state.location.search.workflow ?? null,
+        projectId: router.state.location.search.project ?? null,
       };
 }
 
-/** Starts with the chosen target, preserves the current workflow, or chooses the first available target. */
+/** Starts with the chosen target, preserves the current project, or chooses the first available target. */
 export const openNewChat = Effect.fnUntraced(function* (
   router: ChatRouter,
   viewOf: ViewOf,
   agentId?: Agent["id"],
-  workflowId: string | null = null,
+  projectId: string | null = null,
 ) {
   const eligible = yield* call("chats.listTargets", undefined);
-  const preferred =
-    agentId === undefined ? targetOnScreen(router, viewOf) : { agentId, workflowId };
+  const preferred = agentId === undefined ? targetOnScreen(router, viewOf) : { agentId, projectId };
   const matching = eligible.find(
     (candidate) =>
-      candidate.agentId === preferred?.agentId && candidate.workflowId === preferred.workflowId,
+      candidate.agentId === preferred?.agentId && candidate.projectId === preferred.projectId,
   );
-  if (matching === undefined && (agentId !== undefined || preferred?.workflowId != null))
+  if (matching === undefined && (agentId !== undefined || preferred?.projectId != null))
     return yield* new NotFound();
   const target = matching ?? eligible[0];
   if (target === undefined) return;
@@ -71,7 +70,7 @@ export const openNewChat = Effect.fnUntraced(function* (
       params: { chatId: newChatId() },
       search: {
         agent: target.agentId,
-        ...(target.workflowId === null ? {} : { workflow: target.workflowId }),
+        ...(target.projectId === null ? {} : { project: target.projectId }),
       },
     }),
   );
@@ -80,9 +79,9 @@ export const openNewChat = Effect.fnUntraced(function* (
 export function useNewChat() {
   const router = useRouter();
   return useCallback(
-    (agentId?: Agent["id"], workflowId: string | null = null) =>
+    (agentId?: Agent["id"], projectId: string | null = null) =>
       runtime.runPromise(
-        openNewChat(router, (key) => appAtomRegistry.get(chats.view(key)), agentId, workflowId),
+        openNewChat(router, (key) => appAtomRegistry.get(chats.view(key)), agentId, projectId),
       ),
     [router],
   );

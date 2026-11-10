@@ -19,7 +19,6 @@ import { inputMessageId, rootSessionId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
 import * as Fixture from "./Chats.testkit.ts";
 import { ChatService, type Member } from "./ChatService.ts";
-import { TaskService } from "../tasks/TaskService.ts";
 
 const { isSnapshot, testChatId } = Fixture;
 
@@ -33,7 +32,6 @@ const setup = Effect.gen(function* () {
   return {
     runner: yield* FakeRunner,
     chats: yield* ChatService,
-    tasks: yield* TaskService,
     repository: yield* ChatRepository.ChatRepository,
     agentId,
   };
@@ -71,7 +69,7 @@ describe("chats", () => {
     "starts a member's chat at its first message, once per id, and never again once deleted",
     () =>
       Effect.gen(function* () {
-        const { runner, chats, agentId, tasks } = yield* setup;
+        const { runner, chats, agentId } = yield* setup;
         runner.hold = true;
         const other = yield* Fixture.addAgent("Other");
         const chatId = testChatId(1);
@@ -87,8 +85,12 @@ describe("chats", () => {
           ],
           ["id_taken", "NotFound", "NotFound"],
         );
-        yield* tasks.start(
-          { type: "automation", automationId: AutomationId.make("fixture") },
+        yield* chats.startAutomation(
+          {
+            type: "manual",
+            automationId: AutomationId.make("fixture"),
+            effectiveUserId: "fixture",
+          },
           agentId,
           {
             title: "Nightly",
@@ -115,29 +117,37 @@ describe("chats", () => {
     "refuses a member's chat with an agent that can't chat or is archived, which an automation still takes but no member can steer",
     () =>
       Effect.gen(function* () {
-        const { runner, chats, repository, tasks } = yield* setup;
+        const { runner, chats, repository } = yield* setup;
         runner.hold = true;
         const quiet = yield* Fixture.addAgent("Quiet", { chat: false, stepTools: true });
         const retired = yield* Fixture.addAgent("Retired", { status: "archived", stepTools: true });
         const first = (n: number, agentId: Agent["id"]) =>
           chats.send({ chatId: testChatId(n), agentId, inputId: "input-1", ...typed("Hi") }, alice);
-        const startTask = (agentId: Agent["id"]) =>
-          tasks.start({ type: "automation", automationId: AutomationId.make("fixture") }, agentId, {
-            title: "Report · Read",
-            input: typed("Read the report."),
-          });
+        const startRun = (agentId: Agent["id"]) =>
+          chats.startAutomation(
+            {
+              type: "manual",
+              automationId: AutomationId.make("fixture"),
+              effectiveUserId: "fixture",
+            },
+            agentId,
+            {
+              title: "Report · Read",
+              input: typed("Read the report."),
+            },
+          );
         assert.deepEqual(
           [
             yield* outcomeOf(first(1, quiet)),
             yield* outcomeOf(first(2, retired)),
             yield* outcomeOf(first(3, "agent-gone")),
-            yield* outcomeOf(startTask(retired)),
-            yield* outcomeOf(startTask("agent-ghost")),
+            yield* outcomeOf(startRun(retired)),
+            yield* outcomeOf(startRun("agent-ghost")),
           ],
           Array.from({ length: 5 }, () => "agent_unavailable"),
         );
 
-        const chatId = yield* startTask(quiet);
+        const chatId = yield* startRun(quiet);
         assert.equal(
           yield* outcomeOf(chats.send({ chatId, inputId: "steer-1", ...typed("Read it.") }, admin)),
           "NotFound",
@@ -200,7 +210,7 @@ describe("chats", () => {
 
   it.effect("titles an untitled member chat from its first input, and keeps that or a rename", () =>
     Effect.gen(function* () {
-      const { repository, agentId, chats, tasks } = yield* setup;
+      const { repository, agentId, chats } = yield* setup;
       const titleOf = (n: number) =>
         repository.get(testChatId(n)).pipe(Effect.map((chat) => chat?.title));
       const send = (inputId: string, text: string) =>
@@ -236,8 +246,8 @@ describe("chats", () => {
         },
         alice,
       );
-      const taskId = yield* tasks.start(
-        { type: "automation", automationId: AutomationId.make("fixture") },
+      const runId = yield* chats.startAutomation(
+        { type: "manual", automationId: AutomationId.make("fixture"), effectiveUserId: "fixture" },
         agentId,
         {
           title: "Inbox digest",
@@ -245,7 +255,7 @@ describe("chats", () => {
         },
       );
       assert.deepEqual(
-        [yield* titleOf(2), (yield* repository.get(taskId))?.title],
+        [yield* titleOf(2), (yield* repository.get(runId))?.title],
         ["Image: shot.png", "Inbox digest"],
       );
     }).pipe(Effect.provide(Fixture.layer)),

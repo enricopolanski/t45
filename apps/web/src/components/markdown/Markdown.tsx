@@ -1,4 +1,4 @@
-import type { ChatContextKind } from "@t45/contracts/models/Chat";
+import type { ChatContextKind } from "@t45/contracts/models/Attachment";
 import { parseComposerContextHref } from "@t45/core/composerContextReferences";
 import { Check, Copy, Maximize2, Minimize2 } from "lucide";
 import {

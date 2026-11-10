@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { reachableAtom } from "../rpc/api";
-import { appAtomRegistry } from "../state/atomRegistry";
 
 import {
-  composerFileNeedsReattach,
+  composerAttachmentNeedsReattach,
   useComposerDraftStore,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
@@ -14,11 +12,6 @@ import { testChatId } from "../state/chats.testkit";
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
 }));
-
-vi.mock("../state/atomRegistry", async () => {
-  const { AtomRegistry } = await import("effect/reactivity");
-  return { appAtomRegistry: AtomRegistry.make() };
-});
 
 import {
   awaitAttachmentUploads,
@@ -131,13 +124,8 @@ function makeFile(id: string): ComposerFileAttachment {
   };
 }
 
-function setReachable(isReachable: boolean) {
-  appAtomRegistry.set(reachableAtom, isReachable);
-}
-
 describe("attachmentUploadQueue", () => {
   beforeEach(() => {
-    setReachable(true);
     TestXmlHttpRequest.requests = [];
     uploadIds.clear();
     mocks.fetch.mockReset();
@@ -151,59 +139,6 @@ describe("attachmentUploadQueue", () => {
       releaseAttachmentUpload(id);
     }
     vi.unstubAllGlobals();
-  });
-
-  it.each([false, true])(
-    "retries a failed file once the server is reachable again, including a late failure: %s",
-    async (lateFailure) => {
-      const image = makeFile("reconnect");
-      startAttachmentUpload(image);
-      await Promise.resolve();
-      const firstSettled = awaitAttachmentUploads([image.id]);
-      setReachable(false);
-      if (lateFailure) setReachable(true);
-      TestXmlHttpRequest.requests[0]!.complete(503);
-      await firstSettled;
-      if (!lateFailure) setReachable(true);
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(TestXmlHttpRequest.requests).toHaveLength(2);
-      const retrySettled = awaitAttachmentUploads([image.id]);
-      TestXmlHttpRequest.requests[1]!.complete(503);
-      await retrySettled;
-      setReachable(true);
-      await Promise.resolve();
-      expect(TestXmlHttpRequest.requests).toHaveLength(2);
-      expect(readAttachmentUpload(image.id)?.status).toBe("failed");
-
-      setReachable(false);
-      setReachable(true);
-      await Promise.resolve();
-      await Promise.resolve();
-      const finalSettled = awaitAttachmentUploads([image.id]);
-      TestXmlHttpRequest.requests[2]!.complete();
-      await finalSettled;
-      expect(getUploadedAttachments([image])).not.toBeNull();
-      setReachable(false);
-      setReachable(true);
-      await Promise.resolve();
-      expect(TestXmlHttpRequest.requests).toHaveLength(3);
-    },
-  );
-
-  it("does not retry after the attachment is removed", async () => {
-    const image = makeFile("removed");
-    startAttachmentUpload(image);
-    await Promise.resolve();
-    const settled = awaitAttachmentUploads([image.id]);
-    TestXmlHttpRequest.requests[0]!.complete(503);
-    await settled;
-    setReachable(false);
-    setReachable(true);
-    releaseAttachmentUpload(image.id);
-    await Promise.resolve();
-    expect(TestXmlHttpRequest.requests).toHaveLength(1);
-    expect(readAttachmentUpload(image.id)).toBeUndefined();
   });
 
   it("uploads images immediately and sends attachment references", async () => {
@@ -225,6 +160,7 @@ describe("attachmentUploadQueue", () => {
       {
         type: "image",
         id: uploadedId("image-1.png"),
+        contextId: "image_image-1",
         name: "image-1.png",
         mimeType: "image/png",
         sizeBytes: 3,
@@ -236,10 +172,7 @@ describe("attachmentUploadQueue", () => {
   });
 
   it("uploads generic files and sends file attachment references", async () => {
-    const file = {
-      ...makeFile("report"),
-      source: { _tag: "pasted-text" as const },
-    };
+    const file = makeFile("report");
     startAttachmentUpload(file);
     await Promise.resolve();
 
@@ -255,10 +188,10 @@ describe("attachmentUploadQueue", () => {
       {
         type: "file",
         id: uploadedId("report.pdf"),
+        contextId: "file_report",
         name: "report.pdf",
         mimeType: "application/pdf",
         sizeBytes: 3,
-        source: { _tag: "pasted-text" },
       },
     ]);
   });
@@ -373,7 +306,7 @@ describe("attachmentUploadQueue", () => {
       const marker = useComposerDraftStore.getState().getComposerDraft(draftTarget)?.files[0];
       expect(readAttachmentUpload(file.id)).toBeUndefined();
       expect(marker?.uploadedAttachmentId).toBeUndefined();
-      expect(marker && composerFileNeedsReattach(marker)).toBe(true);
+      expect(marker && composerAttachmentNeedsReattach(marker)).toBe(true);
 
       const replacementBytes = new File([new Uint8Array([1, 2, 3])], file.name, {
         type: file.mimeType,

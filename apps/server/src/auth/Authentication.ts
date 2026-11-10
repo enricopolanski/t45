@@ -3,7 +3,6 @@ import { AuthSessionId } from "@t45/contracts/resources/Session";
 import { Role, State } from "@t45/contracts/models/User";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -12,7 +11,6 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as SqlSchema from "effect/sql/SqlSchema";
 import { createRemoteJWKSet, errors, jwtVerify, type JWTVerifyGetKey } from "jose";
 
 import * as ServerConfig from "../config.ts";
@@ -24,14 +22,6 @@ export class SessionInvalidError extends Schema.TaggedError<SessionInvalidError>
 ) {
   override get message(): string {
     return "The session is unknown, expired, or revoked.";
-  }
-}
-
-class SessionStoreError extends Schema.TaggedError<SessionStoreError>()("SessionStoreError", {
-  cause: Schema.Defect(),
-}) {
-  override get message(): string {
-    return "Session storage failed.";
   }
 }
 
@@ -73,11 +63,6 @@ export class UserDeactivatedError extends Schema.TaggedError<UserDeactivatedErro
     return "This account's access has been deactivated.";
   }
 }
-
-/** Storage failed while admitting the user or issuing the session. */
-class UserAuthInternalError extends Data.TaggedError("UserAuthInternalError")<{
-  readonly cause: unknown;
-}> {}
 
 /** Validates identity tokens before admission to a server session. */
 export class IdentityTokenValidator extends Context.Service<
@@ -175,7 +160,10 @@ const SessionRow = Schema.Struct({
   expiresAt: Schema.DateTimeUtcFromString,
 });
 
-const RevokedRow = Schema.Struct({ sessionId: AuthSessionId });
+const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow));
+const decodeRevoked = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ sessionId: AuthSessionId })),
+);
 
 const makeSessions = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
@@ -191,94 +179,62 @@ const makeSessions = Effect.gen(function* () {
   // to one signs you out of the others.
   const cookieName = `t45_session_${(yield* sha256(stateDir)).slice(0, 12)}`;
 
-  const insertSession = SqlSchema.void({
-    Request: Schema.Struct({
-      sessionId: AuthSessionId,
-      tokenHash: Schema.String,
-      userId: Schema.String,
-      expiresAt: Schema.DateTimeUtcFromString,
-    }),
-    execute: (input) => sql`
-      INSERT INTO auth_sessions
-        (session_id, token_hash, user_id, expires_at)
-      VALUES (${input.sessionId}, ${input.tokenHash}, ${input.userId}, ${input.expiresAt})
-    `,
+  const publishRevoked = Effect.fnUntraced(function* (rows: ReadonlyArray<unknown>) {
+    const revoked = yield* decodeRevoked(rows);
+    yield* sql.afterCommit(
+      PubSub.publishAll(
+        revocations,
+        revoked.map((row) => row.sessionId),
+      ).pipe(Effect.asVoid),
+    );
+    return revoked.length;
   });
-
-  const findSession = SqlSchema.findOneOption({
-    Request: Schema.Struct({ tokenHash: Schema.String, now: Schema.DateTimeUtcFromString }),
-    Result: SessionRow,
-    execute: ({ tokenHash, now }) => sql`
-      SELECT s.session_id AS "sessionId", s.user_id AS "userId", u.role, u.state,
-        s.expires_at AS "expiresAt"
-      FROM auth_sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = ${tokenHash} AND s.expires_at > ${now}
-    `,
-  });
-
-  const deleteSession = SqlSchema.findAll({
-    Request: Schema.Struct({ userId: Schema.String, sessionId: AuthSessionId }),
-    Result: RevokedRow,
-    execute: ({ userId, sessionId }) => sql`
-      DELETE FROM auth_sessions WHERE session_id = ${sessionId} AND user_id = ${userId}
-      RETURNING session_id AS "sessionId"
-    `,
-  });
-
-  const deleteUserSessions = SqlSchema.findAll({
-    Request: Schema.Struct({ userId: Schema.String, except: Schema.String }),
-    Result: RevokedRow,
-    execute: ({ userId, except }) => sql`
-      DELETE FROM auth_sessions WHERE user_id = ${userId} AND session_id != ${except}
-      RETURNING session_id AS "sessionId"
-    `,
-  });
-
-  const toStoreError = Effect.mapError((cause) => new SessionStoreError({ cause }));
-
-  const publishRevoked = (rows: ReadonlyArray<typeof RevokedRow.Type>) =>
-    sql
-      .afterCommit(
-        PubSub.publishAll(
-          revocations,
-          rows.map((row) => row.sessionId),
-        ).pipe(Effect.asVoid),
-      )
-      .pipe(Effect.as(rows.length));
 
   const issue = Effect.fnUntraced(function* (input: { readonly userId: string }) {
     const token = Base64Url.encode(yield* crypto.randomBytes(32));
     const sessionId = AuthSessionId.make(yield* crypto.randomUUIDv4());
     const expiresAt = DateTime.addDuration(yield* DateTime.now, SESSION_TTL);
-    yield* insertSession({
-      sessionId,
-      tokenHash: yield* sha256(token),
-      userId: input.userId,
-      expiresAt,
-    });
+    const tokenHash = yield* sha256(token);
+    yield* sql`
+      INSERT INTO auth_sessions (session_id, token_hash, user_id, expires_at)
+      VALUES (${sessionId}, ${tokenHash}, ${input.userId}, ${DateTime.formatIso(expiresAt)})
+    `;
     return { token, expiresAt };
-  }, toStoreError);
+  }, Effect.orDie);
 
   const authenticate = Effect.fnUntraced(function* (token: string) {
-    const tokenHash = yield* sha256(token).pipe(toStoreError);
-    const session = yield* findSession({ tokenHash, now: yield* DateTime.now }).pipe(toStoreError);
-    return yield* Effect.fromOption(session).pipe(
-      Effect.mapError(() => new SessionInvalidError({})),
-    );
+    const tokenHash = yield* sha256(token).pipe(Effect.orDie);
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const [session] = yield* sql`
+      SELECT s.session_id AS "sessionId", s.user_id AS "userId", u.role, u.state,
+        s.expires_at AS "expiresAt"
+      FROM auth_sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = ${tokenHash} AND s.expires_at > ${now}
+    `.pipe(Effect.flatMap(decodeSessions), Effect.orDie);
+    return session ?? (yield* new SessionInvalidError({}));
   });
 
-  const revoke = (input: { readonly userId: string; readonly sessionId: AuthSessionId }) =>
-    deleteSession(input).pipe(
+  const revoke = ({
+    userId,
+    sessionId,
+  }: {
+    readonly userId: string;
+    readonly sessionId: AuthSessionId;
+  }) =>
+    sql`
+      DELETE FROM auth_sessions WHERE session_id = ${sessionId} AND user_id = ${userId}
+      RETURNING session_id AS "sessionId"
+    `.pipe(
       Effect.flatMap(publishRevoked),
       Effect.map((count) => count > 0),
-      toStoreError,
+      Effect.orDie,
     );
 
   const revokeAllForUser = (userId: string, except?: AuthSessionId) =>
-    deleteUserSessions({ userId, except: except ?? "" }).pipe(
-      Effect.flatMap(publishRevoked),
-      toStoreError,
-    );
+    sql`
+      DELETE FROM auth_sessions WHERE user_id = ${userId} AND session_id != ${except ?? ""}
+      RETURNING session_id AS "sessionId"
+    `.pipe(Effect.flatMap(publishRevoked), Effect.orDie);
 
   return {
     cookieName,
@@ -289,8 +245,6 @@ const makeSessions = Effect.gen(function* () {
     subscribeRevocations: PubSub.subscribe(revocations),
   };
 });
-
-const toInternalError = (cause: unknown) => new UserAuthInternalError({ cause });
 
 export const make = Effect.gen(function* () {
   const identityTokenValidator = yield* IdentityTokenValidator;
@@ -330,10 +284,10 @@ export const make = Effect.gen(function* () {
               updatedAt: now,
             });
           }
-          return yield* sessions.issue({ userId: user.id }).pipe(Effect.mapError(toInternalError));
+          return yield* sessions.issue({ userId: user.id });
         }),
       )
-      .pipe(Effect.catchTags({ SqlError: toInternalError }));
+      .pipe(Effect.catchTags({ SqlError: Effect.die }));
   });
 
   return {

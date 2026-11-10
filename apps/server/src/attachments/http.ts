@@ -10,11 +10,9 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
-import { member } from "../auth/http.ts";
+import { member, uploader } from "../auth/http.ts";
 import { ChatService } from "../chats/ChatService.ts";
-import { TicketRepository } from "../workflows/TicketRepository.ts";
-import { canViewTicket } from "@t45/contracts/models/Workflow";
-import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
+import { WorkflowService } from "../workflows/WorkflowService.ts";
 import {
   AttachmentRepository,
   attachmentIsInlineImage,
@@ -85,8 +83,7 @@ const attachmentRoute = HttpRouter.add(
     if (attachment === null) return notFound;
 
     const chats = yield* ChatService;
-    const tickets = yield* TicketRepository;
-    const workflows = yield* WorkflowRepository;
+    const workflows = yield* WorkflowService;
     const readable = Effect.gen(function* () {
       const holders = yield* files.chatsHolding(attachment.id);
       if (attachment.stepId === null && holders.length === 0) {
@@ -95,18 +92,7 @@ const attachmentRoute = HttpRouter.add(
       for (const chatId of holders) {
         if ((yield* chats.access(currentUser, chatId)) !== null) return true;
       }
-      if (attachment.stepId === null) return false;
-      const ticket = yield* tickets.getByStepId(attachment.stepId);
-      const workflow = ticket === null ? null : yield* workflows.get(ticket.workflowId);
-      return (
-        ticket !== null &&
-        workflow !== null &&
-        canViewTicket(
-          { id: currentUser.userId, isOrgAdmin: currentUser.role === "admin" },
-          workflow,
-          ticket,
-        )
-      );
+      return yield* workflows.canReadStepFile(currentUser.userId, attachment);
     });
     if (!(yield* readable)) return notFound;
 
@@ -137,8 +123,8 @@ const attachmentUploadRoute = HttpRouter.add(
   "POST",
   ATTACHMENT_ROUTE_PREFIX,
   Effect.gen(function* () {
-    const currentUser = yield* member;
-    if (HttpServerResponse.isHttpServerResponse(currentUser)) return currentUser;
+    const actorId = yield* uploader;
+    if (HttpServerResponse.isHttpServerResponse(actorId)) return actorId;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
     if (Option.isNone(url)) {
@@ -162,7 +148,7 @@ const attachmentUploadRoute = HttpRouter.add(
     }
 
     const files = yield* AttachmentRepository;
-    return yield* files.upload(upload.value, currentUser.userId, request.stream).pipe(
+    return yield* files.upload(upload.value, actorId, request.stream).pipe(
       Effect.map((attachment) =>
         HttpServerResponse.jsonUnsafe(
           { attachmentId: attachment.id } satisfies AttachmentUploadResult,

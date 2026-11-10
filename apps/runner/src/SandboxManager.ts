@@ -1,7 +1,7 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { Config as OpenCodeConfig } from "@opencode/schema/config";
 import { T45_TOOLS_DIR } from "@t45/contracts/models/Agent";
-import type { ExecutionRequest } from "@t45/contracts/resources/Runner";
+import { type ExecutionRequest } from "@t45/contracts/resources/Runner";
 import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -35,11 +35,8 @@ const LIMITS = { cpus: 2, memoryMib: 2048, diskMib: 4096 };
 const DISK = "disk.raw";
 const ARCHIVE = "disk.tgz";
 
-/** Written again at every start, or left by the step tools for the last execution. */
-const STALE = ["/work/.opencode/skills", "/work/.t45", T45_TOOLS_DIR];
-
-/** Where the step tools leave the files they generate for T45. */
-const GENERATED = "/work/.t45/attached";
+/** Agent setup is written again at every start. */
+const STALE = ["/work/.opencode/skills", T45_TOOLS_DIR];
 
 /** The SDK types its network setter loosely; this is what it hands the callback. */
 type NetworkSettings = InstanceType<typeof NetworkBuilder>;
@@ -57,7 +54,12 @@ const KEY_ENV = "OPENCODE_API_KEY";
  * provider. OpenCode's port binds to the host's loopback, so only the host reaches it.
  */
 const sandboxNetwork =
-  (openCodeKey: Redacted.Redacted, network: Agent["permissions"]["network"], hostPort: number) =>
+  (
+    openCodeKey: Redacted.Redacted,
+    network: Agent["permissions"]["network"],
+    hostPort: number,
+    serverUrl: string,
+  ) =>
   (settings: NetworkSettings) => {
     let policy = NetworkPolicy.builder().defaultEgress("deny").defaultIngress("allow");
     if (network === "provider") {
@@ -66,6 +68,15 @@ const sandboxNetwork =
       policy = policy.egress((rule) => rule.udp().tcp().port(53).allowHost());
       policy = policy.egress((rule) => rule.allowPublic());
     }
+    const endpoint = new URL(serverUrl);
+    policy = policy.egress((rule) => {
+      const target = rule
+        .tcp()
+        .port(Number(endpoint.port || (endpoint.protocol === "https:" ? 443 : 80)));
+      return endpoint.hostname === "host.microsandbox.internal"
+        ? target.allowHost()
+        : target.allowDomain(endpoint.hostname);
+    });
     return settings
       .policyFromBuilder(policy)
       .tls((tls) => tls)
@@ -147,6 +158,7 @@ export const start = Effect.fn("SandboxManager.start")(function* (
   rootId: string,
   agent: Agent,
   saved: Uint8Array | null,
+  serverUrl: string,
 ) {
   const runnerPort = yield* Config.Port("T45_RUNNER_PORT");
   const openCodeKey = yield* Config.schema(
@@ -204,7 +216,7 @@ export const start = Effect.fn("SandboxManager.start")(function* (
           // Removed by microsandbox once it stops, including when this runner dies.
           .ephemeral(true)
           .replace()
-          .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort))
+          .network(sandboxNetwork(openCodeKey, agent.permissions.network, hostPort, serverUrl))
           .create(),
       );
       return { vm, remove: yield* Effect.cached(sdk("remove", () => vm.destroy())) };
@@ -228,25 +240,10 @@ export const start = Effect.fn("SandboxManager.start")(function* (
         .env("OPENCODE_PASSWORD", Redacted.value(password)),
     ),
   );
-  const returned = new Set<string>();
   return {
     port: hostPort,
     password,
     write: (path: string, content: Uint8Array) => write(vm, `/work/${path}`, content),
-    /** The files in GENERATED it hasn't returned yet, each by its path under /work. */
-    readNewGenerated: Effect.gen(function* () {
-      const fs = vm.fs();
-      // The step tools make it as the agent, who couldn't write into one made here as root.
-      if (!(yield* sdk("exists", () => fs.exists(GENERATED)))) return [];
-      const files: Array<{ path: string; content: Uint8Array }> = [];
-      for (const entry of yield* sdk("list", () => fs.list(GENERATED))) {
-        if (entry.kind !== "file" || returned.has(entry.path)) continue;
-        returned.add(entry.path);
-        const content = yield* sdk("read", () => fs.read(entry.path));
-        files.push({ path: entry.path.slice("/work/".length), content });
-      }
-      return files;
-    }),
     // Only a removed VM has flushed its disk.
     save: remove.pipe(Effect.andThen(disk.save)),
   };

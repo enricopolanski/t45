@@ -3,6 +3,7 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
+import { AutomationId } from "../models/Automation.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 
@@ -15,63 +16,92 @@ import {
   StepDefinition,
   StepField,
   Ticket,
+  Project,
   Workflow,
-  WorkflowDefinition,
+  WorkflowEdit,
+  WorkflowVersion,
 } from "../models/Workflow.ts";
-import { NotFound } from "./errors.ts";
+import { Refused as ChatRefused } from "../models/Chat.ts";
+import { AccessDenied, NotFound } from "./errors.ts";
 
-export const WorkflowErrors = Schema.Union([WorkflowRefused, NotFound]);
+export const WorkflowErrors = Schema.Union([WorkflowRefused, NotFound, AccessDenied]);
 
-const WorkflowInstance = { workflow: Workflow, definition: WorkflowDefinition };
+const ProjectWithWorkflow = { project: Project, workflow: Workflow };
 
-export const WorkflowInstanceView = Schema.Struct(WorkflowInstance);
-export type WorkflowInstanceView = typeof WorkflowInstanceView.Type;
+const project = { projectId: StringId };
 
-/** A workflow in the Workflows list; `canManage` is false for its responsible, who only oversees. */
-export const WorkflowInstanceListEntryView = Schema.Struct({
-  ...WorkflowInstance,
-  canManage: Schema.Boolean,
+/** One member of one of the workflow's steps in a project; `stepId` is the step's definition id. */
+const stepMember = { ...project, stepId: StringId, userId: StringId };
+
+/**
+ * A project as those who manage it set it up. They see its structure and people, and of its
+ * tickets only what identifies them: no description, no step content.
+ */
+export const ProjectView = Schema.Struct({
+  ...ProjectWithWorkflow,
+  /** The version new tickets start on; null before the first adoption. */
+  adopted: Schema.NullOr(WorkflowVersion),
+  /** The workflow's newest version, which the project can adopt. */
+  latest: WorkflowVersion,
+  /** Who works on each of the workflow's steps; sub-steps have their step's members. */
+  members: Schema.Array(Schema.Struct(Struct.pick(stepMember, ["stepId", "userId"]))),
+  openTickets: Schema.Array(Schema.Struct(Struct.pick(Ticket.fields, ["id", "title", "status"]))),
+  /** Whether the viewer is one of the project's listed admins, who alone cancel its tickets. */
+  canCancelTickets: Schema.Boolean,
 });
-export type WorkflowInstanceListEntryView = typeof WorkflowInstanceListEntryView.Type;
+export type ProjectView = typeof ProjectView.Type;
 
-const workflow = { workflowId: StringId };
 const idOrSlug = { idOrSlug: TrimmedNonEmptyString };
 
-export const WorkflowDefinitionView = Schema.Struct({
-  definition: WorkflowDefinition,
-  canManage: Schema.Boolean,
+/** A workflow with its newest version: the draft a save changes, or the frozen one it follows. */
+export const WorkflowView = Schema.Struct({
+  workflow: Workflow,
+  version: WorkflowVersion,
+  canEdit: Schema.Boolean,
+  canSetEditors: Schema.Boolean,
 });
-export type WorkflowDefinitionView = typeof WorkflowDefinitionView.Type;
+export type WorkflowView = typeof WorkflowView.Type;
+
+const VersionNameView = Schema.Struct(Struct.pick(WorkflowVersion.fields, ["id", "number"]));
+
+/** A version as the caller read it, so that a save or an adoption of an older draft is refused. */
+const versionRead = { versionId: StringId, revision: WorkflowVersion.fields.revision };
 
 /** A step without its values. */
 export const StepSummaryView = Schema.Struct(
-  Struct.pick(Step.fields, [
-    "id",
-    "stepDefinitionId",
-    "parentStepId",
-    "status",
-    "assignee",
-    "responsible",
-  ]),
+  Struct.pick(Step.fields, ["id", "stepDefinitionId", "parentStepId", "status", "assignee"]),
 );
 export type StepSummaryView = typeof StepSummaryView.Type;
 
 /** A ticket with the step it is in, and none of its values. */
 export const TicketSummaryView = Schema.Struct({
-  ...Struct.pick(Ticket.fields, ["id", "workflowId", "title", "dueDate", "status"]),
+  ...Struct.pick(Ticket.fields, ["id", "projectId", "title", "status"]),
   currentStep: Schema.NullOr(StepSummaryView),
 });
 export type TicketSummaryView = typeof TicketSummaryView.Type;
 
-export const WorkflowInstanceBoardView = Schema.Struct({
-  ...WorkflowInstance,
+/** A step another step's view names; it opens as a step of its own. */
+export const StepNameView = Schema.Struct({ id: StringId, name: TrimmedNonEmptyString });
+export type StepNameView = typeof StepNameView.Type;
+
+/**
+ * The open tickets of one version of a project's workflow, under that version's steps: only the
+ * steps the viewer is a member of, and the tickets in them.
+ */
+export const ProjectBoardView = Schema.Struct({
+  project: Schema.Struct(Struct.pick(Project.fields, ["id", "name", "slug", "isArchived"])),
+  version: VersionNameView,
+  /** The viewer's steps of the version, each named by its definition's id. */
+  columns: Schema.Array(StepNameView),
+  /** The adopted version, and the others while they have open tickets the viewer sees. */
+  versions: Schema.Array(VersionNameView),
   tickets: Schema.Array(TicketSummaryView),
+  canStartTicket: Schema.Boolean,
 });
-export type WorkflowInstanceBoardView = typeof WorkflowInstanceBoardView.Type;
+export type ProjectBoardView = typeof ProjectBoardView.Type;
 
 const ticket = { ticketId: StringId };
 const step = { stepId: StringId };
-const reason = { ...step, reason: Schema.String };
 
 export const StepFileView = Schema.Struct(Struct.pick(Attachment.fields, ["id", "name"]));
 export type StepFileView = typeof StepFileView.Type;
@@ -101,33 +131,48 @@ export class FieldView extends Schema.Opaque<FieldView>()(
   }),
 ) {}
 
-/** A step another step's view names; it opens as a step of its own. */
-export const StepNameView = Schema.Struct({ id: StringId, name: TrimmedNonEmptyString });
-export type StepNameView = typeof StepNameView.Type;
-
-/** One step, with the names of the steps it sits in and of its sub-steps. */
+/**
+ * One step as someone who may see it does, with the names of the steps it sits in and of its
+ * sub-steps. Of the ticket's other steps it holds nothing, not even their names, but the fields
+ * this step declares as inputs.
+ */
 export const StepView = Schema.Struct({
   ticket: Schema.Struct(Struct.omit(Ticket.fields, ["steps"])),
-  workflowName: TrimmedNonEmptyString,
+  projectName: TrimmedNonEmptyString,
+  /**
+   * The workflow's steps the ticket entered, for whoever sees a closed ticket whole; else just
+   * the one this step is or sits in.
+   */
   otherSteps: Schema.Array(
     Schema.Struct({ step: StepSummaryView, name: Schema.String, fields: Schema.Array(FieldView) }),
   ),
-  step: Step,
-  /** Null once the workflow no longer has the step. */
-  definition: Schema.NullOr(
-    Schema.Struct(Struct.pick(StepDefinition.fields, ["name", "instructions"])),
+  /** The fields of earlier steps this step reads. */
+  inputs: Schema.Array(FieldView),
+  /** The active members of the step, who can be assigned to it. */
+  assignableUserIds: Schema.Array(StringId),
+  /** The commands run on this step, oldest first; a ticket's first step starts with its creation. */
+  history: Schema.Array(
+    Schema.Struct({
+      command: Schema.String,
+      /** Who ran it, or on whose authority an agent did. */
+      userId: Schema.NullOr(StringId),
+      agentId: Schema.NullOr(StringId),
+      createdAt: Schema.DateTimeUtcFromString,
+    }),
   ),
+  canCancelTicket: Schema.Boolean,
+  step: Step,
+  definition: Schema.Struct(Struct.pick(StepDefinition.fields, ["name", "instructions"])),
   /** The steps a sub-step sits in, outermost first; empty for a step. */
   parents: Schema.Array(StepNameView),
-  /** Whether the current user may open the workflow's board: its admins and its responsible. */
-  canOpenBoard: Schema.Boolean,
   fields: Schema.Array(FieldView),
   subSteps: Schema.Array(Schema.Struct({ ...StepSummaryView.fields, name: TrimmedNonEmptyString })),
   comments: Schema.Array(Comment),
   files: Schema.Array(StepFileView),
+  /** The automations the step's definition attaches, each with its latest run on this step. */
   automations: Schema.Array(
     Schema.Struct({
-      id: StringId,
+      id: AutomationId,
       statusLabel: Schema.String,
       runLabel: Schema.NullOr(Schema.Literals(["Run", "Run again"])),
       canStop: Schema.Boolean,
@@ -137,84 +182,164 @@ export const StepView = Schema.Struct({
 export type StepView = typeof StepView.Type;
 
 export const Workflows = RpcGroup.make(
-  Rpc.make("listDefinitions", { success: Schema.Array(WorkflowDefinition), error: WorkflowErrors }),
-  Rpc.make("getDefinition", {
-    payload: { definitionId: StringId },
-    success: WorkflowDefinitionView,
+  Rpc.make("listWorkflows", {
+    success: Schema.Array(Schema.Struct({ workflow: Workflow, version: WorkflowVersion })),
     error: WorkflowErrors,
   }),
-  Rpc.make("listInstances", {
-    success: Schema.Array(WorkflowInstanceListEntryView),
+  Rpc.make("getWorkflow", {
+    payload: { workflowId: StringId },
+    success: WorkflowView,
     error: WorkflowErrors,
   }),
-  Rpc.make("listStartableInstances", {
-    success: Schema.Array(Workflow),
+  /** The projects the caller manages. */
+  Rpc.make("listProjects", {
+    success: Schema.Array(Schema.Struct(ProjectWithWorkflow)),
     error: WorkflowErrors,
   }),
-  Rpc.make("getInstance", {
+  /** The projects whose board the caller opens: those with a step they are a member of. */
+  Rpc.make("listBoards", {
+    success: Schema.Array(Schema.Struct(Struct.pick(Project.fields, ["id", "name", "slug"]))),
+    error: WorkflowErrors,
+  }),
+  /** The projects whose first step the caller is a member of. */
+  Rpc.make("listStartableProjects", {
+    success: Schema.Array(Schema.Struct(Struct.pick(Project.fields, ["id", "name"]))),
+    error: WorkflowErrors,
+  }),
+  Rpc.make("getProject", {
     payload: idOrSlug,
-    success: WorkflowInstanceView,
+    success: ProjectView,
     error: WorkflowErrors,
   }),
-  Rpc.make("getInstanceBoard", {
-    payload: idOrSlug,
-    success: WorkflowInstanceBoardView,
+  Rpc.make("getProjectBoard", {
+    /** Omitted, the board of the project's adopted version. */
+    payload: { ...idOrSlug, versionId: Schema.optionalKey(StringId) },
+    success: ProjectBoardView,
     error: WorkflowErrors,
   }),
-  Rpc.make("createDefinition", {
+  /** The workflow starts as a draft of its first version, with the caller as its creator. */
+  Rpc.make("createWorkflow", {
     payload: {
       name: TrimmedNonEmptyString,
-      /** Checked like saved ones; omitted, the definition starts with no steps. */
-      steps: Schema.optionalKey(WorkflowDefinition.fields.steps),
+      /** Applied to the empty draft; omitted, the workflow starts with no steps. */
+      edits: Schema.optionalKey(Schema.Array(WorkflowEdit)),
     },
-    success: Schema.Struct({ definitionId: StringId }),
+    success: Schema.Struct({ workflowId: StringId }),
     error: WorkflowErrors,
   }),
-  Rpc.make("createInstance", {
+  /** Renames the workflow in place; no version changes. */
+  Rpc.make("renameWorkflow", {
+    payload: { workflowId: StringId, name: Workflow.fields.name },
+    error: WorkflowErrors,
+  }),
+  Rpc.make("setWorkflowEditors", {
+    payload: { workflowId: StringId, editorUserIds: Workflow.fields.editorUserIds },
+    error: WorkflowErrors,
+  }),
+  /** For good: no new project uses the workflow and none adopts a version of it. */
+  Rpc.make("archiveWorkflow", { payload: { workflowId: StringId }, error: WorkflowErrors }),
+  /**
+   * Applies the edits, in order, to the workflow's newest version: a draft is overwritten, and a
+   * frozen version gets the next one as a draft. Refused with `stale_draft` unless `versionId` and
+   * `revision` are that newest version as the caller read it.
+   */
+  Rpc.make("saveWorkflowDraft", {
+    payload: { ...versionRead, edits: Schema.Array(WorkflowEdit) },
+    error: WorkflowErrors,
+  }),
+  /** The project adopts no version yet: an admin does that once its people are chosen. */
+  Rpc.make("createProject", {
     payload: {
-      definitionId: StringId,
-      /** Omitted, the definition's name. */
+      workflowId: StringId,
+      /** Omitted, the workflow's name. */
       name: Schema.optionalKey(TrimmedNonEmptyString),
-      responsible: Workflow.fields.responsible,
     },
-    success: Schema.Struct(workflow),
+    success: Schema.Struct(project),
+    error: WorkflowErrors,
+  }),
+  /**
+   * New tickets of the project start on this version of its workflow, which is frozen from now on;
+   * tickets already started stay on theirs. Refused with `stale_draft` when the version was saved
+   * after `revision`, and with `step_without_members` until each of its steps has an active member.
+   */
+  Rpc.make("adoptWorkflowVersion", {
+    payload: {
+      ...project,
+      ...versionRead,
+    },
     error: WorkflowErrors,
   }),
   /** Omitted fields are left unchanged. */
-  Rpc.make("updateDefinition", {
+  Rpc.make("updateProject", {
     payload: {
-      definitionId: StringId,
-      name: Schema.optionalKey(WorkflowDefinition.fields.name),
-      /**
-       * Replaces the steps. Open tickets of every workflow using the definition move onto them at the
-       * step they are in; refused with `tickets_cannot_move` when a step a ticket is in, or has
-       * entered, is removed or moved.
-       */
-      steps: Schema.optionalKey(WorkflowDefinition.fields.steps),
-      isArchived: Schema.optionalKey(Schema.Boolean),
-    },
-    error: WorkflowErrors,
-  }),
-  /** Omitted fields are left unchanged. */
-  Rpc.make("updateInstance", {
-    payload: {
-      ...workflow,
+      ...project,
       name: Schema.optionalKey(TrimmedNonEmptyString),
-      responsible: Schema.optionalKey(Workflow.fields.responsible),
-      /** Refused with `slug_taken` when another workflow has it; null clears it. */
+      /** Refused with `slug_taken` when another project has it; null clears it. */
       slug: Schema.optionalKey(Schema.NullOr(Slug)),
-      isPublic: Schema.optionalKey(Workflow.fields.isPublic),
-      defaultAssignments: Schema.optionalKey(Workflow.fields.defaultAssignments),
+      defaultAssignees: Schema.optionalKey(Project.fields.defaultAssignees),
       /** Refused with `last_admin` when it leaves no active admin. */
-      adminUserIds: Schema.optionalKey(Workflow.fields.adminUserIds),
-      isArchived: Schema.optionalKey(Schema.Boolean),
+      adminUserIds: Schema.optionalKey(Project.fields.adminUserIds),
     },
     error: WorkflowErrors,
   }),
-  Rpc.make("deleteInstance", { payload: workflow, error: WorkflowErrors }),
+  /**
+   * For good: the project starts no new ticket, adopts no version and runs no automation on a
+   * step, while its open tickets are worked to their end.
+   */
+  Rpc.make("archiveProject", { payload: project, error: WorkflowErrors }),
+  /** Adding oneself is an entry of the command log like any other. */
+  Rpc.make("addStepMember", { payload: stepMember, error: WorkflowErrors }),
+  /** Refused with `member_assigned` while they are assigned to the step on an open ticket. */
+  Rpc.make("removeStepMember", { payload: stepMember, error: WorkflowErrors }),
+  /** The open tickets' steps that keep someone a member: those they are assigned to under the step. */
+  Rpc.make("listStepAssignments", {
+    payload: stepMember,
+    success: Schema.Array(
+      Schema.Struct({
+        ticketTitle: Ticket.fields.title,
+        stepId: StringId,
+        stepName: TrimmedNonEmptyString,
+      }),
+    ),
+    error: WorkflowErrors,
+  }),
+  /**
+   * The project and, of its adopted version, the steps the caller is a member of, each without its
+   * inputs: those would name the other steps.
+   */
+  Rpc.make("getProjectWorkflow", {
+    payload: project,
+    success: Schema.Struct({
+      projectId: StringId,
+      name: Schema.String,
+      steps: WorkflowVersion.fields.steps,
+    }),
+    error: WorkflowErrors,
+  }),
+  Rpc.make("listTickets", {
+    payload: { ...project, query: Schema.optionalKey(Schema.String) },
+    success: Schema.Struct({
+      total: Schema.Number,
+      tickets: Schema.Array(
+        Schema.Struct({
+          ...Struct.pick(Ticket.fields, ["id", "title", "status"]),
+          steps: Schema.Array(
+            Schema.Struct(Struct.pick(Step.fields, ["id", "stepDefinitionId", "status"])),
+          ),
+        }),
+      ),
+    }),
+    error: WorkflowErrors,
+  }),
+  /** The ticket with only the steps the caller sees. */
+  Rpc.make("getTicket", {
+    payload: ticket,
+    success: Ticket,
+    error: WorkflowErrors,
+  }),
   Rpc.make("startTicket", {
     payload: {
-      ...workflow,
+      ...project,
       title: TrimmedNonEmptyString,
       description: Schema.optionalKey(Schema.String),
     },
@@ -225,37 +350,29 @@ export const Workflows = RpcGroup.make(
     payload: { ...ticket, reason: Schema.String },
     error: WorkflowErrors,
   }),
-  Rpc.make("reopenTicket", { payload: ticket, error: WorkflowErrors }),
-  Rpc.make("setTicketDueDate", {
-    payload: { ...ticket, dueDate: Ticket.fields.dueDate },
-    error: WorkflowErrors,
-  }),
   Rpc.make("watchStep", { payload: step, success: StepView, error: WorkflowErrors, stream: true }),
   Rpc.make("setStepField", {
     payload: { ...step, fieldKey: TrimmedNonEmptyString, value: Schema.Json },
     error: WorkflowErrors,
   }),
   Rpc.make("markStepDone", { payload: step, error: WorkflowErrors }),
-  Rpc.make("approveStep", { payload: step, error: WorkflowErrors }),
-  Rpc.make("rejectStep", { payload: reason, error: WorkflowErrors }),
-  Rpc.make("setStepAutomations", {
-    payload: { ...step, automations: Step.fields.automations },
-    error: WorkflowErrors,
-  }),
   Rpc.make("runStepAutomation", {
-    payload: { ...step, automationId: StringId },
-    error: WorkflowErrors,
+    payload: { ...step, automationId: AutomationId },
+    error: Schema.Union([WorkflowErrors, ChatRefused]),
   }),
   Rpc.make("stopStepAutomation", {
-    payload: { ...step, automationId: StringId },
+    payload: { ...step, automationId: AutomationId },
     error: WorkflowErrors,
   }),
-  /** Sets one ticket's step assignee; null clears it. */
+  /**
+   * Sets one ticket's step assignee, a member of the step; null clears it. Those who manage the
+   * project do it on any step of an open ticket, without seeing the step.
+   */
   Rpc.make("setStepAssignee", {
     payload: { ...step, assignee: Step.fields.assignee },
     error: WorkflowErrors,
   }),
-  Rpc.make("blockStep", { payload: reason, error: WorkflowErrors }),
+  Rpc.make("blockStep", { payload: { ...step, reason: Schema.String }, error: WorkflowErrors }),
   Rpc.make("unblockStep", { payload: step, error: WorkflowErrors }),
   Rpc.make("commentOnStep", {
     payload: { ...step, body: TrimmedNonEmptyString },

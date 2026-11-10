@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, expect, it } from "@effect/vitest";
 import { Refused, type User } from "@t45/contracts/models/User";
-import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
+import { Authorization, CurrentActor } from "@t45/contracts/Authorization";
 import { Users } from "@t45/contracts/resources/Users";
 import type { NotFound } from "@t45/contracts/resources/errors";
 import * as DateTime from "effect/DateTime";
@@ -28,6 +28,7 @@ import { AdminOnly } from "../auth/Authorization.ts";
 import * as AuthHttp from "../auth/http.ts";
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as AutomationRepository from "../automations/AutomationRepository.ts";
 import * as UserRepository from "./UserRepository.ts";
 import { UserService } from "./UserService.ts";
 import * as Authentication from "../auth/Authentication.ts";
@@ -1091,6 +1092,7 @@ describe("UserService", () => {
         }),
       ),
       Layer.provideMerge(UserRepository.layer),
+      Layer.provideMerge(AutomationRepository.layer),
       Layer.provideMerge(SqlitePersistence.testLayer),
       Layer.provide(ServerConfig.testLayer("t3-users-handlers-")),
     );
@@ -1107,7 +1109,7 @@ describe("UserService", () => {
 
     /** A client calling the handlers as `currentUser`, with workflows answering deactivations. */
     const makeClient = (
-      currentUser: CurrentUser["Service"],
+      currentUser: Extract<CurrentActor["Service"], { userId: string }>,
       memberDeactivated: WorkflowService["Service"]["memberDeactivated"] = () => Effect.undefined,
     ) =>
       RpcTest.makeClient(Users.middleware(Authorization)).pipe(
@@ -1118,7 +1120,7 @@ describe("UserService", () => {
                 Layer.succeed(
                   Authorization,
                   Authorization.of((effect) =>
-                    Effect.provideService(effect, CurrentUser, currentUser),
+                    Effect.provideService(effect, CurrentActor, currentUser),
                   ),
                 ),
                 AdminOnly.layer,
@@ -1149,7 +1151,7 @@ describe("UserService", () => {
         let refusing = true;
         const client = yield* makeClient(admin, (userId) =>
           refusing
-            ? Effect.fail(new Refused({ reason: "last_workflow_admin" }))
+            ? Effect.fail(new Refused({ reason: "last_project_admin" }))
             : Effect.sync(() => {
                 handedOn.push(userId);
                 return undefined;
@@ -1157,7 +1159,7 @@ describe("UserService", () => {
         );
 
         const refused = yield* Effect.flip(client["users.deactivate"]({ userId: "user-bob" }));
-        assert.equal(refused._tag === "UserRefused" && refused.reason, "last_workflow_admin");
+        assert.equal(refused._tag === "UserRefused" && refused.reason, "last_project_admin");
         assert.equal((yield* sessions.authenticate(bobs.token)).state, "active");
 
         refusing = false;

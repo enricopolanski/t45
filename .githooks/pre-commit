@@ -1,2 +1,3 @@
 #!/bin/sh
+./node_modules/.bin/vp staged || exit $?
 exec ./node_modules/.bin/vpr pre-commit

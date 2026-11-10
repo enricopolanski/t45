@@ -127,12 +127,11 @@ class PendingReads {
 
 /**
  * Turns the events' hints into authoritative emits: the chat's sessions, each session's new or
- * changed messages with the files the agent generated, and the open questions. It remembers what
+ * changed messages and the open questions. It remembers what
  * it read so a pass only emits what changed, and tells when OpenCode has finished everything.
  */
 const createOpencodeReader = (
   client: OpencodeClient,
-  readNewGenerated: Effect.Success<ReturnType<typeof SandboxManager.start>>["readNewGenerated"],
   rootId: Session.ID,
   emit: (event: ExecutionUpdate) => Effect.Effect<void>,
 ) => {
@@ -208,7 +207,6 @@ const createOpencodeReader = (
         if (typeof child === "string") add(reports, child, message.id);
       }
     }
-    for (const file of yield* readNewGenerated) yield* emit({ _tag: "file", ...file });
     yield* emit({ _tag: "messages", sessionId: sessionID, messages });
   });
 
@@ -260,7 +258,12 @@ export const layer = RunnerRpcs.toLayer(
         Effect.repeat(Schedule.spaced("15 seconds")),
         Effect.forkScoped,
       );
-      const sandbox = yield* SandboxManager.start(rootId, request.agent, request.disk);
+      const sandbox = yield* SandboxManager.start(
+        rootId,
+        request.agent,
+        request.disk,
+        request.serverUrl,
+      );
       const opencodeClient = yield* createOpencodeClient(
         `http://127.0.0.1:${sandbox.port}`,
         sandbox.password,
@@ -269,7 +272,7 @@ export const layer = RunnerRpcs.toLayer(
 
       const eventsStream = opencodeClient.event.subscribe();
 
-      const reader = createOpencodeReader(opencodeClient, sandbox.readNewGenerated, rootId, emit);
+      const reader = createOpencodeReader(opencodeClient, rootId, emit);
       let pendingReads = new PendingReads(true, true);
 
       const writeFiles = (files: ExecutionRequest["files"]) =>
@@ -384,14 +387,6 @@ export const layer = RunnerRpcs.toLayer(
             Effect.andThen(Queue.end(queue)),
           ),
         ),
-      // Workflow tools wait on these writes; delivering a reply must not require another OpenCode event.
-      writeFiles: ({ rootId, files }) =>
-        Effect.suspend(() => {
-          const execution = activeExecutions.get(rootId);
-          return execution === undefined
-            ? Effect.die("The execution has ended.")
-            : execution.writeFiles(files).pipe(Effect.orDie);
-        }),
       send: ({ rootId, message, files }) =>
         Effect.gen(function* () {
           const execution = activeExecutions.get(rootId);

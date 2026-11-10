@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 
 import { Avatar } from "./Avatar.ts";
 import { StringId, TrimmedNonEmptyString } from "./primitives.ts";
@@ -47,17 +48,17 @@ export const lastAdminRefusal = (
     ? ("last_admin_protected" as const)
     : null;
 
+const REFUSALS = {
+  invalid_member_state: "This user's state does not allow this action.",
+  last_admin_protected: "An organization must keep at least one active admin.",
+  last_project_admin:
+    "They are the last active admin of a project. Make someone else its admin first.",
+};
+
 export class Refused extends Schema.TaggedError<Refused>()("UserRefused", {
-  reason: Schema.Literals(["invalid_member_state", "last_admin_protected", "last_workflow_admin"]),
+  reason: Schema.Literals(Struct.keys(REFUSALS)),
 }) {
   override get message(): string {
-    switch (this.reason) {
-      case "invalid_member_state":
-        return "This user's state does not allow this action.";
-      case "last_admin_protected":
-        return "An organization must keep at least one active admin.";
-      case "last_workflow_admin":
-        return "They are the last active admin of a workflow. Make someone else its admin first.";
-    }
+    return REFUSALS[this.reason];
   }
 }

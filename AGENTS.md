@@ -16,7 +16,7 @@ Before changing or reviewing code, read and follow [Styles and rules](docs/opera
 
 Continue on the current branch. Create a new branch or PR only when the user asks.
 
-Every commit runs the root `pre-commit` task: workspace format/lint checks, typechecking, unused code (knip), unit tests and mandatory browser E2Es. Start `vp run dev` first; E2Es use the running development app at `http://localhost:5733`. Run pre-commit manually with `vpr pre-commit` (`vp run pre-commit` is equivalent). The parent tasks and browser E2Es are uncached so every commit runs the E2Es; other checks retain their caches. `vpr --no-cache pre-commit` forces all checks fresh. It checks the whole working tree without modifying files or staging.
+Every commit runs the root `pre-commit` task: workspace format/lint checks, typechecking, unused code (knip), unit tests and mandatory browser E2Es. E2Es use the running development app at `http://localhost:5733`, or start a throwaway one when none is up. Run pre-commit manually with `vpr pre-commit` (`vp run pre-commit` is equivalent). The parent tasks and browser E2Es are uncached so every commit runs the E2Es; other checks retain their caches. `vpr --no-cache pre-commit` forces all checks fresh. It fixes formatting and auto-fixable lint issues across the working tree, then runs the remaining checks; manual runs leave staging to you. The Git hook first runs `vp staged` to fix staged files and include those fixes in the commit while preserving unstaged edits.
 
 Commits use conventional, plain-language titles (`fix(web): new threads no longer spike CPU`), a body stating the problem and the fix, and end with the model and harness that did the work.
 

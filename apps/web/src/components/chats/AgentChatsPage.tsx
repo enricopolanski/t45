@@ -58,7 +58,7 @@ function AgentChatRow({ item }: { readonly item: ChatSummary }) {
     >
       <span className="truncate text-sm font-medium text-foreground">{title}</span>
       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="truncate">{item.workflowName ?? item.agentName ?? "An agent"}</span>
+        <span className="truncate">{item.projectName ?? item.agentName ?? "An agent"}</span>
         <span className="ml-auto shrink-0">
           {formatRelativeTimeLabel(item.lastActivityAt, now)}
         </span>
@@ -73,7 +73,7 @@ function NewChatMenu({ targets }: { readonly targets: ReadonlyArray<ChatTarget> 
   const [starting, startTransition] = useTransition();
   const start = (target: ChatTarget) =>
     startTransition(() =>
-      newChat(target.agentId, target.workflowId).catch((cause: unknown) =>
+      newChat(target.agentId, target.projectId).catch((cause: unknown) =>
         toastFailure("Couldn't start a chat", cause),
       ),
     );
@@ -88,7 +88,7 @@ function NewChatMenu({ targets }: { readonly targets: ReadonlyArray<ChatTarget> 
       <MenuPopup align="end" side="bottom">
         {targets.map((target) => (
           <MenuItem
-            key={`${target.agentId}/${target.workflowId ?? ""}`}
+            key={`${target.agentId}/${target.projectId ?? ""}`}
             onClick={() => start(target)}
           >
             {target.name}

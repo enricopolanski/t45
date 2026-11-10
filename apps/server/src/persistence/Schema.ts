@@ -4,43 +4,14 @@
  * place: the fingerprint of the statements changes, and a database created by other statements is
  * refused at startup.
  */
-import { Agent, WORKFLOW_ASSISTANT_ID } from "@t45/contracts/models/Agent";
-import { WORKFLOW_DRAFTING_MCP, WORKFLOW_INSTANCE_MCP } from "@t45/core/agentTools";
 import * as Crypto from "effect/Crypto";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-// Defaults apply only to fresh databases; later changes belong to the organization.
-const workflowDesigner = {
-  id: "workflow-designer",
-  name: "Workflow designer",
-  instructions: `Help the member design a reusable workflow. Clarify the process and expected outputs,
-then use the workflow draft tool to propose a complete blueprint. Submit the complete draft for revisions.
-Explain that the member saves the blueprint, then configures and publishes a workflow from it.`,
-  model: "opencode-go/deepseek-v4.1-flash",
-  files: {},
-  skills: [],
-  mcpServers: { [WORKFLOW_DRAFTING_MCP.name]: WORKFLOW_DRAFTING_MCP.server },
-  permissions: { network: "provider" },
-  isConversational: true,
-  status: "active",
-} satisfies Omit<Agent, "createdAt" | "updatedAt">;
-
-const workflowAssistant = {
-  ...workflowDesigner,
-  id: WORKFLOW_ASSISTANT_ID,
-  name: "Workflow assistant",
-  instructions: `Help the member operate the workflow bound to this conversation. Use get_workflow and get_ticket to obtain current definitions, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. Choose a new UUID requestId for each operation; reuse it with identical arguments when retrying that operation. You cannot approve steps or edit workflow definitions.`,
-  mcpServers: { [WORKFLOW_INSTANCE_MCP.name]: WORKFLOW_INSTANCE_MCP.server },
-} satisfies Omit<Agent, "createdAt" | "updatedAt">;
-
-const encodeFiles = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.files));
-const encodeMcpServers = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.mcpServers));
-
-// The organization's users and sessions, agents and automations, workflows, chats, and files.
+// The organization's users and sessions, agents and automations, workflows and projects, chats,
+// and files.
 const statements = [
   `CREATE TABLE users (
       id TEXT PRIMARY KEY NOT NULL,
@@ -78,18 +49,21 @@ const statements = [
 
   // Named agents, their skills and automations, and the workflows people and agents work
   // through.
-  // Named agents are organization-wide. Every agent works in a sandbox of its own, and its model
-  // is a `provider/model` slug OpenCode Go offers. Admins choose which agents members can
-  // chat with, and which of those draft workflows.
+  // A named agent is its creator's alone until published, then everyone's. Every agent works in a
+  // sandbox of its own, and its model is a `provider/model` slug OpenCode Go offers. Its
+  // `app_tools` lists which of T45's tools it gets. Every server start writes the built-in
+  // agents' rows again; they have no creator.
   `CREATE TABLE agents (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       instructions TEXT NOT NULL,
       model TEXT NOT NULL,
       files TEXT NOT NULL DEFAULT '{}',
-      mcp_servers TEXT NOT NULL DEFAULT '{}',
+      app_tools TEXT NOT NULL DEFAULT '[]',
       network TEXT NOT NULL DEFAULT 'provider' CHECK (network IN ('provider', 'open')),
       is_conversational INTEGER NOT NULL DEFAULT 0,
+      creator_user_id TEXT REFERENCES users(id),
+      is_published INTEGER NOT NULL DEFAULT 0 CHECK (is_published IN (0, 1)),
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -109,55 +83,71 @@ const statements = [
       skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
       PRIMARY KEY (agent_id, skill_id)
     )`,
-  // An Automation starts a Task with its agent: when `next_run_at`
-  // comes, on Run now, or on a request to its webhook URL, whose secret is `webhook_token`.
-  // `schedule_json` is the schedule, a webhook's signing secret included, and `last_error` why
-  // its latest run was refused.
+  // An Automation is a prompt for an agent; each run starts a chat with it. An archived one runs
+  // no more and stays archived, as do archived agents, workflows and projects: nothing here is
+  // deleted or restored.
   `CREATE TABLE automations (
       id TEXT PRIMARY KEY NOT NULL,
       title TEXT NOT NULL,
       prompt TEXT NOT NULL,
       agent_id TEXT NOT NULL REFERENCES agents(id),
-      is_enabled INTEGER NOT NULL CHECK (is_enabled IN (0, 1)),
-      schedule_json TEXT NOT NULL,
-      webhook_token TEXT,
-      next_run_at TEXT,
-      last_error TEXT,
+      is_archived INTEGER NOT NULL DEFAULT 0 CHECK (is_archived IN (0, 1)),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,
-  `CREATE INDEX automations_due ON automations(next_run_at)
-    WHERE is_enabled = 1 AND next_run_at IS NOT NULL`,
 
-  `CREATE TABLE workflow_definitions (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      steps TEXT NOT NULL,
-      is_archived INTEGER NOT NULL
-    )`,
   `CREATE TABLE workflows (
       id TEXT PRIMARY KEY NOT NULL,
-      definition_id TEXT NOT NULL REFERENCES workflow_definitions(id),
       name TEXT NOT NULL,
-      responsible_user_id TEXT NOT NULL,
-      admin_user_ids TEXT NOT NULL,
-      default_assignments TEXT NOT NULL,
-      slug TEXT UNIQUE,
-      is_public INTEGER NOT NULL,
+      creator_user_id TEXT NOT NULL REFERENCES users(id),
+      editor_user_ids TEXT NOT NULL,
       is_archived INTEGER NOT NULL
     )`,
-  `CREATE INDEX workflows_definition ON workflows(definition_id)`,
+  // A workflow's steps, one row per version, each step naming the automations people run on it.
+  // A version is a draft until a project adopts it, which freezes it for good; `revision` counts a
+  // draft's saves. Numbers are unique per workflow, so a version has at most one successor.
+  `CREATE TABLE workflow_versions (
+      id TEXT PRIMARY KEY NOT NULL,
+      workflow_id TEXT NOT NULL REFERENCES workflows(id),
+      number INTEGER NOT NULL,
+      revision INTEGER NOT NULL,
+      is_frozen INTEGER NOT NULL CHECK (is_frozen IN (0, 1)),
+      steps TEXT NOT NULL,
+      UNIQUE (workflow_id, number)
+    )`,
+  // `workflow_version_id` is the version new tickets start on; `default_assignees` names who gets
+  // a step on entry, by step definition.
+  `CREATE TABLE projects (
+      id TEXT PRIMARY KEY NOT NULL,
+      workflow_id TEXT NOT NULL REFERENCES workflows(id),
+      workflow_version_id TEXT REFERENCES workflow_versions(id),
+      name TEXT NOT NULL,
+      admin_user_ids TEXT NOT NULL,
+      default_assignees TEXT NOT NULL,
+      slug TEXT UNIQUE,
+      is_archived INTEGER NOT NULL
+    )`,
+  `CREATE INDEX projects_workflow ON projects(workflow_id)`,
+  // Who works on a step of the workflow in a project. `step_id` is the definition id of one of
+  // the workflow's own steps, the same across versions: its sub-steps have its members.
+  `CREATE TABLE step_members (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      step_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      PRIMARY KEY (project_id, step_id, user_id)
+    ) WITHOUT ROWID`,
+  `CREATE INDEX step_members_user ON step_members(user_id)`,
   `CREATE TABLE tickets (
       id TEXT PRIMARY KEY NOT NULL,
-      workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      workflow_version_id TEXT NOT NULL REFERENCES workflow_versions(id),
       title TEXT NOT NULL,
       description TEXT NOT NULL,
-      due_date TEXT,
       status TEXT NOT NULL,
       steps TEXT NOT NULL,
       created_at TEXT NOT NULL
     )`,
-  `CREATE INDEX tickets_workflow ON tickets(workflow_id, created_at)`,
+  `CREATE INDEX tickets_project ON tickets(project_id, created_at)`,
   `CREATE TABLE workflow_comments (
       id TEXT PRIMARY KEY NOT NULL,
       ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
@@ -167,22 +157,31 @@ const statements = [
       created_at TEXT NOT NULL
     )`,
   `CREATE INDEX workflow_comments_step ON workflow_comments(step_id, created_at)`,
-
-  // The step tool calls T45 applied, by `<assistant message id>/<tool part id>` in the step's
-  // chat; a call is applied and recorded together, so none is applied twice.
-  `CREATE TABLE task_calls (
-      chat_id TEXT NOT NULL REFERENCES chat_origins(chat_id),
-      call_key TEXT NOT NULL,
-      PRIMARY KEY (chat_id, call_key)
-    ) WITHOUT ROWID`,
+  // One entry per successful command, written in the command's transaction and ordered by `id`.
+  // `user_id` is the user on whose authority it ran; `agent_id` and `chat_id` are set when an
+  // agent's execution ran it. Entries outlive what they name, so they hold no foreign keys.
+  // `details` holds ids and keys only, never field values or free text.
+  `CREATE TABLE command_log (
+      id INTEGER PRIMARY KEY,
+      command TEXT NOT NULL,
+      user_id TEXT,
+      agent_id TEXT,
+      chat_id TEXT,
+      workflow_id TEXT,
+      project_id TEXT,
+      ticket_id TEXT,
+      step_id TEXT,
+      details TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`,
+  `CREATE INDEX command_log_step ON command_log(ticket_id, step_id) WHERE step_id IS NOT NULL`,
 
   // In-app notifications: something new landed in a person's My work. Clicking a notification marks it read.
   `CREATE TABLE workflow_notifications (
       id TEXT PRIMARY KEY NOT NULL,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL CHECK (kind IN ('to_do', 'to_approve', 'rejected', 'agent_failed',
-        'needs_responsible', 'names_deactivated')),
-      workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('to_do', 'automation_ended', 'names_deactivated')),
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       step_id TEXT,
       read_at TEXT,
       created_at TEXT NOT NULL
@@ -203,57 +202,49 @@ const statements = [
       updated_at TEXT NOT NULL,
       deleted_at TEXT
     )`,
-  // A conversation retains its scope even after that workflow is deleted.
+  // A conversation retains its scope even after that project is deleted.
   `CREATE TABLE chat_origins (
       chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(id),
       owner_user_id TEXT REFERENCES users(id),
-      workflow_id TEXT,
+      project_id TEXT,
       trigger TEXT,
-      state TEXT,
-      CHECK ((owner_user_id IS NOT NULL AND trigger IS NULL AND state IS NULL)
-          OR (owner_user_id IS NULL AND workflow_id IS NULL AND trigger IS NOT NULL AND state IS NOT NULL))
+      CHECK ((owner_user_id IS NOT NULL AND trigger IS NULL)
+          OR (owner_user_id IS NULL AND project_id IS NULL AND trigger IS NOT NULL))
     )`,
-  // Independent of provisional OpenCode messages: a lost execution cannot repeat a committed write.
-  `CREATE TABLE workflow_operation_receipts (
-      chat_id TEXT NOT NULL REFERENCES chat_origins(chat_id),
-      request_id TEXT NOT NULL,
-      response TEXT NOT NULL,
-      PRIMARY KEY (chat_id, request_id)
-    ) WITHOUT ROWID`,
   `CREATE INDEX origins_owner ON chat_origins(owner_user_id) WHERE owner_user_id IS NOT NULL`,
   `CREATE INDEX origins_step ON chat_origins(json_extract(trigger, '$.ticketId'), json_extract(trigger, '$.stepId')) WHERE trigger IS NOT NULL`,
   `CREATE INDEX origins_automation ON chat_origins(json_extract(trigger, '$.type'), json_extract(trigger, '$.automationId')) WHERE trigger IS NOT NULL`,
   // A chat's OpenCode sessions, every session of its VM, keyed by chat so one VM can't reach
   // another chat's copy. `info_json` is the session as OpenCode last returned it.
-  // `committed` once an execution that wrote it finished; the next execution drops what isn't.
   `CREATE TABLE chat_sessions (
       chat_id TEXT NOT NULL REFERENCES chats(id),
       session_id TEXT NOT NULL,
       parent_session_id TEXT,
       info_json TEXT NOT NULL,
-      committed INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (chat_id, session_id)
     )`,
   // Every message of a session, encoded as OpenCode returned it. `ordinal` is the session's order,
   // which native ids don't give. `committed` once its execution finished, as its saved disk has it.
+  // `is_live` ends with the execution even when OpenCode never completed the native message.
   `CREATE TABLE chat_messages (
       chat_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
       message_id TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
       json TEXT NOT NULL,
+      is_live INTEGER NOT NULL DEFAULT 0 CHECK (is_live IN (0, 1)),
       committed INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (chat_id, session_id, message_id),
       UNIQUE (chat_id, session_id, ordinal)
     )`,
   // The inputs sent to a chat, in order. An input is pending until its user message is stored, and
-  // an execution sends the pending ones. `payload_json` is the input as sent: its text, attachments
-  // and context.
+  // an execution sends those absent from its saved disk. The SQL comment deliberately bumps the
+  // fingerprint to refuse databases whose inputs and message metadata used separate context records.
   `CREATE TABLE chat_inputs (
       chat_id TEXT NOT NULL REFERENCES chats(id),
       input_id TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
-      payload_json TEXT NOT NULL,
+      payload_json TEXT NOT NULL, -- text and attachments carrying inline contextId
       created_at TEXT NOT NULL,
       PRIMARY KEY (chat_id, input_id),
       UNIQUE (chat_id, ordinal)
@@ -309,21 +300,6 @@ export const setupSchema = Effect.fnUntraced(function* () {
         for (const statement of statements) {
           yield* sql.unsafe(statement);
         }
-        const at = DateTime.formatIso(yield* DateTime.now);
-        for (const agent of [workflowDesigner, workflowAssistant])
-          yield* sql`INSERT INTO agents ${sql.insert({
-            id: agent.id,
-            name: agent.name,
-            instructions: agent.instructions,
-            model: agent.model,
-            files: yield* encodeFiles(agent.files),
-            mcp_servers: yield* encodeMcpServers(agent.mcpServers),
-            network: agent.permissions.network,
-            is_conversational: Number(agent.isConversational),
-            status: agent.status,
-            created_at: at,
-            updated_at: at,
-          })}`;
         yield* sql`CREATE TABLE schema_fingerprint (fingerprint TEXT NOT NULL)`;
         yield* sql`INSERT INTO schema_fingerprint (fingerprint) VALUES (${fingerprint})`;
       }),

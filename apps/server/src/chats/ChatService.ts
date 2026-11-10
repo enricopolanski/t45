@@ -2,10 +2,10 @@ import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import {
   canChatWithMembers,
-  WORKFLOW_INSTANCE_MCP_NAME,
+  canUse,
+  PROJECT_TOOLS_MCP_NAME,
   type Agent,
 } from "@t45/contracts/models/Agent";
-import { oversees } from "@t45/contracts/models/Workflow";
 import { limitRefusal } from "@t45/contracts/models/Attachment";
 import {
   ChatId,
@@ -17,11 +17,10 @@ import {
   titleOf,
   type Chat,
 } from "@t45/contracts/models/Chat";
-import type { ChatOrigin } from "@t45/contracts/models/Task";
+import type { ChatOrigin, Trigger } from "@t45/contracts/models/ChatOrigin";
 import type { Role } from "@t45/contracts/models/User";
 import { StringId } from "@t45/contracts/models/primitives";
 import {
-  type ChatErrors,
   type ChatEvent,
   ChatList,
   ChatMessage,
@@ -31,8 +30,8 @@ import {
   type Chats,
 } from "@t45/contracts/resources/Chats";
 import { NotFound } from "@t45/contracts/resources/errors";
-import { isSettled } from "@t45/contracts/resources/Runner";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -41,10 +40,8 @@ import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { makeAccess as makeWorkflowAccess } from "../workflows/WorkflowAssistant.ts";
-import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
-import { WorkflowDefinitionRepository } from "../workflows/WorkflowDefinitionRepository.ts";
-import { TicketRepository } from "../workflows/TicketRepository.ts";
+import { makeAccess as makeProjectAccess } from "../workflows/ProjectAssistant.ts";
+import { ProjectRepository } from "../workflows/ProjectRepository.ts";
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
 import { RunnerService } from "../runner/RunnerService.ts";
@@ -71,7 +68,7 @@ interface Start {
   readonly title: string | null;
   readonly origin: ChatOrigin;
 }
-export interface Post {
+interface Post {
   readonly chatId: ChatId;
   readonly inputId: InputId;
   readonly from: string | null;
@@ -123,32 +120,29 @@ const readMessage = (
     );
     return {
       sessionId: Session.ID.make(sessionId),
-      state: isSettled(message) ? "settled" : "live",
+      state: row.isLive === 1 ? "live" : "settled",
       isTruncated: flag.cut,
       message,
     } satisfies ChatMessage;
   }).pipe(Effect.orDie);
 
 const encodeChatMessage = Schema.encodeSync(Schema.fromJsonString(ChatMessage));
-const hasWorkflowTools = (agent: Agent) =>
-  agent.mcpServers[WORKFLOW_INSTANCE_MCP_NAME] !== undefined &&
-  agent.mcpServers[WORKFLOW_INSTANCE_MCP_NAME]?.disabled !== true;
+const hasProjectTools = (agent: Agent) => agent.appTools.includes(PROJECT_TOOLS_MCP_NAME);
 
 const readBytes = (message: ChatMessage) =>
   new TextEncoder().encode(encodeChatMessage(message)).byteLength;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const crypto = yield* Crypto.Crypto;
   const transaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     sql.withTransaction(effect).pipe(Effect.catchTags({ SqlError: Effect.die }));
   const repository = yield* ChatRepository.ChatRepository;
   const changes = yield* ChatEvents.ChatEvents;
   const runner = yield* RunnerService;
   const agents = yield* AgentRepository.AgentRepository;
-  const workflows = yield* WorkflowRepository;
-  const definitions = yield* WorkflowDefinitionRepository;
-  const tickets = yield* TicketRepository;
-  const loadWorkflow = yield* makeWorkflowAccess;
+  const projects = yield* ProjectRepository;
+  const projectAccess = yield* makeProjectAccess;
   const attachments = yield* AttachmentRepository.AttachmentRepository;
   const origins = repository.origins;
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "posted" | "deleted") =>
@@ -176,15 +170,15 @@ const make = Effect.gen(function* () {
       if (
         agent === null ||
         (start.origin.kind === "conversation"
-          ? !canChatWithMembers(agent)
+          ? !canChatWithMembers(agent) || !canUse(agent, start.origin.ownerUserId)
           : agent.status !== "active")
       )
         return yield* refuse("agent_unavailable");
       if (start.origin.kind === "conversation") {
-        if (start.origin.workflowId !== null) {
-          yield* loadWorkflow(start.origin.ownerUserId, start.origin.workflowId);
-          if (!hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
-        } else if (hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
+        if (start.origin.projectId !== null) {
+          yield* projectAccess.load(start.origin.ownerUserId, start.origin.projectId);
+          if (!hasProjectTools(agent)) return yield* refuse("agent_unavailable");
+        } else if (hasProjectTools(agent)) return yield* refuse("agent_unavailable");
       }
       yield* repository.insert({ id: post.chatId, ...start, at });
       yield* origins.insert(start.origin);
@@ -198,6 +192,10 @@ const make = Effect.gen(function* () {
         }
         return;
       }
+      // An archived agent takes no new message, in a chat it already has either; what it is
+      // running finishes.
+      if ((yield* agents.get(chat.agentId))?.status !== "active")
+        return yield* refuse("agent_unavailable");
     }
     const refusal = inputRefusal(post.input, PromptService.format(post.input).length);
     if (refusal !== null) return yield* refuse(refusal);
@@ -217,8 +215,10 @@ const make = Effect.gen(function* () {
 
   /** Recorded as interrupted at once, so a server start doesn't run it again. */
   const requestStop = Effect.fnUntraced(function* (chatId: ChatId) {
-    if (!(yield* repository.setStatus(chatId, "interrupted", null))) return;
+    if (!(yield* repository.setStatus(chatId, "interrupted", yield* nowIso))) return false;
+    yield* executions.settleMessages(chatId);
     yield* sql.afterCommit(publish(chatId, "chat").pipe(Effect.andThen(executions.stop(chatId))));
+    return true;
   }, transaction);
 
   /** Stops what runs for a deleted chat, then removes its files, disk and copy. */
@@ -252,13 +252,12 @@ const make = Effect.gen(function* () {
   const summaryOf = (chat: Chat, agentName: string | null) =>
     Effect.gen(function* () {
       const origin = yield* origins.get(chat.id);
-      const workflowId = origin?.kind === "conversation" ? origin.workflowId : null;
+      const projectId = origin?.kind === "conversation" ? origin.projectId : null;
       return {
         ...chat,
         agentName,
-        workflowId,
-        workflowName:
-          workflowId === null ? null : ((yield* workflows.get(workflowId))?.name ?? null),
+        projectId,
+        projectName: projectId === null ? null : ((yield* projects.get(projectId))?.name ?? null),
       };
     });
   const openChatOf = (chat: Chat) =>
@@ -339,43 +338,52 @@ const make = Effect.gen(function* () {
   }, transaction);
 
   return {
-    post,
-    remove,
+    startAutomation: Effect.fnUntraced(function* (
+      trigger: Trigger,
+      agentId: string,
+      { title, input }: { readonly title: string; readonly input: InputPayload },
+    ) {
+      const chatId = ChatId.make(yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+      yield* post({
+        chatId,
+        inputId: InputId.make(yield* crypto.randomUUIDv4().pipe(Effect.orDie)),
+        from: null,
+        input,
+        start: { agentId, title, origin: { kind: "automation", chatId, trigger } },
+      });
+      return chatId;
+    }),
     requestStop,
-    consume: executions.consume,
+    onEnd: executions.onEnd,
+    authenticateAgent: Effect.fnUntraced(function* (token: string) {
+      const chatId = executions.chatForToken(token);
+      if (chatId === null) return yield* notFound();
+      const chat = yield* repository.get(chatId);
+      const origin = yield* repository.origins.get(chatId);
+      if (chat?.status !== "running" || origin === null) return yield* notFound();
+      return { chatId, agentId: chat.agentId, origin };
+    }),
     listTargets: (member: Member) =>
       Effect.gen(function* () {
-        const available = (yield* agents.list).filter(canChatWithMembers);
+        const available = (yield* agents.list).filter(
+          (agent) => canChatWithMembers(agent) && canUse(agent, member.userId),
+        );
         const plain = available
-          .filter((agent) => !hasWorkflowTools(agent))
+          .filter((agent) => !hasProjectTools(agent))
           .map((agent) => ({
             agentId: agent.id,
             name: agent.name,
-            workflowId: null,
+            projectId: null,
           }));
-        const assistants = available.filter(hasWorkflowTools);
+        const assistants = available.filter(hasProjectTools);
         if (assistants.length === 0) return plain;
-        const usableDefinitions = new Set(
-          (yield* definitions.list)
-            .filter((definition) => definition.steps.length > 0)
-            .map((definition) => definition.id),
+        const bound = (yield* projectAccess.list(member.userId)).flatMap((project) =>
+          assistants.map((agent) => ({
+            agentId: agent.id,
+            name: assistants.length === 1 ? project.name : `${project.name} · ${agent.name}`,
+            projectId: project.id,
+          })),
         );
-        const involved = new Set(yield* tickets.workflowIdsInvolving(member.userId));
-        const actor = { id: member.userId, isOrgAdmin: member.role === "admin" };
-        const bound = (yield* workflows.list)
-          .filter(
-            (workflow) =>
-              !workflow.isArchived &&
-              usableDefinitions.has(workflow.definitionId) &&
-              (workflow.isPublic || oversees(actor, workflow) || involved.has(workflow.id)),
-          )
-          .flatMap((workflow) =>
-            assistants.map((agent) => ({
-              agentId: agent.id,
-              name: assistants.length === 1 ? workflow.name : `${workflow.name} · ${agent.name}`,
-              workflowId: workflow.id,
-            })),
-          );
         return [...plain, ...bound];
       }),
     access,
@@ -425,10 +433,9 @@ const make = Effect.gen(function* () {
           });
           const eventsOf = (
             change: ChatEvents.ChatChange | ChatEvents.Missed,
-          ): Effect.Effect<ReadonlyArray<ChatEvent>, ChatErrors> => {
+          ): Effect.Effect<ReadonlyArray<ChatEvent>, Refused | NotFound> => {
             switch (change.kind) {
               case "missed":
-              case "replaced":
                 return snapshotOf.pipe(Effect.map((snapshot) => [snapshot]));
               case "deleted":
                 return Effect.fail(notFound());
@@ -500,19 +507,18 @@ const make = Effect.gen(function* () {
       const origin = yield* origins.get(input.chatId);
       if (origin !== null) {
         const existing = yield* memberChat(member, input.chatId);
-        if (origin.kind === "conversation" && origin.workflowId !== null)
-          yield* loadWorkflow(member.userId, origin.workflowId);
+        if (origin.kind === "conversation" && origin.projectId !== null)
+          yield* projectAccess.load(member.userId, origin.projectId);
         if (
           (input.agentId !== undefined && existing.agentId !== input.agentId) ||
-          (input.workflowId !== undefined &&
-            (origin.kind !== "conversation" || origin.workflowId !== input.workflowId))
+          (input.projectId !== undefined &&
+            (origin.kind !== "conversation" || origin.projectId !== input.projectId))
         )
           return yield* refuse("id_taken");
       }
       const payload = {
         text: input.text,
         attachments: input.attachments,
-        ...(input.context === undefined ? {} : { context: input.context }),
       };
       yield* post({
         chatId: input.chatId,
@@ -528,7 +534,7 @@ const make = Effect.gen(function* () {
                   kind: "conversation" as const,
                   chatId: input.chatId,
                   ownerUserId: member.userId,
-                  workflowId: input.workflowId ?? null,
+                  projectId: input.projectId ?? null,
                 },
               },
             }
@@ -558,8 +564,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const chat = yield* memberChat(member, input.chatId);
         const origin = yield* origins.get(chat.id);
-        if (origin?.kind === "conversation" && origin.workflowId !== null)
-          yield* loadWorkflow(member.userId, origin.workflowId);
+        if (origin?.kind === "conversation" && origin.projectId !== null)
+          yield* projectAccess.load(member.userId, origin.projectId);
         const asked = (yield* repository.questions(chat.id)).find(
           (question) => question.sessionId === input.sessionId && question.form.id === input.formId,
         );

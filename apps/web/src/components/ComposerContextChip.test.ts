@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildMessageContext } from "~/lib/composerContextReferences";
+import { attachmentContextReference } from "~/lib/composerContextReferences";
 import { composerContextRecordsFromDraft } from "./ComposerContextChip";
 
 describe("composerContextRecordsFromDraft", () => {
@@ -28,13 +28,10 @@ describe("composerContextRecordsFromDraft", () => {
       files: [file],
       uploadsByAttachmentId: {},
     });
-    const message = buildMessageContext([
-      { attachment: image, attachmentId: "uploaded-image" },
-      { attachment: file, attachmentId: "uploaded-file" },
-    ])!;
     expect(draftRecords.size).toBe(2);
-    for (const record of message.records) {
-      expect(draftRecords.get(record.contextId)?.attachment.type).toBe(record.kind);
+    for (const attachment of [image, file]) {
+      const { contextId } = attachmentContextReference(attachment);
+      expect(draftRecords.get(contextId)?.attachment).toBe(attachment);
     }
   });
 });

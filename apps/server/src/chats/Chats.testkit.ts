@@ -1,11 +1,11 @@
-import * as WorkflowDefinitionRepository from "../workflows/WorkflowDefinitionRepository.ts";
+import * as AutomationRepository from "../automations/AutomationRepository.ts";
+import * as WorkflowRepository from "../workflows/WorkflowRepository.ts";
 import * as NotificationRepository from "../workflows/NotificationRepository.ts";
 import * as UserRepository from "../org/UserRepository.ts";
 import { AutomationId } from "@t45/contracts/models/Automation";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { Session } from "@opencode/schema/session";
-import { Agent } from "@t45/contracts/models/Agent";
-import { STEP_TOOLS_MCP } from "@t45/core/agentTools";
+import { STEP_TOOLS_MCP_NAME } from "@t45/contracts/models/Agent";
 import { ChatId, type Refused } from "@t45/contracts/models/Chat";
 
 import type { ChatEvent, ChatMessage } from "@t45/contracts/resources/Chats";
@@ -13,7 +13,6 @@ import type { NotFound } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -21,27 +20,29 @@ import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as SkillRepository from "../agents/SkillRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
 import * as ServerConfig from "../config.ts";
+import * as CommandLogRepository from "../persistence/CommandLogRepository.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as FakeRunner from "../runner/FakeRunner.testkit.ts";
 import { inputMessageId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
 import { ChatService, type Member } from "./ChatService.ts";
 import * as TicketRepository from "../workflows/TicketRepository.ts";
-import * as WorkflowRepository from "../workflows/WorkflowRepository.ts";
+import * as ProjectRepository from "../workflows/ProjectRepository.ts";
 
-import { TaskService } from "../tasks/TaskService.ts";
 import * as WorkflowService from "../workflows/WorkflowService.ts";
 
 export const testChatId = (n: number) =>
   ChatId.make(`00000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
 
 const layerPersistence = Layer.mergeAll(
+  AutomationRepository.layer,
   ChatRepository.layer,
   UserRepository.layer,
   TicketRepository.layer,
+  ProjectRepository.layer,
   WorkflowRepository.layer,
-  WorkflowDefinitionRepository.layer,
   NotificationRepository.layer,
+  CommandLogRepository.layer,
   AttachmentRepository.layer,
   AgentRepository.layer,
   SkillRepository.layer,
@@ -53,15 +54,12 @@ const layerPersistence = Layer.mergeAll(
 
 /** Chats over a fresh database. */
 export const layer = WorkflowService.layer.pipe(
-  Layer.provideMerge(TaskService.layer),
   Layer.provideMerge(ChatService.layer),
   Layer.provideMerge(FakeRunner.layer),
   Layer.provideMerge(layerPersistence),
 );
 
 const AT = "2026-10-23T09:00:00.000Z";
-
-const encodeMcpServers = Schema.encodeSync(Schema.fromJsonString(Agent.fields.mcpServers));
 
 /** An active member with `role`; returns the user id. */
 export const addUser = (userId: string, role: "admin" | "member" = "member") =>
@@ -72,7 +70,7 @@ export const addUser = (userId: string, role: "admin" | "member" = "member") =>
     return userId;
   });
 
-/** An agent members can chat with, made by `createdBy`; returns its id. */
+/** A published agent members can chat with; returns its id. */
 export const addAgent = (
   name: string,
   options: {
@@ -84,12 +82,11 @@ export const addAgent = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const id = `agent-${name.toLowerCase()}`;
-    const mcpServers =
-      options.stepTools === true ? { [STEP_TOOLS_MCP.name]: STEP_TOOLS_MCP.server } : {};
-    yield* sql`INSERT INTO agents (id, name, instructions, model, mcp_servers, is_conversational,
-        status, created_at, updated_at)
-      VALUES (${id}, ${name}, 'Be brief.', 'opencode-go/test-model', ${encodeMcpServers(mcpServers)},
-        ${options.chat === false ? 0 : 1}, ${options.status ?? "active"}, ${AT}, ${AT})`;
+    yield* sql`INSERT INTO agents (id, name, instructions, model, app_tools, is_conversational,
+        is_published, status, created_at, updated_at)
+      VALUES (${id}, ${name}, 'Be brief.', 'opencode-go/test-model',
+        ${options.stepTools === true ? `["${STEP_TOOLS_MCP_NAME}"]` : "[]"},
+        ${options.chat === false ? 0 : 1}, 1, ${options.status ?? "active"}, ${AT}, ${AT})`;
     return id;
   });
 
@@ -113,22 +110,23 @@ export const seedChat = (chat: {
         : yield* (yield* TicketRepository.TicketRepository).getByStepId(chat.stepId);
     yield* origins.insert(
       chat.ownerUserId !== null
-        ? { kind: "conversation", chatId: chat.id, ownerUserId: chat.ownerUserId, workflowId: null }
+        ? { kind: "conversation", chatId: chat.id, ownerUserId: chat.ownerUserId, projectId: null }
         : {
-            kind: "task",
+            kind: "automation",
             chatId: chat.id,
-            state: { type: "active" },
             trigger:
               ticket !== null && chat.stepId !== undefined
                 ? {
                     type: "step",
                     ticketId: ticket.id,
                     stepId: chat.stepId,
-                    automationId: chat.id,
+                    automationId: AutomationId.make(chat.id),
+                    effectiveUserId: "fixture",
                   }
                 : {
-                    type: "automation",
+                    type: "manual",
                     automationId: AutomationId.make("fixture"),
+                    effectiveUserId: "fixture",
                   },
           },
     );

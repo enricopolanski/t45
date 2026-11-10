@@ -12,6 +12,7 @@ import { AuthSessionId } from "@t45/contracts/resources/Session";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import { HttpRouter } from "effect/http";
 
 import { UserService } from "../org/UserService.ts";
@@ -242,12 +243,11 @@ describe("attachment routes", () => {
           agentId,
         });
         const files = yield* AttachmentRepository.AttachmentRepository;
-        const sent = yield* files.store({
-          name: "notes.txt",
-          mimeType: "text/plain",
-          bytes: new TextEncoder().encode("hello"),
-          uploader: "user-1",
-        });
+        const sent = yield* files.upload(
+          { type: "file", name: "notes.txt", mimeType: "text/plain", sizeBytes: 5 },
+          "user-1",
+          Stream.succeed(new TextEncoder().encode("hello")),
+        );
         yield* files.bindToChat(chatId, [sentFile(sent)], "user-1");
         return sent;
       }),
@@ -260,44 +260,42 @@ describe("attachment routes", () => {
     ),
   );
 
-  it.effect(
-    "serves a step's file sent to an automation chat to admins, and to its ticket's people",
-    () =>
-      withSeededRoutes(
-        Effect.gen(function* () {
-          yield* Fixture.addUser("admin01", "admin");
-          const member = yield* Fixture.addUser("user-1");
-          const step = yield* Attachments.seedStep("ticket-1", member);
-          const files = yield* AttachmentRepository.AttachmentRepository;
-          const stored = yield* files.store({
-            name: "w2.pdf",
-            mimeType: "application/pdf",
-            bytes: new TextEncoder().encode("w2"),
-            uploader: member,
-          });
-          const claimed = yield* files.claimForStep({
-            id: stored.id,
-            actor: member,
-            ...step,
-            fieldKey: null,
-          });
-          if (claimed === null) return yield* Effect.die("The step did not take its file.");
-          const chatId = yield* Fixture.seedChat({
-            id: Fixture.testChatId(1),
-            ownerUserId: null,
-            agentId: yield* Fixture.addAgent("Clerk"),
-            stepId: step.stepId,
-          });
-          yield* files.bindToChat(chatId, [sentFile(claimed)], null);
-          return claimed;
-        }),
-        async ({ request, seeded }) => {
-          const path = `${ATTACHMENT_ROUTE_PREFIX}/${seeded.id}/w2.pdf`;
-          expect(await (await request(path, { session: "admin" })).text()).toBe("w2");
-          expect(await (await request(path, { session: "member" })).text()).toBe("w2");
-          expect((await request(path, { session: "other" })).status).toBe(404);
-        },
-      ),
+  it.effect("serves a step's file sent to an automation chat to the step's members alone", () =>
+    withSeededRoutes(
+      Effect.gen(function* () {
+        yield* Fixture.addUser("admin01", "admin");
+        const member = yield* Fixture.addUser("user-1");
+        const step = yield* Attachments.seedStep("ticket-1", member);
+        const files = yield* AttachmentRepository.AttachmentRepository;
+        const stored = yield* files.upload(
+          { type: "file", name: "w2.pdf", mimeType: "application/pdf", sizeBytes: 2 },
+          member,
+          Stream.succeed(new TextEncoder().encode("w2")),
+        );
+        const claimed = yield* files.claimForStep({
+          id: stored.id,
+          actor: member,
+          ...step,
+          fieldKey: null,
+        });
+        if (claimed === null) return yield* Effect.die("The step did not take its file.");
+        const chatId = yield* Fixture.seedChat({
+          id: Fixture.testChatId(1),
+          ownerUserId: null,
+          agentId: yield* Fixture.addAgent("Clerk"),
+          stepId: step.stepId,
+        });
+        yield* files.bindToChat(chatId, [sentFile(claimed)], null);
+        return claimed;
+      }),
+      async ({ request, seeded }) => {
+        const path = `${ATTACHMENT_ROUTE_PREFIX}/${seeded.id}/w2.pdf`;
+        expect(await (await request(path, { session: "member" })).text()).toBe("w2");
+        // An organization admin who isn't a member of the step reads nothing of it.
+        expect((await request(path, { session: "admin" })).status).toBe(404);
+        expect((await request(path, { session: "other" })).status).toBe(404);
+      },
+    ),
   );
 
   it.effect("refuses requests without a session or from a registration awaiting approval", () =>

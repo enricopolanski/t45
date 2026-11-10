@@ -1,136 +1,80 @@
-import { generateId } from "@t45/contracts/models/primitives";
-import type { StepAutomation } from "@t45/contracts/models/Workflow";
-import { type ReactNode, useState } from "react";
-
+import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import { stepAutomationList } from "../../state/agents";
+import { useApiQuery } from "../../state/rpc";
+import { useIsAdmin } from "../../state/session";
 import { Button } from "../ui/button";
-import {
-  AlertDialog,
-  DialogClose,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPopup,
-  DialogTitle,
-} from "../ui/dialog";
-import { Textarea } from "../ui/textarea";
-import { ActorPicker } from "./ActorPicker";
-import { useWorkDirectory } from "./useWorkDirectory";
-import { actorName } from "./workLogic";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { ErrorText } from "../ui/error-text";
 
+/**
+ * The automations of a step. A workflow's step editor passes `onChange` to attach and detach them;
+ * a ticket's step shows each with what `renderStatus` gives it.
+ */
 export function StepAutomationsEditor({
-  entries,
-  busy,
-  onSave,
+  automationIds,
+  disabled = false,
+  onChange,
   renderStatus,
 }: {
-  readonly entries: ReadonlyArray<StepAutomation>;
-  readonly busy: boolean;
-  readonly onSave?: ((entries: ReadonlyArray<StepAutomation>) => Promise<boolean>) | undefined;
+  readonly automationIds: ReadonlyArray<string>;
+  readonly disabled?: boolean;
+  readonly onChange?: (ids: ReadonlyArray<string>) => void;
   readonly renderStatus?: (id: string) => ReactNode;
 }) {
-  const directory = useWorkDirectory();
-  const [draft, setDraft] = useState<StepAutomation | null>(null);
-  const [removing, setRemoving] = useState<string | null>(null);
-  const save = async () => {
-    if (draft === null || onSave === undefined) return;
-    const next = entries.some((entry) => entry.id === draft.id)
-      ? entries.map((entry) => (entry.id === draft.id ? draft : entry))
-      : [...entries, draft];
-    if (await onSave(next)) setDraft(null);
-  };
+  const query = useApiQuery(stepAutomationList);
+  const isAdmin = useIsAdmin();
+  const available = (query.data ?? []).filter(
+    (automation) => !automationIds.includes(automation.id),
+  );
   return (
     <div className="flex flex-col gap-3">
-      {entries.map((entry) => (
-        <div key={entry.id} className="flex flex-col gap-2 rounded-lg border p-3 text-sm">
-          <p className="font-medium">{actorName(directory, entry.agentId)}</p>
-          <p className="whitespace-pre-wrap text-muted-foreground">{entry.instructions}</p>
-          {renderStatus?.(entry.id)}
-          {onSave && (
-            <div className="flex gap-2">
+      {query.error && <ErrorText text={query.error} />}
+      {automationIds.map((id) => {
+        const automation = query.data?.find((automation) => automation.id === id);
+        return (
+          <div key={id} className="flex flex-col gap-2 rounded-lg border p-3 text-sm">
+            <p className="font-medium">{automation?.title ?? "Unavailable automation"}</p>
+            <p className="whitespace-pre-wrap text-muted-foreground">{automation?.prompt}</p>
+            {renderStatus?.(id)}
+            {onChange && (
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={busy || draft !== null}
-                onClick={() => setDraft(entry)}
-              >
-                Edit
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy || draft !== null}
-                onClick={() => setRemoving(entry.id)}
+                disabled={disabled}
+                onClick={() => onChange(automationIds.filter((other) => other !== id))}
               >
                 Remove
               </Button>
-            </div>
-          )}
-        </div>
-      ))}
-      {onSave &&
-        (draft === null ? (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            onClick={() => setDraft({ id: generateId(), agentId: "", instructions: "" })}
-          >
-            Add automation
-          </Button>
-        ) : (
-          <fieldset className="flex flex-col gap-2 rounded-lg border p-3" disabled={busy}>
-            <ActorPicker
-              kind="agent"
-              value={draft.agentId || null}
-              onChange={(agentId) => setDraft({ ...draft, agentId })}
-              placeholder="Choose an agent"
-              aria-label="Automation agent"
-              disabled={busy}
-            />
-            <Textarea
-              aria-label="Automation instructions"
-              value={draft.instructions}
-              onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
-              placeholder="What this automation contributes"
-            />
-            <div className="flex gap-2">
-              <Button size="sm" disabled={!draft.agentId} onClick={() => void save()}>
-                Save automation
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setDraft(null)}>
-                Cancel
-              </Button>
-            </div>
-          </fieldset>
-        ))}
-      <AlertDialog
-        open={removing !== null}
-        onOpenChange={(open) => {
-          if (!open && !busy) setRemoving(null);
-        }}
-      >
-        <DialogPopup closeButton={false}>
-          <DialogHeader>
-            <DialogTitle>Remove this automation?</DialogTitle>
-            <DialogDescription>Any running task for it will be cancelled.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={busy} />}>
-              Keep automation
-            </DialogClose>
-            <Button
-              variant="destructive"
-              disabled={busy}
-              onClick={async () => {
-                if (onSave && (await onSave(entries.filter((entry) => entry.id !== removing))))
-                  setRemoving(null);
-              }}
-            >
-              Remove automation
-            </Button>
-          </DialogFooter>
-        </DialogPopup>
-      </AlertDialog>
+            )}
+          </div>
+        );
+      })}
+      {onChange && (
+        <Select
+          value={null}
+          disabled={disabled || available.length === 0}
+          onValueChange={(value) => {
+            if (typeof value === "string") onChange([...automationIds, value]);
+          }}
+        >
+          <SelectTrigger aria-label="Add automation">
+            <SelectValue placeholder="Add automation" />
+          </SelectTrigger>
+          <SelectPopup>
+            {available.map((automation) => (
+              <SelectItem key={automation.id} value={automation.id}>
+                {automation.title}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      )}
+      {isAdmin && (
+        <Link to="/settings/automations" className="text-sm text-muted-foreground underline">
+          Manage automations
+        </Link>
+      )}
     </div>
   );
 }

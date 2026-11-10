@@ -14,13 +14,9 @@ import { collectInlineContextIds } from "~/lib/composerContextReferences";
  *
  * The stored prompt stays markdown (`**bold**`, `@file` chips as canonical
  * links). The Tiptap document holds styled text plus inline atom chips, so
- * this module translates both ways, maps cursor offsets between the three
- * coordinate spaces the composer speaks, and groups undo history steps:
- *
- * - flat document offsets (styled markers excluded, chips count 1),
- * - collapsed cursor offsets (markers literal, chips count 1 — the coordinate
- *   the draft store and trigger detection use),
- * - markdown offsets (markers literal, chips expand to their source).
+ * this module translates both ways and groups undo history steps. Components
+ * exchange Markdown offsets; flat offsets (markers excluded, chips count 1)
+ * and ProseMirror positions stay inside the editor.
  *
  * DOM-free on purpose: unit tests build a real ProseMirror document from the
  * JSON this produces and assert the round trip without a browser.
@@ -364,8 +360,6 @@ export interface RichRun {
   /** Flat document offset (atoms count 1, markers excluded). */
   flatStart: number;
   docLen: number;
-  /** Collapsed cursor length (markers literal, tokens count 1). */
-  collapsedLen: number;
   /** Markdown length (tokens expand to their source). */
   mdLen: number;
   /** Marker layout inside text runs. */
@@ -374,7 +368,6 @@ export interface RichRun {
   /** ProseMirror position of the run start. */
   pmPos: number;
   mdStart: number;
-  collapsedStart: number;
 }
 
 export interface RichDocMap {
@@ -388,7 +381,6 @@ interface RichAccumulator {
   runs: RichRun[];
   value: string;
   flat: number;
-  collapsed: number;
   md: number;
 }
 
@@ -400,17 +392,14 @@ function pushBreakRun(acc: RichAccumulator, position?: number): void {
     kind: "break",
     flatStart: acc.flat,
     docLen: 1,
-    collapsedLen: 1,
     mdLen: 1,
     openLen: 0,
     closeLen: 0,
     pmPos,
     mdStart: acc.md,
-    collapsedStart: acc.collapsed,
   });
   acc.value += "\n";
   acc.flat += 1;
-  acc.collapsed += 1;
   acc.md += 1;
 }
 
@@ -522,22 +511,18 @@ function appendInlineRuns(
     const source = child.isText ? child.text! : typeof atomSource === "string" ? atomSource : "";
     const docLen = child.isText ? source.length : 1;
     const mdText = open + source + close;
-    const collapsedLen = open.length + docLen + close.length;
     acc.runs.push({
       kind: child.isText ? "text" : "token",
       flatStart: acc.flat,
       docLen,
-      collapsedLen,
       mdLen: mdText.length,
       openLen: open.length,
       closeLen: close.length,
       pmPos,
       mdStart: acc.md,
-      collapsedStart: acc.collapsed,
     });
     acc.value += mdText;
     acc.flat += docLen;
-    acc.collapsed += collapsedLen;
     acc.md += mdText.length;
   });
   // Empty paragraphs have an editable position even though they emit no text.
@@ -546,13 +531,11 @@ function appendInlineRuns(
       kind: "text",
       flatStart: acc.flat,
       docLen: 0,
-      collapsedLen: 0,
       mdLen: 0,
       openLen: 0,
       closeLen: 0,
       pmPos: contentStart,
       mdStart: acc.md,
-      collapsedStart: acc.collapsed,
     });
   }
 }
@@ -579,16 +562,13 @@ function walkTaskList(list: ProseMirrorNode, listStart: number, acc: RichAccumul
       kind: "prefix",
       flatStart: acc.flat,
       docLen: 0,
-      collapsedLen: prefix.length,
       mdLen: prefix.length,
       openLen: 0,
       closeLen: 0,
       pmPos: itemContentStart + 1,
       mdStart: acc.md,
-      collapsedStart: acc.collapsed,
     });
     acc.value += prefix;
-    acc.collapsed += prefix.length;
     acc.md += prefix.length;
     let childPos = itemContentStart;
     let firstBlock = true;
@@ -607,7 +587,7 @@ function walkTaskList(list: ProseMirrorNode, listStart: number, acc: RichAccumul
 }
 
 export function serializeEditorDoc(doc: ProseMirrorNode): RichDocMap {
-  const acc: RichAccumulator = { runs: [], value: "", flat: 0, collapsed: 0, md: 0 };
+  const acc: RichAccumulator = { runs: [], value: "", flat: 0, md: 0 };
   let pmBlockStart = 0;
   doc.content.forEach((block, _, blockIndex) => {
     if (blockIndex > 0) pushBreakRun(acc);
@@ -627,23 +607,19 @@ export function serializeEditorDoc(doc: ProseMirrorNode): RichDocMap {
   };
 }
 
-export function flatTo(map: RichDocMap, flatOffset: number, space: "collapsed" | "md"): number {
+export function flatToMarkdown(map: RichDocMap, flatOffset: number): number {
   const bounded = Math.max(0, Math.min(flatOffset, map.docLength));
-  const start = (run: RichRun) => (space === "collapsed" ? run.collapsedStart : run.mdStart);
   const run = map.runs.find((candidate) => bounded < candidate.flatStart + candidate.docLen);
-  if (run) return start(run) + run.openLen + (bounded - run.flatStart);
+  if (run) return run.mdStart + run.openLen + (bounded - run.flatStart);
   const last = map.runs.at(-1);
-  return last ? start(last) + (space === "collapsed" ? last.collapsedLen : last.mdLen) : 0;
+  return last ? last.mdStart + last.mdLen : 0;
 }
 
-export function collapsedToFlat(map: RichDocMap, collapsedOffset: number): number {
-  const run = map.runs.find(
-    (candidate) => collapsedOffset < candidate.collapsedStart + candidate.collapsedLen,
-  );
+export function markdownToFlat(map: RichDocMap, offset: number): number {
+  const run = map.runs.find((candidate) => offset < candidate.mdStart + candidate.mdLen);
   if (!run) return map.docLength;
-  // Checkbox prefixes and style markers are shown, never edited: every
-  // offset inside them clamps to the adjacent document position.
-  const within = collapsedOffset - run.collapsedStart - run.openLen;
+  // Chips stay atomic; checkbox prefixes and style markers clamp to the adjacent position.
+  const within = offset - run.mdStart - run.openLen;
   return run.flatStart + Math.max(0, Math.min(run.docLen, within));
 }
 

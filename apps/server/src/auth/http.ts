@@ -7,6 +7,7 @@ import * as Option from "effect/Option";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import * as ServerConfig from "../config.ts";
+import { ChatService } from "../chats/ChatService.ts";
 import { UserService } from "../org/UserService.ts";
 
 const CREDENTIAL_RESPONSE_HEADERS = {
@@ -44,7 +45,7 @@ const readSession = Effect.gen(function* () {
 
 const signedIn = readSession.pipe(
   Effect.map((session) => session ?? refuse("unauthenticated")),
-  Effect.catchTags({ SessionStoreError: failed }),
+  Effect.catchDefect(failed),
 );
 
 /** Authenticates a raw route's request and requires an active member, like the RPC middleware. */
@@ -77,7 +78,7 @@ const sessionRoute = HttpRouter.add(
             deployVersion,
           },
     );
-  }).pipe(Effect.catchTags({ SessionStoreError: failed, HttpBodyError: failed })),
+  }).pipe(Effect.catch(failed), Effect.catchDefect(failed)),
 );
 
 const loginRoute = HttpRouter.add(
@@ -108,9 +109,9 @@ const loginRoute = HttpRouter.add(
           InvalidIdentityToken: () => Effect.succeed(refuse("invalid_credential")),
           UserDeactivatedError: () => Effect.succeed(refuse("deactivated")),
           IdentityProviderUnavailable: failed,
-          UserAuthInternalError: failed,
           CookiesError: failed,
         }),
+        Effect.catchDefect(failed),
       );
   }),
 );
@@ -132,9 +133,26 @@ const logoutRoute = HttpRouter.add(
             SESSION_COOKIE_OPTIONS,
           ),
         ),
-        Effect.catchTags({ SessionStoreError: failed, CookiesError: failed }),
+        Effect.catch(failed),
+        Effect.catchDefect(failed),
       );
   }),
 );
 
 export const layer = Layer.mergeAll(sessionRoute, loginRoute, logoutRoute);
+
+/** The uploader's identity; uploads use the same credentials as workflow RPCs. */
+export const uploader = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  if (request.headers.authorization !== undefined) {
+    const chats = yield* ChatService;
+    return yield* chats
+      .authenticateAgent(request.headers.authorization.replace(/^Bearer /, ""))
+      .pipe(
+        Effect.map((actor) => actor.agentId),
+        Effect.catchTags({ NotFound: () => Effect.succeed(refuse("unauthenticated")) }),
+      );
+  }
+  const user = yield* member;
+  return HttpServerResponse.isHttpServerResponse(user) ? user : user.userId;
+});

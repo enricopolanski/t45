@@ -1,15 +1,14 @@
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { useWorkDirectory } from "./useWorkDirectory";
-import { actorName, assignableActors } from "./workLogic";
+import { actorName, assignablePeople } from "./workLogic";
 
 const NONE = "none";
 
-interface ActorPickerProps {
+interface PersonPickerProps {
   readonly value: string | null;
   readonly onChange: (ref: string) => void;
   readonly noneLabel?: string;
   readonly onClear?: () => void;
-  readonly kind: "person" | "agent";
   readonly placeholder: string;
   readonly disabled?: boolean;
   readonly id?: string;
@@ -17,21 +16,20 @@ interface ActorPickerProps {
 }
 
 /**
- * Picks a person or agent who can be given work. With `noneLabel`, the first choice is nobody in
+ * Picks a person who can be given work. With `noneLabel`, the first choice is nobody in
  * particular (such as inheriting from the step before), which calls `onClear`.
  */
-export function ActorPicker({
+export function PersonPicker({
   value,
   onChange,
   noneLabel,
   onClear,
-  kind,
   placeholder,
   disabled,
   ...rest
-}: ActorPickerProps) {
+}: PersonPickerProps) {
   const directory = useWorkDirectory();
-  const actors = assignableActors(directory, kind);
+  const actors = assignablePeople(directory);
   return (
     <Select
       value={value === null ? (noneLabel === undefined ? null : NONE) : value}
@@ -67,16 +65,4 @@ export function ActorPicker({
       </SelectPopup>
     </Select>
   );
-}
-
-/** An ActorPicker of people that answers with a user id: a responsible, or a workflow's admin. */
-export function PersonPicker({
-  value,
-  onChange,
-  ...rest
-}: Omit<ActorPickerProps, "kind" | "value" | "onChange"> & {
-  readonly value: string | null;
-  readonly onChange: (userId: string) => void;
-}) {
-  return <ActorPicker {...rest} kind="person" value={value} onChange={onChange} />;
 }
