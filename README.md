@@ -1,6 +1,13 @@
 # T45
 
-T45 is a web app for collaborative working assisted by agents via workflows. You define operations, automations, agents (instructions, model, skills, MCP servers).
+T45 is a web app for collaborative working assisted by agents. You can define workflows, projects, automations, assign to coworkers and/or delegate to agents (instructions, model, skills, MCP servers).
+
+## How it works
+
+The application is composed by 3 parts:
+- `client`: the software used by humans to interface with the application
+- `server`: the software handling the business logic
+- `runner`: the software providing isolation for each automation, on a different machine from the server
 
 The T45 server serves the web app and keeps the chats, workflows and agents. Agents run in sandboxed microVMs on a separate runner service, never on the server's machine; the server does not edit code or run git. Sign-in is Clerk.
 
