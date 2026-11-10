@@ -8,7 +8,7 @@ import { AccessDenied, NotFound } from "./errors.ts";
 
 export const NotificationView = Schema.Struct({
   ...Notification.fields,
-  workflowName: TrimmedNonEmptyString,
+  projectName: TrimmedNonEmptyString,
   ticketTitle: Schema.NullOr(TrimmedNonEmptyString),
   stepName: Schema.NullOr(TrimmedNonEmptyString),
 }).check(Schema.makeFilter(hasValidTarget));

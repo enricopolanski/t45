@@ -5,11 +5,11 @@ import {
   type Step,
   type StepDefinition,
   type Ticket,
-  type Workflow,
+  type Project,
   childSteps,
   completeTicketStep,
   currentStep,
-  definitionChangeRefusal,
+  workflowChangeRefusal,
   putTicketStep,
   stepAfterDefinitionChange,
   subStepsToEnter,
@@ -17,9 +17,9 @@ import {
 } from "./Workflow.ts";
 
 const at = DateTime.makeUnsafe("2026-10-26T12:00:00.000Z");
-const workflow: Workflow = {
-  id: "workflow01",
-  definitionId: "definition01",
+const project: Project = {
+  id: "project01",
+  workflowId: "workflow01",
   name: "Review",
   responsible: "owner01",
   adminUserIds: ["admin01", "admin02"],
@@ -48,7 +48,7 @@ const step: Step = {
 };
 const ticket: Ticket = {
   id: "ticket01",
-  workflowId: workflow.id,
+  projectId: project.id,
   title: "Review",
   description: "",
   dueDate: null,
@@ -59,28 +59,25 @@ const ticket: Ticket = {
 
 describe("starting a ticket", () => {
   it("lets an organization admin start an unassigned first step while retaining authorization", () => {
-    const blueprint = {
-      id: workflow.definitionId,
+    const workflow = {
+      id: project.workflowId,
       name: "Review",
       steps: [root],
       isArchived: false,
     };
-    assert.equal(
-      ticketStartRefusal({ id: "admin01", isOrgAdmin: true }, workflow, blueprint),
-      null,
-    );
+    assert.equal(ticketStartRefusal({ id: "admin01", isOrgAdmin: true }, project, workflow), null);
     const configured = {
-      ...workflow,
+      ...project,
       defaultAssignments: {
         [root.id]: { automationIds: [], assignee: "worker01" },
       },
     };
     assert.equal(
-      ticketStartRefusal({ id: "worker01", isOrgAdmin: false }, configured, blueprint),
+      ticketStartRefusal({ id: "worker01", isOrgAdmin: false }, configured, workflow),
       null,
     );
     assert.equal(
-      ticketStartRefusal({ id: "outsider01", isOrgAdmin: false }, configured, blueprint),
+      ticketStartRefusal({ id: "outsider01", isOrgAdmin: false }, configured, workflow),
       "cannot_start_ticket",
     );
   });
@@ -116,15 +113,15 @@ describe("ticket progression", () => {
   });
 });
 
-describe("changing a shared definition", () => {
+describe("changing a shared workflow", () => {
   it("refuses removing or reparenting active work, while retaining completed history", () => {
-    assert.equal(definitionChangeRefusal(ticket, []), "tickets_cannot_move");
+    assert.equal(workflowChangeRefusal(ticket, []), "tickets_cannot_move");
     assert.equal(
-      definitionChangeRefusal(ticket, [definition("parent01", [root])]),
+      workflowChangeRefusal(ticket, [definition("parent01", [root])]),
       "tickets_cannot_move",
     );
     const completed = completeTicketStep(ticket, [root], step, at).ticket;
-    assert.equal(definitionChangeRefusal(completed, []), null);
+    assert.equal(workflowChangeRefusal(completed, []), null);
     assert.equal(completed.steps[0]?.id, step.id);
   });
 

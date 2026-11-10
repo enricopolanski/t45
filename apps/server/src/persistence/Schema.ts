@@ -4,8 +4,8 @@
  * place: the fingerprint of the statements changes, and a database created by other statements is
  * refused at startup.
  */
-import { Agent, WORKFLOW_ASSISTANT_ID } from "@t45/contracts/models/Agent";
-import { WORKFLOW_DRAFTING_MCP, WORKFLOW_INSTANCE_MCP } from "@t45/core/agentTools";
+import { Agent, PROJECT_ASSISTANT_ID } from "@t45/contracts/models/Agent";
+import { WORKFLOW_DRAFTING_MCP, PROJECT_TOOLS_MCP } from "@t45/core/agentTools";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -18,8 +18,8 @@ const workflowDesigner = {
   id: "workflow-designer",
   name: "Workflow designer",
   instructions: `Help the member design a reusable workflow. Clarify the process and expected outputs,
-then use the workflow draft tool to propose a complete blueprint. Submit the complete draft for revisions.
-Explain that the member saves the blueprint, then configures and publishes a workflow from it.`,
+then use the workflow draft tool to propose a complete workflow. Submit the complete draft for revisions.
+Explain that the member saves the workflow, then configures and publishes a project from it.`,
   model: "opencode-go/deepseek-v4.1-flash",
   files: {},
   skills: [],
@@ -29,18 +29,19 @@ Explain that the member saves the blueprint, then configures and publishes a wor
   status: "active",
 } satisfies Omit<Agent, "createdAt" | "updatedAt">;
 
-const workflowAssistant = {
+const projectAssistant = {
   ...workflowDesigner,
-  id: WORKFLOW_ASSISTANT_ID,
-  name: "Workflow assistant",
-  instructions: `Help the member operate the workflow bound to this conversation. Use get_workflow and get_ticket to obtain current definitions, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. You cannot mark steps done or edit workflow definitions.`,
-  mcpServers: { [WORKFLOW_INSTANCE_MCP.name]: WORKFLOW_INSTANCE_MCP.server },
+  id: PROJECT_ASSISTANT_ID,
+  name: "Project assistant",
+  instructions: `Help the member operate the project bound to this conversation. Use get_workflow and get_ticket to obtain current steps, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. You cannot mark steps done or edit workflows.`,
+  mcpServers: { [PROJECT_TOOLS_MCP.name]: PROJECT_TOOLS_MCP.server },
 } satisfies Omit<Agent, "createdAt" | "updatedAt">;
 
 const encodeFiles = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.files));
 const encodeMcpServers = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.mcpServers));
 
-// The organization's users and sessions, agents and automations, workflows, chats, and files.
+// The organization's users and sessions, agents and automations, workflows and projects, chats,
+// and files.
 const statements = [
   `CREATE TABLE users (
       id TEXT PRIMARY KEY NOT NULL,
@@ -129,17 +130,17 @@ const statements = [
   `CREATE INDEX automations_due ON automations(next_run_at)
     WHERE is_enabled = 1 AND next_run_at IS NOT NULL`,
 
-  `CREATE TABLE workflow_definitions (
+  `CREATE TABLE workflows (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       steps TEXT NOT NULL,
       is_archived INTEGER NOT NULL
     )`,
-  // The automationIds SQL comments in workflows and tickets deliberately change the raw-SQL
+  // The automationIds SQL comments in projects and tickets deliberately change the raw-SQL
   // fingerprint so databases containing the old embedded automation objects are refused.
-  `CREATE TABLE workflows (
+  `CREATE TABLE projects (
       id TEXT PRIMARY KEY NOT NULL,
-      definition_id TEXT NOT NULL REFERENCES workflow_definitions(id),
+      workflow_id TEXT NOT NULL REFERENCES workflows(id),
       name TEXT NOT NULL,
       responsible_user_id TEXT NOT NULL,
       admin_user_ids TEXT NOT NULL,
@@ -148,10 +149,10 @@ const statements = [
       is_public INTEGER NOT NULL,
       is_archived INTEGER NOT NULL
     )`,
-  `CREATE INDEX workflows_definition ON workflows(definition_id)`,
+  `CREATE INDEX projects_workflow ON projects(workflow_id)`,
   `CREATE TABLE tickets (
       id TEXT PRIMARY KEY NOT NULL,
-      workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       due_date TEXT,
@@ -159,7 +160,7 @@ const statements = [
       steps TEXT NOT NULL, -- runtime steps reference shared automationIds
       created_at TEXT NOT NULL
     )`,
-  `CREATE INDEX tickets_workflow ON tickets(workflow_id, created_at)`,
+  `CREATE INDEX tickets_project ON tickets(project_id, created_at)`,
   `CREATE TABLE workflow_comments (
       id TEXT PRIMARY KEY NOT NULL,
       ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
@@ -176,7 +177,7 @@ const statements = [
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       kind TEXT NOT NULL CHECK (kind IN ('to_do', 'automation_ended', 'needs_responsible',
         'names_deactivated')),
-      workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       step_id TEXT,
       read_at TEXT,
       created_at TEXT NOT NULL
@@ -197,14 +198,14 @@ const statements = [
       updated_at TEXT NOT NULL,
       deleted_at TEXT
     )`,
-  // A conversation retains its scope even after that workflow is deleted.
+  // A conversation retains its scope even after that project is deleted.
   `CREATE TABLE chat_origins (
       chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(id),
       owner_user_id TEXT REFERENCES users(id),
-      workflow_id TEXT,
+      project_id TEXT,
       trigger TEXT,
       CHECK ((owner_user_id IS NOT NULL AND trigger IS NULL)
-          OR (owner_user_id IS NULL AND workflow_id IS NULL AND trigger IS NOT NULL))
+          OR (owner_user_id IS NULL AND project_id IS NULL AND trigger IS NOT NULL))
     )`,
   `CREATE INDEX origins_owner ON chat_origins(owner_user_id) WHERE owner_user_id IS NOT NULL`,
   `CREATE INDEX origins_step ON chat_origins(json_extract(trigger, '$.ticketId'), json_extract(trigger, '$.stepId')) WHERE trigger IS NOT NULL`,
@@ -296,7 +297,7 @@ export const setupSchema = Effect.fnUntraced(function* () {
           yield* sql.unsafe(statement);
         }
         const at = DateTime.formatIso(yield* DateTime.now);
-        for (const agent of [workflowDesigner, workflowAssistant])
+        for (const agent of [workflowDesigner, projectAssistant])
           yield* sql`INSERT INTO agents ${sql.insert({
             id: agent.id,
             name: agent.name,

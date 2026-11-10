@@ -1,5 +1,5 @@
 import type { DraftStep } from "./workflowLogic";
-import type { WorkflowDefinitionView } from "@t45/contracts/resources/Workflows";
+import type { WorkflowView } from "@t45/contracts/resources/Workflows";
 import { useBlocker } from "@tanstack/react-router";
 import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -44,28 +44,28 @@ function StepTrail({
 }
 
 /**
- * Edits a definition's shared steps and fields. A
+ * Edits a workflow's shared steps and fields. A
  * sub-step, at any depth, opens on its own (`openStepKey`), with the trail back. Leaving with
  * unsaved changes asks first; moving between steps here keeps them.
  */
 export function WorkflowSteps({
-  definitionId,
+  workflowId,
   openStepKey,
   onOpenStep,
 }: {
-  readonly definitionId: string;
+  readonly workflowId: string;
   readonly openStepKey: string | null;
   readonly onOpenStep: (key: string | null) => void;
 }) {
   const [steps, setSteps] = useState<ReadonlyArray<DraftStep>>([]);
   const [dirty, setDirty] = useState(false);
   /** Takes the server's steps as they are, dropping unsaved edits. */
-  const adopt = useCallback((loaded: WorkflowDefinitionView) => {
-    setSteps(loaded.definition.steps);
+  const adopt = useCallback((loaded: WorkflowView) => {
+    setSteps(loaded.workflow.steps);
     setDirty(false);
   }, []);
   const { detail, busy, error, run } = useWorkflowData(
-    useCallback(() => api("workflows.getDefinition", { definitionId }), [definitionId]),
+    useCallback(() => api("workflows.getWorkflow", { workflowId }), [workflowId]),
     adopt,
   );
 
@@ -87,7 +87,7 @@ export function WorkflowSteps({
     );
   }
 
-  const { definition, canManage } = detail;
+  const { workflow, canManage } = detail;
   const disabled = busy || !canManage;
   const edit = (next: ReadonlyArray<DraftStep>) => {
     setSteps(next);
@@ -96,8 +96,8 @@ export function WorkflowSteps({
   const addStep = () => edit([...steps, blankStep()]);
   const save = () => {
     void run(() =>
-      api("workflows.updateDefinition", {
-        definitionId: definition.id,
+      api("workflows.updateWorkflow", {
+        workflowId: workflow.id,
         steps: cleanSteps(steps),
       }),
     );
@@ -110,10 +110,10 @@ export function WorkflowSteps({
       title="Steps"
       parent={
         <PageBreadcrumbLink
-          to="/settings/workflow-blueprints/$definitionId"
-          params={{ definitionId: definition.id }}
+          to="/settings/workflows/$workflowId"
+          params={{ workflowId: workflow.id }}
         >
-          {definition.name}
+          {workflow.name}
         </PageBreadcrumbLink>
       }
       actions={
@@ -128,12 +128,12 @@ export function WorkflowSteps({
       }
     >
       <p className="text-sm text-muted-foreground">
-        These steps and fields are shared by every workflow using this blueprint. Assign people in
-        each workflow's settings.
+        These steps and fields are shared by every project using this workflow. Assign people in
+        each project's settings.
       </p>
       {!canManage ? (
         <p className="text-sm text-muted-foreground">
-          Editing requires admin access to every workflow using this blueprint.
+          Editing requires admin access to every project using this workflow.
         </p>
       ) : null}
       <section aria-label="Step Editor" className="flex flex-col gap-2.5">

@@ -1,10 +1,10 @@
-import type { Workflow } from "@t45/contracts/models/Workflow";
+import type { Project } from "@t45/contracts/models/Workflow";
 import { useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "../../rpc/api";
-import { useStartableWorkflows, workChanged } from "../../state/work";
+import { useStartableProjects, workChanged } from "../../state/work";
 import { FormDialog } from "../FormDialog";
 import { Loading } from "../Loading";
 import { Button } from "../ui/button";
@@ -14,13 +14,13 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 
-const NO_WORKFLOW = "There's no workflow you can start items in yet.";
+const NO_PROJECT = "There's no project you can start items in yet.";
 
 /**
- * Starts an item with a title, in a workflow the viewer picks from those they may start, or in
- * the given one, and opens its first step. The workflow's admins set a due date afterwards.
+ * Starts an item with a title, in a project the viewer picks from those they may start, or in
+ * the given one, and opens its first step. The project's admins set a due date afterwards.
  */
-export function NewItemDialog({ workflow }: { readonly workflow?: Workflow }) {
+export function NewItemDialog({ project }: { readonly project?: Project }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   return (
@@ -33,14 +33,14 @@ export function NewItemDialog({ workflow }: { readonly workflow?: Workflow }) {
           New item
         </DialogTrigger>
       }
-      title={workflow === undefined ? "New item" : `New item in ${workflow.name}`}
+      title={project === undefined ? "New item" : `New item in ${project.name}`}
       submitLabel="Start"
       onSubmit={async (fields) => {
-        const workflowId = fields.get("workflowId");
-        if (typeof workflowId !== "string") return false;
+        const projectId = fields.get("projectId");
+        if (typeof projectId !== "string") return false;
         const description = String(fields.get("description"));
         const result = await api("workflows.startTicket", {
-          workflowId,
+          projectId,
           title: String(fields.get("title")),
           ...(description.trim() ? { description } : {}),
         });
@@ -48,12 +48,12 @@ export function NewItemDialog({ workflow }: { readonly workflow?: Workflow }) {
         void navigate({ to: "/my-work/$stepId", params: result });
       }}
     >
-      {workflow === undefined ? (
+      {project === undefined ? (
         <Loading>
-          <WorkflowChoice />
+          <ProjectChoice />
         </Loading>
       ) : (
-        <input type="hidden" name="workflowId" value={workflow.id} />
+        <input type="hidden" name="projectId" value={project.id} />
       )}
       <Field label="Title">
         <Input name="title" required pattern=".*\S.*" placeholder="e.g. Customer onboarding" />
@@ -68,21 +68,21 @@ export function NewItemDialog({ workflow }: { readonly workflow?: Workflow }) {
   );
 }
 
-function WorkflowChoice() {
-  const workflows = useStartableWorkflows();
-  if (workflows.length === 0) return <p className="text-sm text-muted-foreground">{NO_WORKFLOW}</p>;
+function ProjectChoice() {
+  const projects = useStartableProjects();
+  if (projects.length === 0) return <p className="text-sm text-muted-foreground">{NO_PROJECT}</p>;
   return (
-    <Field label="Workflow">
+    <Field label="Project">
       <Select
-        name="workflowId"
-        defaultValue={workflows[0]?.id}
-        items={workflows.map((candidate) => ({ value: candidate.id, label: candidate.name }))}
+        name="projectId"
+        defaultValue={projects[0]?.id}
+        items={projects.map((candidate) => ({ value: candidate.id, label: candidate.name }))}
       >
         <SelectTrigger>
           <SelectValue />
         </SelectTrigger>
         <SelectPopup>
-          {workflows.map((candidate) => (
+          {projects.map((candidate) => (
             <SelectItem key={candidate.id} value={candidate.id}>
               {candidate.name}
             </SelectItem>

@@ -34,8 +34,8 @@ import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { RunnerService } from "./runner/RunnerService.ts";
 import * as NotificationRepository from "./workflows/NotificationRepository.ts";
 import * as TicketRepository from "./workflows/TicketRepository.ts";
-import * as WorkflowDefinitionRepository from "./workflows/WorkflowDefinitionRepository.ts";
 import * as WorkflowRepository from "./workflows/WorkflowRepository.ts";
+import * as ProjectRepository from "./workflows/ProjectRepository.ts";
 import * as WorkflowService from "./workflows/WorkflowService.ts";
 
 const Store = Layer.mergeAll(
@@ -47,8 +47,8 @@ const Store = Layer.mergeAll(
 ).pipe(Layer.provideMerge(SqlitePersistence.layer));
 
 const WorkflowRepositories = Layer.mergeAll(
-  WorkflowDefinitionRepository.layer,
   WorkflowRepository.layer,
+  ProjectRepository.layer,
   TicketRepository.layer,
   NotificationRepository.layer,
 );

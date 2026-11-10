@@ -45,9 +45,9 @@ it.effect.each([
     expect(request.tag).toBe("chats.listTargets");
     request.succeed([
       ...(conversational
-        ? [{ agentId: CHAT_SUMMARY.agentId, name: "Analyst", workflowId: null }]
+        ? [{ agentId: CHAT_SUMMARY.agentId, name: "Analyst", projectId: null }]
         : []),
-      { agentId: "fallback", name: "Assistant", workflowId: null },
+      { agentId: "fallback", name: "Assistant", projectId: null },
     ]);
     yield* Fiber.join(opening);
 

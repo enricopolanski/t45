@@ -14,7 +14,7 @@ import { member, uploader } from "../auth/http.ts";
 import { ChatService } from "../chats/ChatService.ts";
 import { TicketRepository } from "../workflows/TicketRepository.ts";
 import { canViewTicket } from "@t45/contracts/models/Workflow";
-import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
+import { ProjectRepository } from "../workflows/ProjectRepository.ts";
 import {
   AttachmentRepository,
   attachmentIsInlineImage,
@@ -86,7 +86,7 @@ const attachmentRoute = HttpRouter.add(
 
     const chats = yield* ChatService;
     const tickets = yield* TicketRepository;
-    const workflows = yield* WorkflowRepository;
+    const projects = yield* ProjectRepository;
     const readable = Effect.gen(function* () {
       const holders = yield* files.chatsHolding(attachment.id);
       if (attachment.stepId === null && holders.length === 0) {
@@ -97,13 +97,13 @@ const attachmentRoute = HttpRouter.add(
       }
       if (attachment.stepId === null) return false;
       const ticket = yield* tickets.getByStepId(attachment.stepId);
-      const workflow = ticket === null ? null : yield* workflows.get(ticket.workflowId);
+      const project = ticket === null ? null : yield* projects.get(ticket.projectId);
       return (
         ticket !== null &&
-        workflow !== null &&
+        project !== null &&
         canViewTicket(
           { id: currentUser.userId, isOrgAdmin: currentUser.role === "admin" },
-          workflow,
+          project,
           ticket,
         )
       );

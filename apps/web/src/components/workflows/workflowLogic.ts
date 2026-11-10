@@ -1,8 +1,4 @@
-import {
-  type StepField,
-  type StepDefinition,
-  WorkflowDefinition,
-} from "@t45/contracts/models/Workflow";
+import { type StepField, type StepDefinition, Workflow } from "@t45/contracts/models/Workflow";
 import * as Schema from "effect/Schema";
 
 import { randomUUID } from "../../lib/utils";
@@ -11,7 +7,7 @@ export type DraftField = typeof StepField.Encoded;
 export type FieldType = DraftField["type"];
 export type DraftStep = typeof StepDefinition.Encoded;
 
-export const cleanSteps = Schema.decodeSync(WorkflowDefinition.fields.steps);
+export const cleanSteps = Schema.decodeSync(Workflow.fields.steps);
 
 export const FIELD_TYPES: Record<FieldType, string> = {
   text: "Text",

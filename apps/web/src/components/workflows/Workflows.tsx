@@ -1,4 +1,4 @@
-import type { WorkflowDefinitionView } from "@t45/contracts/resources/Workflows";
+import type { WorkflowView } from "@t45/contracts/resources/Workflows";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useId, useRef, useState } from "react";
 
@@ -15,68 +15,63 @@ import { ActionRow } from "./ActionRow";
 import { useWorkflowData } from "./useWorkflowData";
 import { WorkflowNavigation } from "./WorkflowNavigation";
 
-const loadDefinitions = () => api("workflows.listDefinitions", undefined);
+const loadWorkflows = () => api("workflows.listWorkflows", undefined);
 
-export function WorkflowDefinitions() {
-  const { detail: definitions, error } = useWorkflowData(loadDefinitions);
+export function WorkflowList() {
+  const { detail: workflows, error } = useWorkflowData(loadWorkflows);
   return (
     <WorkFrame
-      title="Workflow blueprints"
+      title="Workflows"
       actions={
         <>
           <WorkflowNavigation />
-          <Button size="sm" render={<Link to="/settings/workflow-blueprints/new" />}>
-            New blueprint
+          <Button size="sm" render={<Link to="/settings/workflows/new" />}>
+            New workflow
           </Button>
         </>
       }
     >
       <p className="text-sm text-muted-foreground">
-        Blueprints define the process: steps, fields and rules. Create workflows from them to assign
+        Workflows define the process: steps, fields and rules. Create projects from them to assign
         people and run tickets.
       </p>
       {error && <ErrorText text={error} />}
-      {definitions?.length === 0 ? (
+      {workflows?.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No blueprints yet. Create a blueprint to get started.
+          No workflows yet. Create a workflow to get started.
         </p>
       ) : null}
-      <section aria-label="Workflow blueprints" className="flex flex-col gap-3">
-        {definitions?.map((definition) => (
+      <section aria-label="Workflows" className="flex flex-col gap-3">
+        {workflows?.map((workflow) => (
           <div
-            key={definition.id}
+            key={workflow.id}
             className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
           >
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{definition.name}</p>
+              <p className="truncate text-sm font-medium">{workflow.name}</p>
               <p className="text-xs text-muted-foreground">
-                {plural(definition.steps.length, "step", "steps")}
+                {plural(workflow.steps.length, "step", "steps")}
               </p>
             </div>
-            {definition.isArchived ? (
+            {workflow.isArchived ? (
               <Badge variant="secondary">Archived</Badge>
             ) : (
               <Button
                 size="sm"
                 variant="outline"
-                render={
-                  <Link to="/settings/workflows/new" search={{ definitionId: definition.id }} />
-                }
+                render={<Link to="/settings/projects/new" search={{ workflowId: workflow.id }} />}
               >
-                Create workflow
+                Create project
               </Button>
             )}
             <Button
               size="sm"
               variant="ghost"
               render={
-                <Link
-                  to="/settings/workflow-blueprints/$definitionId"
-                  params={{ definitionId: definition.id }}
-                />
+                <Link to="/settings/workflows/$workflowId" params={{ workflowId: workflow.id }} />
               }
             >
-              Open blueprint
+              Open workflow
             </Button>
           </div>
         ))}
@@ -85,7 +80,7 @@ export function WorkflowDefinitions() {
   );
 }
 
-export function NewWorkflowDefinition() {
+export function NewWorkflow() {
   const id = useId();
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -93,12 +88,12 @@ export function NewWorkflowDefinition() {
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
   return (
-    <WorkFrame title="New workflow blueprint">
+    <WorkFrame title="New workflow">
       <p className="text-sm text-muted-foreground">
-        Define the process once. Each workflow using it will have its own people and assignments.
+        Define the process once. Each project using it will have its own people and assignments.
       </p>
       <form
-        aria-label="New workflow blueprint"
+        aria-label="New workflow"
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"
         onSubmit={(event) => {
           event.preventDefault();
@@ -106,11 +101,11 @@ export function NewWorkflowDefinition() {
           inFlight.current = true;
           setBusy(true);
           setError(null);
-          void api("workflows.createDefinition", { name: name.trim() }).then(
-            ({ definitionId }) =>
+          void api("workflows.createWorkflow", { name: name.trim() }).then(
+            ({ workflowId }) =>
               void navigate({
-                to: "/settings/workflow-blueprints/$definitionId/steps",
-                params: { definitionId },
+                to: "/settings/workflows/$workflowId/steps",
+                params: { workflowId },
               }),
             (cause: unknown) => {
               inFlight.current = false;
@@ -121,7 +116,7 @@ export function NewWorkflowDefinition() {
         }}
       >
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-name`}>Blueprint name</Label>
+          <Label htmlFor={`${id}-name`}>Workflow name</Label>
           <Input
             id={`${id}-name`}
             value={name}
@@ -133,7 +128,7 @@ export function NewWorkflowDefinition() {
         {error && <ErrorText text={error} />}
         <div>
           <Button type="submit" disabled={busy || !name.trim()}>
-            Create blueprint
+            Create workflow
           </Button>
         </div>
       </form>
@@ -141,56 +136,50 @@ export function NewWorkflowDefinition() {
   );
 }
 
-export function WorkflowDefinitionEditor({ definitionId }: { readonly definitionId: string }) {
+export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) {
   const id = useId();
   const [name, setName] = useState("");
-  const adopt = useCallback(
-    (loaded: WorkflowDefinitionView) => setName(loaded.definition.name),
-    [],
-  );
+  const adopt = useCallback((loaded: WorkflowView) => setName(loaded.workflow.name), []);
   const { detail, busy, error, run } = useWorkflowData(
-    useCallback(() => api("workflows.getDefinition", { definitionId }), [definitionId]),
+    useCallback(() => api("workflows.getWorkflow", { workflowId }), [workflowId]),
     adopt,
   );
   if (detail === null)
     return (
-      <WorkFrame title="Workflow blueprint">
+      <WorkFrame title="Workflow">
         <p role={error === null ? undefined : "alert"} className="text-sm text-muted-foreground">
           {error ?? "Loading…"}
         </p>
       </WorkFrame>
     );
-  const { definition, canManage } = detail;
+  const { workflow, canManage } = detail;
   return (
     <WorkFrame
-      title={definition.name}
+      title={workflow.name}
       actions={
-        !definition.isArchived ? (
-          <Button
-            size="sm"
-            render={<Link to="/settings/workflows/new" search={{ definitionId }} />}
-          >
-            Create workflow
+        !workflow.isArchived ? (
+          <Button size="sm" render={<Link to="/settings/projects/new" search={{ workflowId }} />}>
+            Create project
           </Button>
         ) : null
       }
     >
       <p className="text-sm text-muted-foreground">
-        This is a shared blueprint. Changes to its steps and fields apply to every workflow using
-        it. People are assigned separately in each workflow.
+        This is a shared workflow. Changes to its steps and fields apply to every project using it.
+        People are assigned separately in each project.
       </p>
       {!canManage ? (
         <p className="text-sm text-muted-foreground">
-          Editing requires admin access to every workflow using this blueprint.
+          Editing requires admin access to every project using this workflow.
         </p>
       ) : null}
       {error && <ErrorText text={error} />}
       <section
-        aria-label="Blueprint"
+        aria-label="Workflow"
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"
       >
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-name`}>Blueprint name</Label>
+          <Label htmlFor={`${id}-name`}>Workflow name</Label>
           <Input
             id={`${id}-name`}
             value={name}
@@ -200,25 +189,18 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
               if (event.key === "Enter") event.currentTarget.blur();
             }}
             onBlur={() => {
-              if (name.trim() && name.trim() !== definition.name)
-                void run(() =>
-                  api("workflows.updateDefinition", { definitionId, name: name.trim() }),
-                );
+              if (name.trim() && name.trim() !== workflow.name)
+                void run(() => api("workflows.updateWorkflow", { workflowId, name: name.trim() }));
             }}
           />
         </div>
         <ActionRow
-          title={plural(definition.steps.length, "step", "steps")}
+          title={plural(workflow.steps.length, "step", "steps")}
           action={
             <Button
               size="sm"
               variant="outline"
-              render={
-                <Link
-                  to="/settings/workflow-blueprints/$definitionId/steps"
-                  params={{ definitionId }}
-                />
-              }
+              render={<Link to="/settings/workflows/$workflowId/steps" params={{ workflowId }} />}
             >
               {canManage ? "Edit steps" : "View steps"}
             </Button>
@@ -226,12 +208,12 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
         />
       </section>
       <section
-        aria-label="Blueprint availability"
+        aria-label="Workflow availability"
         className="rounded-xl border border-border bg-card"
       >
         <ActionRow
-          title={!definition.isArchived ? "Archive blueprint" : "Archived blueprint"}
-          description="Archived blueprints cannot be used to create new workflows. Existing workflows keep running."
+          title={!workflow.isArchived ? "Archive workflow" : "Archived workflow"}
+          description="Archived workflows cannot be used to create new projects. Existing projects keep running."
           action={
             <Button
               size="sm"
@@ -239,14 +221,14 @@ export function WorkflowDefinitionEditor({ definitionId }: { readonly definition
               disabled={busy || !canManage}
               onClick={() =>
                 void run(() =>
-                  api("workflows.updateDefinition", {
-                    definitionId,
-                    isArchived: !definition.isArchived,
+                  api("workflows.updateWorkflow", {
+                    workflowId,
+                    isArchived: !workflow.isArchived,
                   }),
                 )
               }
             >
-              {!definition.isArchived ? "Archive blueprint" : "Restore blueprint"}
+              {!workflow.isArchived ? "Archive workflow" : "Restore workflow"}
             </Button>
           }
         />

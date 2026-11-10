@@ -32,8 +32,8 @@ const SessionId = Session.ID.check(Schema.isMaxLength(512));
 export const ChatSummary = Schema.Struct({
   ...Chat.fields,
   agentName: Schema.NullOr(Schema.String),
-  workflowId: Schema.NullOr(StringId),
-  workflowName: Schema.NullOr(Schema.String),
+  projectId: Schema.NullOr(StringId),
+  projectName: Schema.NullOr(Schema.String),
 });
 export type ChatSummary = typeof ChatSummary.Type;
 
@@ -118,7 +118,7 @@ const ChatErrors = Schema.Union([Refused, NotFound, AccessDenied]);
 export const ChatTarget = Schema.Struct({
   agentId: StringId,
   name: Schema.String,
-  workflowId: Schema.NullOr(StringId),
+  projectId: Schema.NullOr(StringId),
 });
 export type ChatTarget = typeof ChatTarget.Type;
 
@@ -181,7 +181,7 @@ export const Chats = RpcGroup.make(
     payload: {
       chatId: ChatId,
       agentId: Schema.optional(StringId),
-      workflowId: Schema.optional(StringId),
+      projectId: Schema.optional(StringId),
       inputId: InputId,
       text: Schema.String.check(Schema.isMaxLength(MESSAGE_MAX_INPUT_CHARS)),
       attachments: InputPayload.fields.attachments.check(

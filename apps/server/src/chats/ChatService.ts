@@ -2,7 +2,7 @@ import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import {
   canChatWithMembers,
-  WORKFLOW_INSTANCE_MCP_NAME,
+  PROJECT_TOOLS_MCP_NAME,
   type Agent,
 } from "@t45/contracts/models/Agent";
 import { limitRefusal } from "@t45/contracts/models/Attachment";
@@ -39,8 +39,8 @@ import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { makeAccess as makeWorkflowAccess } from "../workflows/WorkflowAssistant.ts";
-import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
+import { makeAccess as makeProjectAccess } from "../workflows/ProjectAssistant.ts";
+import { ProjectRepository } from "../workflows/ProjectRepository.ts";
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
 import { RunnerService } from "../runner/RunnerService.ts";
@@ -126,9 +126,9 @@ const readMessage = (
   }).pipe(Effect.orDie);
 
 const encodeChatMessage = Schema.encodeSync(Schema.fromJsonString(ChatMessage));
-const hasWorkflowTools = (agent: Agent) =>
-  agent.mcpServers[WORKFLOW_INSTANCE_MCP_NAME] !== undefined &&
-  agent.mcpServers[WORKFLOW_INSTANCE_MCP_NAME]?.disabled !== true;
+const hasProjectTools = (agent: Agent) =>
+  agent.mcpServers[PROJECT_TOOLS_MCP_NAME] !== undefined &&
+  agent.mcpServers[PROJECT_TOOLS_MCP_NAME]?.disabled !== true;
 
 const readBytes = (message: ChatMessage) =>
   new TextEncoder().encode(encodeChatMessage(message)).byteLength;
@@ -142,8 +142,8 @@ const make = Effect.gen(function* () {
   const changes = yield* ChatEvents.ChatEvents;
   const runner = yield* RunnerService;
   const agents = yield* AgentRepository.AgentRepository;
-  const workflows = yield* WorkflowRepository;
-  const workflowAccess = yield* makeWorkflowAccess;
+  const projects = yield* ProjectRepository;
+  const projectAccess = yield* makeProjectAccess;
   const attachments = yield* AttachmentRepository.AttachmentRepository;
   const origins = repository.origins;
   const publish = (chatId: ChatId, kind: "chat" | "sessions" | "inputs" | "posted" | "deleted") =>
@@ -176,10 +176,10 @@ const make = Effect.gen(function* () {
       )
         return yield* refuse("agent_unavailable");
       if (start.origin.kind === "conversation") {
-        if (start.origin.workflowId !== null) {
-          yield* workflowAccess.load(start.origin.ownerUserId, start.origin.workflowId);
-          if (!hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
-        } else if (hasWorkflowTools(agent)) return yield* refuse("agent_unavailable");
+        if (start.origin.projectId !== null) {
+          yield* projectAccess.load(start.origin.ownerUserId, start.origin.projectId);
+          if (!hasProjectTools(agent)) return yield* refuse("agent_unavailable");
+        } else if (hasProjectTools(agent)) return yield* refuse("agent_unavailable");
       }
       yield* repository.insert({ id: post.chatId, ...start, at });
       yield* origins.insert(start.origin);
@@ -249,13 +249,12 @@ const make = Effect.gen(function* () {
   const summaryOf = (chat: Chat, agentName: string | null) =>
     Effect.gen(function* () {
       const origin = yield* origins.get(chat.id);
-      const workflowId = origin?.kind === "conversation" ? origin.workflowId : null;
+      const projectId = origin?.kind === "conversation" ? origin.projectId : null;
       return {
         ...chat,
         agentName,
-        workflowId,
-        workflowName:
-          workflowId === null ? null : ((yield* workflows.get(workflowId))?.name ?? null),
+        projectId,
+        projectName: projectId === null ? null : ((yield* projects.get(projectId))?.name ?? null),
       };
     });
   const openChatOf = (chat: Chat) =>
@@ -365,20 +364,20 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const available = (yield* agents.list).filter(canChatWithMembers);
         const plain = available
-          .filter((agent) => !hasWorkflowTools(agent))
+          .filter((agent) => !hasProjectTools(agent))
           .map((agent) => ({
             agentId: agent.id,
             name: agent.name,
-            workflowId: null,
+            projectId: null,
           }));
-        const assistants = available.filter(hasWorkflowTools);
+        const assistants = available.filter(hasProjectTools);
         if (assistants.length === 0) return plain;
         const actor = { id: member.userId, isOrgAdmin: member.role === "admin" };
-        const bound = (yield* workflowAccess.list(actor)).flatMap((workflow) =>
+        const bound = (yield* projectAccess.list(actor)).flatMap((project) =>
           assistants.map((agent) => ({
             agentId: agent.id,
-            name: assistants.length === 1 ? workflow.name : `${workflow.name} · ${agent.name}`,
-            workflowId: workflow.id,
+            name: assistants.length === 1 ? project.name : `${project.name} · ${agent.name}`,
+            projectId: project.id,
           })),
         );
         return [...plain, ...bound];
@@ -504,12 +503,12 @@ const make = Effect.gen(function* () {
       const origin = yield* origins.get(input.chatId);
       if (origin !== null) {
         const existing = yield* memberChat(member, input.chatId);
-        if (origin.kind === "conversation" && origin.workflowId !== null)
-          yield* workflowAccess.load(member.userId, origin.workflowId);
+        if (origin.kind === "conversation" && origin.projectId !== null)
+          yield* projectAccess.load(member.userId, origin.projectId);
         if (
           (input.agentId !== undefined && existing.agentId !== input.agentId) ||
-          (input.workflowId !== undefined &&
-            (origin.kind !== "conversation" || origin.workflowId !== input.workflowId))
+          (input.projectId !== undefined &&
+            (origin.kind !== "conversation" || origin.projectId !== input.projectId))
         )
           return yield* refuse("id_taken");
       }
@@ -531,7 +530,7 @@ const make = Effect.gen(function* () {
                   kind: "conversation" as const,
                   chatId: input.chatId,
                   ownerUserId: member.userId,
-                  workflowId: input.workflowId ?? null,
+                  projectId: input.projectId ?? null,
                 },
               },
             }
@@ -561,8 +560,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const chat = yield* memberChat(member, input.chatId);
         const origin = yield* origins.get(chat.id);
-        if (origin?.kind === "conversation" && origin.workflowId !== null)
-          yield* workflowAccess.load(member.userId, origin.workflowId);
+        if (origin?.kind === "conversation" && origin.projectId !== null)
+          yield* projectAccess.load(member.userId, origin.projectId);
         const asked = (yield* repository.questions(chat.id)).find(
           (question) => question.sessionId === input.sessionId && question.form.id === input.formId,
         );

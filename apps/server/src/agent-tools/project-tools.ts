@@ -1,20 +1,20 @@
 import { workflowTool, serve } from "./mcp-stdio.ts";
 
-const workflow = { workflowId: process.env.T45_WORKFLOW_ID! };
+const project = { projectId: process.env.T45_PROJECT_ID! };
 serve({
-  name: "workflow-instance-tools",
+  name: "project-tools",
   tools: [
     workflowTool(
       "get_workflow",
-      "workflows.getWorkflow",
-      "Read this workflow and its current blueprint, including step and field IDs.",
-      workflow,
+      "workflows.getProjectWorkflow",
+      "Read this project and its current workflow, including step and field IDs.",
+      project,
     ),
     workflowTool(
       "list_tickets",
       "workflows.listTickets",
       "List up to 100 visible tickets, newest first; optionally search titles.",
-      workflow,
+      project,
     ),
     workflowTool(
       "get_ticket",
@@ -25,7 +25,7 @@ serve({
       "create_ticket",
       "workflows.startTicket",
       "Start a ticket using the member's permissions.",
-      workflow,
+      project,
     ),
     workflowTool(
       "set_field",
@@ -33,5 +33,5 @@ serve({
       "Set a field on an actionable step using the member's permissions.",
     ),
   ],
-  failure: "The workflow operation could not complete.",
+  failure: "The project operation could not complete.",
 });

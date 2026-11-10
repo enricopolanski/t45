@@ -1,5 +1,5 @@
 import * as AutomationRepository from "../automations/AutomationRepository.ts";
-import * as WorkflowDefinitionRepository from "../workflows/WorkflowDefinitionRepository.ts";
+import * as WorkflowRepository from "../workflows/WorkflowRepository.ts";
 import * as NotificationRepository from "../workflows/NotificationRepository.ts";
 import * as UserRepository from "../org/UserRepository.ts";
 import { AutomationId } from "@t45/contracts/models/Automation";
@@ -28,7 +28,7 @@ import { inputMessageId } from "./ChatIds.ts";
 import * as ChatRepository from "./ChatRepository.ts";
 import { ChatService, type Member } from "./ChatService.ts";
 import * as TicketRepository from "../workflows/TicketRepository.ts";
-import * as WorkflowRepository from "../workflows/WorkflowRepository.ts";
+import * as ProjectRepository from "../workflows/ProjectRepository.ts";
 
 import * as WorkflowService from "../workflows/WorkflowService.ts";
 
@@ -40,8 +40,8 @@ const layerPersistence = Layer.mergeAll(
   ChatRepository.layer,
   UserRepository.layer,
   TicketRepository.layer,
+  ProjectRepository.layer,
   WorkflowRepository.layer,
-  WorkflowDefinitionRepository.layer,
   NotificationRepository.layer,
   AttachmentRepository.layer,
   AgentRepository.layer,
@@ -113,7 +113,7 @@ export const seedChat = (chat: {
         : yield* (yield* TicketRepository.TicketRepository).getByStepId(chat.stepId);
     yield* origins.insert(
       chat.ownerUserId !== null
-        ? { kind: "conversation", chatId: chat.id, ownerUserId: chat.ownerUserId, workflowId: null }
+        ? { kind: "conversation", chatId: chat.id, ownerUserId: chat.ownerUserId, projectId: null }
         : {
             kind: "automation",
             chatId: chat.id,

@@ -53,7 +53,7 @@ const fieldIdsAreDistinct = (fields: ReadonlyArray<StepField>): boolean =>
 
 export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition")({
   id: StringId.annotate({
-    description: "Identifier unique across all steps and sub-steps in the blueprint.",
+    description: "Identifier unique across all steps and sub-steps in the workflow.",
   }),
   name: TrimmedNonEmptyString,
   instructions: Schema.String,
@@ -77,7 +77,7 @@ const stepNodes = (
 export const findStep = (steps: ReadonlyArray<StepDefinition>, id: string) =>
   stepNodes(steps).find((node) => node.step.id === id) ?? null;
 
-/** A workflow's name in URLs: lowercase letters and digits, joined by single hyphens. */
+/** A project's name in URLs: lowercase letters and digits, joined by single hyphens. */
 export const Slug = TrimmedNonEmptyString.check(
   Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   Schema.isMaxLength(64),
@@ -94,10 +94,8 @@ export const toSlug = (value: string) => {
   return slug || null;
 };
 
-/**
- * The blueprint of a process, can be used by different teams, each with their own settings and board.
- */
-export class WorkflowDefinition extends Schema.Opaque<WorkflowDefinition>()(
+/** A reusable process. Teams use it through projects, each with its own settings and board. */
+export class Workflow extends Schema.Opaque<Workflow>()(
   Schema.Struct({
     id: StringId,
     name: TrimmedNonEmptyString,
@@ -110,13 +108,11 @@ export class WorkflowDefinition extends Schema.Opaque<WorkflowDefinition>()(
   }),
 ) {}
 
-/**
- * An actual instance. It references an original WorkflowDefinition and provides additional data.
- */
-export class Workflow extends Schema.Opaque<Workflow>()(
+/** A team's use of a workflow, with its own people, settings and board. */
+export class Project extends Schema.Opaque<Project>()(
   Schema.Struct({
     id: StringId,
-    definitionId: StringId,
+    workflowId: StringId,
     name: TrimmedNonEmptyString,
     responsible: StringId,
     adminUserIds: Schema.Array(StringId),
@@ -183,11 +179,11 @@ const hasValidStepReferences = (steps: ReadonlyArray<Step>) => {
   });
 };
 
-/** A run of a workflow. Nobody owns a ticket: its steps are owned. */
+/** A run of a project's workflow. Nobody owns a ticket: its steps are owned. */
 export class Ticket extends Schema.Opaque<Ticket>()(
   Schema.Struct({
     id: StringId,
-    workflowId: StringId,
+    projectId: StringId,
     title: TrimmedNonEmptyString,
     description: Schema.String,
     dueDate: Schema.NullOr(Schema.DateTimeUtcFromString),
@@ -216,16 +212,17 @@ export class Comment extends Schema.Opaque<Comment>()(
 ) {}
 
 const REFUSALS = {
-  not_workflow_admin: "Only the workflow's admins can do that.",
-  slug_taken: "Another workflow already has that slug.",
+  not_project_admin: "Only the project's admins can do that.",
+  slug_taken: "Another project already has that slug.",
   invalid_people_ref: "That person or agent can no longer be given work.",
   no_steps: "The workflow has no steps yet.",
   tickets_cannot_move:
     "Some open tickets are in, or have passed, a step you removed or moved. Restore it, or finish or cancel those tickets first.",
-  archive_instead_of_delete: "A workflow with tickets can't be deleted. Archive it instead.",
-  last_admin: "A workflow needs at least one active admin.",
-  not_overseer: "Only the workflow's responsible and admins can do that.",
-  cannot_start_ticket: "You can't start tickets in this workflow.",
+  archive_instead_of_delete: "A project with tickets can't be deleted. Archive it instead.",
+  last_admin: "A project needs at least one active admin.",
+  not_overseer: "Only the project's responsible and admins can do that.",
+  cannot_start_ticket: "You can't start tickets in this project.",
+  project_archived: "This project is archived.",
   workflow_archived: "This workflow is archived.",
   ticket_not_open: "This ticket is no longer open.",
   step_not_actionable: "This step can't do that right now.",
@@ -341,19 +338,19 @@ export interface WorkflowActor {
   readonly isOrgAdmin: boolean;
 }
 
-export const isAdmin = (actor: WorkflowActor, workflow: Workflow) =>
-  actor.isOrgAdmin || workflow.adminUserIds.includes(actor.id);
+export const isAdmin = (actor: WorkflowActor, project: Project) =>
+  actor.isOrgAdmin || project.adminUserIds.includes(actor.id);
 
-export const oversees = (actor: WorkflowActor, workflow: Workflow) =>
-  workflow.responsible === actor.id || isAdmin(actor, workflow);
+export const oversees = (actor: WorkflowActor, project: Project) =>
+  project.responsible === actor.id || isAdmin(actor, project);
 
-export const isInvolved = (actor: WorkflowActor, workflow: Workflow, ticket: Ticket) =>
-  ticket.steps.some((step) => step.assignee === actor.id) || oversees(actor, workflow);
+export const isInvolved = (actor: WorkflowActor, project: Project, ticket: Ticket) =>
+  ticket.steps.some((step) => step.assignee === actor.id) || oversees(actor, project);
 
-export const canViewTicket = (actor: WorkflowActor, workflow: Workflow, ticket: Ticket) =>
-  workflow.isPublic || isInvolved(actor, workflow, ticket);
+export const canViewTicket = (actor: WorkflowActor, project: Project, ticket: Ticket) =>
+  project.isPublic || isInvolved(actor, project, ticket);
 
-/** A workflow must retain an active admin when its administrators change. */
+/** A project must retain an active admin when its administrators change. */
 export const lastAdminRefusal = (activeAdminIds: ReadonlyArray<string>) =>
   activeAdminIds.length === 0 ? ("last_admin" as const) : null;
 
@@ -433,24 +430,20 @@ export const completeTicketStep = (
   };
 };
 
-export const ticketStartRefusal = (
-  actor: WorkflowActor,
-  workflow: Workflow,
-  definition: WorkflowDefinition,
-) => {
-  const first = definition.steps[0];
+export const ticketStartRefusal = (actor: WorkflowActor, project: Project, workflow: Workflow) => {
+  const first = workflow.steps[0];
   if (first === undefined) return "no_steps";
-  if (workflow.isArchived) return "workflow_archived";
-  return workflow.defaultAssignments[first.id]?.assignee === actor.id || oversees(actor, workflow)
+  if (project.isArchived) return "project_archived";
+  return project.defaultAssignments[first.id]?.assignee === actor.id || oversees(actor, project)
     ? null
     : "cannot_start_ticket";
 };
 
-export const definitionChangeRefusal = (ticket: Ticket, steps: ReadonlyArray<StepDefinition>) =>
+export const workflowChangeRefusal = (ticket: Ticket, steps: ReadonlyArray<StepDefinition>) =>
   ticket.steps.every((step) => fits(steps, ticket, step)) ? null : ("tickets_cannot_move" as const);
 
-export const canUpdateDefinition = (actor: WorkflowActor, instances: ReadonlyArray<Workflow>) =>
-  instances.every((workflow) => isAdmin(actor, workflow));
+export const canUpdateWorkflow = (actor: WorkflowActor, projects: ReadonlyArray<Project>) =>
+  projects.every((project) => isAdmin(actor, project));
 
 export const fieldPathSurvives = (definition: StepDefinition | null, path: string) =>
   resolveFieldPath(definition?.fields ?? [], path) !== null;

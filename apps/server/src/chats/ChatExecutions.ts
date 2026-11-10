@@ -1,7 +1,7 @@
 import {
   STEP_TOOLS_MCP_NAME,
   WORKFLOW_DRAFTING_MCP_NAME,
-  WORKFLOW_INSTANCE_MCP_NAME,
+  PROJECT_TOOLS_MCP_NAME,
 } from "@t45/contracts/models/Agent";
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import { type Chat, type ChatId, type Input, titleOf } from "@t45/contracts/models/Chat";
@@ -152,7 +152,7 @@ export const make = Effect.gen(function* () {
           mcpServers: Object.fromEntries(
             Object.entries(agent.mcpServers).map(([name, server]) => [
               name,
-              (name === STEP_TOOLS_MCP_NAME || name === WORKFLOW_INSTANCE_MCP_NAME) &&
+              (name === STEP_TOOLS_MCP_NAME || name === PROJECT_TOOLS_MCP_NAME) &&
               server.type === "local"
                 ? {
                     ...server,
@@ -165,8 +165,8 @@ export const make = Effect.gen(function* () {
                         origin?.kind === "automation" && origin.trigger.type === "step"
                           ? origin.trigger.stepId
                           : "",
-                      T45_WORKFLOW_ID:
-                        origin?.kind === "conversation" ? (origin.workflowId ?? "") : "",
+                      T45_PROJECT_ID:
+                        origin?.kind === "conversation" ? (origin.projectId ?? "") : "",
                     },
                   }
                 : server,
@@ -174,11 +174,9 @@ export const make = Effect.gen(function* () {
           ),
           tools: Object.entries(agent.mcpServers).some(
             ([name, server]) =>
-              [
-                STEP_TOOLS_MCP_NAME,
-                WORKFLOW_DRAFTING_MCP_NAME,
-                WORKFLOW_INSTANCE_MCP_NAME,
-              ].includes(name) && server.disabled !== true,
+              [STEP_TOOLS_MCP_NAME, WORKFLOW_DRAFTING_MCP_NAME, PROJECT_TOOLS_MCP_NAME].includes(
+                name,
+              ) && server.disabled !== true,
           )
             ? toolFiles
             : {},

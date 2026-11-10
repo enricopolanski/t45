@@ -40,10 +40,10 @@ export function NotificationBell() {
       void navigate({ to: "/my-work/$stepId", params: { stepId: notification.stepId } });
       return;
     }
-    // A notice about a whole workflow opens its editor, where it gets fixed.
+    // A notice about a whole project opens its editor, where it gets fixed.
     void navigate({
-      to: "/settings/workflows/$workflowId/edit",
-      params: { workflowId: notification.workflowId },
+      to: "/settings/projects/$projectId/edit",
+      params: { projectId: notification.projectId },
     });
   };
 
@@ -92,7 +92,7 @@ export function NotificationBell() {
                   {NOTIFICATION_LABELS[notification.kind]}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {[notification.ticketTitle, notification.stepName, notification.workflowName]
+                  {[notification.ticketTitle, notification.stepName, notification.projectName]
                     .filter((part) => part !== null)
                     .join(" · ")}
                 </span>

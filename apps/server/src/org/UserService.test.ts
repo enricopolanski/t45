@@ -1149,7 +1149,7 @@ describe("UserService", () => {
         let refusing = true;
         const client = yield* makeClient(admin, (userId) =>
           refusing
-            ? Effect.fail(new Refused({ reason: "last_workflow_admin" }))
+            ? Effect.fail(new Refused({ reason: "last_project_admin" }))
             : Effect.sync(() => {
                 handedOn.push(userId);
                 return undefined;
@@ -1157,7 +1157,7 @@ describe("UserService", () => {
         );
 
         const refused = yield* Effect.flip(client["users.deactivate"]({ userId: "user-bob" }));
-        assert.equal(refused._tag === "UserRefused" && refused.reason, "last_workflow_admin");
+        assert.equal(refused._tag === "UserRefused" && refused.reason, "last_project_admin");
         assert.equal((yield* sessions.authenticate(bobs.token)).state, "active");
 
         refusing = false;

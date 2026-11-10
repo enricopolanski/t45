@@ -1,6 +1,6 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { ContactIcon, InboxIcon, KanbanSquareIcon, MessagesSquareIcon } from "lucide-react";
-import type { WorkflowInstanceListEntryView } from "@t45/contracts/resources/Workflows";
+import type { ProjectListEntryView } from "@t45/contracts/resources/Workflows";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { api } from "../../rpc/api";
@@ -23,7 +23,7 @@ export type NavLink = {
     | "/my-work"
     | "/chats"
     | "/people"
-    | "/settings/workflows"
+    | "/settings/projects"
     | "/settings/agents"
     | "/settings/automations"
     | "/settings/organization";
@@ -88,11 +88,11 @@ function BoardsItem({
         <SidebarMenuButton
           onClick={onNavigate}
           render={
-            <Link to="/boards/$slug" params={{ slug: only.workflow.slug ?? only.workflow.id }} />
+            <Link to="/boards/$slug" params={{ slug: only.project.slug ?? only.project.id }} />
           }
         >
           {link.icon}
-          <span>{only.workflow.name}</span>
+          <span>{only.project.name}</span>
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
@@ -109,17 +109,17 @@ function BoardsItem({
       {boards.length > 0 ? (
         <SidebarMenuSub>
           {boards.map((board) => (
-            <SidebarMenuItem key={board.workflow.id}>
+            <SidebarMenuItem key={board.project.id}>
               <SidebarMenuButton
                 onClick={onNavigate}
                 render={
                   <Link
                     to="/boards/$slug"
-                    params={{ slug: board.workflow.slug ?? board.workflow.id }}
+                    params={{ slug: board.project.slug ?? board.project.id }}
                   />
                 }
               >
-                <span>{board.workflow.name}</span>
+                <span>{board.project.name}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}
@@ -130,26 +130,24 @@ function BoardsItem({
 }
 
 /**
- * The boards the viewer can open: every unarchived workflow with steps the server lists for them.
- * Re-read on the workflow pages, where workflows are created, given steps, and archived.
+ * The boards the viewer can open: every unarchived project with steps the server lists for them.
+ * Re-read on the project pages, where projects are created, given steps, and archived.
  */
 function useOpenBoards() {
-  const [boards, setBoards] = useState<ReadonlyArray<WorkflowInstanceListEntryView>>([]);
-  const workflowsPath = useLocation({
+  const [boards, setBoards] = useState<ReadonlyArray<ProjectListEntryView>>([]);
+  const projectsPath = useLocation({
     select: (location) =>
-      location.pathname.startsWith("/settings/workflows") || location.pathname.startsWith("/boards")
+      location.pathname.startsWith("/settings/projects") || location.pathname.startsWith("/boards")
         ? location.pathname
         : null,
   });
   useEffect(() => {
     let current = true;
-    void api("workflows.listInstances", undefined).then(
-      (workflows) => {
+    void api("workflows.listProjects", undefined).then(
+      (projects) => {
         if (!current) return;
         setBoards(
-          workflows.filter(
-            (entry) => !entry.workflow.isArchived && entry.definition.steps.length > 0,
-          ),
+          projects.filter((entry) => !entry.project.isArchived && entry.workflow.steps.length > 0),
         );
       },
       () => undefined,
@@ -157,8 +155,8 @@ function useOpenBoards() {
     return () => {
       current = false;
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-read on each workflow page.
-  }, [workflowsPath]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-read on each project page.
+  }, [projectsPath]);
   return boards;
 }
 

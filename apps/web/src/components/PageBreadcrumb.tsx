@@ -6,16 +6,16 @@ import { cn } from "../lib/utils";
 /** The app's sections whose pages have pages below them, by path prefix. */
 const SECTIONS = [
   { label: "Agents", to: "/settings/agents" },
+  { label: "Projects", to: "/settings/projects" },
   { label: "Workflows", to: "/settings/workflows" },
-  { label: "Blueprints", to: "/settings/workflow-blueprints" },
   { label: "My work", to: "/my-work" },
   { label: "Boards", to: "/boards" },
 ] as const;
 
 /**
  * The page's location in the app, ending with its title as the page heading. `parent` is a page
- * between the section and this one, such as the blueprint above its steps. Chat supplies an
- * editable title. "Settings" isn't a link: members open workflows without access to it.
+ * between the section and this one, such as the workflow above its steps. Chat supplies an
+ * editable title. "Settings" isn't a link: members open projects without access to it.
  */
 export function PageBreadcrumb({
   title,

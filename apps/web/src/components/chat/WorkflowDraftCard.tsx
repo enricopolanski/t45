@@ -9,8 +9,8 @@ import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { plural } from "../work/workLogic";
 
-/** Which drafts this browser saved as definitions, so a reload opens the same blueprint. */
-const createdKey = (itemId: string) => `t45.workflowDraft.definition.${itemId}`;
+/** Which drafts this browser saved as workflows, so a reload opens the same workflow. */
+const createdKey = (itemId: string) => `t45.workflowDraft.workflow.${itemId}`;
 const readCreated = (itemId: string): string | null => {
   try {
     return window.localStorage.getItem(createdKey(itemId));
@@ -18,9 +18,9 @@ const readCreated = (itemId: string): string | null => {
     return null;
   }
 };
-const rememberCreated = (itemId: string, definitionId: string) => {
+const rememberCreated = (itemId: string, workflowId: string) => {
   try {
-    window.localStorage.setItem(createdKey(itemId), definitionId);
+    window.localStorage.setItem(createdKey(itemId), workflowId);
   } catch {}
 };
 
@@ -44,26 +44,26 @@ function DraftSteps({ steps }: { readonly steps: WorkflowDraft["steps"] }) {
 }
 
 /**
- * Saves an agent's draft as a reusable definition. Configuring a workflow from it is a separate
- * action. `itemId` names the tool call, so a reload opens the same definition.
+ * Saves an agent's draft as a reusable workflow. Configuring a project from it is a separate
+ * action. `itemId` names the tool call, so a reload opens the same workflow.
  */
 export function WorkflowDraftCard(props: {
   readonly itemId: string;
   readonly draft: WorkflowDraft;
 }) {
   const { draft, itemId } = props;
-  const [definitionId, setDefinitionId] = useState(() => readCreated(itemId));
+  const [workflowId, setWorkflowId] = useState(() => readCreated(itemId));
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const create = () => {
     setCreating(true);
     setError(null);
-    void api("workflows.createDefinition", draft)
+    void api("workflows.createWorkflow", draft)
       .then(
         (created) => {
-          rememberCreated(itemId, created.definitionId);
-          setDefinitionId(created.definitionId);
+          rememberCreated(itemId, created.workflowId);
+          setWorkflowId(created.workflowId);
         },
         (cause: unknown) => setError(describeFailure(cause)),
       )
@@ -72,13 +72,13 @@ export function WorkflowDraftCard(props: {
 
   return (
     <section
-      aria-label={`Workflow blueprint draft ${draft.name}`}
+      aria-label={`Workflow draft ${draft.name}`}
       className="flex min-w-0 flex-col gap-3 rounded-xl border border-border/60 bg-card p-4"
     >
       <div className="flex min-w-0 items-center gap-2">
         <WorkflowIcon className="size-4 shrink-0 text-icon-muted" aria-hidden />
         <div className="flex min-w-0 flex-col">
-          <span className="text-xs text-muted-foreground">Workflow blueprint draft</span>
+          <span className="text-xs text-muted-foreground">Workflow draft</span>
           <span className="truncate text-sm font-medium text-foreground">{draft.name}</span>
         </div>
       </div>
@@ -86,23 +86,21 @@ export function WorkflowDraftCard(props: {
       {error && <ErrorText text={error} />}
       <div className="flex min-w-0 items-center justify-between gap-2">
         <p className="min-w-0 text-xs text-muted-foreground">
-          {definitionId === null
-            ? "Save this blueprint, then create a workflow to assign people."
-            : "Blueprint saved. Create a workflow from its page."}
+          {workflowId === null
+            ? "Save this workflow, then create a project to assign people."
+            : "Workflow saved. Create a project from its page."}
         </p>
-        {definitionId === null ? (
+        {workflowId === null ? (
           <Button size="sm" disabled={creating} onClick={create}>
-            Save blueprint
+            Save workflow
           </Button>
         ) : (
           <Button
             size="sm"
             variant="outline"
-            render={
-              <Link to="/settings/workflow-blueprints/$definitionId" params={{ definitionId }} />
-            }
+            render={<Link to="/settings/workflows/$workflowId" params={{ workflowId }} />}
           >
-            Open blueprint
+            Open workflow
           </Button>
         )}
       </div>

@@ -13,7 +13,7 @@ export const SETTINGS_GROUPS: ReadonlyArray<{
   {
     label: "Work",
     links: [
-      { to: "/settings/workflows", label: "Workflows", icon: <WorkflowIcon /> },
+      { to: "/settings/projects", label: "Projects", icon: <WorkflowIcon /> },
       { to: "/settings/automations", label: "Automations", icon: <CalendarClockIcon /> },
     ],
   },

@@ -2,7 +2,7 @@ import {
   Comment,
   Ticket,
   oversees,
-  type Workflow,
+  type Project,
   type WorkflowActor,
 } from "@t45/contracts/models/Workflow";
 import * as Context from "effect/Context";
@@ -23,7 +23,7 @@ const encodeRow = Schema.encodeEffect(Row);
 const decodeComments = Schema.decodeUnknownEffect(Schema.Array(Comment));
 const encodeComment = Schema.encodeEffect(Comment);
 
-const COLUMNS = `t.id, t.workflow_id AS "workflowId", t.title, t.description, t.due_date AS "dueDate",
+const COLUMNS = `t.id, t.project_id AS "projectId", t.title, t.description, t.due_date AS "dueDate",
   t.status, t.steps, t.created_at AS "createdAt"`;
 
 const IS_OPEN = `json_extract(t.status, '$.type') = 'open'`;
@@ -31,7 +31,7 @@ const IS_OPEN = `json_extract(t.status, '$.type') = 'open'`;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const watchers = new Set<{
-    readonly ticket: Pick<Ticket, "id" | "workflowId">;
+    readonly ticket: Pick<Ticket, "id" | "projectId">;
     readonly queue: Queue.Queue<void>;
   }>();
   // Each matching view needs at most one pending reread, regardless of the number of writes.
@@ -39,7 +39,7 @@ const make = Effect.gen(function* () {
     sql.afterCommit(
       Effect.sync(() => {
         for (const { ticket, queue } of watchers) {
-          if (id === undefined || id === ticket.id || id === ticket.workflowId)
+          if (id === undefined || id === ticket.id || id === ticket.projectId)
             Queue.offerUnsafe(queue, undefined);
         }
       }),
@@ -52,7 +52,7 @@ const make = Effect.gen(function* () {
 
   return {
     publishChange,
-    watch: <A, E, R>(ticket: Pick<Ticket, "id" | "workflowId">, read: Effect.Effect<A, E, R>) =>
+    watch: <A, E, R>(ticket: Pick<Ticket, "id" | "projectId">, read: Effect.Effect<A, E, R>) =>
       Stream.unwrap(
         Effect.acquireRelease(
           Queue.dropping<void>(1).pipe(
@@ -83,10 +83,10 @@ const make = Effect.gen(function* () {
       read(`EXISTS (SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.id') = ?)`, [
         stepId,
       ]).pipe(first),
-    listForWorkflow: (workflow: Workflow, actor: WorkflowActor, query: string) => {
-      const visible = sql`t.workflow_id = ${workflow.id}
+    listForProject: (project: Project, actor: WorkflowActor, query: string) => {
+      const visible = sql`t.project_id = ${project.id}
         AND instr(lower(t.title), lower(${query.trim()})) > 0
-        AND (${workflow.isPublic || oversees(actor, workflow)} OR EXISTS (
+        AND (${project.isPublic || oversees(actor, project)} OR EXISTS (
           SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.assignee') = ${actor.id}))`;
       return Effect.gen(function* () {
         const rows = yield* sql`SELECT ${sql.literal(COLUMNS)} FROM tickets t WHERE ${visible}
@@ -97,22 +97,22 @@ const make = Effect.gen(function* () {
         return { tickets: yield* decodeRows(rows), total: count!.total };
       }).pipe(Effect.orDie);
     },
-    hasTicketsInvolving: (workflowId: string, userId: string) =>
-      sql`SELECT 1 FROM tickets t WHERE t.workflow_id = ${workflowId} AND EXISTS (
+    hasTicketsInvolving: (projectId: string, userId: string) =>
+      sql`SELECT 1 FROM tickets t WHERE t.project_id = ${projectId} AND EXISTS (
         SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.assignee') = ${userId})
         LIMIT 1`.pipe(
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
-    workflowIdsInvolving: (userId: string) =>
-      sql<{ readonly id: string }>`SELECT DISTINCT t.workflow_id AS id FROM tickets t
+    projectIdsInvolving: (userId: string) =>
+      sql<{ readonly id: string }>`SELECT DISTINCT t.project_id AS id FROM tickets t
         WHERE EXISTS (SELECT 1 FROM json_each(t.steps) s
           WHERE json_extract(s.value, '$.assignee') = ${userId})`.pipe(
         Effect.map((rows) => rows.map((row) => row.id)),
         Effect.orDie,
       ),
-    listOpen: (workflowId: string) =>
-      read(`t.workflow_id = ? AND ${IS_OPEN} ORDER BY t.created_at, t.id`, [workflowId]),
+    listOpen: (projectId: string) =>
+      read(`t.project_id = ? AND ${IS_OPEN} ORDER BY t.created_at, t.id`, [projectId]),
     listOpenInvolving: (id: string) =>
       read(
         `${IS_OPEN} AND EXISTS (SELECT 1 FROM json_each(t.steps) s
@@ -120,17 +120,17 @@ const make = Effect.gen(function* () {
           ORDER BY t.created_at, t.id`,
         [id],
       ),
-    hasTickets: (workflowId: string) =>
-      sql`SELECT 1 FROM tickets WHERE workflow_id = ${workflowId} LIMIT 1`.pipe(
+    hasTickets: (projectId: string) =>
+      sql`SELECT 1 FROM tickets WHERE project_id = ${projectId} LIMIT 1`.pipe(
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
     insert: (ticket: Ticket) =>
       Effect.gen(function* () {
         const row = yield* encodeRow(ticket);
-        yield* sql`INSERT INTO tickets (id, workflow_id, title, description, due_date, status,
+        yield* sql`INSERT INTO tickets (id, project_id, title, description, due_date, status,
               steps, created_at)
-            VALUES (${row.id}, ${row.workflowId}, ${row.title}, ${row.description},
+            VALUES (${row.id}, ${row.projectId}, ${row.title}, ${row.description},
               ${row.dueDate}, ${row.status}, ${row.steps}, ${row.createdAt})`;
         yield* publishChange(ticket.id);
       }).pipe(Effect.orDie),

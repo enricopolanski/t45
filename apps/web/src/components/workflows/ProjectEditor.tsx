@@ -1,5 +1,5 @@
 import { toSlug } from "@t45/contracts/models/Workflow";
-import type { WorkflowInstanceView } from "@t45/contracts/resources/Workflows";
+import type { ProjectView } from "@t45/contracts/resources/Workflows";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useId } from "react";
 
@@ -12,26 +12,26 @@ import { WorkFrame } from "../work/WorkFrame";
 import { plural } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
 import { useWorkflowData } from "./useWorkflowData";
-import { WorkflowDangerZone, WorkflowPeople, WorkflowStepPeople } from "./WorkflowPeople";
+import { ProjectDangerZone, ProjectPeople, ProjectStepPeople } from "./ProjectPeople";
 
 /**
- * A workflow as its admins shape it, in cards: its name first, a link to the step editor, its
+ * A project as its admins shape it, in cards: its name first, a link to the step editor, its
  * people, and archiving or deleting it last. Everything here applies at once; steps are saved
  * on their own page.
  */
-export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) {
+export function ProjectEditor({ projectId }: { readonly projectId: string }) {
   const id = useId();
   const { detail, busy, error, run } = useWorkflowData(
     useCallback(
-      (current: WorkflowInstanceView | null) =>
-        api("workflows.getInstance", { idOrSlug: current?.workflow.id ?? workflowId }),
-      [workflowId],
+      (current: ProjectView | null) =>
+        api("workflows.getProject", { idOrSlug: current?.project.id ?? projectId }),
+      [projectId],
     ),
   );
 
   if (detail === null) {
     return (
-      <WorkFrame title="Workflow">
+      <WorkFrame title="Project">
         <p role={error !== null ? "alert" : undefined} className="text-sm text-muted-foreground">
           {error ?? "Loading…"}
         </p>
@@ -39,20 +39,20 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
     );
   }
 
-  const { workflow, definition } = detail;
-  const steps = detail.definition.steps.length;
-  const update = (change: Omit<ApiInput<"workflows.updateInstance">, "workflowId">) =>
-    run(() => api("workflows.updateInstance", { workflowId: workflow.id, ...change }));
+  const { project, workflow } = detail;
+  const steps = detail.workflow.steps.length;
+  const update = (change: Omit<ApiInput<"workflows.updateProject">, "projectId">) =>
+    run(() => api("workflows.updateProject", { projectId: project.id, ...change }));
 
   return (
     <WorkFrame
-      title={workflow.name}
+      title={project.name}
       actions={
         steps > 0 ? (
           <Button
             size="sm"
             variant="outline"
-            render={<Link to="/boards/$slug" params={{ slug: workflow.id }} />}
+            render={<Link to="/boards/$slug" params={{ slug: project.id }} />}
           >
             Board
           </Button>
@@ -60,8 +60,8 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
       }
     >
       <p className="text-sm text-muted-foreground">
-        This workflow uses the {definition.name} blueprint. Its name, people and assignments belong
-        to this workflow.
+        This project uses the {workflow.name} workflow. Its name, people and assignments belong to
+        this project.
       </p>
       <div className="flex flex-col gap-6">
         {error && <ErrorText text={error} />}
@@ -73,7 +73,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
               <p className="text-xs text-muted-foreground">How this process appears to everyone.</p>
               <SavedInput
                 id={`${id}-name`}
-                value={workflow.name}
+                value={project.name}
                 onSave={(typed) => {
                   if (typed) void update({ name: typed });
                 }}
@@ -84,7 +84,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
               <p className="text-xs text-muted-foreground">Used in its web address.</p>
               <SavedInput
                 id={`${id}-slug`}
-                value={workflow.slug ?? ""}
+                value={project.slug ?? ""}
                 placeholder="e.g. orders"
                 tidy={(typed) => toSlug(typed) ?? ""}
                 onSave={(typed) => void update({ slug: typed || null })}
@@ -92,32 +92,32 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
             </div>
           </div>
         </section>
-        <section aria-label="Workflow blueprint" className="flex flex-col gap-2.5">
-          <h2 className="text-sm font-semibold">Workflow blueprint</h2>
+        <section aria-label="Workflow" className="flex flex-col gap-2.5">
+          <h2 className="text-sm font-semibold">Workflow</h2>
           <div className="rounded-xl border border-border bg-card">
             <ActionRow
-              title={definition.name}
-              description={`${plural(steps, "step", "steps")}. This shared blueprint owns the steps and fields. Configure people below for this workflow.`}
+              title={workflow.name}
+              description={`${plural(steps, "step", "steps")}. This shared workflow owns the steps and fields. Configure people below for this project.`}
               action={
                 <Button
                   size="sm"
                   variant="outline"
                   render={
                     <Link
-                      to="/settings/workflow-blueprints/$definitionId"
-                      params={{ definitionId: definition.id }}
+                      to="/settings/workflows/$workflowId"
+                      params={{ workflowId: workflow.id }}
                     />
                   }
                 >
-                  Open blueprint
+                  Open workflow
                 </Button>
               }
             />
           </div>
         </section>
-        <WorkflowStepPeople detail={detail} busy={busy} run={run} />
-        <WorkflowPeople detail={detail} busy={busy} run={run} />
-        <WorkflowDangerZone detail={detail} busy={busy} run={run} />
+        <ProjectStepPeople detail={detail} busy={busy} run={run} />
+        <ProjectPeople detail={detail} busy={busy} run={run} />
+        <ProjectDangerZone detail={detail} busy={busy} run={run} />
       </div>
     </WorkFrame>
   );

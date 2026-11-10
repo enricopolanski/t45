@@ -52,7 +52,7 @@ function MyWorkRowLink({ row }: { readonly row: AssignmentView }) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{row.ticket.title}</p>
         <p className="truncate text-xs text-muted-foreground">
-          {[...row.parentNames, row.stepName].join(" › ")} · {row.workflowName}
+          {[...row.parentNames, row.stepName].join(" › ")} · {row.projectName}
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">

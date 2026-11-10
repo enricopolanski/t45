@@ -1,4 +1,4 @@
-import type { WorkflowDefinition } from "@t45/contracts/models/Workflow";
+import type { Workflow } from "@t45/contracts/models/Workflow";
 import { StringId } from "@t45/contracts/models/primitives";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
@@ -13,16 +13,16 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { PersonPicker } from "../work/PersonPicker";
 import { WorkFrame } from "../work/WorkFrame";
 
-/** Configures a workflow from an existing shared definition. */
-export function NewWorkflow({
-  definitionId: selectedDefinitionId,
+/** Configures a project from an existing shared workflow. */
+export function NewProject({
+  workflowId: selectedWorkflowId,
 }: {
-  readonly definitionId?: string | undefined;
+  readonly workflowId?: string | undefined;
 }) {
   const id = useId();
   const navigate = useNavigate();
-  const [definitions, setDefinitions] = useState<ReadonlyArray<WorkflowDefinition> | null>(null);
-  const [definitionId, setDefinitionId] = useState(selectedDefinitionId ?? "");
+  const [workflows, setWorkflows] = useState<ReadonlyArray<Workflow> | null>(null);
+  const [workflowId, setWorkflowId] = useState(selectedWorkflowId ?? "");
   const [name, setName] = useState("");
   const [responsible, setResponsible] = useState<StringId | null>(null);
   const [busy, setBusy] = useState(false);
@@ -30,14 +30,14 @@ export function NewWorkflow({
 
   useEffect(() => {
     let current = true;
-    void api("workflows.listDefinitions", undefined).then(
+    void api("workflows.listWorkflows", undefined).then(
       (loaded) => {
         if (!current) return;
-        const active = loaded.filter((definition) => !definition.isArchived);
-        setDefinitions(active);
-        const selected = active.find((definition) => definition.id === selectedDefinitionId);
+        const active = loaded.filter((workflow) => !workflow.isArchived);
+        setWorkflows(active);
+        const selected = active.find((workflow) => workflow.id === selectedWorkflowId);
         if (selected) setName(selected.name);
-        else setDefinitionId("");
+        else setWorkflowId("");
       },
       (cause: unknown) => {
         if (current) setError(describeFailure(cause));
@@ -46,15 +46,15 @@ export function NewWorkflow({
     return () => {
       current = false;
     };
-  }, [selectedDefinitionId]);
+  }, [selectedWorkflowId]);
 
   const submit = () => {
-    if (!definitionId || !name.trim() || responsible === null) return;
+    if (!workflowId || !name.trim() || responsible === null) return;
     setBusy(true);
     setError(null);
-    void api("workflows.createInstance", { definitionId, name: name.trim(), responsible }).then(
-      ({ workflowId }) =>
-        void navigate({ to: "/settings/workflows/$workflowId/edit", params: { workflowId } }),
+    void api("workflows.createProject", { workflowId, name: name.trim(), responsible }).then(
+      ({ projectId }) =>
+        void navigate({ to: "/settings/projects/$projectId/edit", params: { projectId } }),
       (cause: unknown) => {
         setBusy(false);
         setError(describeFailure(cause));
@@ -63,12 +63,12 @@ export function NewWorkflow({
   };
 
   return (
-    <WorkFrame title="New workflow">
+    <WorkFrame title="New project">
       <p className="text-sm text-muted-foreground">
-        Choose a shared blueprint, then configure this workflow's people and assignments.
+        Choose a shared workflow, then configure this project's people and assignments.
       </p>
       <form
-        aria-label="New workflow"
+        aria-label="New project"
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"
         onSubmit={(event) => {
           event.preventDefault();
@@ -76,47 +76,46 @@ export function NewWorkflow({
         }}
       >
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-definition`}>Workflow blueprint</Label>
+          <Label htmlFor={`${id}-workflow`}>Workflow</Label>
           <Select
-            value={definitionId || null}
-            disabled={busy || definitions === null}
+            value={workflowId || null}
+            disabled={busy || workflows === null}
             onValueChange={(key) => {
-              const selected = definitions?.find((definition) => definition.id === key);
+              const selected = workflows?.find((workflow) => workflow.id === key);
               if (!selected) return;
-              const previous = definitions?.find((definition) => definition.id === definitionId);
-              setDefinitionId(selected.id);
+              const previous = workflows?.find((workflow) => workflow.id === workflowId);
+              setWorkflowId(selected.id);
               if (!name.trim() || name === previous?.name) setName(selected.name);
             }}
           >
-            <SelectTrigger id={`${id}-definition`} aria-label="Workflow blueprint">
+            <SelectTrigger id={`${id}-workflow`} aria-label="Workflow">
               <SelectValue
-                placeholder={definitions === null ? "Loading blueprints…" : "Choose a blueprint"}
+                placeholder={workflows === null ? "Loading workflows…" : "Choose a workflow"}
               >
                 {(key: string) =>
-                  definitions?.find((definition) => definition.id === key)?.name ??
-                  "Choose a blueprint"
+                  workflows?.find((workflow) => workflow.id === key)?.name ?? "Choose a workflow"
                 }
               </SelectValue>
             </SelectTrigger>
             <SelectPopup>
-              {definitions?.map((definition) => (
-                <SelectItem key={definition.id} value={definition.id}>
-                  {definition.name}
+              {workflows?.map((workflow) => (
+                <SelectItem key={workflow.id} value={workflow.id}>
+                  {workflow.name}
                 </SelectItem>
               ))}
             </SelectPopup>
           </Select>
-          {definitions?.length === 0 ? (
+          {workflows?.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Create a blueprint before configuring a workflow.
+              Create a workflow before configuring a project.
             </p>
           ) : null}
-          <Link to="/settings/workflow-blueprints/new" className="text-xs text-primary underline">
-            Create a new blueprint
+          <Link to="/settings/workflows/new" className="text-xs text-primary underline">
+            Create a new workflow
           </Link>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-name`}>Workflow name</Label>
+          <Label htmlFor={`${id}-name`}>Project name</Label>
           <p className="text-xs text-muted-foreground">
             Name this configuration for your team, for example Engineering hiring.
           </p>
@@ -144,9 +143,9 @@ export function NewWorkflow({
         <div>
           <Button
             type="submit"
-            disabled={busy || !name.trim() || !definitionId || responsible === null}
+            disabled={busy || !name.trim() || !workflowId || responsible === null}
           >
-            Create workflow
+            Create project
           </Button>
         </div>
       </form>

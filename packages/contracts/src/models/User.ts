@@ -51,8 +51,8 @@ export const lastAdminRefusal = (
 const REFUSALS = {
   invalid_member_state: "This user's state does not allow this action.",
   last_admin_protected: "An organization must keep at least one active admin.",
-  last_workflow_admin:
-    "They are the last active admin of a workflow. Make someone else its admin first.",
+  last_project_admin:
+    "They are the last active admin of a project. Make someone else its admin first.",
 };
 
 export class Refused extends Schema.TaggedError<Refused>()("UserRefused", {

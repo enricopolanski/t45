@@ -6,7 +6,7 @@ import { Button } from "../ui/button";
 import type {
   StepSummaryView,
   TicketSummaryView,
-  WorkflowInstanceBoardView,
+  ProjectBoardView,
 } from "@t45/contracts/resources/Workflows";
 import { Link, Navigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -48,49 +48,49 @@ function BoardCard({
 
 /**
  * Every open item in its current step's column; a card opens its item, and anyone starts items
- * here unless the workflow is archived. A workflow with a slug is shown under it, so a link by
+ * here unless the project is archived. A project with a slug is shown under it, so a link by
  * id ends on the slug.
  */
-export function WorkflowBoardPage({ workflowId }: { readonly workflowId: string }) {
+export function ProjectBoardPage({ projectId }: { readonly projectId: string }) {
   const newChat = useNewChat();
   const targets = useApiQuery(chatTargets);
-  const [board, setBoard] = useState<WorkflowInstanceBoardView | null>(null);
+  const [board, setBoard] = useState<ProjectBoardView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void api("workflows.getInstanceBoard", { idOrSlug: workflowId }).then(
+    void api("workflows.getProjectBoard", { idOrSlug: projectId }).then(
       setBoard,
       (cause: unknown) => setError(describeFailure(cause)),
     );
-  }, [workflowId]);
+  }, [projectId]);
 
-  const slug = board?.workflow.slug ?? null;
-  const target = targets.data?.find((target) => target.workflowId === board?.workflow.id);
-  if (slug !== null && slug !== workflowId) {
+  const slug = board?.project.slug ?? null;
+  const target = targets.data?.find((target) => target.projectId === board?.project.id);
+  if (slug !== null && slug !== projectId) {
     return <Navigate to="/boards/$slug" params={{ slug }} replace />;
   }
 
   return (
     <WorkFrame
-      title={board?.workflow.name ?? "Board"}
+      title={board?.project.name ?? "Board"}
       width="full"
       actions={
         board !== null ? (
           <>
-            {target !== undefined && !board.workflow.isArchived && (
+            {target !== undefined && !board.project.isArchived && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() =>
-                  void newChat(target.agentId, target.workflowId).catch((cause) =>
-                    toastFailure("Workflow chat unavailable", cause),
+                  void newChat(target.agentId, target.projectId).catch((cause) =>
+                    toastFailure("Project chat unavailable", cause),
                   )
                 }
               >
                 Chat
               </Button>
             )}
-            {!board.workflow.isArchived && <NewItemDialog workflow={board.workflow} />}
+            {!board.project.isArchived && <NewItemDialog project={board.project} />}
           </>
         ) : null
       }
@@ -98,7 +98,7 @@ export function WorkflowBoardPage({ workflowId }: { readonly workflowId: string 
       <div className="flex flex-col gap-4">
         {error && <ErrorText text={error} />}
         <div className="flex gap-3 overflow-x-auto pb-2">
-          {board?.definition.steps.map((column) => {
+          {board?.workflow.steps.map((column) => {
             const cards = board.tickets.flatMap((ticket) =>
               ticket.currentStep?.stepDefinitionId === column.id
                 ? [{ ticket, step: ticket.currentStep }]

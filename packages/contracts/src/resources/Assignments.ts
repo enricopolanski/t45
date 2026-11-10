@@ -9,7 +9,7 @@ import { StepSummaryView, TicketSummaryView, WorkflowErrors } from "./Workflows.
 export const AssignmentView = Schema.Struct({
   ticket: TicketSummaryView,
   step: StepSummaryView,
-  workflowName: TrimmedNonEmptyString,
+  projectName: TrimmedNonEmptyString,
   stepName: TrimmedNonEmptyString,
   /** The names of the steps a sub-step sits in, outermost first; empty for a step. */
   parentNames: Schema.Array(Schema.String),

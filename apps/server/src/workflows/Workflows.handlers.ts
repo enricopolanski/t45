@@ -13,24 +13,23 @@ export const layer = Workflows.middleware(Authorization).toLayer(
   Effect.gen(function* () {
     const workflows = yield* WorkflowService;
     return Workflows.of({
-      "workflows.listDefinitions": () => asViewer(() => workflows.listDefinitions),
-      "workflows.getDefinition": ({ definitionId }) =>
-        asViewer((id) => workflows.getDefinition(id, definitionId)),
-      "workflows.listInstances": () => asViewer(workflows.listInstances),
-      "workflows.listStartableInstances": () => asViewer(workflows.listStartableInstances),
-      "workflows.getInstance": ({ idOrSlug }) =>
-        asViewer((id) => workflows.getInstance(id, idOrSlug)),
-      "workflows.getInstanceBoard": ({ idOrSlug }) =>
-        asViewer((id) => workflows.getInstanceBoard(id, idOrSlug)),
-      "workflows.createDefinition": (input) => asViewer(() => workflows.createDefinition(input)),
-      "workflows.createInstance": (input) => asViewer((id) => workflows.createInstance(id, input)),
-      "workflows.updateDefinition": (input) =>
-        asViewer((id) => workflows.updateDefinition(id, input)),
-      "workflows.updateInstance": (input) => asViewer((id) => workflows.updateInstance(id, input)),
-      "workflows.deleteInstance": ({ workflowId }) =>
-        asViewer((id) => workflows.deleteInstance(id, workflowId)),
+      "workflows.listWorkflows": () => asViewer(() => workflows.listWorkflows),
       "workflows.getWorkflow": ({ workflowId }) =>
-        Effect.flatMap(caller, (actor) => workflows.getWorkflow(actor, workflowId)),
+        asViewer((id) => workflows.getWorkflow(id, workflowId)),
+      "workflows.listProjects": () => asViewer(workflows.listProjects),
+      "workflows.listStartableProjects": () => asViewer(workflows.listStartableProjects),
+      "workflows.getProject": ({ idOrSlug }) =>
+        asViewer((id) => workflows.getProject(id, idOrSlug)),
+      "workflows.getProjectBoard": ({ idOrSlug }) =>
+        asViewer((id) => workflows.getProjectBoard(id, idOrSlug)),
+      "workflows.createWorkflow": (input) => asViewer(() => workflows.createWorkflow(input)),
+      "workflows.createProject": (input) => asViewer((id) => workflows.createProject(id, input)),
+      "workflows.updateWorkflow": (input) => asViewer((id) => workflows.updateWorkflow(id, input)),
+      "workflows.updateProject": (input) => asViewer((id) => workflows.updateProject(id, input)),
+      "workflows.deleteProject": ({ projectId }) =>
+        asViewer((id) => workflows.deleteProject(id, projectId)),
+      "workflows.getProjectWorkflow": ({ projectId }) =>
+        Effect.flatMap(caller, (actor) => workflows.getProjectWorkflow(actor, projectId)),
       "workflows.listTickets": (input) =>
         Effect.flatMap(caller, (actor) => workflows.listTickets(actor, input)),
       "workflows.getTicket": (input) =>

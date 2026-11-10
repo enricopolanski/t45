@@ -63,7 +63,7 @@ const makeOrigins = Effect.gen(function* () {
   const select = (where: Statement.Fragment) =>
     sql<{ readonly origin: string }>`SELECT json_object('chatId', chat_id,
       'kind', CASE WHEN owner_user_id IS NULL THEN 'automation' ELSE 'conversation' END,
-      'ownerUserId', owner_user_id, 'workflowId', workflow_id, 'trigger', json(trigger)) AS origin
+      'ownerUserId', owner_user_id, 'projectId', project_id, 'trigger', json(trigger)) AS origin
       FROM chat_origins WHERE ${where}`.pipe(
       Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeOrigin(row.origin))),
       Effect.orDie,
@@ -73,9 +73,9 @@ const makeOrigins = Effect.gen(function* () {
   return {
     get,
     insert: (origin: ChatOrigin) =>
-      sql`INSERT INTO chat_origins (chat_id, owner_user_id, workflow_id, trigger)
+      sql`INSERT INTO chat_origins (chat_id, owner_user_id, project_id, trigger)
       VALUES (${origin.chatId}, ${origin.kind === "conversation" ? origin.ownerUserId : null},
-        ${origin.kind === "conversation" ? origin.workflowId : null},
+        ${origin.kind === "conversation" ? origin.projectId : null},
         ${origin.kind === "automation" ? encodeTrigger(origin.trigger) : null})`.pipe(
         Effect.asVoid,
         Effect.orDie,
@@ -175,9 +175,9 @@ const make = Effect.gen(function* () {
           ${row.at}, ${row.at})`.pipe(Effect.asVoid, Effect.orDie),
     list: (member: Member) =>
       sql`SELECT c.id, c.agent_id AS "agentId", c.title, c.status, c.updated_at AS "lastActivityAt",
-          a.name AS "agentName", o.workflow_id AS "workflowId", w.name AS "workflowName"
+          a.name AS "agentName", o.project_id AS "projectId", p.name AS "projectName"
         FROM chats c JOIN chat_origins o ON o.chat_id = c.id
-          LEFT JOIN agents a ON a.id = c.agent_id LEFT JOIN workflows w ON w.id = o.workflow_id
+          LEFT JOIN agents a ON a.id = c.agent_id LEFT JOIN projects p ON p.id = o.project_id
         WHERE c.deleted_at IS NULL AND o.owner_user_id = ${member.userId}
         ORDER BY c.updated_at DESC, c.id DESC`.pipe(Effect.flatMap(decodeSummaries), Effect.orDie),
     exists: (chatId: ChatId) =>

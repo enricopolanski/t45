@@ -9,16 +9,16 @@ import * as ChatRepository from "../chats/ChatRepository.ts";
 import * as ServerConfig from "../config.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as TicketRepository from "../workflows/TicketRepository.ts";
-import * as WorkflowDefinitionRepository from "../workflows/WorkflowDefinitionRepository.ts";
 import * as WorkflowRepository from "../workflows/WorkflowRepository.ts";
+import * as ProjectRepository from "../workflows/ProjectRepository.ts";
 import * as AttachmentRepository from "./AttachmentRepository.ts";
 
 export const layer = Layer.mergeAll(
   UserRepository.layer,
   AttachmentRepository.layer,
   ChatRepository.layer,
-  WorkflowDefinitionRepository.layer,
   WorkflowRepository.layer,
+  ProjectRepository.layer,
   TicketRepository.layer,
 ).pipe(
   Layer.provideMerge(Sqlite.testLayer),
@@ -30,18 +30,18 @@ const at = DateTime.makeUnsafe("2026-10-23T09:00:00.000Z");
 
 export const seedStep = (ticketId: string, assignee: string) =>
   Effect.gen(function* () {
-    const definitionId = `definition-${ticketId}`;
     const workflowId = `workflow-${ticketId}`;
+    const projectId = `project-${ticketId}`;
     const stepId = generateId();
-    yield* (yield* WorkflowDefinitionRepository.WorkflowDefinitionRepository).insert({
-      id: definitionId,
+    yield* (yield* WorkflowRepository.WorkflowRepository).insert({
+      id: workflowId,
       name: "Taxes",
       steps: [],
       isArchived: false,
     });
-    yield* (yield* WorkflowRepository.WorkflowRepository).insert({
-      id: workflowId,
-      definitionId,
+    yield* (yield* ProjectRepository.ProjectRepository).insert({
+      id: projectId,
+      workflowId,
       name: "Taxes",
       responsible: assignee,
       adminUserIds: [assignee],
@@ -52,7 +52,7 @@ export const seedStep = (ticketId: string, assignee: string) =>
     });
     yield* (yield* TicketRepository.TicketRepository).insert({
       id: ticketId,
-      workflowId,
+      projectId,
       title: "Return",
       description: "",
       dueDate: null,

@@ -19,7 +19,7 @@ export const sendsInFlight = new Set<ChatId>();
 export async function sendChatMessage(send: {
   readonly chatId: ChatId;
   readonly agentId: Agent["id"] | null;
-  readonly workflowId?: string | null;
+  readonly projectId?: string | null;
   readonly prompt: string;
   readonly attachments: ReadonlyArray<ComposerAttachment>;
   readonly setBusy: (busy: boolean) => void;
@@ -43,7 +43,7 @@ export async function sendChatMessage(send: {
       await api("chats.send", {
         chatId,
         ...(send.agentId === null ? {} : { agentId: send.agentId }),
-        ...(send.workflowId == null ? {} : { workflowId: send.workflowId }),
+        ...(send.projectId == null ? {} : { projectId: send.projectId }),
         inputId,
         text: send.prompt.trim(),
         attachments: uploaded,

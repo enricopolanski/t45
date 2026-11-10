@@ -300,7 +300,7 @@ function MissingRecap({
 }
 
 /**
- * The way back to the workflow's board for those who can open it, the item's title, and the step
+ * The way back to the project's board for those who can open it, the item's title, and the step
  * it is in when that isn't the step on the page.
  */
 function ItemHeader({ view }: { readonly view: StepView }) {
@@ -311,8 +311,8 @@ function ItemHeader({ view }: { readonly view: StepView }) {
     <header className="flex flex-col gap-1">
       {view.canOpenBoard ? (
         <div className="mb-5">
-          <BackLink to="/boards/$slug" params={{ slug: view.ticket.workflowId }}>
-            {view.workflowName}
+          <BackLink to="/boards/$slug" params={{ slug: view.ticket.projectId }}>
+            {view.projectName}
           </BackLink>
         </div>
       ) : null}
@@ -422,14 +422,14 @@ function ItemDetails({
             }
           />
         </dd>
-        <dt className="text-muted-foreground">Workflow</dt>
+        <dt className="text-muted-foreground">Project</dt>
         <dd className="min-w-0 truncate">
           {view.canOpenBoard ? (
-            <Link to="/boards/$slug" params={{ slug: item.workflowId }} className="hover:underline">
-              {view.workflowName}
+            <Link to="/boards/$slug" params={{ slug: item.projectId }} className="hover:underline">
+              {view.projectName}
             </Link>
           ) : (
-            view.workflowName
+            view.projectName
           )}
         </dd>
       </dl>

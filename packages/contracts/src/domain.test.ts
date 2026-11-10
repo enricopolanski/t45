@@ -1,12 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
-import {
-  Ticket,
-  WorkflowDefinition,
-  lastAdminRefusal,
-  stepCompletionRefusal,
-} from "./models/Workflow.ts";
+import { Ticket, Workflow, lastAdminRefusal, stepCompletionRefusal } from "./models/Workflow.ts";
 
 const at = "2026-10-26T12:00:00.000Z";
 
@@ -21,7 +16,7 @@ const rawStep = {
 };
 const rawTicket = {
   id: "ticket01",
-  workflowId: "workflow01",
+  projectId: "project01",
   title: "Review",
   description: "",
   dueDate: null,
@@ -30,7 +25,7 @@ const rawTicket = {
   createdAt: at,
 };
 const decodeTicket = Schema.decodeUnknownSync(Schema.toCodecJson(Ticket));
-const decodeSteps = Schema.decodeUnknownSync(WorkflowDefinition.fields.steps);
+const decodeSteps = Schema.decodeUnknownSync(Workflow.fields.steps);
 const definition = {
   id: "def001",
   name: "Review",
@@ -81,7 +76,7 @@ describe("workflow rules", () => {
     );
   });
 
-  it("requires an active workflow admin", () => {
+  it("requires an active project admin", () => {
     assert.equal(lastAdminRefusal([]), "last_admin");
     assert.equal(lastAdminRefusal(["person02"]), null);
   });
