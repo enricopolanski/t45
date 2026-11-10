@@ -47,19 +47,24 @@ const APP_TOOLS: ReadonlyArray<{
   },
 ];
 
+/** Their tools only work in an agent's chats. */
+const CHAT_TOOLS: ReadonlyArray<AppTool> = [WORKFLOW_DRAFTING_MCP_NAME, PROJECT_TOOLS_MCP_NAME];
+
 function AppToolPicker({
+  tools,
   selected,
   disabled,
 }: {
+  readonly tools: ReadonlyArray<AppTool>;
   readonly selected: ReadonlyArray<AppTool>;
   readonly disabled: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1">
-      {APP_TOOLS.map(({ tool, name, description }) => (
+      {APP_TOOLS.filter(({ tool }) => tools.includes(tool)).map(({ tool, name, description }) => (
         <label
           key={tool}
-          className="flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
+          className={`flex items-start gap-2.5 rounded-md px-2 py-1.5 ${disabled ? "cursor-not-allowed" : "cursor-pointer hover:bg-muted"}`}
         >
           <Checkbox
             name="appTools"
@@ -68,7 +73,7 @@ function AppToolPicker({
             defaultChecked={selected.includes(tool)}
             disabled={disabled}
           />
-          <span className="min-w-0">
+          <span className={disabled ? "min-w-0 opacity-64" : "min-w-0"}>
             <span className="block text-sm">{name}</span>
             <span className="block text-xs text-muted-foreground">{description}</span>
           </span>
@@ -172,6 +177,7 @@ function AgentForm({
 }) {
   const navigate = useNavigate();
   const [files, setFiles] = useState(() => fileRows(agent?.files ?? {}));
+  const [isConversational, setIsConversational] = useState(agent?.isConversational ?? false);
   const [error, setError] = useState<string | null>(null);
   const [busy, startTransition] = useTransition();
   return (
@@ -261,10 +267,16 @@ function AgentForm({
             <Switch
               name="isConversational"
               aria-label="Available in Chat"
-              defaultChecked={agent?.isConversational ?? false}
+              checked={isConversational}
+              onCheckedChange={setIsConversational}
               disabled={busy}
             />
           </label>
+          <AppToolPicker
+            tools={CHAT_TOOLS}
+            selected={agent?.appTools ?? []}
+            disabled={busy || !isConversational}
+          />
         </Section>
         <Section
           title="Skills"
@@ -274,7 +286,11 @@ function AgentForm({
           <SkillPicker skills={skills} selected={agent?.skills ?? []} disabled={busy} />
         </Section>
         <Section title="Tools" description="What the agent can do in T45." card>
-          <AppToolPicker selected={agent?.appTools ?? []} disabled={busy} />
+          <AppToolPicker
+            tools={[STEP_TOOLS_MCP_NAME]}
+            selected={agent?.appTools ?? []}
+            disabled={busy}
+          />
         </Section>
         <Section
           title="Files"
