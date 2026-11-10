@@ -7,7 +7,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { avatarUpload } from "./avatars.ts";
 import { UserService } from "./UserService.ts";
 import { UserRepository } from "./UserRepository.ts";
-import { AutomationRepository } from "../automations/AutomationRepository.ts";
 import { WorkflowService } from "../workflows/WorkflowService.ts";
 
 export const layer = Users.middleware(Authorization).toLayer(
@@ -15,7 +14,6 @@ export const layer = Users.middleware(Authorization).toLayer(
     const service = yield* UserService;
     const users = yield* UserRepository;
     const workflows = yield* WorkflowService;
-    const automations = yield* AutomationRepository;
     const sql = yield* SqlClient.SqlClient;
 
     const ownUser = Effect.gen(function* () {
@@ -36,11 +34,10 @@ export const layer = Users.middleware(Authorization).toLayer(
       "users.decline": (request) => service.decline(request),
       "users.changeRole": (request) => service.changeRole(request),
       // Workflows can refuse the deactivation, which rolls it back; the member's revoked sessions
-      // are announced only once it all commits. Their schedules are archived for good.
+      // are announced only once it all commits.
       "users.deactivate": (request) =>
         service.deactivate(request).pipe(
           Effect.tap(() => workflows.memberDeactivated(request.userId)),
-          Effect.tap((user) => automations.triggers.archiveCreatedBy(user.id, user.updatedAt)),
           sql.withTransaction,
           Effect.catchTags({ SqlError: Effect.die }),
         ),

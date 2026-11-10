@@ -4,14 +4,7 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import { Chat, Refused as ChatRefused } from "../models/Chat.ts";
-import {
-  Refused as AutomationRefused,
-  Automation,
-  AutomationId,
-  Schedule,
-  ScheduleTrigger,
-  ScheduleTriggerId,
-} from "../models/Automation.ts";
+import { Refused as AutomationRefused, Automation, AutomationId } from "../models/Automation.ts";
 import { AdminOnly } from "../Authorization.ts";
 import { AccessDenied, NotFound } from "./errors.ts";
 
@@ -20,8 +13,6 @@ const Errors = Schema.Union([AutomationRefused, NotFound, AccessDenied]);
 
 export const AutomationSummary = Schema.Struct({
   ...Automation.fields,
-  /** Its schedules, without the archived ones. */
-  scheduleTriggers: Schema.Array(ScheduleTrigger),
   lastRun: Schema.NullOr(
     Schema.Struct({
       statusLabel: Schema.String,
@@ -47,20 +38,7 @@ export const Automations = RpcGroup.make(
     success: Automation,
     error: Errors,
   }),
-  /** The caller becomes the schedule's creator: its runs are theirs. */
-  Rpc.make("createScheduleTrigger", {
-    payload: { automationId: AutomationId, schedule: Schedule },
-    success: ScheduleTrigger,
-    error: Errors,
-  }),
-  /** Any admin disables a schedule; only its creator enables it. */
-  Rpc.make("setScheduleTriggerEnabled", {
-    payload: { id: ScheduleTriggerId, isEnabled: Schema.Boolean },
-    success: ScheduleTrigger,
-    error: Errors,
-  }),
-  Rpc.make("archiveScheduleTrigger", { payload: { id: ScheduleTriggerId }, error: NotFound }),
-  /** For good, with its schedules: it starts no new run; a run under way finishes. */
+  /** For good: it starts no new run; a run under way finishes. */
   Rpc.make("archive", { payload: { id: AutomationId }, error: NotFound }),
 )
   // Middleware applies only to existing RPCs; adding listForSteps afterward keeps it member-accessible.

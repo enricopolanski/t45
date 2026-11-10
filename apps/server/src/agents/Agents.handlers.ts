@@ -10,6 +10,7 @@ import * as Struct from "effect/Struct";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
 import { AutomationRepository } from "../automations/AutomationRepository.ts";
+import { CommandLogRepository } from "../persistence/CommandLogRepository.ts";
 import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 import { AgentRepository } from "./AgentRepository.ts";
 import { SkillRepository } from "./SkillRepository.ts";
@@ -27,6 +28,7 @@ export const layer = Agents.middleware(Authorization).toLayer(
     const skills = yield* SkillRepository;
     const automations = yield* AutomationRepository;
     const workflows = yield* WorkflowRepository;
+    const commandLog = yield* CommandLogRepository;
     const httpClient = yield* HttpClient.HttpClient;
     const crypto = yield* Crypto.Crypto;
 
@@ -124,10 +126,26 @@ export const layer = Agents.middleware(Authorization).toLayer(
           const { userId } = yield* CurrentUser;
           const agent = yield* agents.get(agentId);
           if (agent === null || agent.creatorUserId !== userId) return yield* new NotFound();
-          if (agent.isPublished) return agent;
-          return yield* save({ ...agent, isPublished: true, updatedAt: yield* DateTime.now }).pipe(
-            Effect.orDie,
-          );
+          // The log entry commits with the publication it records.
+          const published = yield* agents
+            .modify(
+              agent.id,
+              Effect.fnUntraced(function* (current) {
+                if (current.isPublished) return current;
+                const now = yield* DateTime.now;
+                yield* commandLog.append({
+                  command: "agents.publish",
+                  userId,
+                  agentId: null,
+                  chatId: null,
+                  details: { agentId: current.id },
+                  createdAt: now,
+                });
+                return { ...current, isPublished: true, updatedAt: now };
+              }),
+            )
+            .pipe(Effect.orDie);
+          return published ?? (yield* new NotFound());
         }),
       "agents.update": ({ agentId, ...draft }) =>
         Effect.gen(function* () {

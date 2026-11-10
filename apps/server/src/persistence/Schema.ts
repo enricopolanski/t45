@@ -84,8 +84,8 @@ const statements = [
       PRIMARY KEY (agent_id, skill_id)
     )`,
   // An Automation is a prompt for an agent; each run starts a chat with it. An archived one runs
-  // no more and stays archived, as do archived agents, workflows, projects and schedule triggers:
-  // nothing here is deleted or restored.
+  // no more and stays archived, as do archived agents, workflows and projects: nothing here is
+  // deleted or restored.
   `CREATE TABLE automations (
       id TEXT PRIMARY KEY NOT NULL,
       title TEXT NOT NULL,
@@ -95,21 +95,6 @@ const statements = [
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,
-  // A schedule trigger runs its automation when `next_run_at` comes, on its creator's authority.
-  // `last_error` is why its latest run was refused. Disabled can be enabled again; archived can't.
-  `CREATE TABLE schedule_triggers (
-      id TEXT PRIMARY KEY NOT NULL,
-      automation_id TEXT NOT NULL REFERENCES automations(id),
-      creator_user_id TEXT NOT NULL REFERENCES users(id),
-      schedule_json TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('enabled', 'disabled', 'archived')),
-      next_run_at TEXT,
-      last_error TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`,
-  `CREATE INDEX schedule_triggers_due ON schedule_triggers(next_run_at)
-    WHERE status = 'enabled' AND next_run_at IS NOT NULL`,
 
   `CREATE TABLE workflows (
       id TEXT PRIMARY KEY NOT NULL,

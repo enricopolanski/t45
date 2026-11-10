@@ -371,7 +371,7 @@ export function ProjectArchive({ detail, busy, run }: Editing) {
       <div className="rounded-xl border border-destructive/32 bg-card">
         <ActionRow
           title={project.isArchived ? "This project is archived" : "Archive this project"}
-          description="An archived project starts no new item, adopts no version and runs no automation. Its open items can still be finished. There's no going back."
+          description="An archived project starts no new item and adopts no version. Its open tickets must be finished or cancelled first. There's no going back."
           action={
             project.isArchived ? (
               <Badge variant="secondary">Archived</Badge>
@@ -379,7 +379,7 @@ export function ProjectArchive({ detail, busy, run }: Editing) {
               <Button
                 size="sm"
                 variant="destructive-outline"
-                disabled={busy}
+                disabled={busy || detail.openTickets.length > 0}
                 onClick={() => setConfirming(true)}
               >
                 Archive

@@ -1,43 +1,21 @@
 import { appAtomRegistry } from "../../state/atomRegistry";
-import {
-  ArchiveIcon,
-  CalendarPlusIcon,
-  MoreHorizontalIcon,
-  PencilIcon,
-  PlayIcon,
-} from "lucide-react";
+import { ArchiveIcon, MoreHorizontalIcon, PencilIcon, PlayIcon } from "lucide-react";
 import { useState } from "react";
 import { canUse } from "@t45/contracts/models/Agent";
-import {
-  type Automation,
-  type Schedule,
-  type ScheduleTrigger,
-} from "@t45/contracts/models/Automation";
+import type { Automation } from "@t45/contracts/models/Automation";
 import type { AutomationSummary } from "@t45/contracts/resources/Automations";
 
-import { formatRelativeTimeLabel, formatScheduledLabel } from "../../timestampFormat";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { agentsList, stepAutomationList } from "../../state/agents";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { apiQuery, useApiQuery } from "../../state/rpc";
 import { useSession } from "../../state/session";
-import { usersList } from "../../state/users";
 
-import {
-  EMPTY_DRAFT,
-  EMPTY_SCHEDULE,
-  browserTimeZone,
-  scheduleFromDraft,
-  settingsFromDraft,
-  type DraftState,
-  type ScheduleDraft,
-} from "./automationsSettings.logic";
-import { ErrorText } from "../ui/error-text";
+import { EMPTY_DRAFT, settingsFromDraft, type DraftState } from "./automationsSettings.logic";
 import { Field, Fieldset } from "../ui/field";
-import { Label } from "../ui/label";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
-import { ToggleGroup, Toggle } from "../ui/toggle-group";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -51,7 +29,6 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import {
@@ -63,42 +40,19 @@ import {
 
 const automationList = apiQuery("automations.list")(undefined);
 
-/** JS day-of-week (0 = Sunday) rendered Monday-first, matching how people read a week. */
-const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
-const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
-
 function reportFailure(title: string, description: string) {
   toastManager.add({ type: "error", title, description });
-}
-
-function scheduleLabel(schedule: Schedule) {
-  if (schedule.type === "interval") {
-    const minutes = schedule.everyMs / 60_000;
-    return Number.isInteger(minutes)
-      ? `Every ${minutes} min`
-      : `Every ${Math.round(schedule.everyMs / 1000)} sec`;
-  }
-  const { weekdays } = schedule;
-  const days =
-    weekdays.length === 7
-      ? "Daily"
-      : weekdays.length === 5 && weekdays.every((day) => day >= 1 && day <= 5)
-        ? "Weekdays"
-        : weekdays.map((day) => WEEKDAY_LABELS[day]).join(", ");
-  const zone = schedule.timeZone === browserTimeZone() ? "" : ` (${schedule.timeZone})`;
-  return `${days} at ${schedule.timeOfDay}${zone}`;
 }
 
 export function AutomationsSettings() {
   const automationsQuery = useApiQuery(automationList);
   const automations = automationsQuery.data;
   const [editor, setEditor] = useState<{ automation: Automation | null } | null>(null);
-  const [scheduled, setScheduled] = useState<Automation | null>(null);
   return (
     <SettingsPageContainer>
       <SettingsSection
         title="Automations"
-        description="Define reusable agent jobs for steps and schedules."
+        description="Define reusable agent jobs for steps."
         action={
           <div className="flex gap-2">
             <Button
@@ -127,7 +81,6 @@ export function AutomationsSettings() {
               key={automation.id}
               automation={automation}
               onEdit={() => setEditor({ automation })}
-              onSchedule={() => setScheduled(automation)}
               onChanged={automationsQuery.refresh}
             />
           ))
@@ -138,13 +91,6 @@ export function AutomationsSettings() {
           automation={editor.automation}
           onSaved={automationsQuery.refresh}
           onClose={() => setEditor(null)}
-        />
-      ) : null}
-      {scheduled ? (
-        <ScheduleDialog
-          automation={scheduled}
-          onSaved={automationsQuery.refresh}
-          onClose={() => setScheduled(null)}
         />
       ) : null}
     </SettingsPageContainer>
@@ -172,12 +118,10 @@ function useRowAction(onChanged: () => void) {
 function AutomationRow({
   automation,
   onEdit,
-  onSchedule,
   onChanged,
 }: {
   readonly automation: AutomationSummary;
   readonly onEdit: () => void;
-  readonly onSchedule: () => void;
   readonly onChanged: () => void;
 }) {
   const { busy, act } = useRowAction(onChanged);
@@ -192,18 +136,12 @@ function AutomationRow({
       title={automation.title}
       description={<span className="line-clamp-2">{automation.prompt}</span>}
       status={
-        <div className="space-y-1">
-          {automation.scheduleTriggers.length === 0 ? <p>On demand</p> : null}
-          {automation.scheduleTriggers.map((trigger) => (
-            <ScheduleRow key={trigger.id} trigger={trigger} now={now} onChanged={onChanged} />
-          ))}
-          {automation.lastRun !== null && (
-            <p>
-              Last run: {automation.lastRun.statusLabel} ·{" "}
-              {formatRelativeTimeLabel(automation.lastRun.at, now)}
-            </p>
-          )}
-        </div>
+        automation.lastRun !== null && (
+          <p>
+            Last run: {automation.lastRun.statusLabel} ·{" "}
+            {formatRelativeTimeLabel(automation.lastRun.at, now)}
+          </p>
+        )
       }
       control={
         <Menu>
@@ -228,10 +166,6 @@ function AutomationRow({
               <PlayIcon />
               Run now
             </MenuItem>
-            <MenuItem onClick={onSchedule}>
-              <CalendarPlusIcon />
-              Add schedule
-            </MenuItem>
             <MenuItem
               variant="destructive"
               onClick={() =>
@@ -247,63 +181,6 @@ function AutomationRow({
         </Menu>
       }
     />
-  );
-}
-
-/** One schedule of an automation. Anyone here pauses or archives it; only its creator resumes it. */
-function ScheduleRow({
-  trigger,
-  now,
-  onChanged,
-}: {
-  readonly trigger: ScheduleTrigger;
-  readonly now: number;
-  readonly onChanged: () => void;
-}) {
-  const { busy, act } = useRowAction(onChanged);
-  const isMine = useSession()?.userId === trigger.creatorUserId;
-  const creator = useApiQuery(usersList).data?.find((user) => user.id === trigger.creatorUserId);
-  const isEnabled = trigger.status === "enabled";
-  const label = scheduleLabel(trigger.schedule);
-  return (
-    <>
-      <div className="flex items-center gap-2">
-        <p className="min-w-0 flex-1">
-          {label} ·{" "}
-          {!isEnabled
-            ? "Paused"
-            : trigger.nextRunAt
-              ? `Next run ${formatScheduledLabel(trigger.nextRunAt, now)}`
-              : "Ready"}{" "}
-          · as {isMine ? "you" : (creator?.displayName ?? "someone")}
-        </p>
-        <Switch
-          size="sm"
-          checked={isEnabled}
-          disabled={busy || (!isEnabled && !isMine)}
-          aria-label={`Enable ${label}`}
-          onCheckedChange={(isEnabled) =>
-            void act("Could not update schedule", async () => {
-              await api("automations.setScheduleTriggerEnabled", { id: trigger.id, isEnabled });
-            })
-          }
-        />
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          disabled={busy}
-          aria-label={`Archive ${label}`}
-          onClick={() =>
-            void act("Could not archive schedule", () =>
-              api("automations.archiveScheduleTrigger", { id: trigger.id }),
-            )
-          }
-        >
-          <ArchiveIcon />
-        </Button>
-      </div>
-      {trigger.lastError && <ErrorText text={trigger.lastError} />}
-    </>
   );
 }
 
@@ -421,131 +298,6 @@ function AutomationEditorDialog({
           </DialogClose>
           <Button size="sm" disabled={saving} onClick={() => void submit()}>
             {automation ? "Save automation" : "Create automation"}
-          </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
-  );
-}
-
-function ScheduleDialog({
-  automation,
-  onSaved,
-  onClose,
-}: {
-  readonly automation: Automation;
-  readonly onSaved: () => void;
-  readonly onClose: () => void;
-}) {
-  const [draft, setDraft] = useState(EMPTY_SCHEDULE);
-  const patch = (change: Partial<ScheduleDraft>) =>
-    setDraft((current) => ({ ...current, ...change }));
-  const [saving, setSaving] = useState(false);
-
-  const submit = async () => {
-    const checked = scheduleFromDraft(draft);
-    if ("problem" in checked) {
-      reportFailure(checked.problem.title, checked.problem.description);
-      return;
-    }
-    // Stays saving through a successful save, until the dialog closes.
-    setSaving(true);
-    try {
-      await api("automations.createScheduleTrigger", {
-        automationId: automation.id,
-        schedule: checked.schedule,
-      });
-      onSaved();
-      onClose();
-    } catch (error) {
-      setSaving(false);
-      reportFailure("Could not add schedule", describeFailure(error));
-    }
-  };
-
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !saving) onClose();
-      }}
-    >
-      <DialogPopup className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Add schedule</DialogTitle>
-          <DialogDescription>
-            {automation.title} runs on this schedule as you, for as long as you could run it
-            yourself.
-          </DialogDescription>
-        </DialogHeader>
-
-        <DialogPanel>
-          <Fieldset disabled={saving}>
-            <ToggleGroup
-              aria-label="Schedule type"
-              value={[draft.mode]}
-              onValueChange={(values) => {
-                const mode = values[0];
-                if (mode === "fixed" || mode === "interval") patch({ mode });
-              }}
-            >
-              <Toggle value="fixed">At a time</Toggle>
-              <Toggle value="interval">Every interval</Toggle>
-            </ToggleGroup>
-
-            {draft.mode === "fixed" ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="scheduled-automation-time">Run at</Label>
-                  <Input
-                    type="time"
-                    id="scheduled-automation-time"
-                    className="w-32"
-                    value={draft.timeOfDay}
-                    onChange={(event) => patch({ timeOfDay: event.target.value })}
-                  />
-                  <span className="text-xs text-muted-foreground">on</span>
-                </div>
-                <ToggleGroup
-                  multiple
-                  variant="outline"
-                  aria-label="Days to run"
-                  value={[...draft.weekdays].map(String)}
-                  onValueChange={(values) => {
-                    if (values.length > 0) patch({ weekdays: new Set(values.map(Number)) });
-                  }}
-                >
-                  {WEEKDAY_ORDER.map((day) => (
-                    <Toggle key={day} value={String(day)} aria-label={WEEKDAY_LABELS[day]}>
-                      {WEEKDAY_LABELS[day].slice(0, 2)}
-                    </Toggle>
-                  ))}
-                </ToggleGroup>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Label htmlFor="scheduled-automation-interval">Run every</Label>
-                <Input
-                  type="number"
-                  id="scheduled-automation-interval"
-                  min={1}
-                  step="any"
-                  className="w-24"
-                  value={draft.intervalMinutes}
-                  onChange={(event) => patch({ intervalMinutes: event.target.value })}
-                />
-                <span className="text-xs text-muted-foreground">minutes</span>
-              </div>
-            )}
-          </Fieldset>
-        </DialogPanel>
-
-        <DialogFooter>
-          <DialogClose render={<Button variant="outline" size="sm" disabled={saving} />}>
-            Cancel
-          </DialogClose>
-          <Button size="sm" disabled={saving} onClick={() => void submit()}>
-            Add schedule
           </Button>
         </DialogFooter>
       </DialogPopup>

@@ -313,6 +313,7 @@ const REFUSALS = {
   last_admin: "A project needs at least one active admin.",
   cannot_start_ticket: "You can't start tickets in this project.",
   project_archived: "This project is archived.",
+  open_tickets: "This project still has open tickets. Finish or cancel them before archiving it.",
   workflow_archived: "This workflow is archived.",
   ticket_not_open: "This ticket is no longer open.",
   step_not_actionable: "This step can't do that right now.",

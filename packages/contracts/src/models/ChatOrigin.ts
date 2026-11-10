@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { AutomationId, ScheduleTriggerId } from "./Automation.ts";
+import { AutomationId } from "./Automation.ts";
 import { ChatId } from "./Chat.ts";
 import { StringId } from "./primitives.ts";
 
@@ -10,13 +10,6 @@ export const Trigger = Schema.Union([
     type: Schema.Literal("manual"),
     automationId: AutomationId,
     /** The admin who ran the automation. */
-    effectiveUserId: StringId,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("schedule"),
-    automationId: AutomationId,
-    scheduleTriggerId: ScheduleTriggerId,
-    /** The schedule's creator. */
     effectiveUserId: StringId,
   }),
   Schema.Struct({

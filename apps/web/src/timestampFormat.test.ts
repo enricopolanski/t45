@@ -5,7 +5,6 @@ import {
   formatChatTimestampTooltip,
   formatDayAwareTimestamp,
   formatRelativeTimeLabel,
-  formatScheduledLabel,
 } from "./timestampFormat";
 
 // Instants are built from local time so calendar days hold in any test timezone or locale.
@@ -92,20 +91,5 @@ describe("formatRelativeTimeLabel", () => {
     expect(formatRelativeTimeLabel(utc("2026-04-07T11:45:00.000Z"), now)).toBe("15m ago");
     expect(formatRelativeTimeLabel(utc("2026-04-07T09:00:00.000Z"), now)).toBe("3h ago");
     expect(formatRelativeTimeLabel(utc("2026-04-04T12:00:00.000Z"), now)).toBe("3d ago");
-  });
-});
-
-describe("formatScheduledLabel", () => {
-  const now = Date.parse("2026-04-07T12:00:00.000Z");
-
-  it("labels past instants like the relative label", () => {
-    expect(formatScheduledLabel(utc("2026-04-07T11:45:00.000Z"), now)).toBe("15m ago");
-  });
-
-  it("labels the run's next start on a minute/hour/day scale", () => {
-    expect(formatScheduledLabel(utc("2026-04-07T12:00:20.000Z"), now)).toBe("in under a minute");
-    expect(formatScheduledLabel(utc("2026-04-07T12:05:00.000Z"), now)).toBe("in 5m");
-    expect(formatScheduledLabel(utc("2026-04-07T15:00:00.000Z"), now)).toBe("in 3h");
-    expect(formatScheduledLabel(utc("2026-04-09T12:00:00.000Z"), now)).toBe("in 2d");
   });
 });

@@ -1,12 +1,4 @@
-import {
-  canRun,
-  nextRunAt,
-  Refused,
-  type Automation,
-  AutomationId,
-  type ScheduleTrigger,
-  ScheduleTriggerId,
-} from "@t45/contracts/models/Automation";
+import { canRun, Refused, type Automation, AutomationId } from "@t45/contracts/models/Automation";
 import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
 import { NotFound } from "@t45/contracts/resources/errors";
 import { Automations } from "@t45/contracts/resources/Automations";
@@ -19,14 +11,14 @@ import { canAttachAgent } from "@t45/contracts/models/Workflow";
 import * as Struct from "effect/Struct";
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
+import { ChatService } from "../chats/ChatService.ts";
 import { AutomationRepository } from "./AutomationRepository.ts";
-import { AutomationService } from "./AutomationService.ts";
 
 export const layer = Automations.middleware(Authorization).toLayer(
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
     const automations = yield* AutomationRepository;
-    const service = yield* AutomationService;
+    const chats = yield* ChatService;
     const agents = yield* AgentRepository;
     const workflows = yield* WorkflowRepository;
 
@@ -46,7 +38,7 @@ export const layer = Automations.middleware(Authorization).toLayer(
           ? Effect.void
           : Effect.fail(new Refused({ reason: "agent_unavailable" })),
       );
-    /** Finds the automation the caller may run now, by hand or by enabling a schedule of theirs. */
+    /** Finds the automation the caller may run now. */
     const findRunnable = Effect.fnUntraced(function* (id: AutomationId) {
       const automation = yield* found(yield* automations.get(id));
       if (!canRun(yield* CurrentUser, yield* agents.get(automation.agentId)))
@@ -106,64 +98,23 @@ export const layer = Automations.middleware(Authorization).toLayer(
       "automations.runNow": ({ id }) =>
         Effect.gen(function* () {
           const automation = yield* findRunnable(id);
-          yield* service.runNow(automation, (yield* CurrentUser).userId);
+          yield* chats
+            .startAutomation(
+              {
+                type: "manual",
+                automationId: automation.id,
+                effectiveUserId: (yield* CurrentUser).userId,
+              },
+              automation.agentId,
+              { title: automation.title, input: { text: automation.prompt, attachments: [] } },
+            )
+            .pipe(Effect.catchTags({ NotFound: Effect.die }));
         }),
-      "automations.createScheduleTrigger": ({ automationId, schedule }) =>
-        Effect.gen(function* () {
-          yield* findRunnable(automationId);
-          const now = yield* DateTime.now;
-          const trigger: ScheduleTrigger = {
-            id: ScheduleTriggerId.make(yield* crypto.randomUUIDv4().pipe(Effect.orDie)),
-            automationId,
-            creatorUserId: (yield* CurrentUser).userId,
-            schedule,
-            status: "enabled",
-            nextRunAt: nextRunAt(schedule, now),
-            lastError: null,
-            createdAt: now,
-            updatedAt: now,
-          };
-          yield* automations.triggers.insert(trigger);
-          return trigger;
-        }),
-      "automations.setScheduleTriggerEnabled": ({ id, isEnabled }) =>
-        automations.triggers
-          .modify(
-            id,
-            Effect.fnUntraced(function* (trigger) {
-              if (isEnabled === (trigger.status === "enabled")) return trigger;
-              if (isEnabled) {
-                if (trigger.creatorUserId !== (yield* CurrentUser).userId)
-                  return yield* new Refused({ reason: "not_creator" });
-                yield* findRunnable(trigger.automationId);
-              }
-              const now = yield* DateTime.now;
-              const status: ScheduleTrigger["status"] = isEnabled ? "enabled" : "disabled";
-              return {
-                ...trigger,
-                status,
-                nextRunAt: isEnabled ? nextRunAt(trigger.schedule, now) : null,
-                updatedAt: now,
-              };
-            }),
-          )
-          .pipe(Effect.flatMap(found)),
       "automations.archive": ({ id }) =>
         Effect.gen(function* () {
           yield* found(yield* automations.get(id));
           yield* automations.archive(id, yield* DateTime.now);
         }),
-      "automations.archiveScheduleTrigger": ({ id }) =>
-        automations.triggers
-          .modify(id, (trigger) =>
-            Effect.map(DateTime.now, (now): ScheduleTrigger => ({
-              ...trigger,
-              status: "archived",
-              nextRunAt: null,
-              updatedAt: now,
-            })),
-          )
-          .pipe(Effect.flatMap(found), Effect.asVoid),
     });
   }),
 );

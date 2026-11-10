@@ -20,7 +20,7 @@ import * as AttachmentRepository from "./attachments/AttachmentRepository.ts";
 import * as AttachmentsHttp from "./attachments/http.ts";
 import * as Authentication from "./auth/Authentication.ts";
 import * as AuthHttp from "./auth/http.ts";
-import * as AutomationService from "./automations/AutomationService.ts";
+import * as AutomationRepository from "./automations/AutomationRepository.ts";
 import * as ChatRepository from "./chats/ChatRepository.ts";
 import { ChatService } from "./chats/ChatService.ts";
 import * as ServerConfig from "./config.ts";
@@ -65,12 +65,12 @@ const Org = OrganizationRepository.layer.pipe(Layer.provideMerge(ChatServices));
 /**
  * Groups the resources and services owned by one isolated app instance.
  * They get built afresh under a common separate data instance:
- * database, session state, execution state, background automation jobs
+ * database, session state, execution state, background jobs
  */
 const InstanceDependencies = Layer.effect(UserService, UserService.make).pipe(
   Layer.provide(Authentication.layer),
   Layer.provideMerge(WorkflowService.layer),
-  Layer.provideMerge(AutomationService.layer),
+  Layer.provideMerge(AutomationRepository.layer),
   Layer.provideMerge(Org),
 );
 

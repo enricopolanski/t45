@@ -919,6 +919,8 @@ const make = Effect.gen(function* () {
 
   const archiveProject = Effect.fnUntraced(function* (actorId: string, projectId: string) {
     const project = yield* loadManaged(actorId, projectId);
+    // Checked in the archive's own transaction, so an archived project never has an open ticket.
+    if ((yield* tickets.listOpen(project.id)).length > 0) return yield* refuse("open_tickets");
     yield* projects.update({ ...project, isArchived: true });
     yield* record("workflows.archiveProject", actorId, { projectId: project.id });
     yield* tickets.publishChange(project.id);
@@ -1025,9 +1027,9 @@ const make = Effect.gen(function* () {
       files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
       automations: yield* Effect.gen(function* () {
         const attempts = yield* stepRuns(work, step);
-        // New runs stop with the project's archive, and with the automation's own.
-        const isRunnable = isOpen && isActionable(step) && !work.project.isArchived;
+        const isRunnable = isOpen && isActionable(step);
         const attached = definitionOf(work, step).automationIds;
+        // An archived automation starts no new run.
         const live = yield* Effect.filter(attached, (id) =>
           Effect.map(automations.get(id), (automation) => automation !== null),
         );
@@ -1334,7 +1336,6 @@ const make = Effect.gen(function* () {
     input: Payload<"runStepAutomation">,
   ) {
     const { work, step } = yield* loadAutomation(actorId, input);
-    if (work.project.isArchived) return yield* refuse("project_archived");
     const automation = yield* requireStepAutomation(input.automationId, actorId);
     yield* stopStepRuns(work, step, (id) => id === automation.id);
     yield* chats.startAutomation(
