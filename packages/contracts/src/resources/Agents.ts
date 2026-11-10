@@ -27,9 +27,9 @@ export class AgentModels extends Schema.Opaque<AgentModels>()(
   Schema.Struct({ models: Schema.Array(AgentModel), reason: Schema.NullOr(Schema.String) }),
 ) {}
 
-/** What every member may read of an agent: never its instructions, files or MCP configuration. */
+/** What every member may read of an agent: never its setup. */
 export const AgentSummary = Schema.Struct(
-  Struct.pick(Agent.fields, ["id", "name", "model", "permissions", "isConversational", "status"]),
+  Struct.pick(Agent.fields, ["id", "name", "isConversational", "status"]),
 );
 export type AgentSummary = typeof AgentSummary.Type;
 

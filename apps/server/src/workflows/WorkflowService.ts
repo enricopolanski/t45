@@ -9,7 +9,7 @@ import type * as RpcGroup from "effect/rpc/RpcGroup";
 import { ChatRepository } from "../chats/ChatRepository.ts";
 import { ChatEvents } from "../chats/ChatEvents.ts";
 import type { ChatId } from "@t45/contracts/models/Chat";
-import type { AutomationOrigin } from "@t45/contracts/models/ChatOrigin";
+import { type AutomationOrigin, effectiveUserIdOf } from "@t45/contracts/models/ChatOrigin";
 import { canWorkSteps } from "@t45/contracts/models/Agent";
 import type { Attachment } from "@t45/contracts/models/Attachment";
 import {
@@ -70,6 +70,7 @@ import * as Stream from "effect/Stream";
 
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
+import { type CommandLogEntry, CommandLogRepository } from "../persistence/CommandLogRepository.ts";
 import { UserRepository } from "../org/UserRepository.ts";
 import { NotificationRepository } from "./NotificationRepository.ts";
 import { TicketRepository } from "./TicketRepository.ts";
@@ -118,6 +119,7 @@ const make = Effect.gen(function* () {
   const agents = yield* AgentRepository;
   const automations = yield* AutomationRepository;
   const files = yield* AttachmentRepository;
+  const commandLog = yield* CommandLogRepository;
   const buildCurrentStepFieldViews = (
     fields: ReadonlyArray<StepField>,
     prefix: string,
@@ -246,6 +248,33 @@ const make = Effect.gen(function* () {
         createdAt: at,
       });
     }
+  });
+
+  /** Logs a successful command; call it inside the command's transaction. */
+  const record = Effect.fnUntraced(function* (
+    command: WorkflowRpc["_tag"],
+    caller: Caller,
+    target: Pick<CommandLogEntry, "workflowId" | "projectId" | "ticketId" | "stepId">,
+    details: CommandLogEntry["details"] = {},
+  ) {
+    yield* commandLog.append({
+      command,
+      ...(typeof caller === "string"
+        ? { userId: caller, agentId: null, chatId: null }
+        : {
+            userId: effectiveUserIdOf(caller.origin),
+            agentId: caller.agentId,
+            chatId: caller.chatId,
+          }),
+      ...target,
+      details,
+      createdAt: yield* DateTime.now,
+    });
+  });
+  const targetOf = (work: Work, step?: Step) => ({
+    projectId: work.project.id,
+    ticketId: work.ticket.id,
+    stepId: step?.id,
   });
 
   const definitionOf = (work: Work, step: Step) =>
@@ -562,7 +591,10 @@ const make = Effect.gen(function* () {
     };
   });
 
-  const createWorkflow = Effect.fnUntraced(function* (input: Payload<"createWorkflow">) {
+  const createWorkflow = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"createWorkflow">,
+  ) {
     const workflow: Workflow = {
       id: generateId(),
       name: input.name,
@@ -570,8 +602,9 @@ const make = Effect.gen(function* () {
       isArchived: false,
     };
     yield* workflows.insert(workflow);
+    yield* record("workflows.createWorkflow", actorId, { workflowId: workflow.id });
     return { workflowId: workflow.id };
-  });
+  }, transaction);
 
   const updateWorkflow = Effect.fnUntraced(function* (
     actorId: string,
@@ -588,6 +621,12 @@ const make = Effect.gen(function* () {
       ...changes,
     };
     yield* workflows.update(next);
+    yield* record(
+      "workflows.updateWorkflow",
+      actorId,
+      { workflowId },
+      { changed: Object.keys(changes) },
+    );
     for (const project of running) {
       yield* tickets.publishChange(project.id);
       if (changes.steps === undefined) continue;
@@ -618,6 +657,10 @@ const make = Effect.gen(function* () {
       isArchived: false,
     };
     yield* projects.insert(project);
+    yield* record("workflows.createProject", actorId, {
+      workflowId: workflow.id,
+      projectId: project.id,
+    });
     return { projectId: project.id };
   }, transaction);
 
@@ -644,6 +687,12 @@ const make = Effect.gen(function* () {
       ...changes,
       adminUserIds,
     });
+    yield* record(
+      "workflows.updateProject",
+      actorId,
+      { projectId },
+      { changed: Object.keys(changes) },
+    );
     yield* tickets.publishChange(project.id);
   }, transaction);
 
@@ -656,6 +705,7 @@ const make = Effect.gen(function* () {
       return yield* new WorkflowRefused({ reason: "archive_instead_of_delete" });
     }
     yield* projects.remove(project.id);
+    yield* record("workflows.deleteProject", actorId, { projectId });
   }, transaction);
 
   const startTicket = Effect.fnUntraced(function* (caller: Caller, input: Payload<"startTicket">) {
@@ -683,6 +733,7 @@ const make = Effect.gen(function* () {
     yield* tickets.insert(work.ticket);
     const step = yield* enterStep(work, first, null, null, actorId);
     yield* save(work);
+    yield* record("workflows.startTicket", caller, targetOf(work, step));
     return { ticketId: work.ticket.id, stepId: step.id };
   }, transaction);
 
@@ -702,6 +753,7 @@ const make = Effect.gen(function* () {
       status: { type: "cancelled", reason },
     };
     yield* save(work);
+    yield* record("workflows.cancelTicket", actorId, targetOf(work));
   }, transaction);
 
   const reopenTicket = Effect.fnUntraced(function* (actorId: string, ticketId: string) {
@@ -712,6 +764,7 @@ const make = Effect.gen(function* () {
     }
     work.ticket = { ...work.ticket, status: { type: "open" } };
     yield* moveOntoSteps(work, actorId);
+    yield* record("workflows.reopenTicket", actorId, targetOf(work));
   }, transaction);
 
   const setTicketDueDate = Effect.fnUntraced(function* (
@@ -722,6 +775,7 @@ const make = Effect.gen(function* () {
     yield* requireInvolved(work, actorId);
     work.ticket = { ...work.ticket, dueDate: input.dueDate };
     yield* save(work);
+    yield* record("workflows.setTicketDueDate", actorId, targetOf(work));
   }, transaction);
 
   const getStep = Effect.fnUntraced(function* (actorId: string, ticketId: string, stepId: string) {
@@ -816,6 +870,9 @@ const make = Effect.gen(function* () {
       values: value === null ? others : { ...others, [input.fieldKey]: value },
     });
     yield* save(work);
+    yield* record("workflows.setStepField", caller, targetOf(work, step), {
+      fieldKey: input.fieldKey,
+    });
   }, transaction);
 
   const markStepDone = Effect.fnUntraced(function* (actorId: string, stepId: string) {
@@ -834,6 +891,7 @@ const make = Effect.gen(function* () {
     if (completed.next !== null)
       yield* enterStep(work, completed.next, null, step.assignee, actorId);
     yield* save(work);
+    yield* record("workflows.markStepDone", actorId, targetOf(work, step));
   }, transaction);
 
   const setStepAssignee = Effect.fnUntraced(function* (
@@ -854,6 +912,9 @@ const make = Effect.gen(function* () {
       actorId,
     });
     yield* save(work);
+    yield* record("workflows.setStepAssignee", actorId, targetOf(work, step), {
+      assignee: input.assignee,
+    });
   }, transaction);
 
   const blockStep = Effect.fnUntraced(function* (actorId: string, input: Payload<"blockStep">) {
@@ -863,6 +924,7 @@ const make = Effect.gen(function* () {
     yield* stopStepRuns(work, step);
     putStep(work, { ...step, status: { type: "blocked", at: yield* DateTime.now, reason } });
     yield* save(work);
+    yield* record("workflows.blockStep", actorId, targetOf(work, step));
   }, transaction);
 
   const unblockStep = Effect.fnUntraced(function* (actorId: string, stepId: string) {
@@ -872,6 +934,7 @@ const make = Effect.gen(function* () {
     }
     putStep(work, { ...step, status: { type: "working", at: yield* DateTime.now } });
     yield* save(work);
+    yield* record("workflows.unblockStep", actorId, targetOf(work, step));
   }, transaction);
 
   const commentOnStep = Effect.fnUntraced(function* (
@@ -879,13 +942,15 @@ const make = Effect.gen(function* () {
     input: Payload<"commentOnStep">,
   ) {
     const { work, step, actorId } = yield* loadStepFor(caller, input.stepId);
+    const commentId = generateId();
     yield* tickets.insertComment(work.ticket.id, {
-      id: generateId(),
+      id: commentId,
       author: actorId,
       body: input.body,
       createdAt: yield* DateTime.now,
       stepId: step.id,
     });
+    yield* record("workflows.commentOnStep", caller, targetOf(work, step), { commentId });
   }, transaction);
   const attachStepFile = Effect.fnUntraced(function* (
     caller: Caller,
@@ -912,6 +977,10 @@ const make = Effect.gen(function* () {
     if (claimed.sizeBytes === 0) {
       return yield* new WorkflowRefused({ reason: "invalid_attachment" });
     }
+    yield* record("workflows.attachStepFile", caller, targetOf(work, step), {
+      attachmentId: claimed.id,
+      fieldKey,
+    });
     if (fieldKey === null) return yield* tickets.publishChange(work.ticket.id);
     putStep(work, { ...step, values: { ...step.values, [fieldKey]: claimed.id } });
     yield* save(work);
@@ -936,6 +1005,9 @@ const make = Effect.gen(function* () {
       yield* save(work);
     }
     yield* files.detach(file.id);
+    yield* record("workflows.removeStepFile", actorId, targetOf(work, step), {
+      attachmentId: file.id,
+    });
     if (file.fieldKey === null) yield* tickets.publishChange(work.ticket.id);
   }, transaction);
 
@@ -1043,13 +1115,22 @@ const make = Effect.gen(function* () {
     const automation = yield* requireStepAutomation(input.automationId);
     yield* stopStepRuns(work, step, (id) => id === automation.id);
     yield* chats.startAutomation(
-      { type: "step", ticketId: work.ticket.id, stepId: step.id, automationId: automation.id },
+      {
+        type: "step",
+        ticketId: work.ticket.id,
+        stepId: step.id,
+        automationId: automation.id,
+        effectiveUserId: actorId,
+      },
       automation.agentId,
       {
         title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
         input: yield* buildAutomationInput(work, step, automation),
       },
     );
+    yield* record("workflows.runStepAutomation", actorId, targetOf(work, step), {
+      automationId: automation.id,
+    });
   }, transaction);
   const stopStepAutomation = Effect.fnUntraced(function* (
     actorId: string,
@@ -1058,6 +1139,9 @@ const make = Effect.gen(function* () {
     const { work, step } = yield* loadAutomation(actorId, input);
     for (const chatId of yield* stopStepRuns(work, step, (id) => id === input.automationId))
       yield* automationEnded(chatId, actorId);
+    yield* record("workflows.stopStepAutomation", actorId, targetOf(work, step), {
+      automationId: input.automationId,
+    });
   }, transaction);
   const setStepAutomations = Effect.fnUntraced(function* (
     actorId: string,
@@ -1069,6 +1153,9 @@ const make = Effect.gen(function* () {
     yield* stopStepRuns(work, step, (id) => !input.automationIds.includes(id));
     putStep(work, { ...step, automationIds: input.automationIds });
     yield* save(work);
+    yield* record("workflows.setStepAutomations", actorId, targetOf(work, step), {
+      automationIds: input.automationIds,
+    });
   }, transaction);
   const getProjectWorkflow = Effect.fnUntraced(function* (caller: Caller, projectId: string) {
     const { project, workflow } = yield* loadProject(caller, projectId);

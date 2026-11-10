@@ -11,6 +11,8 @@ export const Trigger = Schema.Union([
     ticketId: StringId,
     stepId: StringId,
     automationId: AutomationId,
+    /** The member who ran the automation on the step. */
+    effectiveUserId: StringId,
   }),
 ]);
 export type Trigger = typeof Trigger.Type;
@@ -30,3 +32,11 @@ export type AutomationOrigin = typeof AutomationOrigin.Type;
 
 export const ChatOrigin = Schema.Union([Conversation, AutomationOrigin]);
 export type ChatOrigin = typeof ChatOrigin.Type;
+
+/** The user on whose authority a chat's agent runs commands; a run outside a step has none yet. */
+export const effectiveUserIdOf = (origin: ChatOrigin) =>
+  origin.kind === "conversation"
+    ? origin.ownerUserId
+    : origin.trigger.type === "step"
+      ? origin.trigger.effectiveUserId
+      : null;

@@ -22,7 +22,7 @@ export const layer = Workflows.middleware(Authorization).toLayer(
         asViewer((id) => workflows.getProject(id, idOrSlug)),
       "workflows.getProjectBoard": ({ idOrSlug }) =>
         asViewer((id) => workflows.getProjectBoard(id, idOrSlug)),
-      "workflows.createWorkflow": (input) => asViewer(() => workflows.createWorkflow(input)),
+      "workflows.createWorkflow": (input) => asViewer((id) => workflows.createWorkflow(id, input)),
       "workflows.createProject": (input) => asViewer((id) => workflows.createProject(id, input)),
       "workflows.updateWorkflow": (input) => asViewer((id) => workflows.updateWorkflow(id, input)),
       "workflows.updateProject": (input) => asViewer((id) => workflows.updateProject(id, input)),

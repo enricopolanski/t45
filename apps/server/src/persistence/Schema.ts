@@ -167,6 +167,23 @@ const statements = [
       created_at TEXT NOT NULL
     )`,
   `CREATE INDEX workflow_comments_step ON workflow_comments(step_id, created_at)`,
+  // One entry per successful command, written in the command's transaction and ordered by `id`.
+  // `user_id` is the user on whose authority it ran; `agent_id` and `chat_id` are set when an
+  // agent's execution ran it. Entries outlive what they name, so they hold no foreign keys.
+  // `details` holds ids and keys only, never field values or free text.
+  `CREATE TABLE command_log (
+      id INTEGER PRIMARY KEY,
+      command TEXT NOT NULL,
+      user_id TEXT,
+      agent_id TEXT,
+      chat_id TEXT,
+      workflow_id TEXT,
+      project_id TEXT,
+      ticket_id TEXT,
+      step_id TEXT,
+      details TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`,
 
   // In-app notifications: something new landed in a person's My work. Clicking a notification marks it read.
   `CREATE TABLE workflow_notifications (

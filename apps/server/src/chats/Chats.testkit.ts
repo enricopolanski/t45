@@ -22,6 +22,7 @@ import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as SkillRepository from "../agents/SkillRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
 import * as ServerConfig from "../config.ts";
+import * as CommandLogRepository from "../persistence/CommandLogRepository.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as FakeRunner from "../runner/FakeRunner.testkit.ts";
 import { inputMessageId } from "./ChatIds.ts";
@@ -43,6 +44,7 @@ const layerPersistence = Layer.mergeAll(
   ProjectRepository.layer,
   WorkflowRepository.layer,
   NotificationRepository.layer,
+  CommandLogRepository.layer,
   AttachmentRepository.layer,
   AgentRepository.layer,
   SkillRepository.layer,
@@ -124,6 +126,7 @@ export const seedChat = (chat: {
                     ticketId: ticket.id,
                     stepId: chat.stepId,
                     automationId: AutomationId.make(chat.id),
+                    effectiveUserId: "fixture",
                   }
                 : {
                     type: "automation",

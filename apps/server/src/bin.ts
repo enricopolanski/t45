@@ -29,6 +29,7 @@ import * as OrgHttp from "./org/http.ts";
 import * as OrganizationRepository from "./org/OrganizationRepository.ts";
 import * as UserRepository from "./org/UserRepository.ts";
 import { UserService } from "./org/UserService.ts";
+import * as CommandLogRepository from "./persistence/CommandLogRepository.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { RunnerService } from "./runner/RunnerService.ts";
 import * as NotificationRepository from "./workflows/NotificationRepository.ts";
@@ -50,6 +51,7 @@ const WorkflowRepositories = Layer.mergeAll(
   ProjectRepository.layer,
   TicketRepository.layer,
   NotificationRepository.layer,
+  CommandLogRepository.layer,
 );
 
 const ChatServices = ChatService.layer.pipe(

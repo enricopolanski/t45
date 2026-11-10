@@ -112,17 +112,12 @@ function AgentRow({
           Archived
         </Badge>
       )}
-      {agent.permissions.network === "open" ? (
-        <Badge variant="outline" size="sm">
-          Reaches the internet
-        </Badge>
-      ) : null}
       {agent.isConversational ? (
         <Badge variant="info" size="sm">
           In Chat
         </Badge>
       ) : null}
-      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{agent.model}</span>
+      <span className="flex-1" />
       {canManage ? (
         <Button
           size="sm"
