@@ -1,12 +1,11 @@
 import { appAtomRegistry } from "../../state/atomRegistry";
-import { CopyIcon, MoreHorizontalIcon, PencilIcon, PlayIcon, RefreshCwIcon } from "lucide-react";
+import { MoreHorizontalIcon, PencilIcon, PlayIcon } from "lucide-react";
 import { useState } from "react";
 import { type Schedule, type Automation } from "@t45/contracts/models/Automation";
 import type { AutomationSummary } from "@t45/contracts/resources/Automations";
 
 import { formatRelativeTimeLabel, formatScheduledLabel } from "../../timestampFormat";
 import { agentsList, stepAutomationList } from "../../state/agents";
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
@@ -17,7 +16,6 @@ import {
   browserTimeZone,
   settingsFromDraft,
   automationToDraft,
-  webhookPath,
   type DraftState,
 } from "./automationsSettings.logic";
 import { ErrorText } from "../ui/error-text";
@@ -27,7 +25,6 @@ import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
 import { ToggleGroup, Toggle } from "../ui/toggle-group";
 import { Button } from "../ui/button";
 import {
-  AlertDialog,
   Dialog,
   DialogClose,
   DialogDescription,
@@ -51,9 +48,6 @@ import {
 
 const automationList = apiQuery("automations.list")(undefined);
 
-/** Prompt a new webhook automation starts with: just the body, so request headers stay out unless the user adds them. */
-const DEFAULT_WEBHOOK_PROMPT = "Handle this webhook:\n{{body}}";
-
 /** JS day-of-week (0 = Sunday) rendered Monday-first, matching how people read a week. */
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
@@ -62,14 +56,8 @@ function reportFailure(title: string, description: string) {
   toastManager.add({ type: "error", title, description });
 }
 
-const webhookUrl = (automation: Automation) => {
-  const path = webhookPath(automation);
-  return path === null ? null : new URL(path, window.location.origin).href;
-};
-
 function scheduleLabel(schedule: Schedule) {
   if (schedule.type === "manual") return "On demand";
-  if (schedule.type === "webhook") return "On webhook";
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
     return Number.isInteger(minutes)
@@ -95,7 +83,7 @@ export function AutomationsSettings() {
     <SettingsPageContainer>
       <SettingsSection
         title="Automations"
-        description="Define reusable agent jobs for steps, schedules and webhooks."
+        description="Define reusable agent jobs for steps and schedules."
         action={
           <div className="flex gap-2">
             <Button
@@ -150,14 +138,7 @@ function AutomationRow({
   readonly onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState<"rotate" | null>(null);
   const now = useNowMinute();
-  const { copyToClipboard } = useCopyToClipboard({
-    onCopy: () => toastManager.add({ type: "success", title: "Webhook URL copied" }),
-    onError: () => toastManager.add({ type: "error", title: "Could not copy webhook URL" }),
-  });
-  const isWebhook = automation.schedule.type === "webhook";
-  const url = webhookUrl(automation);
   const act = async (title: string, work: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
@@ -179,17 +160,6 @@ function AutomationRow({
       await api("automations.runNow", { id: automation.id });
       toastManager.add({ type: "success", title: "Run started" });
     });
-  const rotate = () =>
-    act("Could not rotate webhook URL", async () => {
-      const rotated = webhookUrl(await api("automations.rotateToken", { id: automation.id }));
-      toastManager.add({
-        type: "success",
-        title: "Webhook URL rotated",
-        ...(rotated === null
-          ? {}
-          : { actionProps: { children: "Copy URL", onClick: () => copyToClipboard(rotated) } }),
-      });
-    });
   return (
     <SettingsRow
       title={automation.title}
@@ -200,11 +170,9 @@ function AutomationRow({
             {scheduleLabel(automation.schedule)} ·{" "}
             {!automation.isEnabled
               ? "Paused"
-              : isWebhook
-                ? "Listening"
-                : automation.nextRunAt
-                  ? `Next run ${formatScheduledLabel(automation.nextRunAt, now)}`
-                  : "Ready"}
+              : automation.nextRunAt
+                ? `Next run ${formatScheduledLabel(automation.nextRunAt, now)}`
+                : "Ready"}
           </p>
           {automation.lastRun !== null && (
             <p>
@@ -241,52 +209,12 @@ function AutomationRow({
                 <PencilIcon />
                 Edit
               </MenuItem>
-              {isWebhook ? (
-                <>
-                  {url === null ? null : (
-                    <MenuItem onClick={() => copyToClipboard(url)}>
-                      <CopyIcon />
-                      Copy URL
-                    </MenuItem>
-                  )}
-                  <MenuItem onClick={() => setConfirming("rotate")}>
-                    <RefreshCwIcon />
-                    Rotate URL
-                  </MenuItem>
-                </>
-              ) : (
-                <MenuItem onClick={() => void runNow()}>
-                  <PlayIcon />
-                  Run now
-                </MenuItem>
-              )}
+              <MenuItem onClick={() => void runNow()}>
+                <PlayIcon />
+                Run now
+              </MenuItem>
             </MenuPopup>
           </Menu>
-          <AlertDialog
-            open={confirming !== null}
-            onOpenChange={(open) => {
-              if (!open) setConfirming(null);
-            }}
-          >
-            <DialogPopup closeButton={false}>
-              <DialogHeader>
-                <DialogTitle>Rotate this webhook URL?</DialogTitle>
-                <DialogDescription>The current URL stops working.</DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    setConfirming(null);
-                    void rotate();
-                  }}
-                >
-                  Confirm
-                </Button>
-              </DialogFooter>
-            </DialogPopup>
-          </AlertDialog>
         </div>
       }
     />
@@ -404,86 +332,17 @@ function AutomationEditorDialog({
                   value={[draft.scheduleMode]}
                   onValueChange={(values) => {
                     const mode = values[0];
-                    if (
-                      mode === "manual" ||
-                      mode === "fixed" ||
-                      mode === "interval" ||
-                      mode === "webhook"
-                    )
-                      setDraft((current) => ({
-                        ...current,
-                        scheduleMode: mode,
-                        prompt:
-                          mode === "webhook" && !current.prompt.trim()
-                            ? DEFAULT_WEBHOOK_PROMPT
-                            : current.prompt,
-                      }));
+                    if (mode === "manual" || mode === "fixed" || mode === "interval")
+                      patch({ scheduleMode: mode });
                   }}
                 >
                   <Toggle value="manual">On demand</Toggle>
                   <Toggle value="fixed">At a time</Toggle>
                   <Toggle value="interval">Every interval</Toggle>
-                  <Toggle value="webhook">On webhook</Toggle>
                 </ToggleGroup>
               </div>
 
-              {draft.scheduleMode === "manual" ? null : draft.scheduleMode === "webhook" ? (
-                <div className="space-y-4">
-                  <p className="text-xs text-muted-foreground">
-                    {
-                      "Each request to the automation's URL runs the prompt; copy the URL from the automation's menu once saved. Use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}} or {{request}} in the prompt; only what it names reaches the agent."
-                    }
-                  </p>
-                  <SwitchField
-                    label="Require signature"
-                    description="Reject requests without a valid HMAC-SHA256 signature of the body."
-                    checked={draft.isSignatureRequired}
-                    onCheckedChange={(isSignatureRequired) => patch({ isSignatureRequired })}
-                  />
-                  {draft.isSignatureRequired ? (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Header">
-                        <Input
-                          value={draft.signatureHeader}
-                          onChange={(event) => patch({ signatureHeader: event.target.value })}
-                        />
-                      </Field>
-                      <Field label="Prefix">
-                        <Input
-                          value={draft.signaturePrefix}
-                          placeholder="None"
-                          onChange={(event) => patch({ signaturePrefix: event.target.value })}
-                        />
-                      </Field>
-                      <Field label="Encoding">
-                        <Select
-                          value={draft.signatureEncoding}
-                          onValueChange={(value) =>
-                            patch({ signatureEncoding: value === "base64" ? "base64" : "hex" })
-                          }
-                        >
-                          <SelectTrigger size="sm">
-                            <SelectValue>{draft.signatureEncoding}</SelectValue>
-                          </SelectTrigger>
-                          <SelectPopup>
-                            <SelectItem value="hex">hex</SelectItem>
-                            <SelectItem value="base64">base64</SelectItem>
-                          </SelectPopup>
-                        </Select>
-                      </Field>
-                      <Field label="Secret">
-                        <Input
-                          autoComplete="off"
-                          spellCheck={false}
-                          value={draft.signatureSecret}
-                          placeholder="Shared secret"
-                          onChange={(event) => patch({ signatureSecret: event.target.value })}
-                        />
-                      </Field>
-                    </div>
-                  ) : null}
-                </div>
-              ) : draft.scheduleMode === "fixed" ? (
+              {draft.scheduleMode === "manual" ? null : draft.scheduleMode === "fixed" ? (
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="flex items-center gap-2">
                     <Label htmlFor="scheduled-automation-time">Run at</Label>
@@ -531,7 +390,7 @@ function AutomationEditorDialog({
 
             <SwitchField
               label="Enabled"
-              description="Controls scheduled runs and incoming webhooks. You can still run the automation manually or from a step."
+              description="Controls scheduled runs. You can still run the automation manually or from a step."
               checked={draft.isEnabled}
               onCheckedChange={(isEnabled) => patch({ isEnabled })}
             />

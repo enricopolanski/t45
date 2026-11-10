@@ -59,7 +59,6 @@ const addAutomation = (id: string, fields: Partial<Automation> = {}) =>
       agentId: CLERK,
       isEnabled: true,
       schedule: every,
-      webhookToken: null,
       nextRunAt: at,
       lastError: null,
       createdAt: at,
@@ -326,11 +325,6 @@ it.effect("Run now posts the prompt to a new chat and leaves the next slot alone
     const due = DateTime.add(at, { minutes: 1 });
     yield* addAutomation("report", { nextRunAt: due, lastError: "This message is too long." });
     yield* addAutomation("retired", { agentId: RETIRED, nextRunAt: due });
-    yield* addAutomation("hook", {
-      schedule: { type: "webhook", signature: null },
-      webhookToken: "token",
-      nextRunAt: null,
-    });
     const admin = yield* clientAs("admin").pipe(
       Effect.provide(yield* Layer.build(layerAutomations())),
     );
@@ -358,22 +352,13 @@ it.effect("Run now posts the prompt to a new chat and leaves the next slot alone
       (yield* get("retired")).lastError,
       new ChatRefused({ reason: "agent_unavailable" }).message,
     );
-
-    const onRequest = yield* admin["automations.runNow"]({
-      id: AutomationId.make("hook"),
-    }).pipe(Effect.flip);
-    assert.deepInclude(onRequest, { _tag: "AutomationRefused", reason: "runs_on_request" });
   }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
 it.effect("refuses members on every tag before reading or changing an automation", () =>
   Effect.gen(function* () {
     yield* seed;
-    const automation = yield* addAutomation("guarded", {
-      schedule: { type: "webhook", signature: null },
-      webhookToken: "token",
-      nextRunAt: null,
-    });
+    const automation = yield* addAutomation("guarded");
     const member = yield* clientAs("member").pipe(
       Effect.provide(yield* Layer.build(layerAutomations())),
     );
@@ -391,7 +376,6 @@ it.effect("refuses members on every tag before reading or changing an automation
       yield* member["automations.update"]({ id, ...settings }).pipe(Effect.flip),
       yield* member["automations.setEnabled"]({ id, isEnabled: false }).pipe(Effect.flip),
       yield* member["automations.runNow"]({ id }).pipe(Effect.flip),
-      yield* member["automations.rotateToken"]({ id }).pipe(Effect.flip),
     ];
     assert.deepEqual(
       refused.map((error) => error._tag),
@@ -416,7 +400,6 @@ it.effect("keeps the next run through a title edit and restarts it when the sche
     };
     const created = yield* admin["automations.create"](settings);
     assert.equal(iso(created.nextRunAt), "1970-01-01T00:01:00.000Z");
-    assert.isNull(created.webhookToken);
 
     yield* TestClock.adjust("30 seconds");
     const renamed = yield* admin["automations.update"]({
@@ -447,41 +430,6 @@ it.effect("keeps the next run through a title edit and restarts it when the sche
   }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
-it.effect("mints a webhook's token, rotates it, and keeps the rotated one through a save", () =>
-  Effect.gen(function* () {
-    yield* seed;
-    const admin = yield* clientAs("admin").pipe(
-      Effect.provide(yield* Layer.build(layerAutomations())),
-    );
-    const settings = {
-      title: "Review PRs",
-      prompt: "Review {{body.pull_request.url}}",
-      agentId: CLERK,
-      isEnabled: true,
-      schedule: { type: "webhook", signature: null } as const,
-    };
-    const created = yield* admin["automations.create"](settings);
-    assert.isNull(created.nextRunAt);
-    assert.match(created.webhookToken ?? "", /^[A-Za-z0-9_-]{43}$/);
-
-    const rotated = yield* admin["automations.rotateToken"]({ id: created.id });
-    assert.notEqual(rotated.webhookToken, created.webhookToken);
-    const saved = yield* admin["automations.update"]({ id: created.id, ...settings });
-    assert.equal(saved.webhookToken, rotated.webhookToken);
-
-    const timed = yield* admin["automations.update"]({
-      id: created.id,
-      ...settings,
-      schedule: every,
-    });
-    assert.isNull(timed.webhookToken);
-    const notAWebhook = yield* admin["automations.rotateToken"]({ id: created.id }).pipe(
-      Effect.flip,
-    );
-    assert.deepInclude(notAWebhook, { _tag: "AutomationRefused", reason: "not_a_webhook" });
-  }).pipe(Effect.scoped, Effect.provide(layerStore)),
-);
-
 it.effect("refuses an archived agent, and answers NotFound for an unknown automation", () =>
   Effect.gen(function* () {
     yield* seed;
@@ -506,7 +454,6 @@ it.effect("refuses an archived agent, and answers NotFound for an unknown automa
       yield* admin["automations.update"]({ id, ...settings }).pipe(Effect.flip),
       yield* admin["automations.setEnabled"]({ id, isEnabled: false }).pipe(Effect.flip),
       yield* admin["automations.runNow"]({ id }).pipe(Effect.flip),
-      yield* admin["automations.rotateToken"]({ id }).pipe(Effect.flip),
     ];
     assert.deepEqual(
       afterDelete.map((error) => error._tag),

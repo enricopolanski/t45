@@ -110,10 +110,8 @@ const statements = [
       skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
       PRIMARY KEY (agent_id, skill_id)
     )`,
-  // An Automation starts a chat with its agent: when `next_run_at`
-  // comes, on Run now, or on a request to its webhook URL, whose secret is `webhook_token`.
-  // `schedule_json` is the schedule, a webhook's signing secret included, and `last_error` why
-  // its latest run was refused.
+  // An Automation starts a chat with its agent: when `next_run_at` comes, or on Run now.
+  // `schedule_json` is the schedule, and `last_error` why its latest run was refused.
   `CREATE TABLE automations (
       id TEXT PRIMARY KEY NOT NULL,
       title TEXT NOT NULL,
@@ -121,7 +119,6 @@ const statements = [
       agent_id TEXT NOT NULL REFERENCES agents(id),
       is_enabled INTEGER NOT NULL CHECK (is_enabled IN (0, 1)),
       schedule_json TEXT NOT NULL,
-      webhook_token TEXT,
       next_run_at TEXT,
       last_error TEXT,
       created_at TEXT NOT NULL,

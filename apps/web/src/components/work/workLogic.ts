@@ -77,7 +77,7 @@ export const stepNameOf = (view: { readonly definition: { readonly name: string 
 /** The people and agents work can be given to. */
 export interface WorkDirectory {
   readonly people: ReadonlyArray<User>;
-  readonly agents: ReadonlyArray<Pick<Agent, "id" | "name" | "status" | "mcpServers">>;
+  readonly agents: ReadonlyArray<Pick<Agent, "id" | "name" | "status">>;
 }
 
 /** A display name for a person or agent. */

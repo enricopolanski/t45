@@ -1,4 +1,4 @@
-import type { Agent } from "@t45/contracts/models/Agent";
+import type { AgentSummary } from "@t45/contracts/resources/Agents";
 import { Link } from "@tanstack/react-router";
 import { useTransition } from "react";
 
@@ -85,7 +85,13 @@ function AgentsSection({ canManage }: { readonly canManage: boolean }) {
   );
 }
 
-function AgentRow({ agent, canManage }: { readonly agent: Agent; readonly canManage: boolean }) {
+function AgentRow({
+  agent,
+  canManage,
+}: {
+  readonly agent: AgentSummary;
+  readonly canManage: boolean;
+}) {
   const [busy, startTransition] = useTransition();
   const active = agent.status === "active";
   return (

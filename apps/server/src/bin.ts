@@ -21,7 +21,6 @@ import * as AttachmentsHttp from "./attachments/http.ts";
 import * as Authentication from "./auth/Authentication.ts";
 import * as AuthHttp from "./auth/http.ts";
 import * as AutomationService from "./automations/AutomationService.ts";
-import * as WebhookRoute from "./automations/webhookRoute.ts";
 import * as ChatRepository from "./chats/ChatRepository.ts";
 import { ChatService } from "./chats/ChatService.ts";
 import * as ServerConfig from "./config.ts";
@@ -76,7 +75,6 @@ const InstanceDependencies = Layer.effect(UserService, UserService.make).pipe(
 const Routes = Layer.mergeAll(
   AuthHttp.layer,
   OrgHttp.layer,
-  WebhookRoute.layer,
   AttachmentsHttp.layer,
   HttpServer.layer,
   AppRpc.layer,

@@ -8,8 +8,6 @@ import { Refused as AutomationRefused, Automation, AutomationId } from "../model
 import { AdminOnly } from "../Authorization.ts";
 import { NotFound } from "./errors.ts";
 
-export const WEBHOOK_ROUTE_PREFIX = "/api/hooks";
-
 const Settings = Struct.pick(Automation.fields, [
   "title",
   "prompt",
@@ -36,14 +34,9 @@ export const Automations = RpcGroup.make(
     success: Automation,
     error: AutomationRefused,
   }),
-  Rpc.make("rotateToken", {
-    payload: { id: AutomationId },
-    success: Automation,
-    error: Schema.Union([AutomationRefused, NotFound]),
-  }),
   Rpc.make("runNow", {
     payload: { id: AutomationId },
-    error: Schema.Union([AutomationRefused, ChatRefused, NotFound]),
+    error: Schema.Union([ChatRefused, NotFound]),
   }),
   /** Flips only the enabled flag, never overwriting the automation's other fields. */
   Rpc.make("setEnabled", {

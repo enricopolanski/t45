@@ -2,7 +2,6 @@ import {
   isSameSchedule,
   nextRunAt,
   Refused,
-  type Schedule,
   type Automation,
   AutomationId,
 } from "@t45/contracts/models/Automation";
@@ -12,7 +11,6 @@ import { Automations } from "@t45/contracts/resources/Automations";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Base64Url from "effect/encoding/Base64Url";
 
 import { canWorkSteps } from "@t45/contracts/models/Agent";
 import * as Struct from "effect/Struct";
@@ -36,9 +34,6 @@ export const layer = Automations.middleware(Authorization).toLayer(
           () => new Refused({ reason: "agent_unavailable" }),
         ),
       );
-    const newToken = crypto.randomBytes(32).pipe(Effect.map(Base64Url.encode), Effect.orDie);
-    const tokenFor = (schedule: Schedule) =>
-      schedule.type === "webhook" ? newToken : Effect.succeed(null);
 
     return Automations.of({
       "automations.list": () => automations.list,
@@ -58,7 +53,6 @@ export const layer = Automations.middleware(Authorization).toLayer(
           const automation: Automation = {
             ...settings,
             id: AutomationId.make(yield* crypto.randomUUIDv4().pipe(Effect.orDie)),
-            webhookToken: yield* tokenFor(settings.schedule),
             nextRunAt: nextRunAt(settings, now),
             lastError: null,
             createdAt: now,
@@ -71,23 +65,17 @@ export const layer = Automations.middleware(Authorization).toLayer(
         Effect.gen(function* () {
           yield* requireActiveAgent(settings.agentId);
           const now = yield* DateTime.now;
-          const updated = yield* automations.modify(id, (current) =>
-            Effect.gen(function* () {
-              const shouldRestartClock =
-                current.isEnabled !== settings.isEnabled ||
-                !isSameSchedule(current.schedule, settings.schedule);
-              return {
-                ...current,
-                ...settings,
-                webhookToken:
-                  settings.schedule.type === "webhook"
-                    ? (current.webhookToken ?? (yield* newToken))
-                    : null,
-                nextRunAt: shouldRestartClock ? nextRunAt(settings, now) : current.nextRunAt,
-                updatedAt: now,
-              };
-            }),
-          );
+          const updated = yield* automations.modify(id, (current) => {
+            const shouldRestartClock =
+              current.isEnabled !== settings.isEnabled ||
+              !isSameSchedule(current.schedule, settings.schedule);
+            return Effect.succeed({
+              ...current,
+              ...settings,
+              nextRunAt: shouldRestartClock ? nextRunAt(settings, now) : current.nextRunAt,
+              updatedAt: now,
+            });
+          });
           return yield* found(updated);
         }),
       "automations.setEnabled": ({ id, isEnabled }) =>
@@ -108,21 +96,6 @@ export const layer = Automations.middleware(Authorization).toLayer(
           return yield* found(updated);
         }),
       "automations.runNow": ({ id }) => service.runNow(id).pipe(Effect.asVoid),
-      "automations.rotateToken": ({ id }) =>
-        automations
-          .modify(
-            id,
-            Effect.fnUntraced(function* (automation) {
-              if (automation.schedule.type !== "webhook")
-                return yield* new Refused({ reason: "not_a_webhook" });
-              return {
-                ...automation,
-                webhookToken: yield* newToken,
-                updatedAt: yield* DateTime.now,
-              };
-            }),
-          )
-          .pipe(Effect.flatMap(found)),
     });
   }),
 );

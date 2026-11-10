@@ -31,8 +31,8 @@ const decodeSummaries = Schema.decodeUnknownEffect(
 );
 
 const COLUMNS = `id, title, prompt, agent_id AS "agentId", is_enabled AS "isEnabled",
-  schedule_json AS "schedule", webhook_token AS "webhookToken", next_run_at AS "nextRunAt",
-  last_error AS "lastError", created_at AS "createdAt", updated_at AS "updatedAt"`;
+  schedule_json AS "schedule", next_run_at AS "nextRunAt", last_error AS "lastError",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -73,9 +73,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const row = yield* encodeRow(automation);
         yield* sql`INSERT INTO automations (id, title, prompt, agent_id, is_enabled, schedule_json,
-            webhook_token, next_run_at, last_error, created_at, updated_at)
+            next_run_at, last_error, created_at, updated_at)
           VALUES (${row.id}, ${row.title}, ${row.prompt}, ${row.agentId},
-            ${row.isEnabled}, ${row.schedule}, ${row.webhookToken},
+            ${row.isEnabled}, ${row.schedule},
             ${row.nextRunAt}, ${row.lastError}, ${row.createdAt}, ${row.updatedAt})`;
       }).pipe(Effect.orDie),
     setLastError: (id: AutomationId, error: string | null) =>
@@ -98,7 +98,7 @@ const make = Effect.gen(function* () {
               sql`UPDATE automations SET title = ${row.title}, prompt = ${row.prompt},
                     agent_id = ${row.agentId}, is_enabled = ${row.isEnabled},
                     schedule_json = ${row.schedule},
-                    webhook_token = ${row.webhookToken}, next_run_at = ${row.nextRunAt}, last_error = ${row.lastError},
+                    next_run_at = ${row.nextRunAt}, last_error = ${row.lastError},
                     updated_at = ${row.updatedAt}
                   WHERE id = ${id}
                   RETURNING ${columns}`,

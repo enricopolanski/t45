@@ -1,11 +1,12 @@
 import { type Agent, Refused } from "@t45/contracts/models/Agent";
 import { NotFound } from "@t45/contracts/resources/errors";
-import { Agents } from "@t45/contracts/resources/Agents";
+import { Agents, AgentSummary } from "@t45/contracts/resources/Agents";
 import { Authorization } from "@t45/contracts/Authorization";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
 import { AgentRepository } from "./AgentRepository.ts";
@@ -61,7 +62,12 @@ export const layer = Agents.middleware(Authorization).toLayer(
     const save = (agent: Agent) => agents.save(agent).pipe(Effect.as(agent));
 
     return Agents.of({
-      "agents.list": () => agents.list,
+      "agents.list": () =>
+        agents.list.pipe(
+          Effect.map((all) =>
+            all.map((agent) => Struct.pick(agent, Struct.keys(AgentSummary.fields))),
+          ),
+        ),
       "agents.listModels": () =>
         models.pipe(
           Effect.map((models) => ({ models, reason: null })),

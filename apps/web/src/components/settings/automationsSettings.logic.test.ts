@@ -16,39 +16,6 @@ const reviewTask = {
 
 const withSchedule = (schedule: Schedule) => ({ ...reviewTask, schedule });
 
-describe("webhook automations", () => {
-  const signature = {
-    header: "x-signature",
-    encoding: "base64",
-    prefix: "",
-    secret: "shared-secret",
-  } as const;
-  const webhookTask = withSchedule({ type: "webhook", signature });
-
-  it("shows the stored secret and saves the automation's settings back unchanged", () => {
-    const draft = automationToDraft(webhookTask);
-    expect(draft.signatureSecret).toBe("shared-secret");
-    expect(settingsFromDraft(draft)).toEqual({ settings: webhookTask });
-  });
-
-  it("refuses a signature without a secret before sending", () => {
-    const draft = { ...automationToDraft(webhookTask), signatureSecret: "  " };
-    expect(settingsFromDraft(draft)).toEqual({
-      problem: {
-        title: "Signing secret is required",
-        description: "Enter the signature header and secret.",
-      },
-    });
-  });
-
-  it("drops the signature when it is switched off and offers GitHub's settings", () => {
-    const draft = automationToDraft(withSchedule({ type: "webhook", signature: null }));
-    expect(draft.isSignatureRequired).toBe(false);
-    expect(draft.signatureHeader).toBe("x-hub-signature-256");
-    expect(scheduleFromDraft(draft)).toEqual({ type: "webhook", signature: null });
-  });
-});
-
 describe("fixed-time automations", () => {
   it("saves every day explicitly, in this browser's zone", () => {
     const draft = automationToDraft(

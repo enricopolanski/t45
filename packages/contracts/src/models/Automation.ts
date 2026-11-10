@@ -28,15 +28,6 @@ const Weekdays = Schema.Array(Schema.Int.check(Schema.isBetween({ minimum: 0, ma
   ),
 );
 
-/** HMAC-SHA256 over the raw request body. */
-export const Signature = Schema.Struct({
-  header: TrimmedNonEmptyString,
-  encoding: Schema.Literals(["hex", "base64"]),
-  prefix: Schema.String,
-  secret: TrimmedNonEmptyString,
-});
-export type Signature = typeof Signature.Type;
-
 export const Schedule = Schema.Union([
   Schema.Struct({ type: Schema.Literal("manual") }),
   Schema.Struct({
@@ -49,7 +40,6 @@ export const Schedule = Schema.Union([
     timeZone: TimeZone,
     weekdays: Weekdays,
   }),
-  Schema.Struct({ type: Schema.Literal("webhook"), signature: Schema.NullOr(Signature) }),
 ]);
 export type Schedule = typeof Schedule.Type;
 
@@ -62,7 +52,6 @@ export class Automation extends Schema.Opaque<Automation>()(
     agentId: StringId,
     isEnabled: Schema.Boolean,
     schedule: Schedule,
-    webhookToken: Schema.NullOr(Schema.String),
     nextRunAt: Schema.NullOr(Schema.DateTimeUtcFromString),
     lastError: Schema.NullOr(Schema.String),
     createdAt: Schema.DateTimeUtcFromString,
@@ -71,7 +60,7 @@ export class Automation extends Schema.Opaque<Automation>()(
 ) {}
 
 const occurrenceAfter = (schedule: Schedule, from: DateTime.DateTime) => {
-  if (schedule.type === "webhook" || schedule.type === "manual") return null;
+  if (schedule.type === "manual") return null;
   if (schedule.type === "interval") return DateTime.add(from, { milliseconds: schedule.everyMs });
   const hour = Number(schedule.timeOfDay.slice(0, 2));
   const minute = Number(schedule.timeOfDay.slice(3));
@@ -131,8 +120,6 @@ export const isSameSchedule = Schema.toEquivalence(Schedule);
 
 const REFUSALS = {
   agent_unavailable: "This agent was archived or doesn't exist. Choose an active agent.",
-  runs_on_request: "Webhook automations run when their URL receives a request.",
-  not_a_webhook: "Only webhook automations have a URL token.",
 };
 
 export class Refused extends Schema.TaggedError<Refused>()("AutomationRefused", {

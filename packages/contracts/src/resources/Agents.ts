@@ -27,8 +27,14 @@ export class AgentModels extends Schema.Opaque<AgentModels>()(
   Schema.Struct({ models: Schema.Array(AgentModel), reason: Schema.NullOr(Schema.String) }),
 ) {}
 
+/** What every member may read of an agent: never its instructions, files or MCP configuration. */
+export const AgentSummary = Schema.Struct(
+  Struct.pick(Agent.fields, ["id", "name", "model", "permissions", "isConversational", "status"]),
+);
+export type AgentSummary = typeof AgentSummary.Type;
+
 export const Agents = RpcGroup.make(
-  Rpc.make("list", { success: Schema.Array(Agent) }),
+  Rpc.make("list", { success: Schema.Array(AgentSummary) }),
   Rpc.make("listModels", { success: AgentModels }).middleware(AdminOnly),
   Rpc.make("get", { payload: { agentId: StringId }, success: Agent, error: NotFound }).middleware(
     AdminOnly,
