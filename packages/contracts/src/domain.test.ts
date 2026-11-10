@@ -1,7 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
-import { Ticket, Workflow, lastAdminRefusal, stepCompletionRefusal } from "./models/Workflow.ts";
+import {
+  Ticket,
+  WorkflowVersion,
+  lastAdminRefusal,
+  stepCompletionRefusal,
+} from "./models/Workflow.ts";
 
 const at = "2026-10-26T12:00:00.000Z";
 
@@ -12,20 +17,19 @@ const rawStep = {
   status: { type: "working", at },
   assignee: "person01",
   values: {},
-  automationIds: [],
 };
 const rawTicket = {
   id: "ticket01",
   projectId: "project01",
+  workflowVersionId: "version01",
   title: "Review",
   description: "",
-  dueDate: null,
   status: { type: "open" },
   steps: [rawStep],
   createdAt: at,
 };
 const decodeTicket = Schema.decodeUnknownSync(Schema.toCodecJson(Ticket));
-const decodeSteps = Schema.decodeUnknownSync(Workflow.fields.steps);
+const decodeSteps = Schema.decodeUnknownSync(WorkflowVersion.fields.steps);
 const definition = {
   id: "def001",
   name: "Review",

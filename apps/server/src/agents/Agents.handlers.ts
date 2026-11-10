@@ -9,6 +9,8 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
+import { AutomationRepository } from "../automations/AutomationRepository.ts";
+import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 import { AgentRepository } from "./AgentRepository.ts";
 import { SkillRepository } from "./SkillRepository.ts";
 
@@ -23,6 +25,8 @@ export const layer = Agents.middleware(Authorization).toLayer(
   Effect.gen(function* () {
     const agents = yield* AgentRepository;
     const skills = yield* SkillRepository;
+    const automations = yield* AutomationRepository;
+    const workflows = yield* WorkflowRepository;
     const httpClient = yield* HttpClient.HttpClient;
     const crypto = yield* Crypto.Crypto;
 
@@ -86,9 +90,19 @@ export const layer = Agents.middleware(Authorization).toLayer(
         Effect.gen(function* () {
           const agent = yield* findCustom(agentId);
           if (agent.status === "archived") return agent;
-          return yield* save({ ...agent, status: "archived", updatedAt: yield* DateTime.now }).pipe(
-            Effect.orDie,
+          // An agent that a step of some workflow version reaches, through an automation that
+          // isn't archived, stays active. Checked in the archive's own transaction.
+          const archived = yield* agents.modify(
+            agent.id,
+            Effect.fnUntraced(function* (current) {
+              for (const automation of yield* automations.listForAgent(current.id)) {
+                if ((yield* workflows.listAttaching(automation.id)).length > 0)
+                  return yield* new Refused({ reason: "attached_to_workflow" });
+              }
+              return { ...current, status: "archived" as const, updatedAt: yield* DateTime.now };
+            }),
           );
+          return archived ?? (yield* new NotFound());
         }),
       "agents.create": (draft) =>
         Effect.gen(function* () {
@@ -114,12 +128,6 @@ export const layer = Agents.middleware(Authorization).toLayer(
           return yield* save({ ...agent, isPublished: true, updatedAt: yield* DateTime.now }).pipe(
             Effect.orDie,
           );
-        }),
-      "agents.restore": ({ agentId }) =>
-        Effect.gen(function* () {
-          const agent = yield* find(agentId);
-          if (agent.status === "active") return agent;
-          return yield* save({ ...agent, status: "active", updatedAt: yield* DateTime.now });
         }),
       "agents.update": ({ agentId, ...draft }) =>
         Effect.gen(function* () {

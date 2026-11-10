@@ -12,9 +12,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import { member, uploader } from "../auth/http.ts";
 import { ChatService } from "../chats/ChatService.ts";
-import { TicketRepository } from "../workflows/TicketRepository.ts";
-import { canViewTicket } from "@t45/contracts/models/Workflow";
-import { ProjectRepository } from "../workflows/ProjectRepository.ts";
+import { WorkflowService } from "../workflows/WorkflowService.ts";
 import {
   AttachmentRepository,
   attachmentIsInlineImage,
@@ -85,8 +83,7 @@ const attachmentRoute = HttpRouter.add(
     if (attachment === null) return notFound;
 
     const chats = yield* ChatService;
-    const tickets = yield* TicketRepository;
-    const projects = yield* ProjectRepository;
+    const workflows = yield* WorkflowService;
     const readable = Effect.gen(function* () {
       const holders = yield* files.chatsHolding(attachment.id);
       if (attachment.stepId === null && holders.length === 0) {
@@ -95,18 +92,7 @@ const attachmentRoute = HttpRouter.add(
       for (const chatId of holders) {
         if ((yield* chats.access(currentUser, chatId)) !== null) return true;
       }
-      if (attachment.stepId === null) return false;
-      const ticket = yield* tickets.getByStepId(attachment.stepId);
-      const project = ticket === null ? null : yield* projects.get(ticket.projectId);
-      return (
-        ticket !== null &&
-        project !== null &&
-        canViewTicket(
-          { id: currentUser.userId, isOrgAdmin: currentUser.role === "admin" },
-          project,
-          ticket,
-        )
-      );
+      return yield* workflows.canReadStepFile(currentUser.userId, attachment);
     });
     if (!(yield* readable)) return notFound;
 

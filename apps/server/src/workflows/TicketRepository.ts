@@ -1,10 +1,4 @@
-import {
-  Comment,
-  Ticket,
-  oversees,
-  type Project,
-  type WorkflowActor,
-} from "@t45/contracts/models/Workflow";
+import { Comment, Ticket } from "@t45/contracts/models/Workflow";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -23,8 +17,8 @@ const encodeRow = Schema.encodeEffect(Row);
 const decodeComments = Schema.decodeUnknownEffect(Schema.Array(Comment));
 const encodeComment = Schema.encodeEffect(Comment);
 
-const COLUMNS = `t.id, t.project_id AS "projectId", t.title, t.description, t.due_date AS "dueDate",
-  t.status, t.steps, t.created_at AS "createdAt"`;
+const COLUMNS = `t.id, t.project_id AS "projectId", t.workflow_version_id AS "workflowVersionId",
+  t.title, t.description, t.status, t.steps, t.created_at AS "createdAt"`;
 
 const IS_OPEN = `json_extract(t.status, '$.type') = 'open'`;
 
@@ -83,33 +77,12 @@ const make = Effect.gen(function* () {
       read(`EXISTS (SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.id') = ?)`, [
         stepId,
       ]).pipe(first),
-    listForProject: (project: Project, actor: WorkflowActor, query: string) => {
-      const visible = sql`t.project_id = ${project.id}
-        AND instr(lower(t.title), lower(${query.trim()})) > 0
-        AND (${project.isPublic || oversees(actor, project)} OR EXISTS (
-          SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.assignee') = ${actor.id}))`;
-      return Effect.gen(function* () {
-        const rows = yield* sql`SELECT ${sql.literal(COLUMNS)} FROM tickets t WHERE ${visible}
-          ORDER BY t.created_at DESC, t.id DESC LIMIT 100`;
-        const [count] = yield* sql<{
-          readonly total: number;
-        }>`SELECT count(*) AS total FROM tickets t WHERE ${visible}`;
-        return { tickets: yield* decodeRows(rows), total: count!.total };
-      }).pipe(Effect.orDie);
-    },
-    hasTicketsInvolving: (projectId: string, userId: string) =>
-      sql`SELECT 1 FROM tickets t WHERE t.project_id = ${projectId} AND EXISTS (
-        SELECT 1 FROM json_each(t.steps) s WHERE json_extract(s.value, '$.assignee') = ${userId})
-        LIMIT 1`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
-    projectIdsInvolving: (userId: string) =>
-      sql<{ readonly id: string }>`SELECT DISTINCT t.project_id AS id FROM tickets t
-        WHERE EXISTS (SELECT 1 FROM json_each(t.steps) s
-          WHERE json_extract(s.value, '$.assignee') = ${userId})`.pipe(
-        Effect.map((rows) => rows.map((row) => row.id)),
-        Effect.orDie,
+    /** The project's tickets whose title holds `query`, newest first. */
+    listForProject: (projectId: string, query: string) =>
+      read(
+        `t.project_id = ? AND instr(lower(t.title), lower(?)) > 0
+          ORDER BY t.created_at DESC, t.id DESC`,
+        [projectId, query.trim()],
       ),
     listOpen: (projectId: string) =>
       read(`t.project_id = ? AND ${IS_OPEN} ORDER BY t.created_at, t.id`, [projectId]),
@@ -120,25 +93,20 @@ const make = Effect.gen(function* () {
           ORDER BY t.created_at, t.id`,
         [id],
       ),
-    hasTickets: (projectId: string) =>
-      sql`SELECT 1 FROM tickets WHERE project_id = ${projectId} LIMIT 1`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
     insert: (ticket: Ticket) =>
       Effect.gen(function* () {
         const row = yield* encodeRow(ticket);
-        yield* sql`INSERT INTO tickets (id, project_id, title, description, due_date, status,
-              steps, created_at)
-            VALUES (${row.id}, ${row.projectId}, ${row.title}, ${row.description},
-              ${row.dueDate}, ${row.status}, ${row.steps}, ${row.createdAt})`;
+        yield* sql`INSERT INTO tickets (id, project_id, workflow_version_id, title, description,
+              status, steps, created_at)
+            VALUES (${row.id}, ${row.projectId}, ${row.workflowVersionId}, ${row.title},
+              ${row.description}, ${row.status}, ${row.steps}, ${row.createdAt})`;
         yield* publishChange(ticket.id);
       }).pipe(Effect.orDie),
     update: (ticket: Ticket) =>
       Effect.gen(function* () {
         const row = yield* encodeRow(ticket);
         yield* sql`UPDATE tickets SET title = ${row.title}, description = ${row.description},
-              due_date = ${row.dueDate}, status = ${row.status}, steps = ${row.steps}
+              status = ${row.status}, steps = ${row.steps}
             WHERE id = ${row.id}`;
         yield* publishChange(ticket.id);
       }).pipe(Effect.orDie),

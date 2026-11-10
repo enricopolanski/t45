@@ -16,7 +16,7 @@ export const AssignmentView = Schema.Struct({
 });
 export type AssignmentView = typeof AssignmentView.Type;
 
-/** The steps and sub-steps I have to do, by their ticket's due date, undated last. */
+/** The steps and sub-steps I have to do, the longest in their state first. */
 export const Assignments = RpcGroup.make(
   Rpc.make("listAssignments", { success: Schema.Array(AssignmentView), error: WorkflowErrors }),
 ).prefix("assignments.");

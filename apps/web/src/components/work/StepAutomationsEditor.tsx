@@ -1,36 +1,29 @@
-import type { AutomationId } from "@t45/contracts/models/Automation";
 import { Link } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import { stepAutomationList } from "../../state/agents";
 import { useApiQuery } from "../../state/rpc";
 import { useIsAdmin } from "../../state/session";
 import { Button } from "../ui/button";
-import {
-  AlertDialog,
-  DialogClose,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPopup,
-  DialogTitle,
-} from "../ui/dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { ErrorText } from "../ui/error-text";
 
+/**
+ * The automations of a step. A workflow's step editor passes `onChange` to attach and detach them;
+ * a ticket's step shows each with what `renderStatus` gives it.
+ */
 export function StepAutomationsEditor({
   automationIds,
-  busy,
-  onSave,
+  disabled = false,
+  onChange,
   renderStatus,
 }: {
-  readonly automationIds: ReadonlyArray<AutomationId>;
-  readonly busy: boolean;
-  readonly onSave?: ((ids: ReadonlyArray<AutomationId>) => Promise<boolean>) | undefined;
-  readonly renderStatus?: (id: AutomationId) => ReactNode;
+  readonly automationIds: ReadonlyArray<string>;
+  readonly disabled?: boolean;
+  readonly onChange?: (ids: ReadonlyArray<string>) => void;
+  readonly renderStatus?: (id: string) => ReactNode;
 }) {
   const query = useApiQuery(stepAutomationList);
   const isAdmin = useIsAdmin();
-  const [removing, setRemoving] = useState<AutomationId | null>(null);
   const available = (query.data ?? []).filter(
     (automation) => !automationIds.includes(automation.id),
   );
@@ -44,21 +37,25 @@ export function StepAutomationsEditor({
             <p className="font-medium">{automation?.title ?? "Unavailable automation"}</p>
             <p className="whitespace-pre-wrap text-muted-foreground">{automation?.prompt}</p>
             {renderStatus?.(id)}
-            {onSave && (
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRemoving(id)}>
+            {onChange && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                onClick={() => onChange(automationIds.filter((other) => other !== id))}
+              >
                 Remove
               </Button>
             )}
           </div>
         );
       })}
-      {onSave && (
+      {onChange && (
         <Select
           value={null}
-          disabled={busy || available.length === 0}
+          disabled={disabled || available.length === 0}
           onValueChange={(value) => {
-            const automation = available.find((automation) => automation.id === value);
-            if (automation) void onSave([...automationIds, automation.id]);
+            if (typeof value === "string") onChange([...automationIds, value]);
           }}
         >
           <SelectTrigger aria-label="Add automation">
@@ -78,34 +75,6 @@ export function StepAutomationsEditor({
           Manage automations
         </Link>
       )}
-      <AlertDialog
-        open={removing !== null}
-        onOpenChange={(open) => {
-          if (!open && !busy) setRemoving(null);
-        }}
-      >
-        <DialogPopup closeButton={false}>
-          <DialogHeader>
-            <DialogTitle>Remove this automation?</DialogTitle>
-            <DialogDescription>Its current execution will be stopped.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={busy} />}>
-              Keep automation
-            </DialogClose>
-            <Button
-              variant="destructive"
-              disabled={busy}
-              onClick={async () => {
-                if (onSave && (await onSave(automationIds.filter((id) => id !== removing))))
-                  setRemoving(null);
-              }}
-            >
-              Remove automation
-            </Button>
-          </DialogFooter>
-        </DialogPopup>
-      </AlertDialog>
     </div>
   );
 }

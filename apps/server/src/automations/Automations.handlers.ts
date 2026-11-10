@@ -15,8 +15,10 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
 import { type Agent, canUse, canWorkSteps } from "@t45/contracts/models/Agent";
+import { canAttachAgent } from "@t45/contracts/models/Workflow";
 import * as Struct from "effect/Struct";
 import { AgentRepository } from "../agents/AgentRepository.ts";
+import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 import { AutomationRepository } from "./AutomationRepository.ts";
 import { AutomationService } from "./AutomationService.ts";
 
@@ -26,6 +28,7 @@ export const layer = Automations.middleware(Authorization).toLayer(
     const automations = yield* AutomationRepository;
     const service = yield* AutomationService;
     const agents = yield* AgentRepository;
+    const workflows = yield* WorkflowRepository;
 
     const found = <A>(value: A | null) =>
       value === null ? Effect.fail(new NotFound()) : Effect.succeed(value);
@@ -72,21 +75,34 @@ export const layer = Automations.middleware(Authorization).toLayer(
           const automation: Automation = {
             ...settings,
             id: AutomationId.make(yield* crypto.randomUUIDv4().pipe(Effect.orDie)),
+            isArchived: false,
             createdAt: now,
             updatedAt: now,
           };
           yield* automations.save(automation);
           return automation;
         }),
+      // Checked and saved in one transaction, so a step can't attach the automation, nor its
+      // agent be archived, between the two.
       "automations.update": ({ id, ...settings }) =>
-        Effect.gen(function* () {
-          const agent = yield* requireActiveAgent(settings.agentId);
-          const saved = yield* found(yield* automations.get(id));
-          if (settings.agentId !== saved.agentId) yield* requireUse(agent);
-          const updated = { ...saved, ...settings, updatedAt: yield* DateTime.now };
-          yield* automations.save(updated);
-          return updated;
-        }),
+        automations
+          .modify(
+            id,
+            Effect.fnUntraced(function* (saved) {
+              const agent = yield* requireActiveAgent(settings.agentId);
+              if (settings.agentId !== saved.agentId) {
+                yield* requireUse(agent);
+                // A step's automation keeps to the rule its attachment was held to.
+                const { userId } = yield* CurrentUser;
+                for (const workflow of yield* workflows.listAttaching(id)) {
+                  if (agent === null || !canAttachAgent(agent, workflow, userId))
+                    return yield* new Refused({ reason: "attached_agent_unfit" });
+                }
+              }
+              return { ...saved, ...settings, updatedAt: yield* DateTime.now };
+            }),
+          )
+          .pipe(Effect.flatMap(found)),
       "automations.runNow": ({ id }) =>
         Effect.gen(function* () {
           const automation = yield* findRunnable(id);
@@ -132,6 +148,11 @@ export const layer = Automations.middleware(Authorization).toLayer(
             }),
           )
           .pipe(Effect.flatMap(found)),
+      "automations.archive": ({ id }) =>
+        Effect.gen(function* () {
+          yield* found(yield* automations.get(id));
+          yield* automations.archive(id, yield* DateTime.now);
+        }),
       "automations.archiveScheduleTrigger": ({ id }) =>
         automations.triggers
           .modify(id, (trigger) =>

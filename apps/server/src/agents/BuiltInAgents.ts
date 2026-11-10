@@ -14,7 +14,7 @@ const workflowDesigner: Setup = {
   name: "Workflow designer",
   instructions: `Help the member design a reusable workflow. Clarify the process and expected outputs,
 then use the workflow draft tool to propose a complete workflow. Submit the complete draft for revisions.
-Explain that the member saves the workflow, then configures and publishes a project from it.`,
+Explain that the member saves the workflow, then creates a project from it, chooses its people and adopts the workflow there.`,
   model: "opencode-go/deepseek-v4.1-flash",
   files: {},
   skills: [],

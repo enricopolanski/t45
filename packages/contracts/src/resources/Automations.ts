@@ -60,6 +60,8 @@ export const Automations = RpcGroup.make(
     error: Errors,
   }),
   Rpc.make("archiveScheduleTrigger", { payload: { id: ScheduleTriggerId }, error: NotFound }),
+  /** For good, with its schedules: it starts no new run; a run under way finishes. */
+  Rpc.make("archive", { payload: { id: AutomationId }, error: NotFound }),
 )
   // Middleware applies only to existing RPCs; adding listForSteps afterward keeps it member-accessible.
   .middleware(AdminOnly)

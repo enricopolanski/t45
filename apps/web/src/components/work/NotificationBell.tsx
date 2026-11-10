@@ -14,7 +14,6 @@ import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popov
 const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
   to_do: "New step to do",
   automation_ended: "Automation ended",
-  needs_responsible: "Needs a new responsible",
   names_deactivated: "Names someone who left",
 };
 

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { formatDueDate } from "./workLogic";
+import { formatDay } from "./workLogic";
 
-describe("formatDueDate", () => {
+describe("formatDay", () => {
   it("leaves the year out for this year's dates only", () => {
     const year = new Date().getFullYear();
-    expect(formatDueDate(`${year}-10-27`)).not.toContain(String(year));
-    expect(formatDueDate(`${year + 1}-01-05`)).toContain(String(year + 1));
+    expect(formatDay(`${year}-10-27`)).not.toContain(String(year));
+    expect(formatDay(`${year + 1}-01-05`)).toContain(String(year + 1));
   });
 });

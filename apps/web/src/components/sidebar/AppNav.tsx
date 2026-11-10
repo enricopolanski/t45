@@ -6,10 +6,9 @@ import {
   KanbanSquareIcon,
   MessagesSquareIcon,
 } from "lucide-react";
-import type { ProjectListEntryView } from "@t45/contracts/resources/Workflows";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { api } from "../../rpc/api";
+import { api, type ApiSuccess } from "../../rpc/api";
 import {
   SidebarContent,
   SidebarGroup,
@@ -97,12 +96,10 @@ function BoardsItem({
       <SidebarMenuItem>
         <SidebarMenuButton
           onClick={onNavigate}
-          render={
-            <Link to="/boards/$slug" params={{ slug: only.project.slug ?? only.project.id }} />
-          }
+          render={<Link to="/boards/$slug" params={{ slug: only.slug ?? only.id }} />}
         >
           {link.icon}
-          <span>{only.project.name}</span>
+          <span>{only.name}</span>
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
@@ -119,17 +116,12 @@ function BoardsItem({
       {boards.length > 0 ? (
         <SidebarMenuSub>
           {boards.map((board) => (
-            <SidebarMenuItem key={board.project.id}>
+            <SidebarMenuItem key={board.id}>
               <SidebarMenuButton
                 onClick={onNavigate}
-                render={
-                  <Link
-                    to="/boards/$slug"
-                    params={{ slug: board.project.slug ?? board.project.id }}
-                  />
-                }
+                render={<Link to="/boards/$slug" params={{ slug: board.slug ?? board.id }} />}
               >
-                <span>{board.project.name}</span>
+                <span>{board.name}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}
@@ -140,11 +132,11 @@ function BoardsItem({
 }
 
 /**
- * The boards the viewer can open: every unarchived project with steps the server lists for them.
- * Re-read on the project pages, where projects are created, given steps, and archived.
+ * The boards the viewer can open: those of the projects with a step they are a member of. Re-read
+ * on the project pages, where projects get their people, adopt versions, and are archived.
  */
 function useOpenBoards() {
-  const [boards, setBoards] = useState<ReadonlyArray<ProjectListEntryView>>([]);
+  const [boards, setBoards] = useState<ApiSuccess<"workflows.listBoards">>([]);
   const projectsPath = useLocation({
     select: (location) =>
       location.pathname.startsWith("/settings/projects") || location.pathname.startsWith("/boards")
@@ -153,12 +145,9 @@ function useOpenBoards() {
   });
   useEffect(() => {
     let current = true;
-    void api("workflows.listProjects", undefined).then(
-      (projects) => {
-        if (!current) return;
-        setBoards(
-          projects.filter((entry) => !entry.project.isArchived && entry.workflow.steps.length > 0),
-        );
+    void api("workflows.listBoards", undefined).then(
+      (listed) => {
+        if (current) setBoards(listed);
       },
       () => undefined,
     );

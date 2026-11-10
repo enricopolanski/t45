@@ -8,6 +8,7 @@ import { describeFailure } from "../../lib/failures";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { plural } from "../work/workLogic";
+import { editsBetween } from "../workflows/workflowLogic";
 
 /** Which drafts this browser saved as workflows, so a reload opens the same workflow. */
 const createdKey = (itemId: string) => `t45.workflowDraft.workflow.${itemId}`;
@@ -59,7 +60,10 @@ export function WorkflowDraftCard(props: {
   const create = () => {
     setCreating(true);
     setError(null);
-    void api("workflows.createWorkflow", draft)
+    void api("workflows.createWorkflow", {
+      name: draft.name,
+      edits: editsBetween([], draft.steps),
+    })
       .then(
         (created) => {
           rememberCreated(itemId, created.workflowId);
@@ -87,7 +91,7 @@ export function WorkflowDraftCard(props: {
       <div className="flex min-w-0 items-center justify-between gap-2">
         <p className="min-w-0 text-xs text-muted-foreground">
           {workflowId === null
-            ? "Save this workflow, then create a project to assign people."
+            ? "Save this workflow, then create a project to choose its people and adopt it."
             : "Workflow saved. Create a project from its page."}
         </p>
         {workflowId === null ? (

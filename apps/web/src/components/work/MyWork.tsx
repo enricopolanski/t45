@@ -1,12 +1,10 @@
 import type { AssignmentView } from "@t45/contracts/resources/Assignments";
 import { Link } from "@tanstack/react-router";
-import * as DateTime from "effect/DateTime";
 
 import { useMyWork } from "../../state/work";
 import { Badge } from "../ui/badge";
 import { NewItemDialog } from "./NewItemDialog";
 import { WorkFrame } from "./WorkFrame";
-import { formatDueDate } from "./workLogic";
 
 /** The signed-in person's work. */
 export function MyWorkPage() {
@@ -55,22 +53,7 @@ function MyWorkRowLink({ row }: { readonly row: AssignmentView }) {
           {[...row.parentNames, row.stepName].join(" › ")} · {row.projectName}
         </p>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {row.step.status.type === "blocked" ? <Badge variant="warning">Blocked</Badge> : null}
-        <DueBadge dueDate={row.ticket.dueDate} />
-      </div>
+      {row.step.status.type === "blocked" ? <Badge variant="warning">Blocked</Badge> : null}
     </Link>
-  );
-}
-
-/** A row's due date, red once overdue; nothing without one. */
-export function DueBadge({ dueDate }: { readonly dueDate: DateTime.Utc | null }) {
-  if (dueDate === null) return null;
-  const day = DateTime.formatIso(dueDate).slice(0, 10);
-  const isOverdue = day < new Date().toISOString().slice(0, 10);
-  return (
-    <Badge variant={isOverdue ? "error" : "outline"}>
-      {isOverdue ? "Overdue" : "Due"} {formatDueDate(day)}
-    </Badge>
   );
 }

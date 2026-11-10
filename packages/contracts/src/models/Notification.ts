@@ -7,24 +7,16 @@ export type NotificationId = typeof NotificationId.Type;
 
 /**
  * Why something landed in My work: a step to do or a step whose automation ended; or, for a project's
- * admins, a project that needs a new responsible or names a deactivated person.
+ * admins, a project that names a deactivated person as a step's assignee on entry.
  */
-export const NotificationKind = Schema.Literals([
-  "to_do",
-  "automation_ended",
-  "needs_responsible",
-  "names_deactivated",
-]);
+export const NotificationKind = Schema.Literals(["to_do", "automation_ended", "names_deactivated"]);
 export type NotificationKind = typeof NotificationKind.Type;
 
 /** Step notices identify a step; administrative notices identify the project alone. */
 export const hasValidTarget = (notice: {
   readonly kind: NotificationKind;
   readonly stepId: string | null;
-}) =>
-  notice.kind === "needs_responsible" || notice.kind === "names_deactivated"
-    ? notice.stepId === null
-    : notice.stepId !== null;
+}) => (notice.kind === "names_deactivated" ? notice.stepId === null : notice.stepId !== null);
 
 export class Notification extends Schema.Opaque<Notification>()(
   Schema.Struct({

@@ -1,5 +1,4 @@
 import type { Workflow } from "@t45/contracts/models/Workflow";
-import { StringId } from "@t45/contracts/models/primitives";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
 
@@ -10,7 +9,6 @@ import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { PersonPicker } from "../work/PersonPicker";
 import { WorkFrame } from "../work/WorkFrame";
 
 /** Configures a project from an existing shared workflow. */
@@ -24,7 +22,6 @@ export function NewProject({
   const [workflows, setWorkflows] = useState<ReadonlyArray<Workflow> | null>(null);
   const [workflowId, setWorkflowId] = useState(selectedWorkflowId ?? "");
   const [name, setName] = useState("");
-  const [responsible, setResponsible] = useState<StringId | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +30,9 @@ export function NewProject({
     void api("workflows.listWorkflows", undefined).then(
       (loaded) => {
         if (!current) return;
-        const active = loaded.filter((workflow) => !workflow.isArchived);
+        const active = loaded
+          .map(({ workflow }) => workflow)
+          .filter((workflow) => !workflow.isArchived);
         setWorkflows(active);
         const selected = active.find((workflow) => workflow.id === selectedWorkflowId);
         if (selected) setName(selected.name);
@@ -49,10 +48,10 @@ export function NewProject({
   }, [selectedWorkflowId]);
 
   const submit = () => {
-    if (!workflowId || !name.trim() || responsible === null) return;
+    if (!workflowId || !name.trim()) return;
     setBusy(true);
     setError(null);
-    void api("workflows.createProject", { workflowId, name: name.trim(), responsible }).then(
+    void api("workflows.createProject", { workflowId, name: name.trim() }).then(
       ({ projectId }) =>
         void navigate({ to: "/settings/projects/$projectId/edit", params: { projectId } }),
       (cause: unknown) => {
@@ -65,7 +64,7 @@ export function NewProject({
   return (
     <WorkFrame title="New project">
       <p className="text-sm text-muted-foreground">
-        Choose a shared workflow, then configure this project's people and assignments.
+        Choose a shared workflow, then choose this project's people and adopt a version of it.
       </p>
       <form
         aria-label="New project"
@@ -127,24 +126,9 @@ export function NewProject({
             disabled={busy}
           />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-responsible`}>Responsible</Label>
-          <p className="text-xs text-muted-foreground">Who answers for this process.</p>
-          <PersonPicker
-            id={`${id}-responsible`}
-            aria-label="Responsible"
-            value={responsible}
-            onChange={setResponsible}
-            placeholder="Choose a person"
-            disabled={busy}
-          />
-        </div>
         {error && <ErrorText text={error} />}
         <div>
-          <Button
-            type="submit"
-            disabled={busy || !name.trim() || !workflowId || responsible === null}
-          >
+          <Button type="submit" disabled={busy || !name.trim() || !workflowId}>
             Create project
           </Button>
         </div>

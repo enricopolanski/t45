@@ -65,6 +65,7 @@ const addAutomation = (
       title: `Automation ${id}`,
       prompt: prompt ?? `Run ${id}`,
       agentId: agentId ?? CLERK,
+      isArchived: false,
       createdAt: at,
       updatedAt: at,
     };

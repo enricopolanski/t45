@@ -8,16 +8,23 @@ import * as SqlClient from "effect/sql/SqlClient";
 const Row = Schema.Struct({
   ...Project.fields,
   adminUserIds: Schema.fromJsonString(Project.fields.adminUserIds),
-  defaultAssignments: Schema.fromJsonString(Project.fields.defaultAssignments),
-  isPublic: Schema.BooleanFromBit,
+  defaultAssignees: Schema.fromJsonString(Project.fields.defaultAssignees),
   isArchived: Schema.BooleanFromBit,
 });
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
 const encodeRow = Schema.encodeEffect(Row);
 
-const COLUMNS = `id, workflow_id AS "workflowId", name, responsible_user_id AS "responsible",
-  admin_user_ids AS "adminUserIds", default_assignments AS "defaultAssignments", slug,
-  is_public AS "isPublic", is_archived AS "isArchived"`;
+const COLUMNS = `id, workflow_id AS "workflowId", workflow_version_id AS "workflowVersionId", name,
+  admin_user_ids AS "adminUserIds", default_assignees AS "defaultAssignees", slug,
+  is_archived AS "isArchived"`;
+
+/** A member of one of the workflow's steps in a project; `stepId` is the step's definition id. */
+interface StepMember {
+  readonly projectId: string;
+  readonly stepId: string;
+  readonly userId: string;
+}
+const MEMBER_COLUMNS = `project_id AS "projectId", step_id AS "stepId", user_id AS "userId"`;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -39,11 +46,10 @@ const make = Effect.gen(function* () {
     insert: (project: Project) =>
       Effect.gen(function* () {
         const row = yield* encodeRow(project);
-        yield* sql`INSERT INTO projects (id, workflow_id, name, responsible_user_id,
-              admin_user_ids, default_assignments, slug, is_public, is_archived)
-            VALUES (${row.id}, ${row.workflowId}, ${row.name}, ${row.responsible},
-              ${row.adminUserIds}, ${row.defaultAssignments}, ${row.slug},
-              ${row.isPublic}, ${row.isArchived})`;
+        yield* sql`INSERT INTO projects (id, workflow_id, workflow_version_id, name,
+              admin_user_ids, default_assignees, slug, is_archived)
+            VALUES (${row.id}, ${row.workflowId}, ${row.workflowVersionId}, ${row.name},
+              ${row.adminUserIds}, ${row.defaultAssignees}, ${row.slug}, ${row.isArchived})`;
       }).pipe(Effect.orDie),
     update: (project: Project) =>
       Effect.gen(function* () {
@@ -55,13 +61,38 @@ const make = Effect.gen(function* () {
         }
         const row = yield* encodeRow(project).pipe(Effect.orDie);
         yield* sql`UPDATE projects SET name = ${row.name},
-              responsible_user_id = ${row.responsible}, admin_user_ids = ${row.adminUserIds},
-              default_assignments = ${row.defaultAssignments}, slug = ${row.slug},
-              is_public = ${row.isPublic}, is_archived = ${row.isArchived}
+              workflow_version_id = ${row.workflowVersionId},
+              admin_user_ids = ${row.adminUserIds},
+              default_assignees = ${row.defaultAssignees}, slug = ${row.slug},
+              is_archived = ${row.isArchived}
             WHERE id = ${row.id}`.pipe(Effect.orDie);
       }),
-    remove: (id: string) =>
-      sql`DELETE FROM projects WHERE id = ${id}`.pipe(Effect.asVoid, Effect.orDie),
+    members: {
+      listForProject: (projectId: string) =>
+        sql<StepMember>`SELECT ${sql.literal(MEMBER_COLUMNS)} FROM step_members
+            WHERE project_id = ${projectId} ORDER BY step_id, user_id`.pipe(Effect.orDie),
+      /** The definition ids of the workflow's steps `userId` is a member of in the project. */
+      stepIdsOf: (projectId: string, userId: string) =>
+        sql<{ readonly stepId: string }>`SELECT step_id AS "stepId" FROM step_members
+            WHERE project_id = ${projectId} AND user_id = ${userId}`.pipe(
+          Effect.map((rows) => rows.map((row) => row.stepId)),
+          Effect.orDie,
+        ),
+      listForUser: (userId: string) =>
+        sql<StepMember>`SELECT ${sql.literal(MEMBER_COLUMNS)} FROM step_members
+            WHERE user_id = ${userId}`.pipe(Effect.orDie),
+      /** Adding someone who already is a member changes nothing. */
+      add: (member: StepMember) =>
+        sql`INSERT INTO step_members (project_id, step_id, user_id)
+            VALUES (${member.projectId}, ${member.stepId}, ${member.userId})
+            ON CONFLICT DO NOTHING`.pipe(Effect.asVoid, Effect.orDie),
+      remove: (member: StepMember) =>
+        sql`DELETE FROM step_members WHERE project_id = ${member.projectId}
+            AND step_id = ${member.stepId} AND user_id = ${member.userId}`.pipe(
+          Effect.asVoid,
+          Effect.orDie,
+        ),
+    },
   };
 });
 

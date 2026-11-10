@@ -177,7 +177,11 @@ describe("tool parts", () => {
           },
         }),
       ),
-    ).toEqual(draft);
+      // A draft names no inputs or automations: its steps start without any.
+    ).toEqual({
+      ...draft,
+      steps: draft.steps.map((step) => ({ ...step, inputs: [], automationIds: [] })),
+    });
     expect(
       workflowDraftOf(
         toolPart({

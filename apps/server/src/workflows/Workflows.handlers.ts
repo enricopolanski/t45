@@ -17,17 +17,31 @@ export const layer = Workflows.middleware(Authorization).toLayer(
       "workflows.getWorkflow": ({ workflowId }) =>
         asViewer((id) => workflows.getWorkflow(id, workflowId)),
       "workflows.listProjects": () => asViewer(workflows.listProjects),
+      "workflows.listBoards": () => asViewer(workflows.listBoards),
       "workflows.listStartableProjects": () => asViewer(workflows.listStartableProjects),
       "workflows.getProject": ({ idOrSlug }) =>
         asViewer((id) => workflows.getProject(id, idOrSlug)),
-      "workflows.getProjectBoard": ({ idOrSlug }) =>
-        asViewer((id) => workflows.getProjectBoard(id, idOrSlug)),
+      "workflows.getProjectBoard": (input) =>
+        asViewer((id) => workflows.getProjectBoard(id, input)),
       "workflows.createWorkflow": (input) => asViewer((id) => workflows.createWorkflow(id, input)),
+      "workflows.renameWorkflow": (input) => asViewer((id) => workflows.renameWorkflow(id, input)),
+      "workflows.setWorkflowEditors": (input) =>
+        asViewer((id) => workflows.setWorkflowEditors(id, input)),
+      "workflows.archiveWorkflow": ({ workflowId }) =>
+        asViewer((id) => workflows.archiveWorkflow(id, workflowId)),
+      "workflows.saveWorkflowDraft": (input) =>
+        asViewer((id) => workflows.saveWorkflowDraft(id, input)),
       "workflows.createProject": (input) => asViewer((id) => workflows.createProject(id, input)),
-      "workflows.updateWorkflow": (input) => asViewer((id) => workflows.updateWorkflow(id, input)),
+      "workflows.adoptWorkflowVersion": (input) =>
+        asViewer((id) => workflows.adoptWorkflowVersion(id, input)),
       "workflows.updateProject": (input) => asViewer((id) => workflows.updateProject(id, input)),
-      "workflows.deleteProject": ({ projectId }) =>
-        asViewer((id) => workflows.deleteProject(id, projectId)),
+      "workflows.addStepMember": (input) => asViewer((id) => workflows.addStepMember(id, input)),
+      "workflows.removeStepMember": (input) =>
+        asViewer((id) => workflows.removeStepMember(id, input)),
+      "workflows.listStepAssignments": (input) =>
+        asViewer((id) => workflows.listStepAssignments(id, input)),
+      "workflows.archiveProject": ({ projectId }) =>
+        asViewer((id) => workflows.archiveProject(id, projectId)),
       "workflows.getProjectWorkflow": ({ projectId }) =>
         Effect.flatMap(caller, (actor) => workflows.getProjectWorkflow(actor, projectId)),
       "workflows.listTickets": (input) =>
@@ -37,18 +51,12 @@ export const layer = Workflows.middleware(Authorization).toLayer(
       "workflows.startTicket": (input) =>
         Effect.flatMap(caller, (actor) => workflows.startTicket(actor, input)),
       "workflows.cancelTicket": (input) => asViewer((id) => workflows.cancelTicket(id, input)),
-      "workflows.reopenTicket": ({ ticketId }) =>
-        asViewer((id) => workflows.reopenTicket(id, ticketId)),
-      "workflows.setTicketDueDate": (input) =>
-        asViewer((id) => workflows.setTicketDueDate(id, input)),
       "workflows.watchStep": ({ stepId }) =>
         Stream.unwrap(asViewer((id) => Effect.succeed(workflows.watchStep(id, stepId)))),
       "workflows.setStepField": (input) =>
         Effect.flatMap(caller, (actor) => workflows.setStepField(actor, input)),
       "workflows.markStepDone": ({ stepId }) =>
         asViewer((id) => workflows.markStepDone(id, stepId)),
-      "workflows.setStepAutomations": (input) =>
-        asViewer((id) => workflows.setStepAutomations(id, input)),
       "workflows.runStepAutomation": (input) =>
         asViewer((id) => workflows.runStepAutomation(id, input)),
       "workflows.stopStepAutomation": (input) =>

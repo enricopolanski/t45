@@ -54,6 +54,8 @@ export class Automation extends Schema.Opaque<Automation>()(
     prompt: TrimmedNonEmptyString,
     /** The agent each run talks to, in a new chat per run. */
     agentId: StringId,
+    /** Archived for good: it runs no more, by hand, on a schedule or on a step. */
+    isArchived: Schema.Boolean,
     createdAt: Schema.DateTimeUtcFromString,
     updatedAt: Schema.DateTimeUtcFromString,
   }),
@@ -146,6 +148,8 @@ export const isMissed = (schedule: Schedule, slot: DateTime.DateTime, now: DateT
 const REFUSALS = {
   agent_unavailable:
     "This agent is archived or private to someone else. Choose an active agent you can use.",
+  attached_agent_unfit:
+    "A workflow step runs this automation, so its agent must work on steps and, while private, belong to you and that workflow's creator.",
   not_creator: "Only the person who created a schedule can enable it.",
   creator_cannot_run:
     "This schedule's creator can't run the automation now: they must be an active admin, and its agent active and theirs to use.",

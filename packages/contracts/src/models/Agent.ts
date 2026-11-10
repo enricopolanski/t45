@@ -87,6 +87,8 @@ const REFUSALS = {
     "OpenCode Go doesn't offer that model now. Choose another, or try again once it answers.",
   skill_not_found: "That skill no longer exists.",
   built_in: "T45 manages this agent, so it can't be changed or archived.",
+  attached_to_workflow:
+    "A workflow step runs an automation of this agent, so it can't be archived. Give that automation another agent first.",
 };
 export type Refusal = keyof typeof REFUSALS;
 

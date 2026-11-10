@@ -34,6 +34,16 @@ const make = Effect.gen(function* () {
             ${entry.workflowId ?? null}, ${entry.projectId ?? null}, ${entry.ticketId ?? null},
             ${entry.stepId ?? null}, ${JSON.stringify(entry.details)},
             ${DateTime.formatIso(entry.createdAt)})`.pipe(Effect.asVoid, Effect.orDie),
+    /** What was done on one step of a ticket, oldest first: who, when and which command. */
+    listForStep: (ticketId: string, stepId: string) =>
+      sql<Pick<CommandLogEntry, "command" | "userId" | "agentId"> & { readonly createdAt: string }>`
+          SELECT command, user_id AS "userId", agent_id AS "agentId", created_at AS "createdAt"
+          FROM command_log WHERE ticket_id = ${ticketId} AND step_id = ${stepId} ORDER BY id`.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({ ...row, createdAt: DateTime.makeUnsafe(row.createdAt) })),
+        ),
+        Effect.orDie,
+      ),
   };
 });
 

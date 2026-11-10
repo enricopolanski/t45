@@ -13,12 +13,13 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-const encodeAutomation = Schema.encodeEffect(Automation);
-const decodeAutomations = Schema.decodeUnknownEffect(Schema.Array(Automation));
+const Row = Schema.Struct({ ...Automation.fields, isArchived: Schema.BooleanFromBit });
+const encodeAutomation = Schema.encodeEffect(Row);
+const decodeAutomations = Schema.decodeUnknownEffect(Schema.Array(Row));
 const decodeSummaries = Schema.decodeUnknownEffect(
   Schema.Array(
     Schema.Struct({
-      ...Automation.fields,
+      ...Row.fields,
       lastRun: Schema.NullOr(
         Schema.fromJsonString(
           Schema.Struct({
@@ -37,8 +38,8 @@ const TriggerRow = Schema.Struct({
 const decodeTriggers = Schema.decodeUnknownEffect(Schema.Array(TriggerRow));
 const encodeTrigger = Schema.encodeEffect(TriggerRow);
 
-const COLUMNS = `id, title, prompt, agent_id AS "agentId", created_at AS "createdAt",
-  updated_at AS "updatedAt"`;
+const COLUMNS = `id, title, prompt, agent_id AS "agentId", is_archived AS "isArchived",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
 const TRIGGER_COLUMNS = `id, automation_id AS "automationId", creator_user_id AS "creatorUserId",
   schedule_json AS "schedule", status, next_run_at AS "nextRunAt", last_error AS "lastError",
   created_at AS "createdAt", updated_at AS "updatedAt"`;
@@ -53,7 +54,7 @@ const make = Effect.gen(function* () {
       FROM chat_origins o JOIN chats c ON c.id = o.chat_id
       WHERE json_extract(o.trigger, '$.automationId') = automations.id
       ORDER BY c.created_at DESC, c.id DESC LIMIT 1
-    ) AS "lastRun" FROM automations ORDER BY created_at, id`.pipe(
+    ) AS "lastRun" FROM automations WHERE is_archived = 0 ORDER BY created_at, id`.pipe(
     Effect.flatMap(decodeSummaries),
     Effect.orDie,
   );
@@ -71,6 +72,24 @@ const make = Effect.gen(function* () {
       Effect.orDie,
     );
 
+  /** An archived automation is as good as missing: nothing runs or changes it again. */
+  const get = (id: AutomationId) =>
+    sql`SELECT ${columns} FROM automations WHERE id = ${id} AND is_archived = 0`.pipe(
+      Effect.flatMap(decodeAutomations),
+      Effect.map((automations) => automations[0] ?? null),
+      Effect.orDie,
+    );
+  /** Inserts the automation, or replaces the one with its id. */
+  const save = (automation: Automation) =>
+    Effect.gen(function* () {
+      const row = yield* encodeAutomation(automation);
+      yield* sql`INSERT INTO automations (id, title, prompt, agent_id, created_at, updated_at)
+          VALUES (${row.id}, ${row.title}, ${row.prompt}, ${row.agentId}, ${row.createdAt},
+            ${row.updatedAt})
+          ON CONFLICT (id) DO UPDATE SET title = excluded.title, prompt = excluded.prompt,
+            agent_id = excluded.agent_id, updated_at = excluded.updated_at`;
+    }).pipe(Effect.orDie);
+
   return {
     list: Effect.gen(function* () {
       const triggers = yield* liveTriggers;
@@ -83,22 +102,39 @@ const make = Effect.gen(function* () {
             : { at: lastRun.at, statusLabel: lastRun.status === "running" ? "Running" : "Ended" },
       }));
     }),
-    get: (id: AutomationId) =>
-      sql`SELECT ${columns} FROM automations WHERE id = ${id}`.pipe(
+    get,
+    /** The agent's automations, without the archived ones. */
+    listForAgent: (agentId: string) =>
+      sql`SELECT ${columns} FROM automations WHERE agent_id = ${agentId} AND is_archived = 0`.pipe(
         Effect.flatMap(decodeAutomations),
-        Effect.map((automations) => automations[0] ?? null),
         Effect.orDie,
       ),
-    /** Inserts the automation, or replaces the one with its id. */
-    save: (automation: Automation) =>
+    save,
+    /** Reads the automation and writes its change in one transaction; null when there is none. */
+    modify: <E, R>(
+      id: AutomationId,
+      change: (current: Automation) => Effect.Effect<Automation, E, R>,
+    ) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const current = yield* get(id);
+            if (current === null) return null;
+            const automation = yield* change(current);
+            yield* save(automation);
+            return automation;
+          }),
+        )
+        .pipe(Effect.catchTags({ SqlError: Effect.die })),
+    /** Archives the automation and its schedules together. */
+    archive: (id: AutomationId, at: DateTime.Utc) =>
       Effect.gen(function* () {
-        const row = yield* encodeAutomation(automation);
-        yield* sql`INSERT INTO automations (id, title, prompt, agent_id, created_at, updated_at)
-          VALUES (${row.id}, ${row.title}, ${row.prompt}, ${row.agentId}, ${row.createdAt},
-            ${row.updatedAt})
-          ON CONFLICT (id) DO UPDATE SET title = excluded.title, prompt = excluded.prompt,
-            agent_id = excluded.agent_id, updated_at = excluded.updated_at`;
-      }).pipe(Effect.orDie),
+        const now = DateTime.formatIso(at);
+        yield* sql`UPDATE automations SET is_archived = 1, updated_at = ${now} WHERE id = ${id}`;
+        yield* sql`UPDATE schedule_triggers
+            SET status = 'archived', next_run_at = NULL, updated_at = ${now}
+            WHERE automation_id = ${id} AND status != 'archived'`;
+      }).pipe(sql.withTransaction, Effect.orDie),
     triggers: {
       insert: (trigger: ScheduleTrigger) =>
         Effect.gen(function* () {

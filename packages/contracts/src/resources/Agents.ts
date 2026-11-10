@@ -43,7 +43,7 @@ const AgentErrors = Schema.Union([Refused, NotFound, AccessDenied]);
 
 /**
  * Every member creates agents. An agent's creator and organization admins read its setup, change
- * it and archive it; only its creator publishes it.
+ * it and archive it, for good; only its creator publishes it.
  */
 export const Agents = RpcGroup.make(
   Rpc.make("list", { success: Schema.Array(AgentSummary), error: AccessDenied }),
@@ -52,7 +52,6 @@ export const Agents = RpcGroup.make(
   Rpc.make("archive", { payload: { agentId: StringId }, success: Agent, error: AgentErrors }),
   Rpc.make("create", { payload: SaveAgentRequest, success: Agent, error: AgentErrors }),
   Rpc.make("publish", { payload: { agentId: StringId }, success: Agent, error: AgentErrors }),
-  Rpc.make("restore", { payload: { agentId: StringId }, success: Agent, error: AgentErrors }),
   Rpc.make("update", {
     payload: { agentId: StringId, ...SaveAgentRequest.fields },
     success: Agent,

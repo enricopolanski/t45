@@ -1,4 +1,5 @@
-import type { DraftField, FieldType, DraftStep } from "./workflowLogic";
+import { isSameInput } from "@t45/contracts/models/Workflow";
+import type { DraftField, FieldType, DraftStep, inputSourcesFor } from "./workflowLogic";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XIcon } from "lucide-react";
 import { useId, useState } from "react";
 
@@ -11,6 +12,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { FoldChevron } from "../work/CardFold";
+import { StepAutomationsEditor } from "../work/StepAutomationsEditor";
 import { plural } from "../work/workLogic";
 import { blankField, blankStep, FIELD_TYPES, listEntries, retypeField } from "./workflowLogic";
 
@@ -322,12 +324,15 @@ function SubStepRow({
  */
 export function WorkflowStepEditor({
   step,
+  inputSources,
   position,
   onChange,
   onOpenSubStep,
   disabled,
 }: {
   readonly step: DraftStep;
+  /** The fields of earlier steps it may read. */
+  readonly inputSources: ReturnType<typeof inputSourcesFor>;
   /** Its place among the workflow's steps, with moving and removing it; null for a sub-step. */
   readonly position: Placement | null;
   readonly onChange: (step: DraftStep) => void;
@@ -336,6 +341,9 @@ export function WorkflowStepEditor({
 }) {
   // A sub-step's own editor is always open; a step in the list starts open only when new.
   const [startsOpen] = useState(position === null || step.name === "");
+  const inputs = step.inputs ?? [];
+  const inputKey = (input: (typeof inputs)[number]) => `${input.stepId}.${input.fieldId}`;
+  const unboundSources = inputSources.filter(({ input }) => !inputs.some(isSameInput(input)));
   const title = (
     <Field label={position === null ? "Sub-step title" : "Step title"} size="xs">
       <Input
@@ -396,6 +404,74 @@ export function WorkflowStepEditor({
               depth={0}
               onChange={(fields) => onChange({ ...step, fields })}
               disabled={disabled}
+            />
+          </div>
+          <hr />
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-medium text-muted-foreground">Inputs</span>
+              <p className="text-xs text-muted-foreground">
+                Fields of earlier steps this step reads. Whoever works on it sees nothing else of
+                them.
+              </p>
+            </div>
+            {inputs.map((input) => {
+              const label =
+                inputSources.find((source) => isSameInput(input)(source.input))?.label ??
+                "A field that no earlier step has";
+              return (
+                <div
+                  key={inputKey(input)}
+                  className="flex items-center gap-2 rounded-lg border border-border px-3 py-2"
+                >
+                  <span className="min-w-0 flex-1 truncate text-sm">{label}</span>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Remove input ${label}`}
+                    onClick={() =>
+                      onChange({ ...step, inputs: inputs.filter((other) => other !== input) })
+                    }
+                    disabled={disabled}
+                  >
+                    <XIcon />
+                  </Button>
+                </div>
+              );
+            })}
+            <Select
+              value={null}
+              disabled={disabled || unboundSources.length === 0}
+              onValueChange={(key) => {
+                const source = unboundSources.find(({ input }) => inputKey(input) === key);
+                if (source) onChange({ ...step, inputs: [...inputs, source.input] });
+              }}
+            >
+              <SelectTrigger aria-label="Add input">
+                <SelectValue placeholder="Add input" />
+              </SelectTrigger>
+              <SelectPopup>
+                {unboundSources.map(({ input, label }) => (
+                  <SelectItem key={inputKey(input)} value={inputKey(input)}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </div>
+          <hr />
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-medium text-muted-foreground">Automations</span>
+              <p className="text-xs text-muted-foreground">
+                What people can run on this step, in every project.
+              </p>
+            </div>
+            <StepAutomationsEditor
+              automationIds={step.automationIds ?? []}
+              disabled={disabled}
+              onChange={(automationIds) => onChange({ ...step, automationIds })}
             />
           </div>
           <hr />

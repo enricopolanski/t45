@@ -12,12 +12,12 @@ import { WorkFrame } from "../work/WorkFrame";
 import { plural } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
 import { useWorkflowData } from "./useWorkflowData";
-import { ProjectDangerZone, ProjectPeople, ProjectStepPeople } from "./ProjectPeople";
+import { ProjectArchive, ProjectPeople, ProjectStepPeople, ProjectTickets } from "./ProjectPeople";
 
 /**
- * A project as its admins shape it, in cards: its name first, a link to the step editor, its
- * people, and archiving or deleting it last. Everything here applies at once; steps are saved
- * on their own page.
+ * A project as those who manage it shape it, in cards: its name first, the version of its
+ * workflow it adopted, its people and open tickets, and archiving it last. Everything here
+ * applies at once; steps are saved on the workflow's own page.
  */
 export function ProjectEditor({ projectId }: { readonly projectId: string }) {
   const id = useId();
@@ -39,29 +39,15 @@ export function ProjectEditor({ projectId }: { readonly projectId: string }) {
     );
   }
 
-  const { project, workflow } = detail;
-  const steps = detail.workflow.steps.length;
+  const { project, workflow, adopted, latest } = detail;
   const update = (change: Omit<ApiInput<"workflows.updateProject">, "projectId">) =>
     run(() => api("workflows.updateProject", { projectId: project.id, ...change }));
 
   return (
-    <WorkFrame
-      title={project.name}
-      actions={
-        steps > 0 ? (
-          <Button
-            size="sm"
-            variant="outline"
-            render={<Link to="/boards/$slug" params={{ slug: project.id }} />}
-          >
-            Board
-          </Button>
-        ) : null
-      }
-    >
+    <WorkFrame title={project.name}>
       <p className="text-sm text-muted-foreground">
         This project uses the {workflow.name} workflow. Its name, people and assignments belong to
-        this project.
+        this project, and so does the version of the workflow its new tickets start on.
       </p>
       <div className="flex flex-col gap-6">
         {error && <ErrorText text={error} />}
@@ -94,10 +80,14 @@ export function ProjectEditor({ projectId }: { readonly projectId: string }) {
         </section>
         <section aria-label="Workflow" className="flex flex-col gap-2.5">
           <h2 className="text-sm font-semibold">Workflow</h2>
-          <div className="rounded-xl border border-border bg-card">
+          <div className="divide-y divide-border rounded-xl border border-border bg-card">
             <ActionRow
               title={workflow.name}
-              description={`${plural(steps, "step", "steps")}. This shared workflow owns the steps and fields. Configure people below for this project.`}
+              description={
+                adopted === null
+                  ? "No version adopted yet, so no ticket can start."
+                  : `New tickets start on version ${adopted.number}, with ${plural(adopted.steps.length, "step", "steps")}.`
+              }
               action={
                 <Button
                   size="sm"
@@ -113,11 +103,35 @@ export function ProjectEditor({ projectId }: { readonly projectId: string }) {
                 </Button>
               }
             />
+            {adopted?.id !== latest.id && !project.isArchived && !workflow.isArchived ? (
+              <ActionRow
+                title={`Adopt version ${latest.number}`}
+                description={`${plural(latest.steps.length, "step", "steps")}, each of which needs a member below first. ${latest.isFrozen ? "" : "It is a draft: adopting it freezes it for good. "}Tickets already started stay on their version.`}
+                action={
+                  <Button
+                    size="sm"
+                    disabled={busy || latest.steps.length === 0}
+                    onClick={() =>
+                      void run(() =>
+                        api("workflows.adoptWorkflowVersion", {
+                          projectId: project.id,
+                          versionId: latest.id,
+                          revision: latest.revision,
+                        }),
+                      )
+                    }
+                  >
+                    Adopt
+                  </Button>
+                }
+              />
+            ) : null}
           </div>
         </section>
         <ProjectStepPeople detail={detail} busy={busy} run={run} />
+        <ProjectTickets detail={detail} busy={busy} run={run} />
         <ProjectPeople detail={detail} busy={busy} run={run} />
-        <ProjectDangerZone detail={detail} busy={busy} run={run} />
+        <ProjectArchive detail={detail} busy={busy} run={run} />
       </div>
     </WorkFrame>
   );

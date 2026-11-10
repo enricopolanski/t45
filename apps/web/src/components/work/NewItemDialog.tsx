@@ -18,9 +18,9 @@ const NO_PROJECT = "There's no project you can start items in yet.";
 
 /**
  * Starts an item with a title, in a project the viewer picks from those they may start, or in
- * the given one, and opens its first step. The project's admins set a due date afterwards.
+ * the given one, and opens its first step.
  */
-export function NewItemDialog({ project }: { readonly project?: Project }) {
+export function NewItemDialog({ project }: { readonly project?: Pick<Project, "id" | "name"> }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   return (

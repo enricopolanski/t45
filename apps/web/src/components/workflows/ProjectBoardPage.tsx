@@ -15,7 +15,7 @@ import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { ErrorText } from "../ui/error-text";
-import { DueBadge } from "../work/MyWork";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { NewItemDialog } from "../work/NewItemDialog";
 import { useWorkDirectory } from "../work/useWorkDirectory";
 import { WorkFrame } from "../work/WorkFrame";
@@ -40,29 +40,30 @@ function BoardCard({
       <span className="text-xs text-muted-foreground">{actorName(directory, step.assignee)}</span>
       <span className="flex flex-wrap gap-1">
         <Badge variant={status.variant}>{status.label}</Badge>
-        <DueBadge dueDate={ticket.dueDate} />
       </span>
     </Link>
   );
 }
 
 /**
- * Every open item in its current step's column; a card opens its item, and anyone starts items
- * here unless the project is archived. A project with a slug is shown under it, so a link by
- * id ends on the slug.
+ * The open items of one version of the project's workflow, each in its current step's column: the
+ * adopted version, or an older one chosen while it still has open items. The viewer gets the
+ * columns of the steps they are a member of. A card opens its item, and the first step's members
+ * start items here. A project with a slug is shown under it, so a link by id ends on the slug.
  */
 export function ProjectBoardPage({ projectId }: { readonly projectId: string }) {
   const newChat = useNewChat();
   const targets = useApiQuery(chatTargets);
   const [board, setBoard] = useState<ProjectBoardView | null>(null);
+  const [versionId, setVersionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void api("workflows.getProjectBoard", { idOrSlug: projectId }).then(
-      setBoard,
-      (cause: unknown) => setError(describeFailure(cause)),
-    );
-  }, [projectId]);
+    void api("workflows.getProjectBoard", {
+      idOrSlug: projectId,
+      ...(versionId === null ? {} : { versionId }),
+    }).then(setBoard, (cause: unknown) => setError(describeFailure(cause)));
+  }, [projectId, versionId]);
 
   const slug = board?.project.slug ?? null;
   const target = targets.data?.find((target) => target.projectId === board?.project.id);
@@ -77,6 +78,27 @@ export function ProjectBoardPage({ projectId }: { readonly projectId: string }) 
       actions={
         board !== null ? (
           <>
+            {board.versions.length > 1 ? (
+              <Select
+                value={board.version.id}
+                onValueChange={setVersionId}
+                items={board.versions.map(({ id, number }) => ({
+                  value: id,
+                  label: `Version ${number}`,
+                }))}
+              >
+                <SelectTrigger size="sm" aria-label="Workflow version">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  {board.versions.map(({ id, number }) => (
+                    <SelectItem key={id} value={id}>
+                      Version {number}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            ) : null}
             {target !== undefined && !board.project.isArchived && (
               <Button
                 size="sm"
@@ -90,7 +112,7 @@ export function ProjectBoardPage({ projectId }: { readonly projectId: string }) 
                 Chat
               </Button>
             )}
-            {!board.project.isArchived && <NewItemDialog project={board.project} />}
+            {board.canStartTicket && <NewItemDialog project={board.project} />}
           </>
         ) : null
       }
@@ -98,7 +120,7 @@ export function ProjectBoardPage({ projectId }: { readonly projectId: string }) 
       <div className="flex flex-col gap-4">
         {error && <ErrorText text={error} />}
         <div className="flex gap-3 overflow-x-auto pb-2">
-          {board?.workflow.steps.map((column) => {
+          {board?.columns.map((column) => {
             const cards = board.tickets.flatMap((ticket) =>
               ticket.currentStep?.stepDefinitionId === column.id
                 ? [{ ticket, step: ticket.currentStep }]

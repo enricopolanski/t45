@@ -192,6 +192,10 @@ const make = Effect.gen(function* () {
         }
         return;
       }
+      // An archived agent takes no new message, in a chat it already has either; what it is
+      // running finishes.
+      if ((yield* agents.get(chat.agentId))?.status !== "active")
+        return yield* refuse("agent_unavailable");
     }
     const refusal = inputRefusal(post.input, PromptService.format(post.input).length);
     if (refusal !== null) return yield* refuse(refusal);
@@ -373,8 +377,7 @@ const make = Effect.gen(function* () {
           }));
         const assistants = available.filter(hasProjectTools);
         if (assistants.length === 0) return plain;
-        const actor = { id: member.userId, isOrgAdmin: member.role === "admin" };
-        const bound = (yield* projectAccess.list(actor)).flatMap((project) =>
+        const bound = (yield* projectAccess.list(member.userId)).flatMap((project) =>
           assistants.map((agent) => ({
             agentId: agent.id,
             name: assistants.length === 1 ? project.name : `${project.name} · ${agent.name}`,

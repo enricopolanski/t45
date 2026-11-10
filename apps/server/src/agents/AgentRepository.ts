@@ -26,6 +26,11 @@ export class AgentRepository extends Context.Service<
     readonly list: Effect.Effect<ReadonlyArray<Agent>>;
     readonly get: (id: string) => Effect.Effect<Agent | null>;
     readonly save: (agent: Agent) => Effect.Effect<void, Refused>;
+    /** Reads the agent and writes its change in one transaction; null when there is none. */
+    readonly modify: (
+      id: string,
+      change: (current: Agent) => Effect.Effect<Agent, Refused>,
+    ) => Effect.Effect<Agent | null, Refused>;
   }
 >()("t45/agents/AgentRepository") {}
 
@@ -100,6 +105,14 @@ export const layer = Layer.effect(
       list: read(sql`1 = 1`),
       get: (agentId) => read(sql`id = ${agentId}`).pipe(Effect.map(([agent]) => agent ?? null)),
       save,
+      modify: (id, change) =>
+        Effect.gen(function* () {
+          const [current] = yield* read(sql`id = ${id}`);
+          if (current === undefined) return null;
+          const agent = yield* change(current);
+          yield* save(agent);
+          return agent;
+        }).pipe(sql.withTransaction, Effect.catchTags({ SqlError: Effect.die })),
     });
   }),
 );

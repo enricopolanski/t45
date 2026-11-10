@@ -232,6 +232,17 @@ function AutomationRow({
               <CalendarPlusIcon />
               Add schedule
             </MenuItem>
+            <MenuItem
+              variant="destructive"
+              onClick={() =>
+                void act("Could not archive automation", () =>
+                  api("automations.archive", { id: automation.id }),
+                )
+              }
+            >
+              <ArchiveIcon />
+              Archive for good
+            </MenuItem>
           </MenuPopup>
         </Menu>
       }

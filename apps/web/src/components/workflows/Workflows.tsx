@@ -1,5 +1,6 @@
 import type { WorkflowView } from "@t45/contracts/resources/Workflows";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { XIcon } from "lucide-react";
 import { useCallback, useId, useRef, useState } from "react";
 
 import { api } from "../../rpc/api";
@@ -9,8 +10,10 @@ import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
+import { PersonPicker } from "../work/PersonPicker";
+import { useWorkDirectory } from "../work/useWorkDirectory";
 import { WorkFrame } from "../work/WorkFrame";
-import { plural } from "../work/workLogic";
+import { actorName, plural } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
 import { useWorkflowData } from "./useWorkflowData";
 import { WorkflowNavigation } from "./WorkflowNavigation";
@@ -42,7 +45,7 @@ export function WorkflowList() {
         </p>
       ) : null}
       <section aria-label="Workflows" className="flex flex-col gap-3">
-        {workflows?.map((workflow) => (
+        {workflows?.map(({ workflow, version }) => (
           <div
             key={workflow.id}
             className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
@@ -50,7 +53,7 @@ export function WorkflowList() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{workflow.name}</p>
               <p className="text-xs text-muted-foreground">
-                {plural(workflow.steps.length, "step", "steps")}
+                {plural(version.steps.length, "step", "steps")} · Version {version.number}
               </p>
             </div>
             {workflow.isArchived ? (
@@ -90,7 +93,8 @@ export function NewWorkflow() {
   return (
     <WorkFrame title="New workflow">
       <p className="text-sm text-muted-foreground">
-        Define the process once. Each project using it will have its own people and assignments.
+        Define the process once. Each project using it will have its own people and assignments. You
+        are its creator: you choose who else edits it.
       </p>
       <form
         aria-label="New workflow"
@@ -139,10 +143,11 @@ export function NewWorkflow() {
 export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) {
   const id = useId();
   const [name, setName] = useState("");
-  const adopt = useCallback((loaded: WorkflowView) => setName(loaded.workflow.name), []);
+  const directory = useWorkDirectory();
+  const resetName = useCallback((loaded: WorkflowView) => setName(loaded.workflow.name), []);
   const { detail, busy, error, run } = useWorkflowData(
     useCallback(() => api("workflows.getWorkflow", { workflowId }), [workflowId]),
-    adopt,
+    resetName,
   );
   if (detail === null)
     return (
@@ -152,7 +157,10 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
         </p>
       </WorkFrame>
     );
-  const { workflow, canManage } = detail;
+  const { workflow, version, canEdit, canSetEditors } = detail;
+  const canChange = canEdit && !workflow.isArchived;
+  const setEditors = (editorUserIds: ReadonlyArray<string>) =>
+    void run(() => api("workflows.setWorkflowEditors", { workflowId, editorUserIds }));
   return (
     <WorkFrame
       title={workflow.name}
@@ -165,12 +173,12 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
       }
     >
       <p className="text-sm text-muted-foreground">
-        This is a shared workflow. Changes to its steps and fields apply to every project using it.
-        People are assigned separately in each project.
+        This is a shared workflow. Each project adopts a version of its steps and fields, and
+        tickets keep the version they started on. People are assigned separately in each project.
       </p>
-      {!canManage ? (
+      {!canEdit ? (
         <p className="text-sm text-muted-foreground">
-          Editing requires admin access to every project using this workflow.
+          Only this workflow's creator, its editors and organization admins can edit it.
         </p>
       ) : null}
       {error && <ErrorText text={error} />}
@@ -184,28 +192,73 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
             id={`${id}-name`}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            disabled={busy || !canManage}
+            disabled={busy || !canChange}
             onKeyDown={(event) => {
               if (event.key === "Enter") event.currentTarget.blur();
             }}
             onBlur={() => {
               if (name.trim() && name.trim() !== workflow.name)
-                void run(() => api("workflows.updateWorkflow", { workflowId, name: name.trim() }));
+                void run(() => api("workflows.renameWorkflow", { workflowId, name: name.trim() }));
             }}
           />
         </div>
         <ActionRow
-          title={plural(workflow.steps.length, "step", "steps")}
+          title={`Version ${version.number} · ${plural(version.steps.length, "step", "steps")}`}
+          description={
+            version.isFrozen
+              ? "In use by a project. Saving its steps starts the next version."
+              : "A draft until a project adopts it."
+          }
           action={
             <Button
               size="sm"
               variant="outline"
               render={<Link to="/settings/workflows/$workflowId/steps" params={{ workflowId }} />}
             >
-              {canManage ? "Edit steps" : "View steps"}
+              {canChange ? "Edit steps" : "View steps"}
             </Button>
           }
         />
+      </section>
+      <section
+        aria-label="Editors"
+        className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-5"
+      >
+        <span className="text-sm font-medium">Editors</span>
+        <p className="text-xs text-muted-foreground">
+          {actorName(directory, workflow.creatorUserId)} created this workflow. Editors change it
+          too, as do organization admins.
+        </p>
+        <ul className="flex flex-col gap-1">
+          {workflow.editorUserIds.map((userId) => {
+            const editor = actorName(directory, userId);
+            return (
+              <li key={userId} className="flex items-center gap-2 text-sm">
+                {editor}
+                {canSetEditors && canChange ? (
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={`Remove editor ${editor}`}
+                    disabled={busy}
+                    onClick={() => setEditors(workflow.editorUserIds.filter((id) => id !== userId))}
+                  >
+                    <XIcon />
+                  </Button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+        {canSetEditors && canChange ? (
+          <PersonPicker
+            aria-label="New editor"
+            value={null}
+            onChange={(editor) => setEditors([...workflow.editorUserIds, editor])}
+            placeholder="Add an editor"
+            disabled={busy}
+          />
+        ) : null}
       </section>
       <section
         aria-label="Workflow availability"
@@ -213,23 +266,20 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
       >
         <ActionRow
           title={!workflow.isArchived ? "Archive workflow" : "Archived workflow"}
-          description="Archived workflows cannot be used to create new projects. Existing projects keep running."
+          description="An archived workflow no longer changes, starts no new project and has no version adopted. Existing projects keep running. There's no going back."
           action={
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy || !canManage}
-              onClick={() =>
-                void run(() =>
-                  api("workflows.updateWorkflow", {
-                    workflowId,
-                    isArchived: !workflow.isArchived,
-                  }),
-                )
-              }
-            >
-              {!workflow.isArchived ? "Archive workflow" : "Restore workflow"}
-            </Button>
+            workflow.isArchived ? (
+              <Badge variant="secondary">Archived</Badge>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || !canEdit}
+                onClick={() => void run(() => api("workflows.archiveWorkflow", { workflowId }))}
+              >
+                Archive workflow
+              </Button>
+            )
           }
         />
       </section>

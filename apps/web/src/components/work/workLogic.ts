@@ -4,7 +4,7 @@ import type { Step, Ticket } from "@t45/contracts/models/Workflow";
 import type { FieldView } from "@t45/contracts/resources/Workflows";
 
 /** "27 Oct", with the year when it isn't this year's. `date` starts with `YYYY-MM-DD`. */
-export function formatDueDate(date: string) {
+export function formatDay(date: string) {
   const [year = 0, month = 1, day = 1] = date.slice(0, 10).split("-").map(Number);
   return new Date(year, month - 1, day).toLocaleDateString(undefined, {
     day: "numeric",
@@ -17,8 +17,15 @@ export function formatDueDate(date: string) {
 export const plural = (count: number, one: string, many: string) =>
   `${count} ${count === 1 ? one : many}`;
 
-/** What the viewer may do on the step now, mirroring the commands' checks. */
-export const stepActions = (ticket: Pick<Ticket, "status">, step: Step) => {
+/**
+ * What the viewer, who sees the step as one of its members, may do on it now, mirroring the
+ * commands' checks. Cancelling the ticket is for the project's admins: `canCancelTicket`.
+ */
+export const stepActions = (
+  ticket: Pick<Ticket, "status">,
+  step: Step,
+  canCancelTicket: boolean,
+) => {
   const open = ticket.status.type === "open";
   const actionable = open && step.status.type === "working";
   const blocked = open && step.status.type === "blocked";
@@ -28,8 +35,7 @@ export const stepActions = (ticket: Pick<Ticket, "status">, step: Step) => {
     canSetAssignee: actionable || blocked,
     canBlock: actionable,
     canUnblock: blocked,
-    canCancelTicket: open,
-    canReopenTicket: ticket.status.type === "cancelled",
+    canCancelTicket,
   };
 };
 export type StepActions = ReturnType<typeof stepActions>;
@@ -59,6 +65,24 @@ export const missingFields = (
  */
 export type StepAct = (run: () => Promise<unknown>, quiet?: boolean) => Promise<string | null>;
 
+/** What a command did, as a step's history says it after the name of who ran it. */
+const HISTORY_LABELS: Record<string, string> = {
+  "workflows.startTicket": "started the item",
+  "workflows.setStepField": "changed a field",
+  "workflows.markStepDone": "marked the step done",
+  "workflows.setStepAssignee": "changed the assignee",
+  "workflows.blockStep": "blocked the step",
+  "workflows.unblockStep": "unblocked the step",
+  "workflows.commentOnStep": "commented",
+  "workflows.attachStepFile": "attached a file",
+  "workflows.removeStepFile": "removed a file",
+  "workflows.runStepAutomation": "ran an automation",
+  "workflows.stopStepAutomation": "stopped an automation",
+  "workflows.cancelTicket": "cancelled the item",
+};
+
+export const historyLabel = (command: string) => HISTORY_LABELS[command] ?? command;
+
 export const STEP_STATE_LABELS: Record<Step["status"]["type"], string> = {
   working: "To do",
   blocked: "Blocked",
@@ -70,9 +94,6 @@ export const stepStatus = (step: Pick<Step, "status">) =>
     label: STEP_STATE_LABELS[step.status.type],
     variant: step.status.type === "blocked" ? "warning" : "outline",
   }) as const;
-
-export const stepNameOf = (view: { readonly definition: { readonly name: string } | null }) =>
-  view.definition?.name ?? "Removed step";
 
 /** The people and agents work can be given to. */
 export interface WorkDirectory {

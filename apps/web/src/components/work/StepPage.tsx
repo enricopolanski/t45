@@ -2,13 +2,12 @@ import { Button } from "../ui/button";
 import { StepAutomationsEditor } from "./StepAutomationsEditor";
 import { StringId } from "@t45/contracts/models/primitives";
 import type { StepNameView, StepView } from "@t45/contracts/resources/Workflows";
-import { Link } from "@tanstack/react-router";
-import * as DateTime from "effect/DateTime";
+import { Link, useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { AtomRegistry } from "effect/reactivity";
 import { InfoIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { api, runtime } from "../../rpc/api";
 import { appAtomRegistry } from "../../state/atomRegistry";
@@ -16,24 +15,25 @@ import { apiWatch, useApiQuery } from "../../state/rpc";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { ErrorText } from "../ui/error-text";
-import { SavedInput } from "../SavedInput";
 import { ActorName } from "./ActorAvatar";
 import { AssigneePicker } from "./AssigneePicker";
 import { CardFold } from "./CardFold";
 import { OtherStep } from "./ItemSteps";
 import { ItemDescription } from "./ItemDescription";
 import { StepComments, StepFiles } from "./StepConversation";
-import { attachStepFile, StepFields } from "./StepFields";
+import { attachStepFile, ReadOnlyFields, StepFields } from "./StepFields";
 import { StepStatus } from "./StepStatus";
 import { StepSubSteps } from "./StepSubSteps";
 import { BackLink, WorkFrame } from "./WorkFrame";
 import {
+  historyLabel,
   missingFields,
   type StepAct,
   type StepActions,
   stepActions,
-  stepNameOf,
 } from "./workLogic";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import { workChanged } from "../../state/work";
 
 const isStepId = Schema.is(StringId);
@@ -51,6 +51,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const [error, setError] = useState<string | null>(null);
   // Set once Mark done is tried; from then on, what's missing shows and clears as it's filled.
   const [triedDone, setTriedDone] = useState(false);
+  const navigate = useNavigate();
 
   const act: StepAct = async (run, quiet = false) => {
     setBusy(true);
@@ -95,7 +96,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     );
   }
 
-  const actions = stepActions(view.ticket, view.step);
+  const actions = stepActions(view.ticket, view.step, view.canCancelTicket);
   const step = { stepId: view.step.id };
   const writes = view.ticket.status.type === "open";
   const incomplete = view.subSteps.filter((step) => step.status.type !== "completed");
@@ -106,7 +107,11 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     setTriedDone(true);
     setError(null);
     if (empty.length === 0 && incomplete.length === 0) {
-      void act(() => api("workflows.markStepDone", step));
+      void act(async () => {
+        await api("workflows.markStepDone", step);
+        // Done, a step of the workflow leaves its members' sight: back to their work.
+        if (view.parents.length === 0) await navigate({ to: "/my-work" });
+      });
     }
   };
   // The workflow's step this one is, or sits in, shown among all the others.
@@ -117,7 +122,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         <InfoIcon aria-hidden className="mt-1 size-5 shrink-0 text-info" />
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <StepHeading view={view} />
-          {view.definition?.instructions ? (
+          {view.definition.instructions ? (
             <section aria-label="Goal">
               <p className="text-sm whitespace-pre-wrap">{view.definition.instructions}</p>
             </section>
@@ -140,6 +145,14 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           }
         />
       </div>
+      {view.inputs.length > 0 ? (
+        <section aria-label="Inputs" className="flex flex-col gap-2.5">
+          <h2 className="text-sm font-semibold">Inputs</h2>
+          <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+            <ReadOnlyFields fields={view.inputs} />
+          </div>
+        </section>
+      ) : null}
       <StepFields
         fields={view.fields}
         editable={actions.canEditFields}
@@ -174,37 +187,50 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         <div className="flex flex-col gap-3">
           <StepStatus view={view} actions={actions} busy={busy} act={act} onMarkDone={markDone} />
           <ItemDetails view={view} actions={actions} busy={busy} act={act} />
-          <AgentCard view={view} actions={actions} busy={busy} act={act} />
+          <AgentCard view={view} busy={busy} act={act} />
+          <StepHistory view={view} />
         </div>
       </div>
     </WorkFrame>
   );
 }
 
+/** What was done on the step, oldest first: who or which agent, what, and when. */
+function StepHistory({ view }: { readonly view: StepView }) {
+  const now = useNowMinute();
+  if (view.history.length === 0) return null;
+  return (
+    <CardFold as="aside" title="History">
+      <ol className="flex flex-col gap-2 text-sm">
+        {view.history.map((entry, at) => (
+          // oxlint-disable-next-line react/no-array-index-key -- The log only grows at its end.
+          <li key={at} className="flex flex-col gap-0.5">
+            <ActorName actor={entry.agentId ?? entry.userId} />
+            <span className="text-xs text-muted-foreground">
+              {historyLabel(entry.command)} · {formatRelativeTimeLabel(entry.createdAt, now)}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </CardFold>
+  );
+}
+
+/** The automations the workflow gives this step, each with its latest run and the ways to run it. */
 function AgentCard({
   view,
-  actions,
   busy,
   act,
 }: {
   readonly view: StepView;
-  readonly actions: StepActions;
   readonly busy: boolean;
   readonly act: StepAct;
 }) {
+  if (view.automations.length === 0) return null;
   return (
     <CardFold as="aside" title="Automations">
       <StepAutomationsEditor
-        automationIds={view.step.automationIds}
-        busy={busy}
-        onSave={
-          actions.canEditFields
-            ? async (automationIds) =>
-                (await act(() =>
-                  api("workflows.setStepAutomations", { stepId: view.step.id, automationIds }),
-                )) === null
-            : undefined
-        }
+        automationIds={view.automations.map((automation) => automation.id)}
         renderStatus={(id) => {
           const status = view.automations.find((entry) => entry.id === id);
           if (status === undefined) return null;
@@ -221,7 +247,7 @@ function AgentCard({
                       void act(() =>
                         api("workflows.runStepAutomation", {
                           stepId: view.step.id,
-                          automationId: id,
+                          automationId: status.id,
                         }),
                       )
                     }
@@ -238,7 +264,7 @@ function AgentCard({
                       void act(() =>
                         api("workflows.stopStepAutomation", {
                           stepId: view.step.id,
-                          automationId: id,
+                          automationId: status.id,
                         }),
                       )
                     }
@@ -300,8 +326,8 @@ function MissingRecap({
 }
 
 /**
- * The way back to the project's board for those who can open it, the item's title, and the step
- * it is in when that isn't the step on the page.
+ * The way back to the project's board, the item's title, and the step it is in when that isn't
+ * the step on the page.
  */
 function ItemHeader({ view }: { readonly view: StepView }) {
   const current =
@@ -309,13 +335,11 @@ function ItemHeader({ view }: { readonly view: StepView }) {
       ?.name ?? null;
   return (
     <header className="flex flex-col gap-1">
-      {view.canOpenBoard ? (
-        <div className="mb-5">
-          <BackLink to="/boards/$slug" params={{ slug: view.ticket.projectId }}>
-            {view.projectName}
-          </BackLink>
-        </div>
-      ) : null}
+      <div className="mb-5">
+        <BackLink to="/boards/$slug" params={{ slug: view.ticket.projectId }}>
+          {view.projectName}
+        </BackLink>
+      </div>
       <h2 className="text-xl font-semibold tracking-tight">{view.ticket.title}</h2>
       {current !== null ? (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -352,7 +376,7 @@ function StepHeading({ view }: { readonly view: StepView }) {
           ))}
         </p>
       ) : null}
-      <h2 className="text-lg font-semibold tracking-tight">{stepNameOf(view)}</h2>
+      <h2 className="text-lg font-semibold tracking-tight">{view.definition.name}</h2>
       {step.status.type === "blocked" ? (
         <p className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
           <span className="font-medium">Blocked:</span> {step.status.reason}
@@ -363,8 +387,8 @@ function StepHeading({ view }: { readonly view: StepView }) {
 }
 
 /**
- * The Details card, collapsible like a ticket's: who has the open step and the item's details.
- * Cancelling and reopening are on the status.
+ * The Details card, collapsible like a ticket's: who has the open step and the item's project.
+ * Cancelling is on the status.
  */
 function ItemDetails({
   view,
@@ -377,9 +401,7 @@ function ItemDetails({
   readonly busy: boolean;
   readonly act: StepAct;
 }) {
-  const id = useId();
   const { step, ticket: item } = view;
-  const dueDate = item.dueDate === null ? "" : DateTime.formatIso(item.dueDate).slice(0, 10);
   return (
     <CardFold as="aside" title="Details">
       <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
@@ -388,6 +410,7 @@ function ItemDetails({
           {actions.canSetAssignee ? (
             <AssigneePicker
               current={step.assignee}
+              memberIds={view.assignableUserIds}
               disabled={busy}
               onPick={(assignee) =>
                 void act(() =>
@@ -402,35 +425,11 @@ function ItemDetails({
             <ActorName actor={step.assignee} />
           )}
         </dd>
-        <dt className="text-muted-foreground">
-          <label htmlFor={`${id}-due`}>Due date</label>
-        </dt>
-        <dd className="min-w-0">
-          <SavedInput
-            id={`${id}-due`}
-            type="date"
-            size="sm"
-            value={dueDate}
-            disabled={item.status.type !== "open"}
-            onSave={(typed) =>
-              void act(() =>
-                api("workflows.setTicketDueDate", {
-                  ticketId: item.id,
-                  dueDate: typed ? DateTime.makeUnsafe(typed) : null,
-                }),
-              )
-            }
-          />
-        </dd>
         <dt className="text-muted-foreground">Project</dt>
         <dd className="min-w-0 truncate">
-          {view.canOpenBoard ? (
-            <Link to="/boards/$slug" params={{ slug: item.projectId }} className="hover:underline">
-              {view.projectName}
-            </Link>
-          ) : (
-            view.projectName
-          )}
+          <Link to="/boards/$slug" params={{ slug: item.projectId }} className="hover:underline">
+            {view.projectName}
+          </Link>
         </dd>
       </dl>
     </CardFold>

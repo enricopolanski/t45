@@ -17,20 +17,23 @@ type Actor = ReturnType<typeof assignablePeople>[number];
 
 /**
  * The step's assignee in its details, like a ticket's: clicking the name opens a searchable list
- * of the people who can take the step, less whoever has it now. Picking one reassigns
- * at once.
+ * of the step's members, less whoever has it now. Picking one reassigns at once.
  */
 export function AssigneePicker({
   current,
+  memberIds,
   disabled,
   onPick,
 }: {
   readonly current: string | null;
+  readonly memberIds: ReadonlyArray<string>;
   readonly disabled: boolean;
   readonly onPick: (ref: string) => void;
 }) {
   const directory = useWorkDirectory();
-  const actors = assignablePeople(directory).filter((actor) => actor.id !== current);
+  const actors = assignablePeople(directory).filter(
+    (actor) => actor.id !== current && memberIds.includes(actor.id),
+  );
   return (
     <Combobox<Actor>
       items={actors}

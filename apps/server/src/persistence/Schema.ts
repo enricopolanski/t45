@@ -83,12 +83,15 @@ const statements = [
       skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
       PRIMARY KEY (agent_id, skill_id)
     )`,
-  // An Automation is a prompt for an agent; each run starts a chat with it.
+  // An Automation is a prompt for an agent; each run starts a chat with it. An archived one runs
+  // no more and stays archived, as do archived agents, workflows, projects and schedule triggers:
+  // nothing here is deleted or restored.
   `CREATE TABLE automations (
       id TEXT PRIMARY KEY NOT NULL,
       title TEXT NOT NULL,
       prompt TEXT NOT NULL,
       agent_id TEXT NOT NULL REFERENCES agents(id),
+      is_archived INTEGER NOT NULL DEFAULT 0 CHECK (is_archived IN (0, 1)),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,
@@ -111,31 +114,52 @@ const statements = [
   `CREATE TABLE workflows (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
-      steps TEXT NOT NULL,
+      creator_user_id TEXT NOT NULL REFERENCES users(id),
+      editor_user_ids TEXT NOT NULL,
       is_archived INTEGER NOT NULL
     )`,
-  // The automationIds SQL comments in projects and tickets deliberately change the raw-SQL
-  // fingerprint so databases containing the old embedded automation objects are refused.
+  // A workflow's steps, one row per version, each step naming the automations people run on it.
+  // A version is a draft until a project adopts it, which freezes it for good; `revision` counts a
+  // draft's saves. Numbers are unique per workflow, so a version has at most one successor.
+  `CREATE TABLE workflow_versions (
+      id TEXT PRIMARY KEY NOT NULL,
+      workflow_id TEXT NOT NULL REFERENCES workflows(id),
+      number INTEGER NOT NULL,
+      revision INTEGER NOT NULL,
+      is_frozen INTEGER NOT NULL CHECK (is_frozen IN (0, 1)),
+      steps TEXT NOT NULL,
+      UNIQUE (workflow_id, number)
+    )`,
+  // `workflow_version_id` is the version new tickets start on; `default_assignees` names who gets
+  // a step on entry, by step definition.
   `CREATE TABLE projects (
       id TEXT PRIMARY KEY NOT NULL,
       workflow_id TEXT NOT NULL REFERENCES workflows(id),
+      workflow_version_id TEXT REFERENCES workflow_versions(id),
       name TEXT NOT NULL,
-      responsible_user_id TEXT NOT NULL,
       admin_user_ids TEXT NOT NULL,
-      default_assignments TEXT NOT NULL, -- assignee and shared automationIds by step definition
+      default_assignees TEXT NOT NULL,
       slug TEXT UNIQUE,
-      is_public INTEGER NOT NULL,
       is_archived INTEGER NOT NULL
     )`,
   `CREATE INDEX projects_workflow ON projects(workflow_id)`,
+  // Who works on a step of the workflow in a project. `step_id` is the definition id of one of
+  // the workflow's own steps, the same across versions: its sub-steps have its members.
+  `CREATE TABLE step_members (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      step_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      PRIMARY KEY (project_id, step_id, user_id)
+    ) WITHOUT ROWID`,
+  `CREATE INDEX step_members_user ON step_members(user_id)`,
   `CREATE TABLE tickets (
       id TEXT PRIMARY KEY NOT NULL,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      workflow_version_id TEXT NOT NULL REFERENCES workflow_versions(id),
       title TEXT NOT NULL,
       description TEXT NOT NULL,
-      due_date TEXT,
       status TEXT NOT NULL,
-      steps TEXT NOT NULL, -- runtime steps reference shared automationIds
+      steps TEXT NOT NULL,
       created_at TEXT NOT NULL
     )`,
   `CREATE INDEX tickets_project ON tickets(project_id, created_at)`,
@@ -165,13 +189,13 @@ const statements = [
       details TEXT NOT NULL,
       created_at TEXT NOT NULL
     )`,
+  `CREATE INDEX command_log_step ON command_log(ticket_id, step_id) WHERE step_id IS NOT NULL`,
 
   // In-app notifications: something new landed in a person's My work. Clicking a notification marks it read.
   `CREATE TABLE workflow_notifications (
       id TEXT PRIMARY KEY NOT NULL,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL CHECK (kind IN ('to_do', 'automation_ended', 'needs_responsible',
-        'names_deactivated')),
+      kind TEXT NOT NULL CHECK (kind IN ('to_do', 'automation_ended', 'names_deactivated')),
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       step_id TEXT,
       read_at TEXT,

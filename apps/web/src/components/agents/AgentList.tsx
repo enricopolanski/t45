@@ -137,18 +137,15 @@ function AgentRow({ agent }: { readonly agent: AgentSummary }) {
           Publish
         </Button>
       ) : null}
-      {canChange ? (
+      {canChange && active ? (
         <Button
           size="sm"
           variant="ghost"
           disabled={busy}
-          onClick={() =>
-            startTransition(() =>
-              active ? agentActions.archive(agent.id) : agentActions.restore(agent.id),
-            )
-          }
+          title="For good: an archived agent takes no new work and can't be restored."
+          onClick={() => startTransition(() => agentActions.archive(agent.id))}
         >
-          {active ? "Archive" : "Restore"}
+          Archive
         </Button>
       ) : null}
     </div>

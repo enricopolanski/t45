@@ -14,7 +14,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { newKey } from "../workflows/workflowLogic";
 import { CardFold } from "./CardFold";
-import { formatDueDate } from "./workLogic";
+import { formatDay } from "./workLogic";
 
 /** Uploads a file to the step; with `fieldKey`, it becomes that file field's value. */
 export async function attachStepFile(stepId: string, file: File, fieldKey?: string) {
@@ -95,7 +95,7 @@ function shownValue(field: FieldView) {
     case "boolean":
       return field.value === true ? "Yes" : "No";
     case "date":
-      return typeof field.value === "string" ? formatDueDate(field.value) : String(field.value);
+      return typeof field.value === "string" ? formatDay(field.value) : String(field.value);
     default:
       return String(field.value);
   }

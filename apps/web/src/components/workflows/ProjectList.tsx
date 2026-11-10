@@ -10,10 +10,7 @@ import { useWorkflowData } from "./useWorkflowData";
 
 const loadProjects = () => api("workflows.listProjects", undefined);
 
-/**
- * The projects I manage, and those I answer for as their responsible, who opens the board but
- * doesn't edit. Organization admins manage every project.
- */
+/** The projects I manage. Organization admins manage every project. */
 export function ProjectList() {
   const { detail: projects, error } = useWorkflowData(loadProjects);
   return (
@@ -39,7 +36,7 @@ export function ProjectList() {
             No projects yet. Choose a workflow to configure a project for your team.
           </p>
         ) : null}
-        {projects?.map(({ project, workflow, canManage }) => (
+        {projects?.map(({ project, workflow }) => (
           <div
             key={project.id}
             className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
@@ -47,34 +44,17 @@ export function ProjectList() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{project.name}</p>
               <p className="text-xs text-muted-foreground">Workflow: {workflow.name}</p>
-              {canManage ? null : (
-                <p className="text-xs text-muted-foreground">You're responsible</p>
-              )}
             </div>
             {project.isArchived ? <Badge variant="secondary">Archived</Badge> : null}
-            {workflow.steps.length > 0 ? (
-              <Button
-                size="sm"
-                variant="outline"
-                render={<Link to="/boards/$slug" params={{ slug: project.id }} />}
-              >
-                Board
-              </Button>
-            ) : null}
-            {canManage ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                render={
-                  <Link
-                    to="/settings/projects/$projectId/edit"
-                    params={{ projectId: project.id }}
-                  />
-                }
-              >
-                Edit
-              </Button>
-            ) : null}
+            <Button
+              size="sm"
+              variant="ghost"
+              render={
+                <Link to="/settings/projects/$projectId/edit" params={{ projectId: project.id }} />
+              }
+            >
+              Edit
+            </Button>
           </div>
         ))}
       </section>
