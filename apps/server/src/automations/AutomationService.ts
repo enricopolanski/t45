@@ -1,11 +1,13 @@
-import type { ChatId, Refused as ChatRefused } from "@t45/contracts/models/Chat";
 import {
+  canRun,
   isMissed,
   nextRunAt,
+  Refused,
   type Automation,
-  type AutomationId,
+  type ScheduleTrigger,
+  type ScheduleTriggerId,
 } from "@t45/contracts/models/Automation";
-import { NotFound } from "@t45/contracts/resources/errors";
+import type { Trigger } from "@t45/contracts/models/ChatOrigin";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -13,20 +15,17 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schedule from "effect/Schedule";
-import * as SqlClient from "effect/sql/SqlClient";
 
+import { AgentRepository } from "../agents/AgentRepository.ts";
 import * as AutomationRepository from "./AutomationRepository.ts";
 import { ChatService } from "../chats/ChatService.ts";
-
-const refusalOf = (run: Result.Result<ChatId, ChatRefused>) =>
-  Result.isFailure(run) ? run.failure.message : null;
+import { UserRepository } from "../org/UserRepository.ts";
 
 const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
   const automations = yield* AutomationRepository.AutomationRepository;
+  const agents = yield* AgentRepository;
+  const users = yield* UserRepository;
   const chats = yield* ChatService;
-  const transaction = <A, E>(effect: Effect.Effect<A, E>) =>
-    sql.withTransaction(effect).pipe(Effect.catchTags({ SqlError: Effect.die }));
 
   const logFailure = (message: string, annotations: Record<string, unknown> = {}) =>
     Effect.catchCause((cause: Cause.Cause<unknown>) =>
@@ -35,59 +34,70 @@ const make = Effect.gen(function* () {
         : Effect.logWarning(message, { ...annotations, cause }),
     );
 
-  const postRun = (automation: Automation) =>
+  const run = (automation: Automation, trigger: Trigger) =>
     chats
-      .startAutomation({ type: "automation", automationId: automation.id }, automation.agentId, {
+      .startAutomation(trigger, automation.agentId, {
         title: automation.title,
         input: { text: automation.prompt, attachments: [] },
       })
-      .pipe(Effect.catchTags({ NotFound: Effect.die }), Effect.result);
+      .pipe(Effect.catchTags({ NotFound: Effect.die }));
 
-  const runDue = (id: AutomationId) =>
-    automations.modify(
+  /** Runs the schedule's automation as its creator; answers why the run was refused. */
+  const runScheduled = Effect.fnUntraced(function* (trigger: ScheduleTrigger) {
+    const automation = yield* automations
+      .get(trigger.automationId)
+      .pipe(Effect.flatMap(Effect.fromNullishOr), Effect.orDie);
+    const creator = yield* users
+      .get(trigger.creatorUserId)
+      .pipe(Effect.flatMap(Effect.fromNullishOr), Effect.orDie);
+    if (!canRun({ ...creator, userId: creator.id }, yield* agents.get(automation.agentId)))
+      return new Refused({ reason: "creator_cannot_run" }).message;
+    const started = yield* run(automation, {
+      type: "schedule",
+      automationId: automation.id,
+      scheduleTriggerId: trigger.id,
+      effectiveUserId: creator.id,
+    }).pipe(Effect.result);
+    return Result.isFailure(started) ? started.failure.message : null;
+  });
+
+  const runDue = (id: ScheduleTriggerId) =>
+    automations.triggers.modify(
       id,
-      Effect.fnUntraced(function* (automation) {
+      Effect.fnUntraced(function* (trigger) {
         const now = yield* DateTime.now;
         if (
-          !automation.isEnabled ||
-          automation.nextRunAt === null ||
-          DateTime.isGreaterThan(automation.nextRunAt, now)
+          trigger.status !== "enabled" ||
+          trigger.nextRunAt === null ||
+          DateTime.isGreaterThan(trigger.nextRunAt, now)
         )
-          return automation;
-        const missed = isMissed(automation.schedule, automation.nextRunAt, now);
-        if (missed) yield* Effect.logInfo("Skipping missed automation run", { automationId: id });
-        const lastError = missed ? automation.lastError : refusalOf(yield* postRun(automation));
-        return { ...automation, nextRunAt: nextRunAt(automation, now), lastError };
+          return trigger;
+        const missed = isMissed(trigger.schedule, trigger.nextRunAt, now);
+        if (missed)
+          yield* Effect.logInfo("Skipping missed scheduled run", { scheduleTriggerId: id });
+        const lastError = missed ? trigger.lastError : yield* runScheduled(trigger);
+        return { ...trigger, nextRunAt: nextRunAt(trigger.schedule, now), lastError };
       }),
     );
 
   const pass = DateTime.now.pipe(
-    Effect.flatMap(automations.due),
+    Effect.flatMap(automations.triggers.due),
     Effect.flatMap((ids) =>
       Effect.forEach(
         ids,
-        (id) => runDue(id).pipe(logFailure("Automation run failed", { automationId: id })),
+        (id) => runDue(id).pipe(logFailure("Scheduled run failed", { scheduleTriggerId: id })),
         { discard: true },
       ),
     ),
-    logFailure("Automation pass failed"),
+    logFailure("Schedule pass failed"),
   );
   // The next pass is spaced from the end of the last one, so passes never overlap.
   yield* Effect.forkScoped(pass.pipe(Effect.repeat(Schedule.spaced("5 seconds"))));
 
   return {
-    runNow: Effect.fnUntraced(function* (id: AutomationId) {
-      const run = yield* transaction(
-        Effect.gen(function* () {
-          const automation = yield* automations.get(id);
-          if (automation === null) return yield* new NotFound();
-          const posted = yield* postRun(automation);
-          yield* automations.setLastError(automation.id, refusalOf(posted));
-          return posted;
-        }),
-      );
-      return yield* Effect.fromResult(run);
-    }),
+    /** Runs the automation on `userId`'s authority. */
+    runNow: (automation: Automation, userId: string) =>
+      run(automation, { type: "manual", automationId: automation.id, effectiveUserId: userId }),
   };
 });
 

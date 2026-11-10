@@ -86,7 +86,6 @@ describe("a chat's execution", () => {
         const sql = yield* SqlClient.SqlClient;
         yield* sql`UPDATE agents SET instructions = 'Use the policy.',
           model = 'opencode-go/other-model', network = 'open',
-          mcp_servers = '{"docs":{"type":"remote","url":"https://docs.example"}}',
           files = '{"policy.md":"The policy."}'
           WHERE id = ${agentId}`;
         const file = yield* upload;
@@ -100,7 +99,7 @@ describe("a chat's execution", () => {
         assert.deepEqual(request.agent, {
           instructions: "Use the policy.",
           model: "opencode-go/other-model",
-          mcpServers: { docs: { type: "remote", url: "https://docs.example" } },
+          mcpServers: {},
           permissions: { network: "open" },
           files: { "policy.md": "The policy." },
           tools: {},

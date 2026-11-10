@@ -2,6 +2,7 @@ import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import {
   canChatWithMembers,
+  canUse,
   PROJECT_TOOLS_MCP_NAME,
   type Agent,
 } from "@t45/contracts/models/Agent";
@@ -126,9 +127,7 @@ const readMessage = (
   }).pipe(Effect.orDie);
 
 const encodeChatMessage = Schema.encodeSync(Schema.fromJsonString(ChatMessage));
-const hasProjectTools = (agent: Agent) =>
-  agent.mcpServers[PROJECT_TOOLS_MCP_NAME] !== undefined &&
-  agent.mcpServers[PROJECT_TOOLS_MCP_NAME]?.disabled !== true;
+const hasProjectTools = (agent: Agent) => agent.appTools.includes(PROJECT_TOOLS_MCP_NAME);
 
 const readBytes = (message: ChatMessage) =>
   new TextEncoder().encode(encodeChatMessage(message)).byteLength;
@@ -171,7 +170,7 @@ const make = Effect.gen(function* () {
       if (
         agent === null ||
         (start.origin.kind === "conversation"
-          ? !canChatWithMembers(agent)
+          ? !canChatWithMembers(agent) || !canUse(agent, start.origin.ownerUserId)
           : agent.status !== "active")
       )
         return yield* refuse("agent_unavailable");
@@ -362,7 +361,9 @@ const make = Effect.gen(function* () {
     }),
     listTargets: (member: Member) =>
       Effect.gen(function* () {
-        const available = (yield* agents.list).filter(canChatWithMembers);
+        const available = (yield* agents.list).filter(
+          (agent) => canChatWithMembers(agent) && canUse(agent, member.userId),
+        );
         const plain = available
           .filter((agent) => !hasProjectTools(agent))
           .map((agent) => ({

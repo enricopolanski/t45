@@ -42,7 +42,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   useOrganizationFavicon();
   const showSettingsSidebar =
     /^\/settings(\/|$)/u.test(pathname) &&
-    (isAdmin || !/^\/settings\/(projects|workflows)(\/|$)/u.test(pathname));
+    (isAdmin || !/^\/settings\/(projects|workflows|agents)(\/|$)/u.test(pathname));
 
   return (
     <SidebarProvider>

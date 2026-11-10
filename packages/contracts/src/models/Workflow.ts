@@ -230,7 +230,8 @@ const REFUSALS = {
   reason_required: "Give a reason.",
   invalid_field_value: "That value doesn't fit the field.",
   invalid_attachment: "That file can't be attached here.",
-  invalid_automations: "Choose automations whose agents can work on steps.",
+  invalid_automations:
+    "An automation's agent can't work on steps, or is private to someone else. Choose another.",
 };
 
 export class Refused extends Schema.TaggedError<Refused>()("WorkflowRefused", {

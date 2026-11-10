@@ -1,5 +1,11 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { ContactIcon, InboxIcon, KanbanSquareIcon, MessagesSquareIcon } from "lucide-react";
+import {
+  BotIcon,
+  ContactIcon,
+  InboxIcon,
+  KanbanSquareIcon,
+  MessagesSquareIcon,
+} from "lucide-react";
 import type { ProjectListEntryView } from "@t45/contracts/resources/Workflows";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -34,10 +40,14 @@ const MAIN_LINKS: ReadonlyArray<NavLink> = [
   { label: "My work", icon: <InboxIcon />, to: "/my-work" },
   { label: "Chat", icon: <MessagesSquareIcon />, to: "/chats" },
   { label: "People", icon: <ContactIcon />, to: "/people" },
+  { label: "Agents", icon: <BotIcon />, to: "/settings/agents" },
   { label: "Boards", icon: <KanbanSquareIcon />, to: "/boards" },
 ];
 
-/** The app's main sidebar, for everyone: My work, Chat, People, and Boards (or the one board). */
+/**
+ * The app's main sidebar, for everyone: My work, Chat, People, Agents, and Boards (or the one
+ * board).
+ */
 export function AppNavSidebar() {
   return (
     <>

@@ -10,7 +10,7 @@ import { ChatRepository } from "../chats/ChatRepository.ts";
 import { ChatEvents } from "../chats/ChatEvents.ts";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import { type AutomationOrigin, effectiveUserIdOf } from "@t45/contracts/models/ChatOrigin";
-import { canWorkSteps } from "@t45/contracts/models/Agent";
+import { canUse, canWorkSteps } from "@t45/contracts/models/Agent";
 import type { Attachment } from "@t45/contracts/models/Attachment";
 import {
   type Notification,
@@ -671,8 +671,12 @@ const make = Effect.gen(function* () {
     const actor = yield* actorOf(actorId);
     const project = yield* requireAdmin(actor, yield* found(projects.get(projectId)));
     if (changes.responsible !== undefined) yield* requireValidPerson(changes.responsible);
-    for (const assignment of Object.values(changes.defaultAssignments ?? {})) {
-      yield* validateAutomations(assignment.automationIds);
+    for (const [stepDefinitionId, assignment] of Object.entries(changes.defaultAssignments ?? {})) {
+      yield* validateAutomations(
+        actorId,
+        assignment.automationIds,
+        project.defaultAssignments[stepDefinitionId]?.automationIds ?? [],
+      );
       if (assignment.assignee !== null) yield* requireValidPerson(assignment.assignee);
     }
     const adminUserIds = [...new Set(changes.adminUserIds ?? project.adminUserIds)];
@@ -1089,15 +1093,31 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const requireStepAutomation = Effect.fnUntraced(function* (id: AutomationId) {
+  /** Whoever attaches or runs an automation must be able to use its agent; `userId` is theirs. */
+  const requireStepAutomation = Effect.fnUntraced(function* (
+    id: AutomationId,
+    userId: string | null,
+  ) {
     const automation = yield* automations.get(id);
     const agent = automation === null ? null : yield* agents.get(automation.agentId);
-    if (automation === null || agent === null || !canWorkSteps(agent))
+    if (
+      automation === null ||
+      agent === null ||
+      !canWorkSteps(agent) ||
+      (userId !== null && !canUse(agent, userId))
+    )
       return yield* new WorkflowRefused({ reason: "invalid_automations" });
     return automation;
   });
-  const validateAutomations = (ids: ReadonlyArray<AutomationId>) =>
-    Effect.forEach(ids, requireStepAutomation, { discard: true });
+  /** The `attached` automations stay whoever saves the list; the actor attaches the rest. */
+  const validateAutomations = (
+    actorId: string,
+    ids: ReadonlyArray<AutomationId>,
+    attached: ReadonlyArray<AutomationId>,
+  ) =>
+    Effect.forEach(ids, (id) => requireStepAutomation(id, attached.includes(id) ? null : actorId), {
+      discard: true,
+    });
   const loadAutomation = Effect.fnUntraced(function* (
     actorId: string,
     input: Payload<"runStepAutomation">,
@@ -1112,7 +1132,7 @@ const make = Effect.gen(function* () {
     input: Payload<"runStepAutomation">,
   ) {
     const { work, step } = yield* loadAutomation(actorId, input);
-    const automation = yield* requireStepAutomation(input.automationId);
+    const automation = yield* requireStepAutomation(input.automationId, actorId);
     yield* stopStepRuns(work, step, (id) => id === automation.id);
     yield* chats.startAutomation(
       {
@@ -1149,7 +1169,7 @@ const make = Effect.gen(function* () {
   ) {
     const { work, step } = yield* loadForCommand(actorId, input.stepId);
     yield* requireActionable(step);
-    yield* validateAutomations(input.automationIds);
+    yield* validateAutomations(actorId, input.automationIds, step.automationIds);
     yield* stopStepRuns(work, step, (id) => !input.automationIds.includes(id));
     putStep(work, { ...step, automationIds: input.automationIds });
     yield* save(work);

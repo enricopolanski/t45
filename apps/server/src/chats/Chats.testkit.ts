@@ -5,8 +5,7 @@ import * as UserRepository from "../org/UserRepository.ts";
 import { AutomationId } from "@t45/contracts/models/Automation";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { Session } from "@opencode/schema/session";
-import { Agent } from "@t45/contracts/models/Agent";
-import { STEP_TOOLS_MCP } from "@t45/core/agentTools";
+import { STEP_TOOLS_MCP_NAME } from "@t45/contracts/models/Agent";
 import { ChatId, type Refused } from "@t45/contracts/models/Chat";
 
 import type { ChatEvent, ChatMessage } from "@t45/contracts/resources/Chats";
@@ -14,7 +13,6 @@ import type { NotFound } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -63,8 +61,6 @@ export const layer = WorkflowService.layer.pipe(
 
 const AT = "2026-10-23T09:00:00.000Z";
 
-const encodeMcpServers = Schema.encodeSync(Schema.fromJsonString(Agent.fields.mcpServers));
-
 /** An active member with `role`; returns the user id. */
 export const addUser = (userId: string, role: "admin" | "member" = "member") =>
   Effect.gen(function* () {
@@ -74,7 +70,7 @@ export const addUser = (userId: string, role: "admin" | "member" = "member") =>
     return userId;
   });
 
-/** An agent members can chat with, made by `createdBy`; returns its id. */
+/** A published agent members can chat with; returns its id. */
 export const addAgent = (
   name: string,
   options: {
@@ -86,12 +82,11 @@ export const addAgent = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const id = `agent-${name.toLowerCase()}`;
-    const mcpServers =
-      options.stepTools === true ? { [STEP_TOOLS_MCP.name]: STEP_TOOLS_MCP.server } : {};
-    yield* sql`INSERT INTO agents (id, name, instructions, model, mcp_servers, is_conversational,
-        status, created_at, updated_at)
-      VALUES (${id}, ${name}, 'Be brief.', 'opencode-go/test-model', ${encodeMcpServers(mcpServers)},
-        ${options.chat === false ? 0 : 1}, ${options.status ?? "active"}, ${AT}, ${AT})`;
+    yield* sql`INSERT INTO agents (id, name, instructions, model, app_tools, is_conversational,
+        is_published, status, created_at, updated_at)
+      VALUES (${id}, ${name}, 'Be brief.', 'opencode-go/test-model',
+        ${options.stepTools === true ? `["${STEP_TOOLS_MCP_NAME}"]` : "[]"},
+        ${options.chat === false ? 0 : 1}, 1, ${options.status ?? "active"}, ${AT}, ${AT})`;
     return id;
   });
 
@@ -129,8 +124,9 @@ export const seedChat = (chat: {
                     effectiveUserId: "fixture",
                   }
                 : {
-                    type: "automation",
+                    type: "manual",
                     automationId: AutomationId.make("fixture"),
+                    effectiveUserId: "fixture",
                   },
           },
     );

@@ -86,7 +86,11 @@ describe("chats", () => {
           ["id_taken", "NotFound", "NotFound"],
         );
         yield* chats.startAutomation(
-          { type: "automation", automationId: AutomationId.make("fixture") },
+          {
+            type: "manual",
+            automationId: AutomationId.make("fixture"),
+            effectiveUserId: "fixture",
+          },
           agentId,
           {
             title: "Nightly",
@@ -121,7 +125,11 @@ describe("chats", () => {
           chats.send({ chatId: testChatId(n), agentId, inputId: "input-1", ...typed("Hi") }, alice);
         const startRun = (agentId: Agent["id"]) =>
           chats.startAutomation(
-            { type: "automation", automationId: AutomationId.make("fixture") },
+            {
+              type: "manual",
+              automationId: AutomationId.make("fixture"),
+              effectiveUserId: "fixture",
+            },
             agentId,
             {
               title: "Report · Read",
@@ -239,7 +247,7 @@ describe("chats", () => {
         alice,
       );
       const runId = yield* chats.startAutomation(
-        { type: "automation", automationId: AutomationId.make("fixture") },
+        { type: "manual", automationId: AutomationId.make("fixture"), effectiveUserId: "fixture" },
         agentId,
         {
           title: "Inbox digest",

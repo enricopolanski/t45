@@ -45,6 +45,8 @@ export const chatTargets = apiQuery("chats.listTargets")(undefined);
 export const agentActions = {
   archive: (agentId: string) =>
     mutate(api("agents.archive", { agentId }), agentsList, "Couldn't archive the agent"),
+  publish: (agentId: string) =>
+    mutate(api("agents.publish", { agentId }), agentsList, "Couldn't publish the agent"),
   restore: (agentId: string) =>
     mutate(api("agents.restore", { agentId }), agentsList, "Couldn't restore the agent"),
 };

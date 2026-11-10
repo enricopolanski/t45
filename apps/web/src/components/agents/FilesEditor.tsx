@@ -5,19 +5,17 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 
-export function RowsEditor<Row>({
+function RowsEditor<Row>({
   rows,
   onChange,
   blank,
   addLabel,
-  actions,
   children,
 }: {
   readonly rows: ReadonlyArray<Row>;
   readonly onChange: (rows: ReadonlyArray<Row>) => void;
   readonly blank: Row;
   readonly addLabel: string;
-  readonly actions?: ReactNode;
   readonly children: (
     row: Row,
     edit: (change: Partial<Row>) => void,
@@ -58,7 +56,6 @@ export function RowsEditor<Row>({
         >
           {addLabel}
         </Button>
-        {actions}
       </div>
     </div>
   );

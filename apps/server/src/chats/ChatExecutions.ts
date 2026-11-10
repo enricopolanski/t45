@@ -1,5 +1,7 @@
 import {
+  type AppTool,
   STEP_TOOLS_MCP_NAME,
+  T45_TOOLS_DIR,
   WORKFLOW_DRAFTING_MCP_NAME,
   PROJECT_TOOLS_MCP_NAME,
 } from "@t45/contracts/models/Agent";
@@ -30,6 +32,13 @@ import * as PromptService from "./PromptService.ts";
 import * as ServerConfig from "../config.ts";
 
 const encodeInputMetadata = Schema.encodeSync(InputMetadata);
+
+/** The program of each app tool, among the files written to `T45_TOOLS_DIR`. */
+const APP_TOOL_FILES: Record<AppTool, string> = {
+  [WORKFLOW_DRAFTING_MCP_NAME]: "workflow-tools.mjs",
+  [STEP_TOOLS_MCP_NAME]: "step-tools.mjs",
+  [PROJECT_TOOLS_MCP_NAME]: "project-tools.mjs",
+};
 
 export type Posted = Pick<Input, "inputId" | "payload">;
 
@@ -150,36 +159,33 @@ export const make = Effect.gen(function* () {
         agent: {
           ...Struct.pick(agent, ["instructions", "model", "permissions", "files"]),
           mcpServers: Object.fromEntries(
-            Object.entries(agent.mcpServers).map(([name, server]) => [
-              name,
-              (name === STEP_TOOLS_MCP_NAME || name === PROJECT_TOOLS_MCP_NAME) &&
-              server.type === "local"
-                ? {
-                    ...server,
-                    environment: {
-                      ...server.environment,
-                      T45_SERVER_URL: serverUrl,
-                      T45_TOOL_TOKEN: token,
-                      T45_TOOL_INSTANCE: toolInstance,
-                      T45_STEP_ID:
-                        origin?.kind === "automation" && origin.trigger.type === "step"
-                          ? origin.trigger.stepId
-                          : "",
-                      T45_PROJECT_ID:
-                        origin?.kind === "conversation" ? (origin.projectId ?? "") : "",
-                    },
-                  }
-                : server,
+            agent.appTools.map((tool) => [
+              tool,
+              {
+                type: "local" as const,
+                command: ["node", `${T45_TOOLS_DIR}/${APP_TOOL_FILES[tool]}`],
+                // Each tool call stays visible in the chat; draft calls render workflow cards.
+                codemode: false,
+                // Drafting calls nothing on the server, so it gets no token.
+                ...(tool === WORKFLOW_DRAFTING_MCP_NAME
+                  ? {}
+                  : {
+                      environment: {
+                        T45_SERVER_URL: serverUrl,
+                        T45_TOOL_TOKEN: token,
+                        T45_TOOL_INSTANCE: toolInstance,
+                        T45_STEP_ID:
+                          origin?.kind === "automation" && origin.trigger.type === "step"
+                            ? origin.trigger.stepId
+                            : "",
+                        T45_PROJECT_ID:
+                          origin?.kind === "conversation" ? (origin.projectId ?? "") : "",
+                      },
+                    }),
+              },
             ]),
           ),
-          tools: Object.entries(agent.mcpServers).some(
-            ([name, server]) =>
-              [STEP_TOOLS_MCP_NAME, WORKFLOW_DRAFTING_MCP_NAME, PROJECT_TOOLS_MCP_NAME].includes(
-                name,
-              ) && server.disabled !== true,
-          )
-            ? toolFiles
-            : {},
+          tools: agent.appTools.length > 0 ? toolFiles : {},
           skills: (yield* skills.listForAgent(agent.id)).map((skill) =>
             Struct.pick(skill, ["name", "description", "content", "files"]),
           ),

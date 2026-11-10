@@ -1,7 +1,7 @@
-import { type Agent, Refused } from "@t45/contracts/models/Agent";
+import { type Agent, canManage, canUse, isBuiltIn, Refused } from "@t45/contracts/models/Agent";
 import { NotFound } from "@t45/contracts/resources/errors";
 import { Agents, AgentSummary } from "@t45/contracts/resources/Agents";
-import { Authorization } from "@t45/contracts/Authorization";
+import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -26,11 +26,18 @@ export const layer = Agents.middleware(Authorization).toLayer(
     const httpClient = yield* HttpClient.HttpClient;
     const crypto = yield* Crypto.Crypto;
 
-    const find = (agentId: string) =>
-      agents.get(agentId).pipe(
-        Effect.filterOrElse(
-          (agent) => agent !== null,
-          () => new NotFound(),
+    /** An agent the member doesn't manage is as good as missing. */
+    const find = Effect.fnUntraced(function* (agentId: string) {
+      const member = yield* CurrentUser;
+      const agent = yield* agents.get(agentId);
+      if (agent === null || !canManage(agent, member)) return yield* new NotFound();
+      return agent;
+    });
+    const findCustom = (agentId: string) =>
+      find(agentId).pipe(
+        Effect.filterOrFail(
+          (agent) => !isBuiltIn(agent.id),
+          () => new Refused({ reason: "built_in" }),
         ),
       );
     const models = yield* httpClient.get(MODELS_URL).pipe(
@@ -63,11 +70,12 @@ export const layer = Agents.middleware(Authorization).toLayer(
 
     return Agents.of({
       "agents.list": () =>
-        agents.list.pipe(
-          Effect.map((all) =>
-            all.map((agent) => Struct.pick(agent, Struct.keys(AgentSummary.fields))),
-          ),
-        ),
+        Effect.gen(function* () {
+          const member = yield* CurrentUser;
+          return (yield* agents.list)
+            .filter((agent) => canUse(agent, member.userId) || canManage(agent, member))
+            .map((agent) => Struct.pick(agent, Struct.keys(AgentSummary.fields)));
+        }),
       "agents.listModels": () =>
         models.pipe(
           Effect.map((models) => ({ models, reason: null })),
@@ -76,7 +84,7 @@ export const layer = Agents.middleware(Authorization).toLayer(
       "agents.get": ({ agentId }) => find(agentId),
       "agents.archive": ({ agentId }) =>
         Effect.gen(function* () {
-          const agent = yield* find(agentId);
+          const agent = yield* findCustom(agentId);
           if (agent.status === "archived") return agent;
           return yield* save({ ...agent, status: "archived", updatedAt: yield* DateTime.now }).pipe(
             Effect.orDie,
@@ -90,10 +98,22 @@ export const layer = Agents.middleware(Authorization).toLayer(
           return yield* save({
             id: yield* crypto.randomUUIDv4().pipe(Effect.orDie),
             ...draft,
+            creatorUserId: (yield* CurrentUser).userId,
+            isPublished: false,
             status: "active",
             createdAt: now,
             updatedAt: now,
           });
+        }),
+      "agents.publish": ({ agentId }) =>
+        Effect.gen(function* () {
+          const { userId } = yield* CurrentUser;
+          const agent = yield* agents.get(agentId);
+          if (agent === null || agent.creatorUserId !== userId) return yield* new NotFound();
+          if (agent.isPublished) return agent;
+          return yield* save({ ...agent, isPublished: true, updatedAt: yield* DateTime.now }).pipe(
+            Effect.orDie,
+          );
         }),
       "agents.restore": ({ agentId }) =>
         Effect.gen(function* () {
@@ -103,7 +123,7 @@ export const layer = Agents.middleware(Authorization).toLayer(
         }),
       "agents.update": ({ agentId, ...draft }) =>
         Effect.gen(function* () {
-          const agent = yield* find(agentId);
+          const agent = yield* findCustom(agentId);
           if (draft.model !== agent.model) yield* requireOfferedModel(draft.model);
           yield* requireSkills(draft.skills);
           return yield* save({ ...agent, ...draft, updatedAt: yield* DateTime.now });

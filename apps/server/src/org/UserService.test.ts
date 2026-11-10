@@ -28,6 +28,7 @@ import { AdminOnly } from "../auth/Authorization.ts";
 import * as AuthHttp from "../auth/http.ts";
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as AutomationRepository from "../automations/AutomationRepository.ts";
 import * as UserRepository from "./UserRepository.ts";
 import { UserService } from "./UserService.ts";
 import * as Authentication from "../auth/Authentication.ts";
@@ -1091,6 +1092,7 @@ describe("UserService", () => {
         }),
       ),
       Layer.provideMerge(UserRepository.layer),
+      Layer.provideMerge(AutomationRepository.layer),
       Layer.provideMerge(SqlitePersistence.testLayer),
       Layer.provide(ServerConfig.testLayer("t3-users-handlers-")),
     );

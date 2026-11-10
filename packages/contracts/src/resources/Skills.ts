@@ -14,7 +14,6 @@ class SaveSkillRequest extends Schema.Opaque<SaveSkillRequest>()(
 ) {}
 
 export const Skills = RpcGroup.make(
-  Rpc.make("list", { success: Schema.Array(Skill) }),
   Rpc.make("create", {
     payload: SaveSkillRequest,
     success: Skill,
@@ -30,5 +29,7 @@ export const Skills = RpcGroup.make(
     error: Schema.Union([Refused, NotFound]),
   }),
 )
-  .prefix("skills.")
-  .middleware(AdminOnly);
+  // Middleware applies only to existing RPCs; every member lists the skills to pick for an agent.
+  .middleware(AdminOnly)
+  .add(Rpc.make("list", { success: Schema.Array(Skill) }))
+  .prefix("skills.");

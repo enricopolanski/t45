@@ -4,41 +4,11 @@
  * place: the fingerprint of the statements changes, and a database created by other statements is
  * refused at startup.
  */
-import { Agent, PROJECT_ASSISTANT_ID } from "@t45/contracts/models/Agent";
-import { WORKFLOW_DRAFTING_MCP, PROJECT_TOOLS_MCP } from "@t45/core/agentTools";
 import * as Crypto from "effect/Crypto";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-
-// Defaults apply only to fresh databases; later changes belong to the organization.
-const workflowDesigner = {
-  id: "workflow-designer",
-  name: "Workflow designer",
-  instructions: `Help the member design a reusable workflow. Clarify the process and expected outputs,
-then use the workflow draft tool to propose a complete workflow. Submit the complete draft for revisions.
-Explain that the member saves the workflow, then configures and publishes a project from it.`,
-  model: "opencode-go/deepseek-v4.1-flash",
-  files: {},
-  skills: [],
-  mcpServers: { [WORKFLOW_DRAFTING_MCP.name]: WORKFLOW_DRAFTING_MCP.server },
-  permissions: { network: "provider" },
-  isConversational: true,
-  status: "active",
-} satisfies Omit<Agent, "createdAt" | "updatedAt">;
-
-const projectAssistant = {
-  ...workflowDesigner,
-  id: PROJECT_ASSISTANT_ID,
-  name: "Project assistant",
-  instructions: `Help the member operate the project bound to this conversation. Use get_workflow and get_ticket to obtain current steps, fields and IDs before making changes. Never invent IDs. Confirm what the member wants before making ambiguous changes. Only claim a write succeeded after its tool returns success. You cannot mark steps done or edit workflows.`,
-  mcpServers: { [PROJECT_TOOLS_MCP.name]: PROJECT_TOOLS_MCP.server },
-} satisfies Omit<Agent, "createdAt" | "updatedAt">;
-
-const encodeFiles = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.files));
-const encodeMcpServers = Schema.encodeEffect(Schema.fromJsonString(Agent.fields.mcpServers));
 
 // The organization's users and sessions, agents and automations, workflows and projects, chats,
 // and files.
@@ -79,18 +49,21 @@ const statements = [
 
   // Named agents, their skills and automations, and the workflows people and agents work
   // through.
-  // Named agents are organization-wide. Every agent works in a sandbox of its own, and its model
-  // is a `provider/model` slug OpenCode Go offers. Admins choose which agents members can
-  // chat with, and which of those draft workflows.
+  // A named agent is its creator's alone until published, then everyone's. Every agent works in a
+  // sandbox of its own, and its model is a `provider/model` slug OpenCode Go offers. Its
+  // `app_tools` lists which of T45's tools it gets. Every server start writes the built-in
+  // agents' rows again; they have no creator.
   `CREATE TABLE agents (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       instructions TEXT NOT NULL,
       model TEXT NOT NULL,
       files TEXT NOT NULL DEFAULT '{}',
-      mcp_servers TEXT NOT NULL DEFAULT '{}',
+      app_tools TEXT NOT NULL DEFAULT '[]',
       network TEXT NOT NULL DEFAULT 'provider' CHECK (network IN ('provider', 'open')),
       is_conversational INTEGER NOT NULL DEFAULT 0,
+      creator_user_id TEXT REFERENCES users(id),
+      is_published INTEGER NOT NULL DEFAULT 0 CHECK (is_published IN (0, 1)),
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -110,22 +83,30 @@ const statements = [
       skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
       PRIMARY KEY (agent_id, skill_id)
     )`,
-  // An Automation starts a chat with its agent: when `next_run_at` comes, or on Run now.
-  // `schedule_json` is the schedule, and `last_error` why its latest run was refused.
+  // An Automation is a prompt for an agent; each run starts a chat with it.
   `CREATE TABLE automations (
       id TEXT PRIMARY KEY NOT NULL,
       title TEXT NOT NULL,
       prompt TEXT NOT NULL,
       agent_id TEXT NOT NULL REFERENCES agents(id),
-      is_enabled INTEGER NOT NULL CHECK (is_enabled IN (0, 1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+  // A schedule trigger runs its automation when `next_run_at` comes, on its creator's authority.
+  // `last_error` is why its latest run was refused. Disabled can be enabled again; archived can't.
+  `CREATE TABLE schedule_triggers (
+      id TEXT PRIMARY KEY NOT NULL,
+      automation_id TEXT NOT NULL REFERENCES automations(id),
+      creator_user_id TEXT NOT NULL REFERENCES users(id),
       schedule_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('enabled', 'disabled', 'archived')),
       next_run_at TEXT,
       last_error TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,
-  `CREATE INDEX automations_due ON automations(next_run_at)
-    WHERE is_enabled = 1 AND next_run_at IS NOT NULL`,
+  `CREATE INDEX schedule_triggers_due ON schedule_triggers(next_run_at)
+    WHERE status = 'enabled' AND next_run_at IS NOT NULL`,
 
   `CREATE TABLE workflows (
       id TEXT PRIMARY KEY NOT NULL,
@@ -310,21 +291,6 @@ export const setupSchema = Effect.fnUntraced(function* () {
         for (const statement of statements) {
           yield* sql.unsafe(statement);
         }
-        const at = DateTime.formatIso(yield* DateTime.now);
-        for (const agent of [workflowDesigner, projectAssistant])
-          yield* sql`INSERT INTO agents ${sql.insert({
-            id: agent.id,
-            name: agent.name,
-            instructions: agent.instructions,
-            model: agent.model,
-            files: yield* encodeFiles(agent.files),
-            mcp_servers: yield* encodeMcpServers(agent.mcpServers),
-            network: agent.permissions.network,
-            is_conversational: Number(agent.isConversational),
-            status: agent.status,
-            created_at: at,
-            updated_at: at,
-          })}`;
         yield* sql`CREATE TABLE schema_fingerprint (fingerprint TEXT NOT NULL)`;
         yield* sql`INSERT INTO schema_fingerprint (fingerprint) VALUES (${fingerprint})`;
       }),

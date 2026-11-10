@@ -4,20 +4,24 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import { Chat, Refused as ChatRefused } from "../models/Chat.ts";
-import { Refused as AutomationRefused, Automation, AutomationId } from "../models/Automation.ts";
+import {
+  Refused as AutomationRefused,
+  Automation,
+  AutomationId,
+  Schedule,
+  ScheduleTrigger,
+  ScheduleTriggerId,
+} from "../models/Automation.ts";
 import { AdminOnly } from "../Authorization.ts";
-import { NotFound } from "./errors.ts";
+import { AccessDenied, NotFound } from "./errors.ts";
 
-const Settings = Struct.pick(Automation.fields, [
-  "title",
-  "prompt",
-  "agentId",
-  "isEnabled",
-  "schedule",
-]);
+const Settings = Struct.pick(Automation.fields, ["title", "prompt", "agentId"]);
+const Errors = Schema.Union([AutomationRefused, NotFound, AccessDenied]);
 
 export const AutomationSummary = Schema.Struct({
   ...Automation.fields,
+  /** Its schedules, without the archived ones. */
+  scheduleTriggers: Schema.Array(ScheduleTrigger),
   lastRun: Schema.NullOr(
     Schema.Struct({
       statusLabel: Schema.String,
@@ -32,23 +36,30 @@ export const Automations = RpcGroup.make(
   Rpc.make("create", {
     payload: Settings,
     success: Automation,
-    error: AutomationRefused,
+    error: Schema.Union([AutomationRefused, AccessDenied]),
   }),
   Rpc.make("runNow", {
     payload: { id: AutomationId },
-    error: Schema.Union([ChatRefused, NotFound]),
-  }),
-  /** Flips only the enabled flag, never overwriting the automation's other fields. */
-  Rpc.make("setEnabled", {
-    payload: { id: AutomationId, isEnabled: Schema.Boolean },
-    success: Automation,
-    error: NotFound,
+    error: Schema.Union([AutomationRefused, ChatRefused, NotFound, AccessDenied]),
   }),
   Rpc.make("update", {
     payload: { id: AutomationId, ...Settings },
     success: Automation,
-    error: Schema.Union([AutomationRefused, NotFound]),
+    error: Errors,
   }),
+  /** The caller becomes the schedule's creator: its runs are theirs. */
+  Rpc.make("createScheduleTrigger", {
+    payload: { automationId: AutomationId, schedule: Schedule },
+    success: ScheduleTrigger,
+    error: Errors,
+  }),
+  /** Any admin disables a schedule; only its creator enables it. */
+  Rpc.make("setScheduleTriggerEnabled", {
+    payload: { id: ScheduleTriggerId, isEnabled: Schema.Boolean },
+    success: ScheduleTrigger,
+    error: Errors,
+  }),
+  Rpc.make("archiveScheduleTrigger", { payload: { id: ScheduleTriggerId }, error: NotFound }),
 )
   // Middleware applies only to existing RPCs; adding listForSteps afterward keeps it member-accessible.
   .middleware(AdminOnly)
@@ -57,6 +68,7 @@ export const Automations = RpcGroup.make(
       success: Schema.Array(
         Schema.Struct(Struct.pick(Automation.fields, ["id", "title", "prompt", "agentId"])),
       ),
+      error: AccessDenied,
     }),
   )
   .prefix("automations.");

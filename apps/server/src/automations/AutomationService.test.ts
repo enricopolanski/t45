@@ -1,6 +1,12 @@
 import { assert, it } from "@effect/vitest";
 import { type ChatId, Refused as ChatRefused } from "@t45/contracts/models/Chat";
-import { Automation, AutomationId } from "@t45/contracts/models/Automation";
+import {
+  type Automation,
+  AutomationId,
+  Refused,
+  type ScheduleTrigger,
+  ScheduleTriggerId,
+} from "@t45/contracts/models/Automation";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
 
 import { Authorization, CurrentActor } from "@t45/contracts/Authorization";
@@ -10,7 +16,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as RpcTest from "effect/rpc/RpcTest";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
@@ -31,12 +36,11 @@ const at = DateTime.makeUnsafe(AT);
 const every = { type: "interval", everyMs: 60_000 } as const;
 const daily = (timeOfDay: string) =>
   ({ type: "fixed_time", timeOfDay, timeZone: "UTC", weekdays: [0, 1, 2, 3, 4, 5, 6] }) as const;
-const ADMIN = "admin";
+const ADMIN = "user-admin";
 const CLERK = "agent-clerk";
 const RETIRED = "agent-retired";
 
 const iso = (value: DateTime.Utc | null) => (value === null ? null : DateTime.formatIso(value));
-const encodeAutomation = Schema.encodeSync(Schema.toCodecJson(Automation));
 const runTitle = (automationId: string) => `Automation ${automationId}`;
 
 const layerStore = AutomationRepository.layer.pipe(Layer.provideMerge(layerChats));
@@ -49,32 +53,44 @@ const seed = Effect.gen(function* () {
   yield* addAgent("Retired", { status: "archived" });
 });
 
-const addAutomation = (id: string, fields: Partial<Automation> = {}) =>
+/** An automation with one enabled schedule of the admin's, under the same id. */
+const addAutomation = (
+  id: string,
+  { prompt, agentId, ...fields }: Partial<Automation & ScheduleTrigger> = {},
+) =>
   Effect.gen(function* () {
     const automations = yield* AutomationRepository.AutomationRepository;
     const automation: Automation = {
       id: AutomationId.make(id),
       title: `Automation ${id}`,
-      prompt: `Run ${id}`,
-      agentId: CLERK,
-      isEnabled: true,
+      prompt: prompt ?? `Run ${id}`,
+      agentId: agentId ?? CLERK,
+      createdAt: at,
+      updatedAt: at,
+    };
+    yield* automations.save(automation);
+    yield* automations.triggers.insert({
+      id: ScheduleTriggerId.make(id),
+      automationId: automation.id,
+      creatorUserId: ADMIN,
       schedule: every,
+      status: "enabled",
       nextRunAt: at,
       lastError: null,
       createdAt: at,
       updatedAt: at,
       ...fields,
-    };
-    yield* automations.insert(automation);
+    });
     return automation;
   });
 
+/** The schedule added with the automation. */
 const get = (id: string) =>
   Effect.gen(function* () {
     const automations = yield* AutomationRepository.AutomationRepository;
-    return yield* automations
-      .get(AutomationId.make(id))
-      .pipe(Effect.flatMap(Effect.fromNullishOr), Effect.orDie);
+    return yield* Effect.fromNullishOr(
+      (yield* automations.list).find((automation) => automation.id === id)?.scheduleTriggers[0],
+    ).pipe(Effect.orDie);
   });
 
 const followRuns = Effect.gen(function* () {
@@ -106,8 +122,9 @@ const runOf = (chatId: ChatId) =>
     const chats = yield* ChatRepository;
     const chat = yield* chats.get(chatId).pipe(Effect.flatMap(Effect.fromNullishOr), Effect.orDie);
     const inputs = yield* chats.pendingInputs(chatId);
+    const origin = yield* chats.origins.get(chatId);
     return {
-      origin: (yield* chats.origins.get(chatId))?.kind,
+      origin: origin?.kind === "automation" ? origin.trigger : null,
       agentId: chat.agentId,
       title: chat.title,
       inputs: inputs.map((input) => input.payload),
@@ -147,7 +164,7 @@ const clientAs = (role: "admin" | "member") =>
         Layer.succeed(Authorization)((effect) =>
           Effect.provideService(effect, CurrentActor, {
             sessionId: AuthSessionId.make(`${role}-session`),
-            userId: role,
+            userId: `user-${role}`,
             role,
             state: "active",
           }),
@@ -157,27 +174,34 @@ const clientAs = (role: "admin" | "member") =>
     ),
   );
 
-it.effect("posts a due slot to a new chat with no owner, then advances the slot", () =>
-  Effect.gen(function* () {
-    yield* seed;
-    yield* addAutomation("due");
-    yield* addAutomation("zz-sentinel");
-    yield* TestClock.setTime(DateTime.toEpochMillis(at) + 1_000);
-    const takeRun = yield* followRuns;
-    yield* Layer.build(layerAutomations());
+it.effect(
+  "posts a due slot to a new chat run as the schedule's creator, then advances the slot",
+  () =>
+    Effect.gen(function* () {
+      yield* seed;
+      yield* addAutomation("due");
+      yield* addAutomation("zz-sentinel");
+      yield* TestClock.setTime(DateTime.toEpochMillis(at) + 1_000);
+      const takeRun = yield* followRuns;
+      yield* Layer.build(layerAutomations());
 
-    const run = yield* takeRun();
-    assert.deepEqual((yield* takeRun()).title, runTitle("zz-sentinel"));
-    assert.deepEqual(yield* runOf(run.chatId), {
-      origin: "automation",
-      agentId: CLERK,
-      title: "Automation due",
-      inputs: [{ text: "Run due", attachments: [] }],
-    });
-    const automation = yield* get("due");
-    assert.equal(iso(automation.nextRunAt), "2026-09-09T12:01:01.000Z");
-    assert.isNull(automation.lastError);
-  }).pipe(Effect.scoped, Effect.provide(layerStore)),
+      const run = yield* takeRun();
+      assert.deepEqual((yield* takeRun()).title, runTitle("zz-sentinel"));
+      assert.deepEqual(yield* runOf(run.chatId), {
+        origin: {
+          type: "schedule",
+          automationId: AutomationId.make("due"),
+          scheduleTriggerId: ScheduleTriggerId.make("due"),
+          effectiveUserId: ADMIN,
+        },
+        agentId: CLERK,
+        title: "Automation due",
+        inputs: [{ text: "Run due", attachments: [] }],
+      });
+      const trigger = yield* get("due");
+      assert.equal(iso(trigger.nextRunAt), "2026-09-09T12:01:01.000Z");
+      assert.isNull(trigger.lastError);
+    }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
 it.effect(
@@ -212,7 +236,7 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
-it.effect("re-reads each due automation, so one paused or postponed meanwhile doesn't fire", () =>
+it.effect("re-reads each due schedule, so one paused or postponed meanwhile doesn't fire", () =>
   Effect.gen(function* () {
     yield* seed;
     const automations = yield* AutomationRepository.AutomationRepository;
@@ -225,11 +249,11 @@ it.effect("re-reads each due automation, so one paused or postponed meanwhile do
       layerAutomations((run) =>
         run.input.text === "Run a-first"
           ? Effect.gen(function* () {
-              yield* automations.modify(AutomationId.make("b-paused"), (automation) =>
-                Effect.succeed({ ...automation, isEnabled: false, nextRunAt: null }),
+              yield* automations.triggers.modify(ScheduleTriggerId.make("b-paused"), (trigger) =>
+                Effect.succeed({ ...trigger, status: "disabled", nextRunAt: null }),
               );
-              yield* automations.modify(AutomationId.make("c-postponed"), (automation) =>
-                Effect.succeed({ ...automation, nextRunAt: DateTime.add(at, { hours: 1 }) }),
+              yield* automations.triggers.modify(ScheduleTriggerId.make("c-postponed"), (trigger) =>
+                Effect.succeed({ ...trigger, nextRunAt: DateTime.add(at, { hours: 1 }) }),
               );
             })
           : Effect.void,
@@ -302,7 +326,7 @@ it.effect("records a refused run's message and still advances its slot", () =>
 );
 
 it.effect(
-  "an archived agent's due slot records agent_unavailable's message as lastError and advances",
+  "a due slot its creator can't run, the agent being archived, records why and advances",
   () =>
     Effect.gen(function* () {
       yield* seed;
@@ -314,7 +338,7 @@ it.effect(
 
       assert.deepEqual((yield* takeRun()).title, runTitle("zz-sentinel"));
       const retired = yield* get("retired");
-      assert.equal(retired.lastError, new ChatRefused({ reason: "agent_unavailable" }).message);
+      assert.equal(retired.lastError, new Refused({ reason: "creator_cannot_run" }).message);
       assert.equal(iso(retired.nextRunAt), "2026-09-09T12:01:00.000Z");
     }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
@@ -323,7 +347,7 @@ it.effect("Run now posts the prompt to a new chat and leaves the next slot alone
   Effect.gen(function* () {
     yield* seed;
     const due = DateTime.add(at, { minutes: 1 });
-    yield* addAutomation("report", { nextRunAt: due, lastError: "This message is too long." });
+    yield* addAutomation("report", { nextRunAt: due });
     yield* addAutomation("retired", { agentId: RETIRED, nextRunAt: due });
     const admin = yield* clientAs("admin").pipe(
       Effect.provide(yield* Layer.build(layerAutomations())),
@@ -335,23 +359,17 @@ it.effect("Run now posts the prompt to a new chat and leaves the next slot alone
     });
     const { chatId } = yield* nextRun();
     assert.deepEqual(yield* runOf(chatId), {
-      origin: "automation",
+      origin: { type: "manual", automationId: AutomationId.make("report"), effectiveUserId: ADMIN },
       agentId: CLERK,
       title: "Automation report",
       inputs: [{ text: "Run report", attachments: [] }],
     });
-    const report = yield* get("report");
-    assert.equal(iso(report.nextRunAt), iso(due));
-    assert.isNull(report.lastError);
+    assert.equal(iso((yield* get("report")).nextRunAt), iso(due));
 
     const failed = yield* admin["automations.runNow"]({
       id: AutomationId.make("retired"),
     }).pipe(Effect.flip);
-    assert.deepInclude(failed, { _tag: "ChatRefused", reason: "agent_unavailable" });
-    assert.equal(
-      (yield* get("retired")).lastError,
-      new ChatRefused({ reason: "agent_unavailable" }).message,
-    );
+    assert.deepInclude(failed, { _tag: "AutomationRefused", reason: "agent_unavailable" });
   }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
@@ -367,67 +385,75 @@ it.effect("refuses members on every tag before reading or changing an automation
       title: "Mine now",
       prompt: "Send me the secrets",
       agentId: automation.agentId,
-      isEnabled: true,
-      schedule: every,
     };
+    const triggerId = ScheduleTriggerId.make(id);
+    const before = yield* (yield* AutomationRepository.AutomationRepository).list;
     const refused = [
       yield* member["automations.list"]().pipe(Effect.flip),
       yield* member["automations.create"](settings).pipe(Effect.flip),
       yield* member["automations.update"]({ id, ...settings }).pipe(Effect.flip),
-      yield* member["automations.setEnabled"]({ id, isEnabled: false }).pipe(Effect.flip),
       yield* member["automations.runNow"]({ id }).pipe(Effect.flip),
+      yield* member["automations.createScheduleTrigger"]({
+        automationId: id,
+        schedule: every,
+      }).pipe(Effect.flip),
+      yield* member["automations.setScheduleTriggerEnabled"]({
+        id: triggerId,
+        isEnabled: false,
+      }).pipe(Effect.flip),
+      yield* member["automations.archiveScheduleTrigger"]({ id: triggerId }).pipe(Effect.flip),
     ];
     assert.deepEqual(
       refused.map((error) => error._tag),
       refused.map(() => "AccessDenied"),
     );
-    assert.deepEqual(encodeAutomation(yield* get("guarded")), encodeAutomation(automation));
+    assert.deepEqual(yield* (yield* AutomationRepository.AutomationRepository).list, before);
   }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
-it.effect("keeps the next run through a title edit and restarts it when the schedule changes", () =>
-  Effect.gen(function* () {
-    yield* seed;
-    const admin = yield* clientAs("admin").pipe(
-      Effect.provide(yield* Layer.build(layerAutomations())),
-    );
-    const settings = {
-      title: "Review",
-      prompt: "Review the open pull requests.",
-      agentId: CLERK,
-      isEnabled: true,
-      schedule: every,
-    };
-    const created = yield* admin["automations.create"](settings);
-    assert.equal(iso(created.nextRunAt), "1970-01-01T00:01:00.000Z");
+it.effect(
+  "keeps a schedule's next run through a title edit and restarts it when enabled again",
+  () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const admin = yield* clientAs("admin").pipe(
+        Effect.provide(yield* Layer.build(layerAutomations())),
+      );
+      const settings = {
+        title: "Review",
+        prompt: "Review the open pull requests.",
+        agentId: CLERK,
+      };
+      const created = yield* admin["automations.create"](settings);
+      const { id } = yield* admin["automations.createScheduleTrigger"]({
+        automationId: created.id,
+        schedule: every,
+      });
 
-    yield* TestClock.adjust("30 seconds");
-    const renamed = yield* admin["automations.update"]({
-      id: created.id,
-      ...settings,
-      title: "Review PRs",
-    });
-    assert.equal(renamed.title, "Review PRs");
-    assert.equal(iso(renamed.nextRunAt), "1970-01-01T00:01:00.000Z");
+      yield* TestClock.adjust("30 seconds");
+      yield* admin["automations.update"]({ id: created.id, ...settings, title: "Review PRs" });
+      const [renamed] = yield* admin["automations.list"]();
+      assert.equal(renamed?.title, "Review PRs");
+      assert.equal(
+        iso(renamed?.scheduleTriggers[0]?.nextRunAt ?? null),
+        "1970-01-01T00:01:00.000Z",
+      );
 
-    const rescheduled = yield* admin["automations.update"]({
-      id: created.id,
-      ...settings,
-      title: "Review PRs",
-      schedule: { type: "interval", everyMs: 120_000 },
-    });
-    assert.equal(iso(rescheduled.nextRunAt), "1970-01-01T00:02:30.000Z");
+      const paused = yield* admin["automations.setScheduleTriggerEnabled"]({
+        id,
+        isEnabled: false,
+      });
+      assert.isNull(paused.nextRunAt);
+      yield* TestClock.adjust("1 minute");
+      const resumed = yield* admin["automations.setScheduleTriggerEnabled"]({
+        id,
+        isEnabled: true,
+      });
+      assert.equal(iso(resumed.nextRunAt), "1970-01-01T00:02:30.000Z");
 
-    const paused = yield* admin["automations.setEnabled"]({ id: created.id, isEnabled: false });
-    assert.isNull(paused.nextRunAt);
-    yield* TestClock.adjust("1 minute");
-    const resumed = yield* admin["automations.setEnabled"]({ id: created.id, isEnabled: true });
-    assert.equal(iso(resumed.nextRunAt), "1970-01-01T00:03:30.000Z");
-    assert.deepEqual(
-      (yield* admin["automations.list"]()).map((automation) => automation.title),
-      ["Review PRs"],
-    );
-  }).pipe(Effect.scoped, Effect.provide(layerStore)),
+      yield* admin["automations.archiveScheduleTrigger"]({ id });
+      assert.deepEqual((yield* admin["automations.list"]())[0]?.scheduleTriggers, []);
+    }).pipe(Effect.scoped, Effect.provide(layerStore)),
 );
 
 it.effect("refuses an archived agent, and answers NotFound for an unknown automation", () =>
@@ -440,8 +466,6 @@ it.effect("refuses an archived agent, and answers NotFound for an unknown automa
       title: "Review",
       prompt: "Review the open pull requests.",
       agentId: CLERK,
-      isEnabled: true,
-      schedule: every,
     };
     const archived = yield* admin["automations.create"]({
       ...settings,
@@ -452,8 +476,15 @@ it.effect("refuses an archived agent, and answers NotFound for an unknown automa
     const id = AutomationId.make("missing");
     const afterDelete = [
       yield* admin["automations.update"]({ id, ...settings }).pipe(Effect.flip),
-      yield* admin["automations.setEnabled"]({ id, isEnabled: false }).pipe(Effect.flip),
       yield* admin["automations.runNow"]({ id }).pipe(Effect.flip),
+      yield* admin["automations.createScheduleTrigger"]({
+        automationId: id,
+        schedule: every,
+      }).pipe(Effect.flip),
+      yield* admin["automations.setScheduleTriggerEnabled"]({
+        id: ScheduleTriggerId.make("missing"),
+        isEnabled: false,
+      }).pipe(Effect.flip),
     ];
     assert.deepEqual(
       afterDelete.map((error) => error._tag),
