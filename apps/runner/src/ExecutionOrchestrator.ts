@@ -263,6 +263,7 @@ export const layer = RunnerRpcs.toLayer(
         request.agent,
         request.disk,
         request.serverUrl,
+        request.webBrowserUrl,
       );
       const opencodeClient = yield* createOpencodeClient(
         `http://127.0.0.1:${sandbox.port}`,

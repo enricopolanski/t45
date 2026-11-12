@@ -68,6 +68,7 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 `vp run dev` starts the runner on loopback next to the server (`runnerUrl=` on the `[dev-runner]` line) and points the server at it, with a token made fresh for each run. To use a shared runner instead, set both `RUNNER_URL` and `RUNNER_TOKEN`; this skips the local runner. The local runner needs three things:
 
 - **`OPENCODE_API_KEY`** in `.env`: the runner's OpenCode Go key. The runner doesn't start without it; the sandbox only sees a placeholder.
+- **`WEB_BROWSER_URL`** in `.env`, optional: the remote browser for agents with Web browser, as a CDP WebSocket URL with its credential as user and password. The server sends it with each execution of such an agent; the runner sends the credential only to that host, and the sandbox only sees a placeholder.
 - **The agent image**, built with Docker and loaded into microsandbox as `t45-agent:dev`: `vp run --filter @t45/runner image`. Rebuild after changing `apps/runner/image`. Without it, chats fail and the server log names the reason, as in production.
 - **`mkfs.ext4` (e2fsprogs) and GNU tar** on the host, which make and pack VM disks. On macOS, install `e2fsprogs` and `gnu-tar` with Homebrew and put their `sbin` and `gnubin` folders first on `PATH`.
 

@@ -15,6 +15,7 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -64,6 +65,7 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const serverUrl = yield* ServerConfig.serverUrl;
   const toolInstance = yield* ServerConfig.toolInstance;
+  const webBrowserUrl = Option.getOrNull(yield* ServerConfig.webBrowserUrl);
   const repository = yield* ChatRepository;
   const changes = yield* ChatEvents;
   const runner = yield* RunnerService;
@@ -191,6 +193,7 @@ export const make = Effect.gen(function* () {
           ),
         },
         serverUrl,
+        webBrowserUrl: agent.permissions.hasWebBrowser ? webBrowserUrl : null,
         rootId: rootSessionId(chat.id),
         title: titleOf(chat),
         allowQuestions: origin?.kind === "conversation",

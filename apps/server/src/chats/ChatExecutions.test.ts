@@ -100,7 +100,7 @@ describe("a chat's execution", () => {
           instructions: "Use the policy.",
           model: "opencode-go/other-model",
           mcpServers: {},
-          permissions: { network: "open" },
+          permissions: { network: "open", hasWebBrowser: false },
           files: { "policy.md": "The policy." },
           tools: {},
           skills: [],

@@ -61,6 +61,7 @@ const statements = [
       files TEXT NOT NULL DEFAULT '{}',
       app_tools TEXT NOT NULL DEFAULT '[]',
       network TEXT NOT NULL DEFAULT 'provider' CHECK (network IN ('provider', 'open')),
+      has_web_browser INTEGER NOT NULL DEFAULT 0 CHECK (has_web_browser IN (0, 1)),
       is_conversational INTEGER NOT NULL DEFAULT 0,
       creator_user_id TEXT REFERENCES users(id),
       is_published INTEGER NOT NULL DEFAULT 0 CHECK (is_published IN (0, 1)),

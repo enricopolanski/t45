@@ -19,7 +19,7 @@ Explain that the member saves the workflow, then creates a project from it, choo
   files: {},
   skills: [],
   appTools: [WORKFLOW_DRAFTING_MCP_NAME],
-  permissions: { network: "provider" },
+  permissions: { network: "provider", hasWebBrowser: false },
   isConversational: true,
 };
 

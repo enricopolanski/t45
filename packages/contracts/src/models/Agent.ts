@@ -42,8 +42,12 @@ export class Agent extends Schema.Opaque<Agent>()(
     files: FilesByPath(AGENT_SETUP_PATHS),
     skills: Schema.Array(StringId),
     appTools: Schema.Array(AppTool),
-    /** Provider: can only reach the LLM provider. Open: can query the rest of the internet. */
-    permissions: Schema.Struct({ network: Schema.Literals(["provider", "open"]) }),
+    permissions: Schema.Struct({
+      /** Provider: can only reach the LLM provider. Open: can query the rest of the internet. */
+      network: Schema.Literals(["provider", "open"]),
+      /** Drives a browser that runs outside its VM, whatever its network. */
+      hasWebBrowser: Schema.Boolean,
+    }),
     isConversational: Schema.Boolean,
     /** Who made it; null for the agents T45 ships. */
     creatorUserId: Schema.NullOr(StringId),

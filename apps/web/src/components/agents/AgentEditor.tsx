@@ -203,7 +203,10 @@ function AgentForm({
                 appTools: APP_TOOLS.map(({ tool }) => tool).filter((tool) =>
                   form.getAll("appTools").includes(tool),
                 ),
-                permissions: { network: form.get("network") === "open" ? "open" : "provider" },
+                permissions: {
+                  network: form.get("network") === "open" ? "open" : "provider",
+                  hasWebBrowser: form.has("hasWebBrowser"),
+                },
                 isConversational: form.has("isConversational"),
               });
               await navigate({ to: "/settings/agents" });
@@ -256,6 +259,20 @@ function AgentForm({
               <SelectItem value="open">{NETWORKS.open}</SelectItem>
             </SelectPopup>
           </Select>
+          <label className="flex items-center justify-between gap-3">
+            <span className="min-w-0">
+              <span className="block text-sm">Web browser</span>
+              <span className="block text-xs text-muted-foreground">
+                Visits websites in a remote browser, even when it reaches only its provider.
+              </span>
+            </span>
+            <Switch
+              name="hasWebBrowser"
+              aria-label="Web browser"
+              defaultChecked={agent?.permissions.hasWebBrowser ?? false}
+              disabled={busy}
+            />
+          </label>
         </Section>
         <Section
           title="Chat"

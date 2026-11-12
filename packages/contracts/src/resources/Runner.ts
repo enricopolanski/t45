@@ -34,6 +34,8 @@ export const ExecutionRequest = Schema.Struct({
     ),
   }),
   serverUrl: Schema.String,
+  /** The CDP URL of the browser the agent drives, credential included; null without one. */
+  webBrowserUrl: Schema.NullOr(Schema.Redacted(Schema.String)),
   rootId: Session.ID,
   title: Schema.String,
   allowQuestions: Schema.Boolean,
