@@ -1,6 +1,7 @@
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import { type Chat, type ChatId, type Input, titleOf } from "@t45/contracts/models/Chat";
 import { InputMetadata } from "@t45/contracts/resources/Chats";
+import { REPORTING_CAPABILITY_ID } from "@t45/contracts/resources/AgentTools";
 import type { ExecutionRequest, ExecutionUpdate } from "@t45/contracts/resources/Runner";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -125,6 +126,11 @@ export const make = Effect.gen(function* () {
       const agent = (yield* agents.get(chat.agentId))!;
       const origin = yield* repository.origins.get(chat.id);
       const inputs = yield* repository.executionInputs(chat.id);
+      const selected = [...(yield* capabilities.listForAgent(agent.id))];
+      const reporting = yield* capabilities.get(REPORTING_CAPABILITY_ID);
+      if (reporting !== null && !selected.some((capability) => capability.id === reporting.id)) {
+        selected.push(reporting);
+      }
       const context: Record<string, string> = {
         serverUrl,
         instanceId: toolInstance,
@@ -137,7 +143,7 @@ export const make = Effect.gen(function* () {
       return {
         agent: {
           ...Struct.pick(agent, ["instructions", "model", "permissions", "files"]),
-          capabilities: (yield* capabilities.listForAgent(agent.id))
+          capabilities: selected
             .filter((capability) => (capability.requiredContext ?? []).every((key) => context[key]))
             .map((capability) =>
               Struct.pick(capability, [

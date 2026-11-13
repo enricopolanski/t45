@@ -331,12 +331,21 @@ importers:
 
   e2e:
     devDependencies:
+      '@effect/platform-node':
+        specifier: 4.0.6
+        version: 4.0.6(effect@4.0.6)(redis@6.2.1)
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.65.0
+      '@t45/contracts':
+        specifier: workspace:*
+        version: link:../packages/contracts
       '@types/node':
         specifier: 24.12.4
         version: 24.12.4
+      effect:
+        specifier: 4.0.6
+        version: 4.0.6
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

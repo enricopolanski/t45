@@ -31,6 +31,7 @@ import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { ErrorText } from "../ui/error-text";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
+import { ProgressReport } from "../ProgressReport";
 import { ActorName } from "./ActorAvatar";
 import { AssigneePicker } from "./AssigneePicker";
 import { CardFold } from "./CardFold";
@@ -312,6 +313,7 @@ function StepAutomations({
                       </span>
                     </div>
                   )}
+                  {latest !== undefined && <ProgressReport report={latest.latestReport} />}
                   <div className="flex items-center gap-2 text-xs">
                     <RunPill state={state} busy={busy} onAct={onAct} />
                     {state === "completed" && emptyCount > 0 ? (
@@ -457,6 +459,7 @@ function EarlierRuns({
                   <Icon aria-hidden className={`mt-px size-3.5 shrink-0 ${tone}`} />
                   <div className="flex min-w-0 flex-col gap-0.5">
                     <span className={`font-semibold ${tone}`}>{label}</span>
+                    <ProgressReport report={run.latestReport} />
                     <span className="text-muted-foreground">
                       {actorName(directory, run.ranBy)} ·{" "}
                       {formatRelativeTimeLabel(run.startedAt, now)}

@@ -342,6 +342,11 @@ const make = Effect.gen(function* () {
   }, transaction);
 
   return {
+    report: Effect.fnUntraced(function* (chatId: ChatId, message: string) {
+      const saved = yield* repository.appendReport(chatId, { message, at: yield* DateTime.now });
+      if (!saved) return yield* refuse("not_running");
+      yield* sql.afterCommit(publish(chatId, "chat"));
+    }, transaction),
     startAutomation: Effect.fnUntraced(function* (
       trigger: Trigger,
       agentId: string,
