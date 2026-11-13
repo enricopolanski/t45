@@ -141,18 +141,16 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
       {missing.length > 0 || unfinished.length > 0 ? (
         <MissingRecap missing={missing} unfinished={unfinished} />
       ) : null}
-      <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-4">
-        <ItemDescription description={view.ticket.description} />
-        <StepFiles
-          view={view}
-          canWrite={writes}
-          busy={busy}
-          onAttach={(file) => void act(() => attachStepFile(view.step.id, file))}
-          onRemove={(attachmentId) =>
-            void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
-          }
-        />
-      </div>
+      <ItemDescription description={view.ticket.description} />
+      <StepFiles
+        view={view}
+        canWrite={writes}
+        busy={busy}
+        onAttach={(file) => void act(() => attachStepFile(view.step.id, file))}
+        onRemove={(attachmentId) =>
+          void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
+        }
+      />
       {view.inputs.length > 0 ? (
         <section aria-label="Inputs" className="flex flex-col gap-2.5">
           <h2 className="text-sm font-semibold">Inputs</h2>

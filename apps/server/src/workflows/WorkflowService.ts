@@ -93,7 +93,12 @@ type Caller = string | Extract<CurrentActor["Service"], { agentId: string }>;
 type WorkflowRpc = RpcGroup.Rpcs<typeof Workflows>;
 type Payload<Tag extends string> = Rpc.Payload<Rpc.ExtractTag<WorkflowRpc, `workflows.${Tag}`>>;
 
-const toFile = ({ id, name }: Attachment) => ({ id, name });
+const toFile = ({ id, name, uploader, createdAt }: Attachment) => ({
+  id,
+  name,
+  uploader,
+  createdAt,
+});
 
 /** Encoding the view drops what it doesn't name: the description and the steps' values. */
 const summaryOf = (ticket: Ticket): TicketSummaryView => ({

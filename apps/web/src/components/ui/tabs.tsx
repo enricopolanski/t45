@@ -15,22 +15,38 @@ function Tabs({ className, ...props }: TabsPrimitive.Root.Props) {
   );
 }
 
-/** The tabs as a segmented control: the active one raised on a muted track. */
-function TabsList({ className, ...props }: TabsPrimitive.List.Props) {
+/**
+ * The tabs as a segmented control: the active one raised on a muted track. `sm` sits in a heading
+ * row, its tabs as wide as their names.
+ */
+function TabsList({
+  className,
+  size = "default",
+  ...props
+}: TabsPrimitive.List.Props & { size?: "default" | "sm" }) {
   return (
     <TabsPrimitive.List
-      className={cn("flex gap-0.5 rounded-md border bg-accent p-0.75", className)}
+      className={cn(
+        "flex gap-0.5 rounded-md border bg-accent",
+        size === "sm" ? "p-0.5" : "p-0.75",
+        className,
+      )}
       data-slot="tabs-list"
       {...props}
     />
   );
 }
 
-function TabsTab({ className, ...props }: TabsPrimitive.Tab.Props) {
+function TabsTab({
+  className,
+  size = "default",
+  ...props
+}: TabsPrimitive.Tab.Props & { size?: "default" | "sm" }) {
   return (
     <TabsPrimitive.Tab
       className={cn(
-        "h-7 flex-1 cursor-pointer rounded-sm px-2.5 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-active:bg-card data-active:text-foreground data-active:shadow-xs/12",
+        "cursor-pointer rounded-sm px-2.5 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-active:bg-card data-active:text-foreground data-active:shadow-xs/12",
+        size === "sm" ? "h-6 flex-none text-xs" : "h-7 flex-1 text-sm",
         className,
       )}
       data-slot="tabs-tab"
