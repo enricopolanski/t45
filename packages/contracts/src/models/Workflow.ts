@@ -4,7 +4,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Struct from "effect/Struct";
 
-import { type Agent, canUse, canWorkSteps } from "./Agent.ts";
+import { type Agent, canUse } from "./Agent.ts";
+import type { Capability } from "./Capability.ts";
 import { AutomationId } from "./Automation.ts";
 import { AttachmentId, NonNegativeInt, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 
@@ -595,13 +596,22 @@ export const canSetWorkflowEditors = (actor: WorkflowActor, workflow: Workflow) 
  * steps, is theirs to use and, while private, belongs to the workflow's creator.
  */
 export const canAttachAgent = (
-  agent: Pick<Agent, "status" | "appTools" | "creatorUserId" | "isPublished">,
+  agent: Pick<Agent, "status" | "creatorUserId" | "isPublished">,
   workflow: Workflow,
   userId: string,
+  capabilities: ReadonlyArray<Pick<Capability, "requiredContext">>,
 ) =>
-  canWorkSteps(agent) &&
+  canWorkSteps(agent, capabilities) &&
   canUse(agent, userId) &&
   (agent.isPublished || agent.creatorUserId === workflow.creatorUserId);
+
+/** A step automation needs a capability that consumes its step context. */
+export const canWorkSteps = (
+  agent: Pick<Agent, "status">,
+  capabilities: ReadonlyArray<Pick<Capability, "requiredContext">>,
+) =>
+  agent.status === "active" &&
+  capabilities.some((capability) => capability.requiredContext?.includes("stepId"));
 
 const stepRef = { stepId: StringId };
 

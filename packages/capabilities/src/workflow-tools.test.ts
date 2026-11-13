@@ -13,7 +13,7 @@ const session = (drafts: ReadonlyArray<unknown>) => {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "workflow-tools-"));
   const runtime = NodePath.join(root, "runtime");
   // Run with only injected assets, outside the checkout's dependency tree.
-  NodeFS.cpSync(new URL("../../dist/runtime/", import.meta.url), runtime, { recursive: true });
+  NodeFS.cpSync(new URL("../dist/runtime/", import.meta.url), runtime, { recursive: true });
   const tool = NodePath.join(runtime, "workflow-tools.mjs");
   const input = [
     { jsonrpc: "2.0", id: 0, method: "tools/list" },

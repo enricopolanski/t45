@@ -5,6 +5,7 @@ T45 is a web app for collaborative working assisted by agents. You can define wo
 ## How it works
 
 The application is composed by 3 parts:
+
 - `client`: the software used by humans to interface with the application
 - `server`: the software handling the business logic
 - `runner`: the software providing isolation for each automation, on a different machine from the server

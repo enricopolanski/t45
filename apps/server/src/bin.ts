@@ -14,6 +14,7 @@ import type * as Types from "effect/Types";
 import { FetchHttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import * as AppRpc from "./AppRpc.ts";
+import * as BuiltIns from "./BuiltIns.ts";
 import * as AgentRepository from "./agents/AgentRepository.ts";
 import * as SkillRepository from "./agents/SkillRepository.ts";
 import * as AttachmentRepository from "./attachments/AttachmentRepository.ts";
@@ -21,6 +22,7 @@ import * as AttachmentsHttp from "./attachments/http.ts";
 import * as Authentication from "./auth/Authentication.ts";
 import * as AuthHttp from "./auth/http.ts";
 import * as AutomationRepository from "./automations/AutomationRepository.ts";
+import * as CapabilityRepository from "./capabilities/CapabilityRepository.ts";
 import * as ChatRepository from "./chats/ChatRepository.ts";
 import { ChatService } from "./chats/ChatService.ts";
 import * as ServerConfig from "./config.ts";
@@ -38,13 +40,18 @@ import * as WorkflowRepository from "./workflows/WorkflowRepository.ts";
 import * as ProjectRepository from "./workflows/ProjectRepository.ts";
 import * as WorkflowService from "./workflows/WorkflowService.ts";
 
-const Store = Layer.mergeAll(
-  UserRepository.layer,
-  ChatRepository.layer,
-  AttachmentRepository.layer,
-  AgentRepository.layer,
-  SkillRepository.layer,
-).pipe(Layer.provideMerge(SqlitePersistence.layer));
+const Store = BuiltIns.layer.pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      UserRepository.layer,
+      ChatRepository.layer,
+      AttachmentRepository.layer,
+      AgentRepository.layer,
+      SkillRepository.layer,
+      CapabilityRepository.layer,
+    ).pipe(Layer.provideMerge(SqlitePersistence.layer)),
+  ),
+);
 
 const WorkflowRepositories = Layer.mergeAll(
   WorkflowRepository.layer,

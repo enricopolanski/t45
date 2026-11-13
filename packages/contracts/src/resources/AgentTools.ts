@@ -1,12 +1,11 @@
 import * as Schema from "effect/Schema";
 
-import { WORKFLOW_DRAFTING_MCP_NAME } from "../models/Agent.ts";
 import { Workflow, WorkflowVersion } from "../models/Workflow.ts";
 
 /**
- * The `draft` tool of `WORKFLOW_DRAFTING_MCP` as OpenCode names it, and what that takes: a name and the steps. The chat shows the draft for the member to create.
+ * The workflow draft tool's identity in OpenCode messages. The chat shows its result for the member to save.
  */
-export const WORKFLOW_DRAFT_TOOL_NAME = `${WORKFLOW_DRAFTING_MCP_NAME}_draft`;
+export const WORKFLOW_DRAFT_TOOL_NAME = "workflows_draft";
 
 export const WorkflowDraft = Schema.Struct({
   name: Workflow.fields.name,

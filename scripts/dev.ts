@@ -72,6 +72,8 @@ export const runDev = Effect.fnUntraced(function* (
   const env: NodeJS.ProcessEnv = {
     ...baseEnv,
     DATA_DIR: homeDir,
+    BUILT_INS_FILE:
+      baseEnv.BUILT_INS_FILE ?? path.join(launch.cwd, "packages/capabilities/dist/built-ins.json"),
     HOST: config.host,
     PORT: String(ports.server),
     LOG_REQUESTS: baseEnv.LOG_REQUESTS ?? "true",

@@ -6,6 +6,7 @@ import { RpcSerialization, RpcServer } from "effect/rpc";
 
 import * as AgentsHandlers from "./agents/Agents.handlers.ts";
 import * as SkillsHandlers from "./agents/Skills.handlers.ts";
+import * as CapabilitiesHandlers from "./capabilities/Capabilities.handlers.ts";
 import { AdminOnly, Authorization } from "./auth/Authorization.ts";
 import * as ChatsHandlers from "./chats/Chats.handlers.ts";
 import * as OrganizationHandlers from "./org/Organization.handlers.ts";
@@ -28,6 +29,7 @@ export const layer = Layer.unwrap(
   Layer.provide(
     Layer.mergeAll(
       SkillsHandlers.layer,
+      CapabilitiesHandlers.layer,
       AgentsHandlers.layer,
       UsersHandlers.layer,
       OrganizationHandlers.layer,

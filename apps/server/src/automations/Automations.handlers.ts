@@ -6,10 +6,11 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
-import { type Agent, canUse, canWorkSteps } from "@t45/contracts/models/Agent";
-import { canAttachAgent } from "@t45/contracts/models/Workflow";
+import { type Agent, canUse } from "@t45/contracts/models/Agent";
+import { canAttachAgent, canWorkSteps } from "@t45/contracts/models/Workflow";
 import * as Struct from "effect/Struct";
 import { AgentRepository } from "../agents/AgentRepository.ts";
+import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
 import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 import { ChatService } from "../chats/ChatService.ts";
 import { AutomationRepository } from "./AutomationRepository.ts";
@@ -20,6 +21,7 @@ export const layer = Automations.middleware(Authorization).toLayer(
     const automations = yield* AutomationRepository;
     const chats = yield* ChatService;
     const agents = yield* AgentRepository;
+    const capabilities = yield* CapabilityRepository;
     const workflows = yield* WorkflowRepository;
 
     const found = <A>(value: A | null) =>
@@ -51,11 +53,14 @@ export const layer = Automations.middleware(Authorization).toLayer(
       "automations.listForSteps": () =>
         Effect.gen(function* () {
           const { userId } = yield* CurrentUser;
-          const available = new Set(
-            (yield* agents.list)
-              .filter((agent) => canWorkSteps(agent) && canUse(agent, userId))
-              .map((agent) => agent.id),
-          );
+          const available = new Set<string>();
+          for (const agent of yield* agents.list) {
+            if (
+              canUse(agent, userId) &&
+              canWorkSteps(agent, yield* capabilities.listForAgent(agent.id))
+            )
+              available.add(agent.id);
+          }
           return (yield* automations.list)
             .filter((automation) => available.has(automation.agentId))
             .map((automation) => Struct.pick(automation, ["id", "title", "prompt", "agentId"]));
@@ -87,7 +92,15 @@ export const layer = Automations.middleware(Authorization).toLayer(
                 // A step's automation keeps to the rule its attachment was held to.
                 const { userId } = yield* CurrentUser;
                 for (const workflow of yield* workflows.listAttaching(id)) {
-                  if (agent === null || !canAttachAgent(agent, workflow, userId))
+                  if (
+                    agent === null ||
+                    !canAttachAgent(
+                      agent,
+                      workflow,
+                      userId,
+                      yield* capabilities.listForAgent(agent.id),
+                    )
+                  )
                     return yield* new Refused({ reason: "attached_agent_unfit" });
                 }
               }

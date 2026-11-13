@@ -47,21 +47,23 @@ const statements = [
     SELECT 'organization', NULL, at, at
     FROM (SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS at)`,
 
+  `CREATE TABLE capabilities (
+      id TEXT PRIMARY KEY NOT NULL,
+      definition TEXT NOT NULL
+    )`,
+
   // Named agents, their skills and automations, and the workflows people and agents work
   // through.
   // A named agent is its creator's alone until published, then everyone's. Every agent works in a
   // sandbox of its own, and its model is a `provider/model` slug OpenCode Go offers. Its
-  // `app_tools` lists which of T45's tools it gets. Every server start writes the built-in
-  // agents' rows again; they have no creator.
+  // Selected capabilities live in a separate relation. Supplied agents have no creator.
   `CREATE TABLE agents (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       instructions TEXT NOT NULL,
       model TEXT NOT NULL,
       files TEXT NOT NULL DEFAULT '{}',
-      app_tools TEXT NOT NULL DEFAULT '[]',
       network TEXT NOT NULL DEFAULT 'provider' CHECK (network IN ('provider', 'open')),
-      has_web_browser INTEGER NOT NULL DEFAULT 0 CHECK (has_web_browser IN (0, 1)),
       is_conversational INTEGER NOT NULL DEFAULT 0,
       creator_user_id TEXT REFERENCES users(id),
       is_published INTEGER NOT NULL DEFAULT 0 CHECK (is_published IN (0, 1)),
@@ -70,6 +72,11 @@ const statements = [
       updated_at TEXT NOT NULL
     )`,
   `CREATE UNIQUE INDEX agents_name ON agents(name COLLATE NOCASE)`,
+  `CREATE TABLE agent_capabilities (
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      capability_id TEXT NOT NULL REFERENCES capabilities(id),
+      PRIMARY KEY (agent_id, capability_id)
+    )`,
   `CREATE TABLE skills (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL UNIQUE,

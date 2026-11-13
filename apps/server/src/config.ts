@@ -17,14 +17,7 @@ export const serverUrl = Config.String("SERVER_URL").pipe(
   Config.orElse(() => port.pipe(Config.map((port) => `http://host.microsandbox.internal:${port}`))),
 );
 export const toolInstance = Config.String("TOOL_INSTANCE").pipe(Config.withDefault(""));
-/**
- * The browser that agents with a web browser drive: its CDP WebSocket URL, with the provider's
- * credential as user and password. Unset, no agent gets a browser.
- */
-export const webBrowserUrl = Config.schema(
-  Schema.Redacted(Schema.NonEmptyString),
-  "WEB_BROWSER_URL",
-).pipe(Config.option);
+export const builtInsFile = Config.String("BUILT_INS_FILE").pipe(Config.option);
 
 const decodeClerkIssuer = (publishableKey: string) =>
   `https://${atob(publishableKey.replace(/^pk_(?:test|live)_/u, "")).replace(/\$$/u, "")}`;

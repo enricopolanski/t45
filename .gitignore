@@ -14,6 +14,7 @@ packages/*/dist
 # Linked worktrees keep dev state here.
 .t3
 .t45
+.claude/worktrees/
 # Vitest browser-mode failure screenshots.
 __screenshots__/
 # TanStack Router dev cache.

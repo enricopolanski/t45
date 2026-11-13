@@ -1,11 +1,6 @@
 import type { AgentModels } from "@t45/contracts/resources/Agents";
-import {
-  type Agent,
-  type AppTool,
-  PROJECT_TOOLS_MCP_NAME,
-  STEP_TOOLS_MCP_NAME,
-  WORKFLOW_DRAFTING_MCP_NAME,
-} from "@t45/contracts/models/Agent";
+import type { Agent } from "@t45/contracts/models/Agent";
+import type { Capability } from "@t45/contracts/models/Capability";
 import type { StringId } from "@t45/contracts/models/primitives";
 import type { Skill } from "@t45/contracts/models/Skill";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -25,52 +20,30 @@ import { ErrorText } from "../ui/error-text";
 import { Section } from "../Section";
 import { fileRecord, fileRows, FilesEditor } from "./FilesEditor";
 
-const APP_TOOLS: ReadonlyArray<{
-  readonly tool: AppTool;
-  readonly name: string;
-  readonly description: string;
-}> = [
-  {
-    tool: WORKFLOW_DRAFTING_MCP_NAME,
-    name: "Workflow drafting",
-    description: "Its chats draft workflows for the member to save.",
-  },
-  {
-    tool: PROJECT_TOOLS_MCP_NAME,
-    name: "Project operations",
-    description: "Its chats belong to a project: it reads tickets, starts them and fills fields.",
-  },
-  {
-    tool: STEP_TOOLS_MCP_NAME,
-    name: "Step tools",
-    description: "Workflow automations can run it on a step, where it fills fields and comments.",
-  },
-];
-
-/** Their tools only work in an agent's chats. */
-const CHAT_TOOLS: ReadonlyArray<AppTool> = [WORKFLOW_DRAFTING_MCP_NAME, PROJECT_TOOLS_MCP_NAME];
-
-function AppToolPicker({
-  tools,
+function CapabilityPicker({
+  capabilities,
   selected,
   disabled,
 }: {
-  readonly tools: ReadonlyArray<AppTool>;
-  readonly selected: ReadonlyArray<AppTool>;
+  readonly capabilities: ReadonlyArray<Capability>;
+  readonly selected: ReadonlyArray<string>;
   readonly disabled: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1">
-      {APP_TOOLS.filter(({ tool }) => tools.includes(tool)).map(({ tool, name, description }) => (
+      {capabilities.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No capabilities available.</p>
+      ) : null}
+      {capabilities.map(({ id, name, description }) => (
         <label
-          key={tool}
+          key={id}
           className={`flex items-start gap-2.5 rounded-md px-2 py-1.5 ${disabled ? "cursor-not-allowed" : "cursor-pointer hover:bg-muted"}`}
         >
           <Checkbox
-            name="appTools"
-            value={tool}
+            name="capabilities"
+            value={id}
             aria-label={`Use ${name}`}
-            defaultChecked={selected.includes(tool)}
+            defaultChecked={selected.includes(id)}
             disabled={disabled}
           />
           <span className={disabled ? "min-w-0 opacity-64" : "min-w-0"}>
@@ -169,10 +142,12 @@ const NETWORKS: Record<Agent["permissions"]["network"], string> = {
 function AgentForm({
   agent,
   skills,
+  capabilities,
   models,
 }: {
   readonly agent: Agent | null;
   readonly skills: ReadonlyArray<Skill>;
+  readonly capabilities: ReadonlyArray<Capability>;
   readonly models: AgentModels;
 }) {
   const navigate = useNavigate();
@@ -200,12 +175,9 @@ function AgentForm({
                 model,
                 files: fileRecord(files),
                 skills: form.getAll("skills").map(String),
-                appTools: APP_TOOLS.map(({ tool }) => tool).filter((tool) =>
-                  form.getAll("appTools").includes(tool),
-                ),
+                capabilities: form.getAll("capabilities").map(String),
                 permissions: {
                   network: form.get("network") === "open" ? "open" : "provider",
-                  hasWebBrowser: form.has("hasWebBrowser"),
                 },
                 isConversational: form.has("isConversational"),
               });
@@ -259,24 +231,10 @@ function AgentForm({
               <SelectItem value="open">{NETWORKS.open}</SelectItem>
             </SelectPopup>
           </Select>
-          <label className="flex items-center justify-between gap-3">
-            <span className="min-w-0">
-              <span className="block text-sm">Web browser</span>
-              <span className="block text-xs text-muted-foreground">
-                Visits websites in a remote browser, even when it reaches only its provider.
-              </span>
-            </span>
-            <Switch
-              name="hasWebBrowser"
-              aria-label="Web browser"
-              defaultChecked={agent?.permissions.hasWebBrowser ?? false}
-              disabled={busy}
-            />
-          </label>
         </Section>
         <Section
           title="Chat"
-          description="Allow whoever can use this agent to start conversations with it. It can also run automations; workflow automations require the step tools."
+          description="Allow whoever can use this agent to start conversations with it."
           card
         >
           <label className="flex items-center justify-between gap-3 text-sm">
@@ -289,11 +247,6 @@ function AgentForm({
               disabled={busy}
             />
           </label>
-          <AppToolPicker
-            tools={CHAT_TOOLS}
-            selected={agent?.appTools ?? []}
-            disabled={busy || !isConversational}
-          />
         </Section>
         <Section
           title="Skills"
@@ -302,10 +255,14 @@ function AgentForm({
         >
           <SkillPicker skills={skills} selected={agent?.skills ?? []} disabled={busy} />
         </Section>
-        <Section title="Tools" description="What the agent can do in T45." card>
-          <AppToolPicker
-            tools={[STEP_TOOLS_MCP_NAME]}
-            selected={agent?.appTools ?? []}
+        <Section
+          title="Capabilities"
+          description="Choose the capabilities this agent can use together."
+          card
+        >
+          <CapabilityPicker
+            capabilities={capabilities}
+            selected={agent?.capabilities ?? []}
             disabled={busy}
           />
         </Section>

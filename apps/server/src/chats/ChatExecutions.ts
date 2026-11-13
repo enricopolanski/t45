@@ -1,10 +1,3 @@
-import {
-  type AppTool,
-  STEP_TOOLS_MCP_NAME,
-  T45_TOOLS_DIR,
-  WORKFLOW_DRAFTING_MCP_NAME,
-  PROJECT_TOOLS_MCP_NAME,
-} from "@t45/contracts/models/Agent";
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import { type Chat, type ChatId, type Input, titleOf } from "@t45/contracts/models/Chat";
 import { InputMetadata } from "@t45/contracts/resources/Chats";
@@ -15,8 +8,6 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
@@ -24,6 +15,7 @@ import * as Struct from "effect/Struct";
 
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { SkillRepository } from "../agents/SkillRepository.ts";
+import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
 import { RunnerService } from "../runner/RunnerService.ts";
 import { ChatEvents } from "./ChatEvents.ts";
@@ -33,13 +25,6 @@ import * as PromptService from "./PromptService.ts";
 import * as ServerConfig from "../config.ts";
 
 const encodeInputMetadata = Schema.encodeSync(InputMetadata);
-
-/** The program of each app tool, among the files written to `T45_TOOLS_DIR`. */
-const APP_TOOL_FILES: Record<AppTool, string> = {
-  [WORKFLOW_DRAFTING_MCP_NAME]: "workflow-tools.mjs",
-  [STEP_TOOLS_MCP_NAME]: "step-tools.mjs",
-  [PROJECT_TOOLS_MCP_NAME]: "project-tools.mjs",
-};
 
 export type Posted = Pick<Input, "inputId" | "payload">;
 
@@ -65,33 +50,15 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const serverUrl = yield* ServerConfig.serverUrl;
   const toolInstance = yield* ServerConfig.toolInstance;
-  const webBrowserUrl = Option.getOrNull(yield* ServerConfig.webBrowserUrl);
   const repository = yield* ChatRepository;
   const changes = yield* ChatEvents;
   const runner = yield* RunnerService;
   const agents = yield* AgentRepository;
   const skills = yield* SkillRepository;
+  const capabilities = yield* CapabilityRepository;
   const attachments = yield* AttachmentRepository;
   const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const scope = yield* Effect.scope;
-  const runtime = path.resolve(
-    import.meta.dirname,
-    import.meta.filename.endsWith(".ts") ? "../../dist/runtime" : "runtime",
-  );
-  const toolFiles = yield* fileSystem.readDirectory(runtime).pipe(
-    Effect.flatMap((files) =>
-      Effect.forEach(
-        files.filter((file) => file.endsWith(".mjs")),
-        (file) =>
-          fileSystem
-            .readFileString(path.join(runtime, file))
-            .pipe(Effect.map((source) => [file, source] as const)),
-      ),
-    ),
-    Effect.map((files) => Object.fromEntries(files)),
-    Effect.orDie,
-  );
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const endHandler = yield* Deferred.make<(chatId: ChatId) => Effect.Effect<void>>();
   const owners = new Map<ChatId, Owner>();
@@ -157,43 +124,28 @@ export const make = Effect.gen(function* () {
       const agent = (yield* agents.get(chat.agentId))!;
       const origin = yield* repository.origins.get(chat.id);
       const inputs = yield* repository.executionInputs(chat.id);
+      const context: Record<string, string> = {
+        serverUrl,
+        token,
+        instanceId: toolInstance,
+        stepId:
+          origin?.kind === "automation" && origin.trigger.type === "step"
+            ? origin.trigger.stepId
+            : "",
+        projectId: origin?.kind === "conversation" ? (origin.projectId ?? "") : "",
+      };
       return {
         agent: {
           ...Struct.pick(agent, ["instructions", "model", "permissions", "files"]),
-          mcpServers: Object.fromEntries(
-            agent.appTools.map((tool) => [
-              tool,
-              {
-                type: "local" as const,
-                command: ["node", `${T45_TOOLS_DIR}/${APP_TOOL_FILES[tool]}`],
-                // Each tool call stays visible in the chat; draft calls render workflow cards.
-                codemode: false,
-                // Drafting calls nothing on the server, so it gets no token.
-                ...(tool === WORKFLOW_DRAFTING_MCP_NAME
-                  ? {}
-                  : {
-                      environment: {
-                        T45_SERVER_URL: serverUrl,
-                        T45_TOOL_TOKEN: token,
-                        T45_TOOL_INSTANCE: toolInstance,
-                        T45_STEP_ID:
-                          origin?.kind === "automation" && origin.trigger.type === "step"
-                            ? origin.trigger.stepId
-                            : "",
-                        T45_PROJECT_ID:
-                          origin?.kind === "conversation" ? (origin.projectId ?? "") : "",
-                      },
-                    }),
-              },
-            ]),
-          ),
-          tools: agent.appTools.length > 0 ? toolFiles : {},
+          capabilities: (yield* capabilities.listForAgent(agent.id))
+            .filter((capability) => (capability.requiredContext ?? []).every((key) => context[key]))
+            .map((capability) => Struct.pick(capability, ["files", "mcpServers"])),
           skills: (yield* skills.listForAgent(agent.id)).map((skill) =>
             Struct.pick(skill, ["name", "description", "content", "files"]),
           ),
         },
         serverUrl,
-        webBrowserUrl: agent.permissions.hasWebBrowser ? webBrowserUrl : null,
+        context,
         rootId: rootSessionId(chat.id),
         title: titleOf(chat),
         allowQuestions: origin?.kind === "conversation",

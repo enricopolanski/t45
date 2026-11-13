@@ -19,17 +19,6 @@ export const AGENT_SETUP_PATHS = [
   ".opencode/opencode.jsonc",
 ] as const;
 
-/** T45's own tools, each named as OpenCode names its server. An agent gets no other integration. */
-export const WORKFLOW_DRAFTING_MCP_NAME = "workflows";
-export const STEP_TOOLS_MCP_NAME = "step";
-export const PROJECT_TOOLS_MCP_NAME = "project";
-export const AppTool = Schema.Literals([
-  WORKFLOW_DRAFTING_MCP_NAME,
-  STEP_TOOLS_MCP_NAME,
-  PROJECT_TOOLS_MCP_NAME,
-]);
-export type AppTool = typeof AppTool.Type;
-
 /**
  * An `Agent` is a reusable recipe (instructions, skills, configuration, etc) for work carried by LLMs.
  */
@@ -41,12 +30,10 @@ export class Agent extends Schema.Opaque<Agent>()(
     model: TrimmedNonEmptyString,
     files: FilesByPath(AGENT_SETUP_PATHS),
     skills: Schema.Array(StringId),
-    appTools: Schema.Array(AppTool),
+    capabilities: Schema.Array(StringId),
     permissions: Schema.Struct({
       /** Provider: can only reach the LLM provider. Open: can query the rest of the internet. */
       network: Schema.Literals(["provider", "open"]),
-      /** Drives a browser that runs outside its VM, whatever its network. */
-      hasWebBrowser: Schema.Boolean,
     }),
     isConversational: Schema.Boolean,
     /** Who made it; null for the agents T45 ships. */
@@ -59,12 +46,8 @@ export class Agent extends Schema.Opaque<Agent>()(
   }),
 ) {}
 
-/**
- * The agents T45 ships. Every release brings their setup and a server start replaces the stored
- * one, so nobody edits or archives them.
- */
-export const BUILT_IN_AGENT_IDS = ["workflow-designer", "project-assistant"] as const;
-export const isBuiltIn = (agentId: string) => BUILT_IN_AGENT_IDS.some((id) => id === agentId);
+/** Supplied agents have no creator; their setup comes from deployment data. */
+export const isBuiltIn = (agent: Pick<Agent, "creatorUserId">) => agent.creatorUserId === null;
 
 /** A private agent works for its creator alone; organization admins get no exception. */
 export const canUse = (agent: Pick<Agent, "creatorUserId" | "isPublished">, userId: string) =>
@@ -76,20 +59,15 @@ export const canManage = (
   member: { readonly userId: string; readonly role: Role },
 ) => member.role === "admin" || agent.creatorUserId === member.userId;
 
-/** Where the runner writes T45's tools in the VM, outside the agent's /work. */
-export const T45_TOOLS_DIR = "/opt/t45";
-
 export const canChatWithMembers = (agent: Pick<Agent, "status" | "isConversational">) =>
   agent.status === "active" && agent.isConversational;
-
-export const canWorkSteps = (agent: Pick<Agent, "status" | "appTools">) =>
-  agent.status === "active" && agent.appTools.includes(STEP_TOOLS_MCP_NAME);
 
 const REFUSALS = {
   name_taken: "Another agent already has that name.",
   model_unavailable:
     "OpenCode Go doesn't offer that model now. Choose another, or try again once it answers.",
   skill_not_found: "That skill no longer exists.",
+  capability_not_found: "That capability no longer exists.",
   built_in: "T45 manages this agent, so it can't be changed or archived.",
   attached_to_workflow:
     "A workflow step runs an automation of this agent, so it can't be archived. Give that automation another agent first.",

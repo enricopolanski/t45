@@ -1,4 +1,3 @@
-import { ConfigMCP } from "@opencode/schema/config/mcp";
 import { Form } from "@opencode/schema/form";
 import { Session } from "@opencode/schema/session";
 import { SessionInbox } from "@opencode/schema/session-inbox";
@@ -9,6 +8,7 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import { Agent, AGENT_SETUP_PATHS } from "../models/Agent.ts";
+import { Capability } from "../models/Capability.ts";
 import { FilesByPath } from "../models/primitives.ts";
 import { Skill } from "../models/Skill.ts";
 
@@ -24,18 +24,18 @@ export type Message = typeof Message.Type;
 export const ExecutionRequest = Schema.Struct({
   agent: Schema.Struct({
     ...Struct.pick(Agent.fields, ["instructions", "model", "permissions"]),
-    /** The servers of the agent's app tools, for the VM's OpenCode configuration. */
-    mcpServers: Schema.Record(Schema.String, Schema.toEncoded(ConfigMCP.Server)),
+    /** Resolved bundle content; the runner needs no catalogue or capability IDs. */
+    capabilities: Schema.Array(
+      Schema.Struct(Struct.pick(Capability.fields, ["files", "mcpServers"])),
+    ),
     files: FilesByPath(AGENT_SETUP_PATHS),
-    /** T45's tools by file name, for `T45_TOOLS_DIR`; none for agents without app tools. */
-    tools: Schema.Record(Schema.String, Schema.String),
     skills: Schema.Array(
       Schema.Struct(Struct.pick(Skill.fields, ["name", "description", "content", "files"])),
     ),
   }),
   serverUrl: Schema.String,
-  /** The CDP URL of the browser the agent drives, credential included; null without one. */
-  webBrowserUrl: Schema.NullOr(Schema.Redacted(Schema.String)),
+  /** Trusted execution bindings used by declarations, separate from stored per-agent credentials. */
+  context: Schema.Record(Schema.String, Schema.String),
   rootId: Session.ID,
   title: Schema.String,
   allowQuestions: Schema.Boolean,
