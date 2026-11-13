@@ -57,6 +57,23 @@ export function formatDayAwareTimestamp(instant: DateTime.Utc, now = Date.now())
   return `${dateFormatter.format(date)} ${time}`;
 }
 
+/** `12s ago`, then `3m 05s ago`, then as `formatRelativeTimeLabel` from an hour on. */
+export function formatRelativeSecondsLabel(instant: DateTime.Utc, now = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - DateTime.toEpochMillis(instant)) / 1_000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds >= 3_600) return formatRelativeTimeLabel(instant, now);
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s ago`;
+}
+
+/** How long something took: `9s`, then `1m 12s`. */
+export function formatDurationLabel(start: DateTime.Utc, end: DateTime.Utc): string {
+  const seconds = Math.max(
+    0,
+    Math.round((DateTime.toEpochMillis(end) - DateTime.toEpochMillis(start)) / 1_000),
+  );
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 /** `just now`, then `3m ago`, `3h ago` or `3d ago`. */
 export function formatRelativeTimeLabel(instant: DateTime.Utc, now = Date.now()): string {
   const minutes = Math.floor((now - DateTime.toEpochMillis(instant)) / 60_000);

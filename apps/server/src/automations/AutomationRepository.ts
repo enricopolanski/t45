@@ -42,6 +42,14 @@ const make = Effect.gen(function* () {
   return {
     list,
     get,
+    /** Includes archived automations so earlier activity can still name them. */
+    listByIds: (ids: ReadonlyArray<AutomationId>) =>
+      ids.length === 0
+        ? Effect.succeed([])
+        : sql`SELECT ${columns} FROM automations WHERE ${sql.in("id", ids)}`.pipe(
+            Effect.flatMap(decodeAutomations),
+            Effect.orDie,
+          ),
     /** The agent's automations, without the archived ones. */
     listForAgent: (agentId: string) =>
       sql`SELECT ${columns} FROM automations WHERE agent_id = ${agentId} AND is_archived = 0`.pipe(

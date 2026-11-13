@@ -48,8 +48,8 @@ const openOrder = async (signIn: (email: string) => Promise<Page>) => {
   await ben.getByLabel("Supplier").fill("Acme");
   await ben.getByLabel("Supplier").blur();
   await expect(
-    ben.getByRole("complementary", { name: "History" }).getByText("changed a field"),
-  ).toHaveCount(2);
+    ben.getByRole("complementary", { name: "History" }).getByText("changed 2 fields"),
+  ).toBeVisible();
   return { ada, ben, cy, projectId, collectUrl: ben.url() };
 };
 

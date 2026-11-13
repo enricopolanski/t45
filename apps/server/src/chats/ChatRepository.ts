@@ -57,6 +57,7 @@ const decodeAutomatedRows = Schema.decodeUnknownEffect(
       origin: Schema.fromJsonString(AutomationOrigin),
       chatStatus: Schema.NullOr(ChatStatus),
       startedAt: Schema.DateTimeUtcFromString,
+      endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
       latestReport: Schema.NullOr(Schema.fromJsonString(Report)),
     }),
   ),
@@ -88,6 +89,7 @@ const makeOrigins = Effect.gen(function* () {
       sql`SELECT json_object('kind', 'automation', 'chatId', o.chat_id,
           'trigger', json(o.trigger)) AS origin,
           c.status AS "chatStatus", c.created_at AS "startedAt",
+          CASE WHEN c.status = 'running' THEN NULL ELSE c.updated_at END AS "endedAt",
           json_extract(c.reports, '$[#-1]') AS "latestReport"
         FROM chat_origins o JOIN chats c ON c.id = o.chat_id
         WHERE o.trigger IS NOT NULL

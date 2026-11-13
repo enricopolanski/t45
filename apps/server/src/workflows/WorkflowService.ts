@@ -1,4 +1,4 @@
-import type { Automation, AutomationId } from "@t45/contracts/models/Automation";
+import { type Automation, AutomationId } from "@t45/contracts/models/Automation";
 import { AutomationRepository } from "../automations/AutomationRepository.ts";
 import type { CurrentActor } from "@t45/contracts/Authorization";
 import { ChatService } from "../chats/ChatService.ts";
@@ -119,6 +119,7 @@ const stepFileForChat = (file: Attachment) => ({
 });
 
 const sameStepView = Schema.toEquivalence(StepView);
+const isAutomationId = Schema.is(AutomationId);
 
 /** A ticket with its project and the version of the workflow it runs on. */
 interface Work {
@@ -1021,6 +1022,14 @@ const make = Effect.gen(function* () {
     const parents = ancestorSteps(work.ticket, step).toReversed();
     const root = parents[0] ?? step;
     const isOpen = work.ticket.status.type === "open";
+    const history = yield* commandLog.listForStep(work.ticket.id, step.id);
+    const historyAutomations = yield* automations.listByIds([
+      ...new Set(
+        history.flatMap(({ details }) =>
+          isAutomationId(details.automationId) ? [details.automationId] : [],
+        ),
+      ),
+    ]);
     return {
       ticket: work.ticket,
       projectName: work.project.name,
@@ -1045,7 +1054,15 @@ const make = Effect.gen(function* () {
           .map((member) => member.userId),
         isActivePerson,
       ),
-      history: yield* commandLog.listForStep(work.ticket.id, step.id),
+      history: history.map(({ details, ...entry }) => {
+        const automation = historyAutomations.find(({ id }) => id === details.automationId);
+        return {
+          ...entry,
+          fieldKey: typeof details.fieldKey === "string" ? details.fieldKey : null,
+          automation:
+            automation === undefined ? null : { id: automation.id, title: automation.title },
+        };
+      }),
       canCancelTicket: isOpen && isProjectAdmin(yield* actorOf(actorId), work.project),
       step,
       definition: definitionOf(work, step),
@@ -1069,10 +1086,11 @@ const make = Effect.gen(function* () {
           const canRun = isRunnable && live.includes(id);
           const runs = attempts
             .filter((run) => run.trigger.automationId === id)
-            .map(({ trigger, startedAt, chatStatus, latestReport }) => ({
+            .map(({ trigger, startedAt, endedAt, chatStatus, latestReport }) => ({
               latestReport,
               ranBy: trigger.effectiveUserId,
               startedAt,
+              endedAt,
               status:
                 chatStatus === null
                   ? ("completed" as const)

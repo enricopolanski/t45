@@ -54,7 +54,8 @@ test("agents report live progress on steps and settings, retaining reports per r
   await expect(settings.getByRole("heading", { name: "Check order", exact: true })).toBeVisible();
 
   const automations = page.getByRole("complementary", { name: "Automations" });
-  await automations.getByRole("button", { name: "Not run yet. Run" }).click();
+  await automations.getByRole("button", { name: "Run Automation", exact: true }).click();
+  await page.getByRole("button", { name: "Run automation", exact: true }).click();
   const first = await agentApp.nextExecution();
   expect(
     first.request.agent.capabilities.some((capability) =>
@@ -62,7 +63,9 @@ test("agents report live progress on steps and settings, retaining reports per r
     ),
   ).toBe(true);
   expect(agentApp.readReports(first)).toBeNull();
-  await expect(automations.getByRole("button", { name: "Running. Stop" })).toBeVisible();
+  await expect(automations.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+  const history = page.getByRole("complementary", { name: "History" });
+  await expect(history.getByText("ran “Check order”")).toBeVisible();
   expect((await agentApp.report(first, "Checking invoices")).isError).not.toBe(true);
   await expect(automations.getByText("Checking invoices", { exact: true })).toBeVisible();
   await expect(settings.getByText("Checking invoices", { exact: true })).toBeVisible();
@@ -81,8 +84,9 @@ test("agents report live progress on steps and settings, retaining reports per r
     { message: "Matching purchase orders", at: expect.any(String) },
   ]);
 
-  await automations.getByRole("button", { name: "Running. Stop" }).click();
-  await expect(automations.getByRole("button", { name: "Run", exact: true })).toBeVisible();
+  await automations.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(automations.getByRole("img", { name: "Stopped" })).toBeVisible();
+  await expect(history.getByText("stopped “Check order”")).toBeVisible();
   expect((await agentApp.report(first, "Late report")).isError).toBe(true);
   expect(agentApp.readReports(first)).toBe(reports);
 
@@ -94,7 +98,6 @@ test("agents report live progress on steps and settings, retaining reports per r
   expect(agentApp.readReports(second)).toBeNull();
   expect((await agentApp.report(second, "Checking a new order")).isError).not.toBe(true);
   await expect(settings.getByText("Checking a new order", { exact: true })).toBeVisible();
-  await automations.getByRole("button", { name: "1 earlier run" }).click();
   await expect(automations.getByText("Matching purchase orders", { exact: true })).toBeVisible();
   await expect(automations.getByText("Checking a new order", { exact: true })).toHaveCount(0);
   second.finish();

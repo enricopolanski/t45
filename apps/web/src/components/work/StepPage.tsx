@@ -7,35 +7,36 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { AtomRegistry } from "effect/reactivity";
 import {
-  BotIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
+  CalendarIcon,
   CircleCheckIcon,
   CircleStopIcon,
   CircleXIcon,
   LoaderCircleIcon,
-  MinusIcon,
+  type LucideIcon,
+  MoreHorizontalIcon,
   PlayIcon,
-  RotateCwIcon,
-  XIcon,
+  SquareIcon,
+  TimerIcon,
 } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 
 import { api, runtime } from "../../rpc/api";
 import { appAtomRegistry } from "../../state/atomRegistry";
 import { stepAutomationList } from "../../state/agents";
 import { apiWatch, useApiQuery } from "../../state/rpc";
-import { useIsAdmin } from "../../state/session";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Field } from "../ui/field";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { ErrorText } from "../ui/error-text";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { ProgressReport } from "../ProgressReport";
 import { ActorName } from "./ActorAvatar";
 import { AssigneePicker } from "./AssigneePicker";
 import { CardFold } from "./CardFold";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { OtherStep } from "./ItemSteps";
 import { ItemDescription } from "./ItemDescription";
 import { StepComments, StepFiles } from "./StepConversation";
@@ -46,13 +47,13 @@ import { useWorkDirectory } from "./useWorkDirectory";
 import { BackLink, WorkFrame } from "./WorkFrame";
 import {
   actorName,
-  historyLabel,
+  summarizeHistory,
   missingFields,
   type StepAct,
   type StepActions,
   stepActions,
 } from "./workLogic";
-import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { formatDurationLabel, formatRelativeTimeLabel } from "../../timestampFormat";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { workChanged } from "../../state/work";
 
@@ -230,12 +231,12 @@ function StepHistory({ view }: { readonly view: StepView }) {
   return (
     <CardFold as="aside" title="History">
       <ol className="flex flex-col gap-2 text-sm">
-        {view.history.map((entry, at) => (
+        {summarizeHistory(view.history).map((entry, at) => (
           // oxlint-disable-next-line react/no-array-index-key -- The log only grows at its end.
           <li key={at} className="flex flex-col gap-0.5">
             <ActorName actor={entry.agentId ?? entry.userId} />
             <span className="text-xs text-muted-foreground">
-              {historyLabel(entry.command)} · {formatRelativeTimeLabel(entry.createdAt, now)}
+              {entry.label} · {formatRelativeTimeLabel(entry.createdAt, now)}
             </span>
           </li>
         ))}
@@ -244,7 +245,14 @@ function StepHistory({ view }: { readonly view: StepView }) {
   );
 }
 
-/** The automations the workflow gives this step, each with its runs and the way to run or stop it. */
+const RUN_STATUSES = {
+  running: { label: "Running", Icon: LoaderCircleIcon, tone: "animate-spin text-info" },
+  completed: { label: "Completed", Icon: CircleCheckIcon, tone: "text-success-foreground" },
+  failed: { label: "Failed", Icon: CircleXIcon, tone: "text-destructive-foreground" },
+  stopped: { label: "Stopped", Icon: CircleStopIcon, tone: "text-muted-foreground" },
+} as const;
+
+/** The runs of the automations the workflow gives this step, newest first, and the way to start one. */
 function StepAutomations({
   view,
   busy,
@@ -255,223 +263,191 @@ function StepAutomations({
   readonly act: StepAct;
 }) {
   const titles = useApiQuery(stepAutomationList);
-  const isAdmin = useIsAdmin();
+  const directory = useWorkDirectory();
   const now = useNowMinute();
-  if (view.automations.length === 0) return null;
-  const emptyCount = missingFields(view.fields).length;
+  const runnable = view.automations.filter((automation) => automation.runLabel !== null);
+  const runs = view.automations
+    .flatMap((automation) =>
+      automation.runs.map((run, at) => ({
+        ...run,
+        automation,
+        number: automation.runs.length - at,
+      })),
+    )
+    .toSorted((a, b) => DateTime.toEpochMillis(b.startedAt) - DateTime.toEpochMillis(a.startedAt));
+  if (runs.length === 0 && runnable.length === 0) return null;
+  const titleOf = (id: AutomationId) =>
+    titles.data?.find((automation) => automation.id === id)?.title ?? "Unavailable automation";
   const call = (
     tag: "workflows.runStepAutomation" | "workflows.stopStepAutomation",
     automationId: AutomationId,
   ) => void act(() => api(tag, { stepId: view.step.id, automationId }));
   return (
-    <CardFold as="aside" title="Automations">
-      <div className="flex flex-col gap-3 text-sm">
-        {titles.error && <ErrorText text={titles.error} />}
-        {view.automations.map(({ id, runs, runLabel, canStop }) => {
-          const status = runs[0]?.status;
-          // A stopped run is over: the card offers a new one and lists it among the earlier.
-          const state = status === undefined ? "notRun" : status === "stopped" ? "ready" : status;
-          const latest = state === "ready" ? undefined : runs[0];
-          const earlier = runs.slice(latest === undefined ? 0 : 1);
-          const onAct =
-            state === "running"
-              ? canStop
-                ? () => call("workflows.stopStepAutomation", id)
-                : null
-              : runLabel === null
-                ? null
-                : () => call("workflows.runStepAutomation", id);
-          const title = (
-            <>
-              <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-info/12 text-info">
-                <BotIcon aria-hidden className="size-3.5" />
-              </span>
-              <span className="min-w-0 flex-1 truncate font-medium">
-                {titles.data?.find((automation) => automation.id === id)?.title ??
-                  "Unavailable automation"}
-              </span>
-            </>
-          );
-          return (
-            <article key={id} className="flex flex-col gap-3 rounded-lg border p-3">
-              {isAdmin ? (
-                <Link to="/settings/automations" className="flex items-center gap-2">
-                  {title}
-                  <ChevronRightIcon aria-hidden className="size-3.5 text-muted-foreground" />
-                </Link>
-              ) : (
-                <div className="flex items-center gap-2">{title}</div>
-              )}
-              {state === "ready" && onAct === null ? null : (
-                <div className="flex flex-col gap-2 border-t pt-3">
-                  {latest !== undefined && (
-                    <div className="flex flex-col gap-0.5">
-                      <ActorName actor={latest.ranBy} />
-                      <span className="text-xs text-muted-foreground">
-                        {state === "running" ? "started" : "ran"} this automation ·{" "}
-                        {formatRelativeTimeLabel(latest.startedAt, now)}
-                      </span>
-                    </div>
-                  )}
-                  {latest !== undefined && <ProgressReport report={latest.latestReport} />}
-                  <div className="flex items-center gap-2 text-xs">
-                    <RunPill state={state} busy={busy} onAct={onAct} />
-                    {state === "completed" && emptyCount > 0 ? (
-                      <span className="min-w-0">
-                        {emptyCount} {emptyCount === 1 ? "field" : "fields"} left empty
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              )}
-              {earlier.length > 0 && <EarlierRuns runs={earlier} now={now} />}
-            </article>
-          );
-        })}
-      </div>
-    </CardFold>
-  );
-}
-
-const play = <PlayIcon className="size-2.5 fill-current" />;
-const RUN_PILLS = {
-  notRun: {
-    label: "Not run yet",
-    action: "Run",
-    tone: "border-border bg-muted text-foreground",
-    dot: "bg-foreground text-background",
-    act: play,
-    still: <MinusIcon className="size-3" />,
-  },
-  running: {
-    label: "Running",
-    action: "Stop",
-    tone: "border-info/32 bg-info/8 text-info-foreground",
-    dot: "",
-    act: null,
-    still: null,
-  },
-  completed: {
-    label: "Completed",
-    action: "Run again",
-    tone: "border-success/32 bg-success/8 text-success-foreground",
-    dot: "bg-success-foreground text-white",
-    act: play,
-    still: <CheckIcon className="size-3" />,
-  },
-  failed: {
-    label: "Failed",
-    action: "Retry",
-    tone: "border-destructive/32 bg-destructive/8 text-destructive-foreground",
-    dot: "bg-destructive-foreground text-white",
-    act: <RotateCwIcon className="size-3" />,
-    still: <XIcon className="size-3" />,
-  },
-  ready: {
-    label: "Run",
-    action: "Run",
-    tone: "border-border bg-muted text-foreground",
-    dot: "bg-foreground text-background",
-    act: play,
-    still: null,
-  },
-} as const;
-
-/**
- * How an automation's latest run stands, as a pill that also acts on it for whoever may: running
- * stops it, any other state runs the automation again. After a stop, it only offers a new run.
- */
-function RunPill({
-  state,
-  busy,
-  onAct,
-}: {
-  readonly state: keyof typeof RUN_PILLS;
-  readonly busy: boolean;
-  readonly onAct: (() => void) | null;
-}) {
-  const { label, action, tone, dot, act, still } = RUN_PILLS[state];
-  const className = `inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border pr-2.5 pl-1 font-semibold ${tone}`;
-  const content = (
-    <>
-      {state === "running" ? (
-        <span aria-hidden className="grid size-5 shrink-0 place-items-center">
-          <span className="col-start-1 row-start-1 size-5 animate-spin rounded-full border-2 border-info/24 border-t-info" />
-          {onAct !== null && (
-            <span className="col-start-1 row-start-1 size-2 rounded-xs bg-current" />
-          )}
-        </span>
-      ) : (
-        <span aria-hidden className={`grid size-5 shrink-0 place-items-center rounded-full ${dot}`}>
-          {onAct === null ? still : act}
-        </span>
-      )}
-      {label}
-    </>
-  );
-  return onAct === null ? (
-    <span className={className}>{content}</span>
-  ) : (
-    <button
-      type="button"
-      aria-label={label === action ? undefined : `${label}. ${action}`}
-      disabled={busy}
-      onClick={onAct}
-      className={`${className} hover:brightness-95 disabled:opacity-64`}
-    >
-      {content}
-    </button>
-  );
-}
-
-const RUN_OUTCOMES = {
-  running: { label: "Running", Icon: LoaderCircleIcon, tone: "text-info-foreground" },
-  completed: { label: "Completed", Icon: CircleCheckIcon, tone: "text-success-foreground" },
-  failed: { label: "Failed", Icon: CircleXIcon, tone: "text-destructive-foreground" },
-  stopped: { label: "Stopped", Icon: CircleStopIcon, tone: "text-muted-foreground" },
-} as const;
-
-/** An automation's past runs, newest first, folded away at first. */
-function EarlierRuns({
-  runs,
-  now,
-}: {
-  readonly runs: StepView["automations"][number]["runs"];
-  readonly now: number;
-}) {
-  const directory = useWorkDirectory();
-  return (
-    <div className="border-t pt-3 text-xs">
-      <Collapsible>
-        <CollapsibleTrigger className="group flex items-center gap-1 font-medium text-muted-foreground">
-          {runs.length} earlier {runs.length === 1 ? "run" : "runs"}
-          <ChevronDownIcon
-            aria-hidden
-            className="size-3 transition-transform group-data-panel-open:rotate-180"
+    <aside aria-label="Automations" className="flex flex-col gap-2 text-sm">
+      <div className="flex items-center gap-2">
+        <h2 className="min-w-0 flex-1 font-medium">Automations</h2>
+        {runnable.length > 0 && (
+          <RunAutomation
+            automations={runnable.map(({ id }) => ({ id, title: titleOf(id) }))}
+            busy={busy}
+            onRun={(id) => call("workflows.runStepAutomation", id)}
           />
-        </CollapsibleTrigger>
-        <CollapsiblePanel>
-          <ol className="flex flex-col gap-2 pt-2">
-            {runs.map((run) => {
-              const { label, Icon, tone } = RUN_OUTCOMES[run.status];
-              return (
-                <li key={DateTime.formatIso(run.startedAt)} className="flex items-start gap-1.5">
-                  <Icon aria-hidden className={`mt-px size-3.5 shrink-0 ${tone}`} />
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span className={`font-semibold ${tone}`}>{label}</span>
-                    <ProgressReport report={run.latestReport} />
-                    <span className="text-muted-foreground">
-                      {actorName(directory, run.ranBy)} ·{" "}
-                      {formatRelativeTimeLabel(run.startedAt, now)}
-                    </span>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        </CollapsiblePanel>
-      </Collapsible>
-    </div>
+        )}
+      </div>
+      {titles.error && <ErrorText text={titles.error} />}
+      {runs.length > 0 && (
+        <ol className="overflow-hidden rounded-xl border bg-card">
+          {runs.map(({ automation, number, ...run }) => {
+            const { label, Icon, tone } = RUN_STATUSES[run.status];
+            return (
+              <li
+                key={`${automation.id}-${number}`}
+                className="flex flex-col gap-1 border-t p-3 first:border-t-0"
+              >
+                <div className="flex min-h-6 items-center gap-2">
+                  <span role="img" aria-label={label} className="flex size-4 shrink-0">
+                    <Icon aria-hidden className={`size-4 ${tone}`} />
+                  </span>
+                  <span className="min-w-0 flex-1 font-semibold">{titleOf(automation.id)}</span>
+                  {run.status === "running"
+                    ? automation.canStop && (
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => call("workflows.stopStepAutomation", automation.id)}
+                        >
+                          <SquareIcon aria-hidden className="size-2.5 fill-current" />
+                          Stop
+                        </Button>
+                      )
+                    : automation.runLabel !== null && (
+                        <Menu>
+                          <MenuTrigger
+                            render={
+                              <Button
+                                size="icon-xs"
+                                variant="ghost"
+                                disabled={busy}
+                                aria-label={`Options for run ${number}`}
+                              />
+                            }
+                          >
+                            <MoreHorizontalIcon aria-hidden />
+                          </MenuTrigger>
+                          <MenuPopup align="end">
+                            <MenuItem
+                              onClick={() => call("workflows.runStepAutomation", automation.id)}
+                            >
+                              <PlayIcon />
+                              Run again
+                            </MenuItem>
+                          </MenuPopup>
+                        </Menu>
+                      )}
+                </div>
+                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <p className="pl-6">
+                    #{number} · Manually run by {actorName(directory, run.ranBy)}
+                  </p>
+                  {run.status !== "running" && run.latestReport !== null && (
+                    <p className="pl-6 wrap-break-word text-foreground">
+                      {run.latestReport.message}
+                    </p>
+                  )}
+                  <RunDetail Icon={CalendarIcon}>
+                    {formatRelativeTimeLabel(run.startedAt, now)}
+                  </RunDetail>
+                  <RunDetail Icon={TimerIcon}>
+                    {run.endedAt === null
+                      ? "In progress"
+                      : formatDurationLabel(run.startedAt, run.endedAt)}
+                  </RunDetail>
+                  {run.status === "running" && (
+                    <ProgressReport report={run.latestReport} isRunning />
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </aside>
+  );
+}
+
+function RunDetail({
+  Icon,
+  children,
+}: {
+  readonly Icon: LucideIcon;
+  readonly children: ReactNode;
+}) {
+  return (
+    <p className="flex items-center gap-2">
+      <span aria-hidden className="flex w-4 shrink-0 justify-center">
+        <Icon className="size-3" />
+      </span>
+      {children}
+    </p>
+  );
+}
+
+/** Starts one of the step's automations, chosen in a popover. */
+function RunAutomation({
+  automations,
+  busy,
+  onRun,
+}: {
+  readonly automations: ReadonlyArray<{ readonly id: AutomationId; readonly title: string }>;
+  readonly busy: boolean;
+  readonly onRun: (automationId: AutomationId) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [chosen, setChosen] = useState<AutomationId | null>(null);
+  const selected = automations.find(({ id }) => id === chosen) ?? automations[0];
+  return (
+    <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <PopoverTrigger render={<Button size="sm" />}>Run Automation</PopoverTrigger>
+      <PopoverPopup align="end" width="md">
+        <div className="flex flex-col gap-3">
+          <Field label="Automation">
+            <Select
+              value={selected?.id ?? null}
+              onValueChange={(value) =>
+                setChosen(automations.find(({ id }) => id === value)?.id ?? null)
+              }
+            >
+              <SelectTrigger size="sm">
+                <SelectValue>{selected?.title}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                {automations.map(({ id, title }) => (
+                  <SelectItem key={id} value={id}>
+                    {title}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </Field>
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button size="sm" variant="outline" onClick={() => setIsOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setIsOpen(false);
+                if (selected !== undefined) onRun(selected.id);
+              }}
+            >
+              Run automation
+            </Button>
+          </div>
+        </div>
+      </PopoverPopup>
+    </Popover>
   );
 }
 
