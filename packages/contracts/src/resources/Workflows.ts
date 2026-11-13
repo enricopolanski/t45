@@ -188,7 +188,14 @@ export const StepView = Schema.Struct({
   automations: Schema.Array(
     Schema.Struct({
       id: AutomationId,
-      statusLabel: Schema.String,
+      /** Its runs on this step, newest first: who started each, when, and how it stands. */
+      runs: Schema.Array(
+        Schema.Struct({
+          ranBy: StringId,
+          startedAt: Schema.DateTimeUtcFromString,
+          status: Schema.Literals(["running", "completed", "failed", "stopped"]),
+        }),
+      ),
       runLabel: Schema.NullOr(Schema.Literals(["Run", "Run again"])),
       canStop: Schema.Boolean,
     }),

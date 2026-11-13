@@ -1061,21 +1061,28 @@ const make = Effect.gen(function* () {
         );
         return attached.map((id) => {
           const canRun = isRunnable && live.includes(id);
-          const latest = attempts.findLast((run) => run.trigger.automationId === id);
-          if (latest === undefined)
-            return {
-              id,
-              statusLabel: "Not run",
-              runLabel: canRun ? ("Run" as const) : null,
-              canStop: false,
-            };
-          const { chatStatus } = latest;
-          const statusLabel = chatStatus === "running" ? "Running" : "Ended";
+          const runs = attempts
+            .filter((run) => run.trigger.automationId === id)
+            .map(({ trigger, startedAt, chatStatus }) => ({
+              ranBy: trigger.effectiveUserId,
+              startedAt,
+              status:
+                chatStatus === null
+                  ? ("completed" as const)
+                  : chatStatus === "interrupted"
+                    ? ("stopped" as const)
+                    : chatStatus,
+            }))
+            .toReversed();
           return {
             id,
-            statusLabel,
-            runLabel: canRun ? ("Run again" as const) : null,
-            canStop: canRun && chatStatus === "running",
+            runs,
+            runLabel: canRun
+              ? runs.length === 0
+                ? ("Run" as const)
+                : ("Run again" as const)
+              : null,
+            canStop: canRun && runs[0]?.status === "running",
           };
         });
       }),
