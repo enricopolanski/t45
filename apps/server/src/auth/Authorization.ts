@@ -40,7 +40,8 @@ export const Authorization = {
         });
       return AuthorizationMiddleware.of((effect, { rpc, headers }) => {
         if (headers.authorization !== undefined) {
-          if (!rpc._tag.startsWith("workflows.")) return Effect.fail(denied);
+          if (!rpc._tag.startsWith("workflows.") && rpc._tag !== "chats.report")
+            return Effect.fail(denied);
           return chats.authenticateAgent(headers.authorization.replace(/^Bearer /, "")).pipe(
             Effect.catchTags({ NotFound: () => Effect.fail(denied) }),
             Effect.flatMap((actor) => Effect.provideService(effect, CurrentActor, actor)),

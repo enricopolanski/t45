@@ -5,6 +5,7 @@ import { Automations } from "@t45/contracts/resources/Automations";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 
 import { type Agent, canUse } from "@t45/contracts/models/Agent";
 import { canAttachAgent, canWorkSteps } from "@t45/contracts/models/Workflow";
@@ -13,6 +14,8 @@ import { AgentRepository } from "../agents/AgentRepository.ts";
 import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
 import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 import { ChatService } from "../chats/ChatService.ts";
+import { ChatRepository } from "../chats/ChatRepository.ts";
+import { ChatEvents } from "../chats/ChatEvents.ts";
 import { AutomationRepository } from "./AutomationRepository.ts";
 
 export const layer = Automations.middleware(Authorization).toLayer(
@@ -20,6 +23,8 @@ export const layer = Automations.middleware(Authorization).toLayer(
     const crypto = yield* Crypto.Crypto;
     const automations = yield* AutomationRepository;
     const chats = yield* ChatService;
+    const chatRepository = yield* ChatRepository;
+    const changes = yield* ChatEvents;
     const agents = yield* AgentRepository;
     const capabilities = yield* CapabilityRepository;
     const workflows = yield* WorkflowRepository;
@@ -48,8 +53,49 @@ export const layer = Automations.middleware(Authorization).toLayer(
       return automation;
     });
 
+    const list = Effect.flatMap(automations.list, (entries) =>
+      Effect.forEach(entries, (automation) =>
+        Effect.gen(function* () {
+          const chat = yield* chatRepository.getLatestAutomationRun(automation.id);
+          return {
+            ...automation,
+            lastRun:
+              chat === null
+                ? null
+                : {
+                    statusLabel: chat.status === "running" ? "Running" : "Ended",
+                    at: chat.lastActivityAt,
+                    latestReport: chat.reports?.at(-1) ?? null,
+                  },
+          };
+        }),
+      ),
+    );
+
     return Automations.of({
-      "automations.list": () => automations.list,
+      "automations.list": () => list,
+      "automations.watch": () =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const events = yield* changes.subscribe(
+              (change) => change.kind === "chat" || change.kind === "posted",
+            );
+            return Stream.concat(
+              Stream.fromEffect(list),
+              events.pipe(
+                Stream.filterEffect((event) =>
+                  event.kind === "missed"
+                    ? Effect.succeed(true)
+                    : Effect.map(
+                        chatRepository.origins.get(event.chatId),
+                        (origin) => origin?.kind === "automation",
+                      ),
+                ),
+                Stream.mapEffect(() => list),
+              ),
+            );
+          }),
+        ),
       "automations.listForSteps": () =>
         Effect.gen(function* () {
           const { userId } = yield* CurrentUser;

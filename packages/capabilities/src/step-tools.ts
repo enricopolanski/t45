@@ -4,10 +4,10 @@ import * as NodePath from "node:path";
 import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
 import { AttachmentUploadResult } from "@t45/contracts/resources/Attachments";
 import * as Schema from "effect/Schema";
-import { apiHeaders, apiUrl, workflowTool, refuse, serve } from "./mcp-stdio.ts";
+import { apiHeaders, apiUrl, rpcTool, refuse, serve } from "./mcp-stdio.ts";
 
 const step = { stepId: process.env.T45_STEP_ID! };
-const attach = workflowTool(
+const attach = rpcTool(
   "attach",
   "workflows.attachStepFile",
   "Attach a file from your working folder. Give fieldKey to fill a file field.",
@@ -24,22 +24,22 @@ const document = Schema.toJsonSchemaDocument(AttachInput);
 serve({
   name: "step-tools",
   tools: [
-    workflowTool(
+    rpcTool(
       "get_step",
       "workflows.getStep",
       "Read your step as the web shows it: its instructions, its fields with their keys, types and current values, a repeatable group's rowFields and rows, its inputs, comments and files.",
       step,
     ),
-    workflowTool(
+    rpcTool(
       "set_field",
       "workflows.setStepField",
       "Fill a step field by its key: text and dates (YYYY-MM-DD) as strings, numbers as JSON numbers, yes/no as booleans, selects as one of their options; null clears it. Nested fields use dotted keys. Set a repeatable group to the list of its row ids, then fill each row's fields as group.rowId.field, with the field ids in the group's rowFields. A refusal says exactly what didn't fit.",
       step,
     ),
-    workflowTool(
+    rpcTool(
       "comment",
       "workflows.commentOnStep",
-      "Post a comment on your step: progress, a question, or your result.",
+      "Post a comment on your step: a question or your result. Use progress_report for progress updates.",
       step,
     ),
     {

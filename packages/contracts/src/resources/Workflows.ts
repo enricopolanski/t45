@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import { AutomationId } from "../models/Automation.ts";
+import { Report } from "../models/Chat.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 
@@ -199,6 +200,7 @@ export const StepView = Schema.Struct({
           ranBy: StringId,
           startedAt: Schema.DateTimeUtcFromString,
           status: Schema.Literals(["running", "completed", "failed", "stopped"]),
+          latestReport: Schema.NullOr(Report),
         }),
       ),
       runLabel: Schema.NullOr(Schema.Literals(["Run", "Run again"])),

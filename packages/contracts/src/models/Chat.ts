@@ -26,12 +26,19 @@ export type InputId = typeof InputId.Type;
 export const ChatStatus = Schema.Literals(["running", "failed", "interrupted"]);
 export type ChatStatus = typeof ChatStatus.Type;
 
+export const Report = Schema.Struct({
+  message: TrimmedNonEmptyString,
+  at: Schema.DateTimeUtcFromString,
+});
+export type Report = typeof Report.Type;
+
 export class Chat extends Schema.Opaque<Chat>()(
   Schema.Struct({
     id: ChatId,
     agentId: StringId,
     title: Schema.NullOr(Title),
     status: Schema.NullOr(ChatStatus),
+    reports: Schema.NullOr(Schema.Array(Report)),
     lastActivityAt: Schema.DateTimeUtcFromString,
   }),
 ) {}
@@ -75,6 +82,7 @@ const REFUSALS = {
   answer_invalid: "This answer doesn't fit the question.",
   answer_files_need_text: "Files can only go with a written answer.",
   unavailable: "The chat's sandbox could not do this right now. Try again.",
+  not_running: "This chat is no longer running.",
 };
 export type Refusal = keyof typeof REFUSALS;
 

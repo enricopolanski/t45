@@ -3,7 +3,7 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { Chat, Refused as ChatRefused } from "../models/Chat.ts";
+import { Chat, Refused as ChatRefused, Report } from "../models/Chat.ts";
 import { Refused as AutomationRefused, Automation, AutomationId } from "../models/Automation.ts";
 import { AdminOnly } from "../Authorization.ts";
 import { AccessDenied, NotFound } from "./errors.ts";
@@ -17,6 +17,7 @@ export const AutomationSummary = Schema.Struct({
     Schema.Struct({
       statusLabel: Schema.String,
       at: Chat.fields.lastActivityAt,
+      latestReport: Schema.NullOr(Report),
     }),
   ),
 });
@@ -24,6 +25,7 @@ export type AutomationSummary = typeof AutomationSummary.Type;
 
 export const Automations = RpcGroup.make(
   Rpc.make("list", { success: Schema.Array(AutomationSummary) }),
+  Rpc.make("watch", { success: Schema.Array(AutomationSummary), stream: true }),
   Rpc.make("create", {
     payload: Settings,
     success: Automation,

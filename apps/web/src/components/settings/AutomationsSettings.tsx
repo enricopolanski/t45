@@ -10,7 +10,8 @@ import { agentsList, stepAutomationList } from "../../state/agents";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
-import { apiQuery, useApiQuery } from "../../state/rpc";
+import { apiWatch, useApiQuery } from "../../state/rpc";
+import { ProgressReport } from "../ProgressReport";
 import { useSession } from "../../state/session";
 
 import { EMPTY_DRAFT, settingsFromDraft, type DraftState } from "./automationsSettings.logic";
@@ -38,7 +39,7 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 
-const automationList = apiQuery("automations.list")(undefined);
+const automationList = apiWatch("automations.watch", { idleTtlMs: 0 })(undefined);
 
 function reportFailure(title: string, description: string) {
   toastManager.add({ type: "error", title, description });
@@ -137,10 +138,13 @@ function AutomationRow({
       description={<span className="line-clamp-2">{automation.prompt}</span>}
       status={
         automation.lastRun !== null && (
-          <p>
-            Last run: {automation.lastRun.statusLabel} ·{" "}
-            {formatRelativeTimeLabel(automation.lastRun.at, now)}
-          </p>
+          <div className="space-y-1">
+            <p>
+              Last run: {automation.lastRun.statusLabel} ·{" "}
+              {formatRelativeTimeLabel(automation.lastRun.at, now)}
+            </p>
+            <ProgressReport report={automation.lastRun.latestReport} />
+          </div>
         )
       }
       control={

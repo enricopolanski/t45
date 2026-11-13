@@ -12,6 +12,7 @@ import { AutomationOrigin, ChatOrigin, Trigger } from "@t45/contracts/models/Cha
 import { ChatSummary } from "@t45/contracts/resources/Chats";
 import { isSettled } from "@t45/contracts/resources/Runner";
 import type { Agent } from "@t45/contracts/models/Agent";
+import type { AutomationId } from "@t45/contracts/models/Automation";
 import {
   Chat,
   type ChatId,
@@ -19,6 +20,7 @@ import {
   Input,
   type InputId,
   InputPayload,
+  Report,
 } from "@t45/contracts/models/Chat";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -55,6 +57,7 @@ const decodeAutomatedRows = Schema.decodeUnknownEffect(
       origin: Schema.fromJsonString(AutomationOrigin),
       chatStatus: Schema.NullOr(ChatStatus),
       startedAt: Schema.DateTimeUtcFromString,
+      latestReport: Schema.NullOr(Schema.fromJsonString(Report)),
     }),
   ),
 );
@@ -84,25 +87,30 @@ const makeOrigins = Effect.gen(function* () {
     listByTrigger: (reference: { readonly ticketId: string; readonly stepId: string }) =>
       sql`SELECT json_object('kind', 'automation', 'chatId', o.chat_id,
           'trigger', json(o.trigger)) AS origin,
-          c.status AS "chatStatus", c.created_at AS "startedAt"
+          c.status AS "chatStatus", c.created_at AS "startedAt",
+          json_extract(c.reports, '$[#-1]') AS "latestReport"
         FROM chat_origins o JOIN chats c ON c.id = o.chat_id
         WHERE o.trigger IS NOT NULL
           AND json_extract(o.trigger, '$.ticketId') = ${reference.ticketId}
           AND json_extract(o.trigger, '$.stepId') = ${reference.stepId}
         ORDER BY c.created_at, c.id`.pipe(
         Effect.flatMap(decodeAutomatedRows),
-        Effect.map((rows) =>
-          rows.map(({ origin, chatStatus, startedAt }) => ({ ...origin, chatStatus, startedAt })),
-        ),
+        Effect.map((rows) => rows.map(({ origin, ...run }) => ({ ...origin, ...run }))),
         Effect.orDie,
       ),
   };
 });
 
-const CHAT_COLUMNS = `id, agent_id AS "agentId", title, status, updated_at AS "lastActivityAt"`;
+const CHAT_COLUMNS = `id, agent_id AS "agentId", title, status, reports, updated_at AS "lastActivityAt"`;
 
-const decodeChat = Schema.decodeUnknownEffect(Chat);
-const decodeSummaries = Schema.decodeUnknownEffect(Schema.Array(ChatSummary));
+const reportsColumn = Schema.NullOr(Schema.fromJsonString(Schema.Array(Report)));
+const decodeChat = Schema.decodeUnknownEffect(
+  Schema.Struct({ ...Chat.fields, reports: reportsColumn }),
+);
+const decodeSummaries = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ ...ChatSummary.fields, reports: reportsColumn })),
+);
+const encodeReport = Schema.encodeSync(Schema.fromJsonString(Report));
 
 const MESSAGE_COLUMNS = `session_id AS "sessionId", message_id AS "messageId", ordinal, json, is_live AS "isLive"`;
 
@@ -166,6 +174,22 @@ const make = Effect.gen(function* () {
 
   return {
     get,
+    getLatestAutomationRun: (automationId: AutomationId) =>
+      sql`SELECT ${chatColumns} FROM chats WHERE id = (
+        SELECT c.id FROM chat_origins o JOIN chats c ON c.id = o.chat_id
+        WHERE json_extract(o.trigger, '$.automationId') = ${automationId}
+        ORDER BY c.created_at DESC, c.id DESC LIMIT 1
+      )`.pipe(
+        Effect.flatMap(([row]) => (row === undefined ? Effect.succeed(null) : decodeChat(row))),
+        Effect.orDie,
+      ),
+    appendReport: (chatId: ChatId, report: Report) =>
+      sql`UPDATE chats SET reports = json_insert(COALESCE(reports, '[]'), '$[#]', json(${encodeReport(report)}))
+        WHERE id = ${chatId} AND status = 'running' AND deleted_at IS NULL
+        RETURNING id`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
     origins,
     insert: (row: {
       readonly id: ChatId;
@@ -177,7 +201,7 @@ const make = Effect.gen(function* () {
         VALUES (${row.id}, ${row.agentId}, ${row.title},
           ${row.at}, ${row.at})`.pipe(Effect.asVoid, Effect.orDie),
     list: (member: Member) =>
-      sql`SELECT c.id, c.agent_id AS "agentId", c.title, c.status, c.updated_at AS "lastActivityAt",
+      sql`SELECT c.id, c.agent_id AS "agentId", c.title, c.status, c.reports, c.updated_at AS "lastActivityAt",
           a.name AS "agentName", o.project_id AS "projectId", p.name AS "projectName"
         FROM chats c JOIN chat_origins o ON o.chat_id = c.id
           LEFT JOIN agents a ON a.id = c.agent_id LEFT JOIN projects p ON p.id = o.project_id

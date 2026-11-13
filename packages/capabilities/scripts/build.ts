@@ -10,8 +10,10 @@ import { stepOperations } from "../src/steps.ts";
 import { projectOperations } from "../src/projects.ts";
 import { agents } from "../src/agents.ts";
 import { webBrowser } from "../src/browser.ts";
+import { progressReporting } from "../src/reporting.ts";
 
 const programs = [
+  { name: "report-tools", definition: progressReporting },
   { name: "workflow-tools", definition: workflowDrafting },
   { name: "step-tools", definition: stepOperations },
   { name: "project-tools", definition: projectOperations },

@@ -9,6 +9,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import Migration0001 from "./Migrations/001_Initial.ts";
 import Migration0002 from "./Migrations/002_AgentCapabilities.ts";
+import Migration0003 from "./Migrations/003_ChatReports.ts";
 
 /**
  * Append only. The migrator skips every id up to the highest a database has recorded, so a
@@ -17,6 +18,7 @@ import Migration0002 from "./Migrations/002_AgentCapabilities.ts";
 const migrations = [
   [1, "Initial", Migration0001],
   [2, "AgentCapabilities", Migration0002],
+  [3, "ChatReports", Migration0003],
 ] as const;
 
 class PremigrationDatabaseError extends Schema.TaggedError<PremigrationDatabaseError>()(

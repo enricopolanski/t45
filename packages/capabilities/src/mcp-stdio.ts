@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off - Injected tools run as plain Node programs.
 import * as NodeReadline from "node:readline";
 import { Authorization } from "@t45/contracts/Authorization";
+import { ReportProgress } from "@t45/contracts/resources/Chats";
 import { Workflows } from "@t45/contracts/resources/Workflows";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -21,7 +22,9 @@ export const apiHeaders = {
   ...(process.env.T45_TOOL_INSTANCE ? { "x-instance-id": process.env.T45_TOOL_INSTANCE } : {}),
 };
 export const apiUrl = (path: string) => new URL(path, process.env.T45_SERVER_URL).toString();
-const operations = Workflows.omit("workflows.watchStep").middleware(Authorization);
+const operations = Workflows.omit("workflows.watchStep")
+  .add(ReportProgress)
+  .middleware(Authorization);
 const client = RpcClient.make(operations, { disableTracing: true, flatten: true });
 const protocol = () =>
   RpcClient.layerProtocolHttp({
@@ -30,7 +33,7 @@ const protocol = () =>
   }).pipe(Layer.provide(RpcSerialization.layerNdjson), Layer.provide(FetchHttpClient.layer));
 
 /** The API payload supplies the tool schema; bound IDs come from its execution. */
-export const workflowTool = (
+export const rpcTool = (
   name: string,
   tag: RpcGroup.Rpcs<typeof operations>["_tag"],
   description: string,

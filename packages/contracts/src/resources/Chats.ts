@@ -15,6 +15,7 @@ import {
   InputPayload,
   MESSAGE_MAX_INPUT_CHARS,
   Refused,
+  Report,
 } from "../models/Chat.ts";
 import { StringId, Title } from "../models/primitives.ts";
 import { AccessDenied, NotFound } from "./errors.ts";
@@ -122,6 +123,11 @@ export const ChatTarget = Schema.Struct({
 });
 export type ChatTarget = typeof ChatTarget.Type;
 
+export const ReportProgress = Rpc.make("chats.report", {
+  payload: { message: Report.fields.message },
+  error: ChatErrors,
+});
+
 export const Chats = RpcGroup.make(
   Rpc.make("listTargets", { success: Schema.Array(ChatTarget), error: AccessDenied }),
   Rpc.make("getHistory", {
@@ -191,4 +197,6 @@ export const Chats = RpcGroup.make(
     error: ChatErrors,
   }),
   Rpc.make("stop", { payload: { chatId: ChatId }, error: ChatErrors }),
-).prefix("chats.");
+)
+  .prefix("chats.")
+  .add(ReportProgress);

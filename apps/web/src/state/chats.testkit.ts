@@ -24,6 +24,7 @@ const chatSummary = (title = "Quarterly report"): ChatSummary =>
     projectName: null,
     title,
     status: null,
+    reports: null,
     lastActivityAt: "2026-10-01T10:00:00.000Z",
   });
 

@@ -480,7 +480,7 @@ const make = Effect.gen(function* () {
     return {
       text: [
         `You contribute to ${subject} of "${brief.ticketTitle}" in the project "${brief.projectName}". The step is below as JSON: its instructions, the fields of earlier steps it reads as inputs, its own fields, its comments and its files. That is all you can see of this ticket.`,
-        "Fill the step's fields with step_set_field, using each field's key and type below; a repeatable group's rowFields name the fields of its rows. Read the step again with step_get_step, report progress or results with step_comment, and attach files with step_attach. Each tool returns the actual operation result, or exactly why it refused. When your contribution is finished, end the conversation.",
+        "Fill the step's fields with step_set_field, using each field's key and type below; a repeatable group's rowFields name the fields of its rows. Read the step again with step_get_step, report progress with progress_report, share results with step_comment, and attach files with step_attach. Each tool returns the actual operation result, or exactly why it refused. When your contribution is finished, end the conversation.",
         "You work in a folder of your own. Follow AGENTS.md if it is there.",
         instructions ? `Instructions for this step:\n${instructions}` : "",
         formatAutomationContext(brief),
@@ -1069,7 +1069,8 @@ const make = Effect.gen(function* () {
           const canRun = isRunnable && live.includes(id);
           const runs = attempts
             .filter((run) => run.trigger.automationId === id)
-            .map(({ trigger, startedAt, chatStatus }) => ({
+            .map(({ trigger, startedAt, chatStatus, latestReport }) => ({
+              latestReport,
               ranBy: trigger.effectiveUserId,
               startedAt,
               status:

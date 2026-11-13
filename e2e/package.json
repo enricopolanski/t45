@@ -6,8 +6,11 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@effect/platform-node": "catalog:",
     "@playwright/test": "catalog:",
+    "@t45/contracts": "workspace:*",
     "@types/node": "catalog:",
+    "effect": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
   }
