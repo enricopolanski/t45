@@ -14,14 +14,13 @@ import {
   CircleCheckIcon,
   CircleStopIcon,
   CircleXIcon,
-  InfoIcon,
   LoaderCircleIcon,
   MinusIcon,
   PlayIcon,
   RotateCwIcon,
   XIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { api, runtime } from "../../rpc/api";
 import { appAtomRegistry } from "../../state/atomRegistry";
@@ -31,6 +30,7 @@ import { useIsAdmin } from "../../state/session";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { ErrorText } from "../ui/error-text";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { ActorName } from "./ActorAvatar";
 import { AssigneePicker } from "./AssigneePicker";
 import { CardFold } from "./CardFold";
@@ -137,17 +137,6 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const rootId = view.parents[0]?.id ?? view.step.id;
   const open = (
     <section key="open" aria-label="Open step" className="flex flex-col gap-6">
-      <div className="flex gap-3 rounded-xl border border-info/32 bg-info/4 p-4">
-        <InfoIcon aria-hidden className="mt-1 size-5 shrink-0 text-info" />
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <StepHeading view={view} />
-          {view.definition.instructions ? (
-            <section aria-label="Goal">
-              <p className="text-sm whitespace-pre-wrap">{view.definition.instructions}</p>
-            </section>
-          ) : null}
-        </div>
-      </div>
       {error && <ErrorText text={error} />}
       {missing.length > 0 || unfinished.length > 0 ? (
         <MissingRecap missing={missing} unfinished={unfinished} />
@@ -192,6 +181,14 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
       />
     </section>
   );
+  const hasInstructions = view.definition.instructions !== "";
+  const overview = (
+    <>
+      <ItemDetails view={view} actions={actions} busy={busy} act={act} />
+      <StepAutomations view={view} busy={busy} act={act} />
+      <StepHistory view={view} />
+    </>
+  );
   return (
     <WorkFrame title={view.ticket.title} width="split">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_25rem]">
@@ -205,9 +202,22 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         </div>
         <div className="flex flex-col gap-3">
           <StepStatus view={view} actions={actions} busy={busy} act={act} onMarkDone={markDone} />
-          <ItemDetails view={view} actions={actions} busy={busy} act={act} />
-          <StepAutomations view={view} busy={busy} act={act} />
-          <StepHistory view={view} />
+          {hasInstructions ? (
+            <Tabs defaultValue="overview">
+              <TabsList>
+                <TabsTab value="overview">Overview</TabsTab>
+                <TabsTab value="instructions">Instructions</TabsTab>
+              </TabsList>
+              <TabsPanel value="overview">
+                <div className="flex flex-col gap-3">{overview}</div>
+              </TabsPanel>
+              <TabsPanel value="instructions">
+                <StepInstructions view={view} />
+              </TabsPanel>
+            </Tabs>
+          ) : (
+            overview
+          )}
         </div>
       </div>
     </WorkFrame>
@@ -509,45 +519,26 @@ function MissingRecap({
 }
 
 /**
- * The way back to the project's board, the item's title, and the step it is in when that isn't
- * the step on the page.
+ * The way back to the project's board, the item's title, and under it the open step with the steps
+ * it sits in and the way to its instructions. Then the step the item is in when that isn't the step
+ * on the page, and why the item was cancelled or the step blocked.
  */
 function ItemHeader({ view }: { readonly view: StepView }) {
-  const current =
-    view.otherSteps.find(({ step }) => step.id !== view.step.id && step.status.type !== "completed")
-      ?.name ?? null;
-  return (
-    <header className="flex flex-col gap-1">
-      <div className="mb-5">
-        <BackLink to="/boards/$slug" params={{ slug: view.ticket.projectId }}>
-          {view.projectName}
-        </BackLink>
-      </div>
-      <h2 className="text-xl font-semibold tracking-tight">{view.ticket.title}</h2>
-      {current !== null ? (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline">In {current}</Badge>
-        </div>
-      ) : null}
-      {view.ticket.status.type === "cancelled" ? (
-        <p className="mt-2 rounded-lg border border-border bg-muted px-3 py-2 text-sm">
-          <span className="font-medium">Cancelled:</span> {view.ticket.status.reason}
-        </p>
-      ) : null}
-    </header>
-  );
-}
-
-/** The open step's name, the steps it sits in, and why it's blocked. */
-function StepHeading({ view }: { readonly view: StepView }) {
   const { step } = view;
+  const current =
+    view.otherSteps.find(
+      ({ step: other }) => other.id !== step.id && other.status.type !== "completed",
+    )?.name ?? null;
   return (
-    <div className="flex flex-col gap-2">
-      {view.parents.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {view.parents.map((parent, at) => (
-            <span key={parent.id}>
-              {at > 0 ? " › " : null}
+    <header className="flex flex-col gap-3">
+      <BackLink to="/boards/$slug" params={{ slug: view.ticket.projectId }}>
+        {view.projectName}
+      </BackLink>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-3xl font-semibold tracking-tight">{view.ticket.title}</h2>
+        <h3 className="text-sm text-muted-foreground">
+          {view.parents.map((parent) => (
+            <Fragment key={parent.id}>
               <Link
                 to="/my-work/$stepId"
                 params={{ stepId: parent.id }}
@@ -555,16 +546,39 @@ function StepHeading({ view }: { readonly view: StepView }) {
               >
                 {parent.name}
               </Link>
-            </span>
+              {" › "}
+            </Fragment>
           ))}
+          {view.definition.name}
+        </h3>
+      </div>
+      {current !== null ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant="outline">In {current}</Badge>
+        </div>
+      ) : null}
+      {view.ticket.status.type === "cancelled" ? (
+        <p className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
+          <span className="font-medium">Cancelled:</span> {view.ticket.status.reason}
         </p>
       ) : null}
-      <h2 className="text-lg font-semibold tracking-tight">{view.definition.name}</h2>
       {step.status.type === "blocked" ? (
         <p className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
           <span className="font-medium">Blocked:</span> {step.status.reason}
         </p>
       ) : null}
+    </header>
+  );
+}
+
+/** The open step's instructions, under its name. */
+function StepInstructions({ view }: { readonly view: StepView }) {
+  return (
+    <div className="card flex flex-col gap-3 p-4">
+      <h2 className="text-base font-medium">{view.definition.name}</h2>
+      <p className="text-sm whitespace-pre-wrap text-foreground/80">
+        {view.definition.instructions}
+      </p>
     </div>
   );
 }
