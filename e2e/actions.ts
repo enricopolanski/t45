@@ -15,7 +15,7 @@ export const nameOrganization = async (admin: Page) => {
 
 /** `admin` lets in everyone who signed in after them; each then opens the app. */
 export const approveMembers = async (admin: Page, members: ReadonlyArray<Page>) => {
-  await admin.goto("/settings/organization");
+  await admin.goto("/settings/people");
   const approve = admin.getByRole("button", { name: "Approve" });
   await expect(approve).toHaveCount(members.length);
   for (let waiting = members.length; waiting > 0; waiting -= 1) {
