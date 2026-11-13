@@ -25,9 +25,15 @@ serve({
   name: "step-tools",
   tools: [
     workflowTool(
+      "get_step",
+      "workflows.getStep",
+      "Read your step as the web shows it: its instructions, its fields with their keys, types and current values, a repeatable group's rowFields and rows, its inputs, comments and files.",
+      step,
+    ),
+    workflowTool(
       "set_field",
       "workflows.setStepField",
-      "Fill a step field by its key: text and dates (YYYY-MM-DD) as strings, numbers as numbers, yes/no as booleans, selects as an option; null clears it. Nested fields use dotted keys. Set repeatable groups to their row IDs, then fill group.rowId.field.",
+      "Fill a step field by its key: text and dates (YYYY-MM-DD) as strings, numbers as JSON numbers, yes/no as booleans, selects as one of their options; null clears it. Nested fields use dotted keys. Set a repeatable group to the list of its row ids, then fill each row's fields as group.rowId.field, with the field ids in the group's rowFields. A refusal says exactly what didn't fit.",
       step,
     ),
     workflowTool(

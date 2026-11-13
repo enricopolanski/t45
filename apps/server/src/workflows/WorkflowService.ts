@@ -33,7 +33,7 @@ import {
   canEditWorkflow,
   canSetWorkflowEditors,
   stepIds,
-  fieldValueRefusal,
+  fieldValueProblem,
   type WorkflowActor,
   findStep,
   rowIds,
@@ -165,6 +165,7 @@ const make = Effect.gen(function* () {
           options: field.type === "select" ? field.options : [],
           value: field.type === "group" ? null : (value ?? null),
           repeatable: field.type === "group" && field.repeatable,
+          rowFields: field.type === "group" && field.repeatable ? field.fields : [],
           rows,
         };
       }),
@@ -473,7 +474,7 @@ const make = Effect.gen(function* () {
     return {
       text: [
         `You contribute to ${subject} of "${brief.ticketTitle}" in the project "${brief.projectName}". The step is below as JSON: its instructions, the fields of earlier steps it reads as inputs, its own fields, its comments and its files. That is all you can see of this ticket.`,
-        "Fill the step's fields with step_set_field, report progress or results with step_comment, and attach files with step_attach. Each tool returns the actual operation result. When your contribution is finished, end the conversation.",
+        "Fill the step's fields with step_set_field, using each field's key and type below; a repeatable group's rowFields name the fields of its rows. Read the step again with step_get_step, report progress or results with step_comment, and attach files with step_attach. Each tool returns the actual operation result, or exactly why it refused. When your contribution is finished, end the conversation.",
         "You work in a folder of your own. Follow AGENTS.md if it is there.",
         instructions ? `Instructions for this step:\n${instructions}` : "",
         formatAutomationContext(brief),
@@ -540,11 +541,19 @@ const make = Effect.gen(function* () {
 
   const resolveField = (work: Work, step: Step, path: string) => {
     const resolved = resolveFieldPath(definitionOf(work, step).fields, path);
-    if (
-      resolved === null ||
-      resolved.rows.some((row) => !rowIds(step.values[row.groupPath]).includes(row.rowId))
-    ) {
-      return Effect.fail(new WorkflowRefused({ reason: "invalid_field_value" }));
+    if (typeof resolved === "string")
+      return Effect.fail(new WorkflowRefused({ reason: "invalid_field_value", detail: resolved }));
+    const missing = resolved.rows.find(
+      (row) => !rowIds(step.values[row.groupPath]).includes(row.rowId),
+    );
+    if (missing !== undefined) {
+      const existing = rowIds(step.values[missing.groupPath]);
+      return Effect.fail(
+        new WorkflowRefused({
+          reason: "invalid_field_value",
+          detail: `${missing.groupPath} has no row ${missing.rowId}; its rows are ${existing.length === 0 ? "none yet" : existing.join(", ")}. Add a row by setting ${missing.groupPath} to its row ids, the new one included.`,
+        }),
+      );
     }
     return Effect.succeed(resolved.field);
   };
@@ -986,6 +995,17 @@ const make = Effect.gen(function* () {
     );
   }, transaction);
 
+  /** One read of a step's view: an automation reads its own step with its starter's access. */
+  const readStep = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
+    if (typeof caller !== "string" && caller.origin.kind === "automation") {
+      const { work, step } = yield* loadAutomationStep(caller.origin);
+      if (step.id !== stepId) return yield* new NotFound();
+      return yield* getStep(caller.origin.trigger.effectiveUserId, work.ticket.id, stepId);
+    }
+    const { work } = yield* loadStep(stepId);
+    return yield* getStep(yield* resolvePerson(caller, work.project.id), work.ticket.id, stepId);
+  });
+
   const getStep = Effect.fnUntraced(function* (actorId: string, ticketId: string, stepId: string) {
     const work = yield* loadTicket(ticketId);
     const step = stepIn(work, stepId);
@@ -1073,14 +1093,15 @@ const make = Effect.gen(function* () {
       (typeof input.value === "string" && input.value.trim() === "") ||
       (Array.isArray(input.value) && input.value.length === 0);
     const value = blank ? null : input.value;
-    const invalid = () => new WorkflowRefused({ reason: "invalid_field_value" });
     let values = step.values;
-    if (field.type === "file") return yield* invalid();
-    if (
-      (value !== null || field.type === "group") &&
-      fieldValueRefusal(field, value ?? []) !== null
-    )
-      return yield* invalid();
+    const problem =
+      field.type === "file"
+        ? `${input.fieldKey} is a file field: attach a file with this field's key instead.`
+        : value !== null || field.type === "group"
+          ? fieldValueProblem(field, input.fieldKey, value ?? [])
+          : null;
+    if (problem !== null)
+      return yield* new WorkflowRefused({ reason: "invalid_field_value", detail: problem });
     if (field.type === "group")
       values = yield* withoutRemovedRows(step, input.fieldKey, rowIds(value));
     const others = Object.fromEntries(
@@ -1195,8 +1216,12 @@ const make = Effect.gen(function* () {
     const fieldKey = input.fieldKey ?? null;
     if (fieldKey !== null) {
       yield* requireWorkingStep(work, step);
-      if ((yield* resolveField(work, step, fieldKey)).type !== "file") {
-        return yield* new WorkflowRefused({ reason: "invalid_field_value" });
+      const field = yield* resolveField(work, step, fieldKey);
+      if (field.type !== "file") {
+        return yield* new WorkflowRefused({
+          reason: "invalid_field_value",
+          detail: `${fieldKey} is a ${field.type} field, not a file field: set it with its value instead.`,
+        });
       }
       for (const previous of yield* files.forStep(step.id)) {
         if (previous.fieldKey === fieldKey) yield* files.detach(previous.id);
@@ -1477,6 +1502,7 @@ const make = Effect.gen(function* () {
     archiveProject,
     startTicket,
     cancelTicket,
+    readStep,
     watchStep: (actorId: string, stepId: string) =>
       Stream.unwrap(
         Effect.map(found(tickets.getByStepId(stepId)), (ticket) =>

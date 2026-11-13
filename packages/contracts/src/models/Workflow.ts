@@ -328,9 +328,13 @@ const REFUSALS = {
 
 export class Refused extends Schema.TaggedError<Refused>()("WorkflowRefused", {
   reason: Schema.Literals(Struct.keys(REFUSALS)),
+  /** What exactly didn't fit, for a person or an agent to correct it. */
+  detail: Schema.optionalKey(Schema.String),
 }) {
   override get message(): string {
-    return REFUSALS[this.reason];
+    return this.detail === undefined
+      ? REFUSALS[this.reason]
+      : `${REFUSALS[this.reason]} ${this.detail}`;
   }
 }
 
@@ -343,6 +347,8 @@ const holdsData = (value: Schema.Json | undefined): boolean =>
   (!Array.isArray(value) || value.length > 0);
 
 const isRowIds = Schema.is(Schema.UniqueArray(FieldPathSegment));
+const isFiniteNumber = Schema.is(Schema.Finite);
+const isAttachmentId = Schema.is(AttachmentId);
 
 export const rowIds = (value: Schema.Json | undefined): ReadonlyArray<string> =>
   isRowIds(value) ? value : [];
@@ -350,34 +356,40 @@ export const rowIds = (value: Schema.Json | undefined): ReadonlyArray<string> =>
 export const groupRows = (field: StepField, value: Schema.Json | undefined) =>
   field.type === "group" && field.repeatable ? rowIds(value) : [null];
 
+/** The field at a dotted path and the rows it sits in, or why the path names no field. */
 export const resolveFieldPath = (
   fields: ReadonlyArray<StepField>,
   path: string,
-): {
-  readonly field: StepField;
-  readonly rows: ReadonlyArray<{ readonly groupPath: string; readonly rowId: string }>;
-} | null => {
+):
+  | {
+      readonly field: StepField;
+      readonly rows: ReadonlyArray<{ readonly groupPath: string; readonly rowId: string }>;
+    }
+  | string => {
   const segments = path.split(".");
   const rows: Array<{ groupPath: string; rowId: string }> = [];
   let list = fields;
   let prefix = "";
   for (let at = 0; at < segments.length;) {
     const field = list.find((candidate) => candidate.id === segments[at]);
-    if (field === undefined) return null;
+    if (field === undefined)
+      return `There is no field ${path}. The fields ${prefix ? `in ${prefix} ` : ""}are:\n${describeFields(list, prefix)}`;
+    const parent = prefix;
     prefix = prefix ? `${prefix}.${field.id}` : field.id;
     at += 1;
     if (at === segments.length) return { field, rows };
-    if (field.type !== "group") return null;
+    if (field.type !== "group") return `${prefix} is a ${field.type} field, with no fields inside.`;
     if (field.repeatable) {
       const rowId = segments[at];
       at += 1;
-      if (rowId === undefined || at === segments.length) return null;
+      if (rowId === undefined || at === segments.length)
+        return `${prefix} is a repeatable group: set ${prefix} to its row ids, or a row's field as ${prefix}.<rowId>.<field>.\n${describeFields([field], parent)}`;
       rows.push({ groupPath: prefix, rowId });
       prefix = `${prefix}.${rowId}`;
     }
     list = field.fields;
   }
-  return null;
+  return `There is no field ${path}.`;
 };
 
 const fieldsComplete = (fields: ReadonlyArray<StepField>, values: Values, prefix = ""): boolean =>
@@ -485,23 +497,78 @@ export const stepCompletionRefusal = (
     : null;
 
 const decodeDateFieldValue = Schema.decodeUnknownOption(Schema.DateTimeUtcFromString);
-const fieldValueValidators = {
-  text: Schema.is(Schema.String),
-  number: Schema.is(Schema.Finite),
-  boolean: Schema.is(Schema.Boolean),
-  date: (value: unknown) => Option.isSome(decodeDateFieldValue(value)),
-  file: Schema.is(AttachmentId),
+const isDay = (value: unknown) =>
+  typeof value === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/u.test(value) &&
+  Option.isSome(decodeDateFieldValue(value));
+
+/** What a field takes, said the way someone filling it reads it. */
+const expectation = (field: StepField) => {
+  switch (field.type) {
+    case "text":
+      return "text";
+    case "number":
+      return "a number, like 0.5";
+    case "boolean":
+      return "true or false";
+    case "date":
+      return "a date as YYYY-MM-DD";
+    case "select":
+      return `one of ${field.options.map((option) => JSON.stringify(option)).join(", ")}`;
+    case "file":
+      return "a file attached with this field's key";
+    case "group":
+      return field.repeatable
+        ? `the list of its row ids, like ["r1", "r2"] (letters, digits, _ and -, each once)`
+        : "values in its fields";
+  }
 };
 
-/** Checks stored JSON against the field's meaning, before attachment access checks or writes. */
-export const fieldValueRefusal = (field: StepField, value: Schema.Json) => {
-  const valid =
+const describeValue = (value: Schema.Json) => {
+  if (typeof value === "string")
+    return `the text ${JSON.stringify(value.length > 60 ? `${value.slice(0, 60)}…` : value)}`;
+  if (Array.isArray(value)) return "a list";
+  if (value === null) return "nothing";
+  return typeof value === "object" ? "an object" : `${typeof value} ${String(value)}`;
+};
+
+/** Each settable key of these fields and what it takes, one per line. */
+const describeFields = (fields: ReadonlyArray<StepField>, prefix = ""): string =>
+  fields
+    .map((field) => {
+      const key = prefix ? `${prefix}.${field.id}` : field.id;
+      if (field.type !== "group") return `${key}: ${expectation(field)}`;
+      if (!field.repeatable) return describeFields(field.fields, key);
+      return [
+        `${key}: ${expectation(field)}; each row's fields are:`,
+        describeFields(field.fields, `${key}.<rowId>`),
+      ].join("\n");
+    })
+    .join("\n");
+
+/**
+ * Why a value doesn't fit the field at `key`, or null when it does. Checked before attachment
+ * access checks or writes.
+ */
+export const fieldValueProblem = (field: StepField, key: string, value: Schema.Json) => {
+  const fits =
     field.type === "select"
       ? typeof value === "string" && field.options.includes(value)
       : field.type === "group"
         ? field.repeatable && isRowIds(value)
-        : fieldValueValidators[field.type](value);
-  return valid ? null : ("invalid_field_value" as const);
+        : field.type === "text"
+          ? typeof value === "string"
+          : field.type === "number"
+            ? isFiniteNumber(value)
+            : field.type === "boolean"
+              ? typeof value === "boolean"
+              : field.type === "date"
+                ? isDay(value)
+                : isAttachmentId(value);
+  if (fits) return null;
+  if (field.type === "group" && !field.repeatable)
+    return `${key} is a group: set its fields instead.\n${describeFields(field.fields, key)}`;
+  return `${key} takes ${expectation(field)}; got ${describeValue(value)}.`;
 };
 
 export const stepInTicket = (ticket: Ticket, stepId: string | null) =>

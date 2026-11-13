@@ -1,6 +1,10 @@
 import { Refused } from "@t45/contracts/models/Workflow";
 import { AccessDenied } from "@t45/contracts/resources/errors";
-import type { FieldView, StepFileView } from "@t45/contracts/resources/Workflows";
+import type {
+  FieldValue as StepFieldValue,
+  FieldView,
+  StepFileView,
+} from "@t45/contracts/resources/Workflows";
 import { PaperclipIcon, PlusIcon, XIcon } from "lucide-react";
 import { type ComponentProps, useId, useRef } from "react";
 
@@ -148,7 +152,7 @@ function GroupEditor({
 }: {
   readonly field: FieldView;
   readonly missing: ReadonlySet<string>;
-  readonly onSave: (fieldKey: string, value: FieldView["value"]) => void;
+  readonly onSave: (fieldKey: string, value: StepFieldValue) => void;
   readonly onUpload: (fieldKey: string, file: File) => void;
 }) {
   const ids = field.rows.flatMap((row) => (row.id === null ? [] : [row.id]));
@@ -223,14 +227,14 @@ function FieldEditor({
   readonly field: FieldView;
   /** Paths of the fields to flag as still empty. */
   readonly missing: ReadonlySet<string>;
-  readonly onSave: (fieldKey: string, value: FieldView["value"]) => void;
+  readonly onSave: (fieldKey: string, value: StepFieldValue) => void;
   readonly onUpload: (fieldKey: string, file: File) => void;
 }) {
   const id = useId();
   if (field.type === "group") {
     return <GroupEditor field={field} missing={missing} onSave={onSave} onUpload={onUpload} />;
   }
-  const save = (value: FieldView["value"]) => onSave(field.key, value);
+  const save = (value: StepFieldValue) => onSave(field.key, value);
   const label = (
     <div className="flex flex-col gap-0.5">
       <Label htmlFor={id}>{field.label}</Label>
@@ -349,7 +353,7 @@ export function StepFields({
   readonly editable: boolean;
   /** Paths of the fields to flag as still empty. */
   readonly missing: ReadonlySet<string>;
-  readonly onSave: (fieldKey: string, value: FieldView["value"]) => void;
+  readonly onSave: (fieldKey: string, value: StepFieldValue) => void;
   readonly onUpload: (fieldKey: string, file: File) => void;
 }) {
   if (fields.length === 0) return null;
