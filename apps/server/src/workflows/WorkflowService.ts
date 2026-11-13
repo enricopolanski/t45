@@ -34,6 +34,7 @@ import {
   canSetWorkflowEditors,
   stepIds,
   fieldValueProblem,
+  defaultValues,
   type WorkflowActor,
   findStep,
   rowIds,
@@ -529,7 +530,7 @@ const make = Effect.gen(function* () {
       status: { type: "working", at: yield* DateTime.now },
       parentStepId: parent?.id ?? null,
       assignee: Option.getOrNull(assignee),
-      values: {},
+      values: defaultValues(definition.fields),
     });
     putStep(work, step);
     yield* notify({ kind: "to_do", to: step.assignee, project: work.project, step, actorId });
@@ -1109,8 +1110,18 @@ const make = Effect.gen(function* () {
           : null;
     if (problem !== null)
       return yield* new WorkflowRefused({ reason: "invalid_field_value", detail: problem });
-    if (field.type === "group")
-      values = yield* withoutRemovedRows(step, input.fieldKey, rowIds(value));
+    if (field.type === "group") {
+      const before = rowIds(step.values[input.fieldKey]);
+      const added = rowIds(value).filter((rowId) => !before.includes(rowId));
+      values = {
+        ...(yield* withoutRemovedRows(step, input.fieldKey, rowIds(value))),
+        ...Object.fromEntries(
+          added.flatMap((rowId) =>
+            Object.entries(defaultValues(field.fields, `${input.fieldKey}.${rowId}`)),
+          ),
+        ),
+      };
+    }
     const others = Object.fromEntries(
       Object.entries(values).filter(([key]) => key !== input.fieldKey),
     );
