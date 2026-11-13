@@ -38,6 +38,15 @@ export const workflowTool = (
 ) => {
   const rpc = operations.requests.get(tag)!;
   const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
+  const decodeArguments = (input: Record<string, unknown>) => {
+    try {
+      return decode(input);
+    } catch (error) {
+      return refuse(
+        `The arguments don't fit the tool: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
   const document = Schema.toJsonSchemaDocument(rpc.payloadSchema);
   const schema = document.schema;
   const inputSchema =
@@ -58,9 +67,10 @@ export const workflowTool = (
     description,
     inputSchema,
     call: async (input: Record<string, unknown>) => {
+      const payload = decodeArguments({ ...input, ...bound });
       const result = await Effect.runPromise(
         client.pipe(
-          Effect.flatMap((api) => api(tag, decode({ ...input, ...bound }))),
+          Effect.flatMap((api) => api(tag, payload)),
           Effect.scoped,
           Effect.provide(protocol()),
           Effect.result,

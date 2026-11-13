@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Schema from "effect/Schema";
 
 import { AutomationId } from "./Automation.ts";
 import {
@@ -14,9 +15,12 @@ import {
   canSeeStep,
   completeTicketStep,
   currentStep,
+  fieldValueProblem,
   hasValidInputs,
   occupiedStep,
   putTicketStep,
+  resolveFieldPath,
+  StepField,
   stepEntryRefusal,
   stepIds,
   stepsAssignedUnder,
@@ -326,5 +330,49 @@ describe("attaching an agent's automation to a workflow", () => {
     assert.isFalse(
       canAttachAgent({ ...agent, status: "archived" }, workflow, "creator01", capabilities),
     );
+  });
+});
+
+const decodeFields = Schema.decodeSync(Schema.Array(StepField));
+
+describe("explaining a field that doesn't fit", () => {
+  const fields = decodeFields([
+    { id: "f_discount", label: "Discount", type: "number" },
+    { id: "f_duedate", label: "Due", type: "date" },
+    {
+      id: "f_variants",
+      label: "Variants",
+      type: "group",
+      repeatable: true,
+      fields: [
+        { id: "f_size", label: "Size", type: "text" },
+        { id: "f_cost", label: "Cost", type: "number" },
+      ],
+    },
+  ]);
+
+  it("names a repeatable group's row fields when a row field's key is wrong", () => {
+    const problem = resolveFieldPath(fields, "f_variants.r1.size");
+    assert.isString(problem);
+    assert.include(problem, "f_variants.r1.f_size: text");
+    assert.include(problem, "f_variants.r1.f_cost: a number");
+  });
+
+  it("says what a field takes and what it got", () => {
+    assert.strictEqual(
+      fieldValueProblem(fields[0]!, "f_discount", "0.03"),
+      'f_discount takes a number, like 0.5; got the text "0.03".',
+    );
+    assert.isNull(fieldValueProblem(fields[0]!, "f_discount", 0.03));
+    assert.include(
+      fieldValueProblem(fields[2]!, "f_variants", '["r1"]') ?? "",
+      "the list of its row ids",
+    );
+  });
+
+  it("takes a date only as YYYY-MM-DD", () => {
+    assert.isNull(fieldValueProblem(fields[1]!, "f_duedate", "2026-12-01"));
+    assert.isNotNull(fieldValueProblem(fields[1]!, "f_duedate", '"2026-12-01"'));
+    assert.isNotNull(fieldValueProblem(fields[1]!, "f_duedate", "1/12/2026"));
   });
 });

@@ -51,6 +51,8 @@ export const layer = Workflows.middleware(Authorization).toLayer(
       "workflows.startTicket": (input) =>
         Effect.flatMap(caller, (actor) => workflows.startTicket(actor, input)),
       "workflows.cancelTicket": (input) => asViewer((id) => workflows.cancelTicket(id, input)),
+      "workflows.getStep": ({ stepId }) =>
+        Effect.flatMap(caller, (actor) => workflows.readStep(actor, stepId)),
       "workflows.watchStep": ({ stepId }) =>
         Stream.unwrap(asViewer((id) => Effect.succeed(workflows.watchStep(id, stepId)))),
       "workflows.setStepField": (input) =>

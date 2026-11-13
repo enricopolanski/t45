@@ -26,6 +26,16 @@ import { AccessDenied, NotFound } from "./errors.ts";
 
 export const WorkflowErrors = Schema.Union([WorkflowRefused, NotFound, AccessDenied]);
 
+/** What a field is set to: text, a date or a select's option, a number, yes/no, row ids, or nothing. */
+export const FieldValue = Schema.Union([
+  Schema.String,
+  Schema.Finite,
+  Schema.Boolean,
+  Schema.Array(Schema.String),
+  Schema.Null,
+]);
+export type FieldValue = typeof FieldValue.Type;
+
 const ProjectWithWorkflow = { project: Project, workflow: Workflow };
 
 const project = { projectId: StringId };
@@ -121,6 +131,11 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     value: Schema.Json,
     repeatable: Schema.Boolean,
     file: Schema.NullOr(StepFileView),
+    /**
+     * A repeatable group's row fields as its definition declares them, rows or not: a row's field
+     * key is `group.rowId.id`. Empty for other fields.
+     */
+    rowFields: Schema.Array(StepField),
     /** A group's rows: one with a null id for a group that doesn't repeat. Empty for other fields. */
     rows: Schema.Array(
       Schema.Struct({
@@ -351,8 +366,10 @@ export const Workflows = RpcGroup.make(
     error: WorkflowErrors,
   }),
   Rpc.make("watchStep", { payload: step, success: StepView, error: WorkflowErrors, stream: true }),
+  /** The step as the web shows it, once; an automation reads its own step. */
+  Rpc.make("getStep", { payload: step, success: StepView, error: WorkflowErrors }),
   Rpc.make("setStepField", {
-    payload: { ...step, fieldKey: TrimmedNonEmptyString, value: Schema.Json },
+    payload: { ...step, fieldKey: TrimmedNonEmptyString, value: FieldValue },
     error: WorkflowErrors,
   }),
   Rpc.make("markStepDone", { payload: step, error: WorkflowErrors }),
