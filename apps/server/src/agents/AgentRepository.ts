@@ -1,20 +1,16 @@
 import { Agent, Refused } from "@t45/contracts/models/Agent";
 import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { Fragment } from "effect/sql/Statement";
 
-import { BUILT_IN_AGENTS } from "./BuiltInAgents.ts";
-
 const decodeAgents = Schema.decodeUnknownEffect(Schema.Array(Schema.fromJsonString(Agent)));
 const encodeAgent = Schema.encodeEffect(
   Schema.Struct({
     ...Agent.fields,
     files: Schema.fromJsonString(Agent.fields.files),
-    appTools: Schema.fromJsonString(Agent.fields.appTools),
     isConversational: Schema.BooleanFromBit,
     isPublished: Schema.BooleanFromBit,
   }),
@@ -44,7 +40,8 @@ export const layer = Layer.effect(
           'files', json(files),
           'skills', json((SELECT json_group_array(skill_id) FROM agent_skills
             WHERE agent_id = agents.id)),
-          'appTools', json(app_tools),
+          'capabilities', json((SELECT json_group_array(capability_id) FROM agent_capabilities
+            WHERE agent_id = agents.id)),
           'permissions', json_object('network', network),
           'isConversational', json(CASE WHEN is_conversational THEN 'true' ELSE 'false' END),
           'creatorUserId', creator_user_id,
@@ -69,37 +66,28 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const row = yield* encodeAgent(agent).pipe(Effect.orDie);
         yield* requireNameFree(row);
-        yield* sql`INSERT INTO agents (id, name, instructions, model, files, app_tools, network,
-            is_conversational, creator_user_id, is_published, status, created_at, updated_at)
+        yield* sql`INSERT INTO agents (id, name, instructions, model, files, network,
+            is_conversational, creator_user_id, is_published, status, created_at,
+            updated_at)
           VALUES (${row.id}, ${row.name}, ${row.instructions}, ${row.model}, ${row.files},
-            ${row.appTools}, ${row.permissions.network}, ${row.isConversational},
-            ${row.creatorUserId}, ${row.isPublished}, ${row.status}, ${row.createdAt},
-            ${row.updatedAt})
+            ${row.permissions.network},
+            ${row.isConversational}, ${row.creatorUserId}, ${row.isPublished}, ${row.status},
+            ${row.createdAt}, ${row.updatedAt})
           ON CONFLICT (id) DO UPDATE SET name = excluded.name,
             instructions = excluded.instructions, model = excluded.model, files = excluded.files,
-            app_tools = excluded.app_tools, network = excluded.network,
+            network = excluded.network,
             is_conversational = excluded.is_conversational, is_published = excluded.is_published,
             status = excluded.status, updated_at = excluded.updated_at`;
         yield* sql`DELETE FROM agent_skills WHERE agent_id = ${agent.id}`;
         for (const skillId of new Set(agent.skills)) {
           yield* sql`INSERT INTO agent_skills (agent_id, skill_id) VALUES (${agent.id}, ${skillId})`;
         }
+        yield* sql`DELETE FROM agent_capabilities WHERE agent_id = ${agent.id}`;
+        for (const capabilityId of new Set(agent.capabilities)) {
+          yield* sql`INSERT INTO agent_capabilities (agent_id, capability_id)
+            VALUES (${agent.id}, ${capabilityId})`;
+        }
       }).pipe(sql.withTransaction, Effect.catchTags({ SqlError: Effect.die }));
-
-    // Every start replaces the stored built-ins with this release's, so chats get them from
-    // their next execution.
-    const now = yield* DateTime.now;
-    for (const [id, setup] of Object.entries(BUILT_IN_AGENTS)) {
-      yield* save({
-        ...setup,
-        id,
-        creatorUserId: null,
-        isPublished: true,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }).pipe(Effect.orDie);
-    }
 
     return AgentRepository.of({
       list: read(sql`1 = 1`),

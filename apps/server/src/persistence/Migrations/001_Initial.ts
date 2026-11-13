@@ -1,13 +1,4 @@
-/**
- * The database schema, as the statements that create it on an empty database. Until the first
- * release, deploys start from an empty database, so a schema change edits these statements in
- * place: the fingerprint of the statements changes, and a database created by other statements is
- * refused at startup.
- */
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as Hex from "effect/encoding/Hex";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 // The organization's users and sessions, agents and automations, workflows and projects, chats,
@@ -270,47 +261,10 @@ const statements = [
   `CREATE INDEX chat_attachments_attachment ON chat_attachments(attachment_id)`,
 ];
 
-class SchemaMismatchError extends Schema.TaggedError<SchemaMismatchError>()(
-  "SchemaMismatchError",
-  {},
-) {
-  override get message(): string {
-    return "This database was created by a different schema; move it aside to start fresh.";
-  }
-}
-
-/**
- * Creates the schema on an empty database, or checks that the database was created by these
- * statements. Called by the SQLite persistence layer before anything else reads the database.
- */
-export const setupSchema = Effect.fnUntraced(function* () {
+/** The schema T45 had when it started recording migrations. */
+export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const crypto = yield* Crypto.Crypto;
-  const fingerprint = Hex.encode(
-    yield* crypto
-      .digest("SHA-256", new TextEncoder().encode(statements.join(";\n")))
-      .pipe(Effect.orDie),
-  );
-  const tables = yield* sql<{ readonly name: string }>`
-    SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-  `;
-  if (tables.length === 0) {
-    yield* sql.withTransaction(
-      Effect.gen(function* () {
-        for (const statement of statements) {
-          yield* sql.unsafe(statement);
-        }
-        yield* sql`CREATE TABLE schema_fingerprint (fingerprint TEXT NOT NULL)`;
-        yield* sql`INSERT INTO schema_fingerprint (fingerprint) VALUES (${fingerprint})`;
-      }),
-    );
-    return yield* Effect.log("Created the database schema");
+  for (const statement of statements) {
+    yield* sql.unsafe(statement);
   }
-  const stored = tables.some((table) => table.name === "schema_fingerprint")
-    ? yield* sql<{ readonly fingerprint: string }>`SELECT fingerprint FROM schema_fingerprint`
-    : [];
-  if (stored.length !== 1 || stored[0]?.fingerprint !== fingerprint) {
-    return yield* new SchemaMismatchError();
-  }
-  yield* Effect.logDebug("Database schema is current");
 });

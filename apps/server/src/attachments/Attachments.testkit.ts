@@ -29,7 +29,7 @@ export const layer = Layer.mergeAll(
 );
 
 const at = DateTime.makeUnsafe("2026-10-23T09:00:00.000Z");
-const steps = Schema.decodeUnknownSync(WorkflowVersion.fields.steps)([
+const steps = Schema.decodeSync(WorkflowVersion.fields.steps)([
   { id: "collect", name: "Collect", instructions: "", fields: [], subSteps: [] },
 ]);
 

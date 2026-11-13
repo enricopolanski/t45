@@ -68,18 +68,19 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 `vp run dev` starts the runner on loopback next to the server (`runnerUrl=` on the `[dev-runner]` line) and points the server at it, with a token made fresh for each run. To use a shared runner instead, set both `RUNNER_URL` and `RUNNER_TOKEN`; this skips the local runner. The local runner needs three things:
 
 - **`OPENCODE_API_KEY`** in `.env`: the runner's OpenCode Go key. The runner doesn't start without it; the sandbox only sees a placeholder.
+- **`CAPABILITY_SECRET_BROWSERLESS_TOKEN`** in `.env`, for agents with the Web browser capability: a Browserless Cloud API token. A capability's secret `NAME` comes from the runner's `CAPABILITY_SECRET_NAME` and goes only to the capability's hosts; the sandbox only sees a placeholder.
 - **The agent image**, built with Docker and loaded into microsandbox as `t45-agent:dev`: `vp run --filter @t45/runner image`. Rebuild after changing `apps/runner/image`. Without it, chats fail and the server log names the reason, as in production.
 - **`mkfs.ext4` (e2fsprogs) and GNU tar** on the host, which make and pack VM disks. On macOS, install `e2fsprogs` and `gnu-tar` with Homebrew and put their `sbin` and `gnubin` folders first on `PATH`.
 
 Built-in MCP tools call the server’s regular workflow RPCs and attachment upload API with an execution token. `SERVER_URL` sets the server address reachable from agent VMs; by default it is `http://host.microsandbox.internal:<server port>`. Set it to a reachable server address when using a remote runner.
 
-The server and its built-in MCP tools are compiled together from `apps/server/src`; development watches that build and restarts the server after changes. T45 sends the tools with each execution of an agent that uses them, and the runner writes them to `/opt/t45`, so changing a tool does not require an image rebuild. The server reads them when it starts, so a chat gets changed tools at its first execution after the restart.
+`packages/capabilities` builds the supplied MCP programs and exports `dist/capabilities.json` and `dist/built-ins.json`. Development builds these before startup and passes `BUILT_INS_FILE` to the server. Every server start replaces the supplied capabilities and agent presets with the file's, so changed tools reach existing databases after a restart. Import other bundles through the admin-only `capabilities.import` RPC with `{ capabilities: <contents of capabilities.json> }`; an import that uses a supplied capability's ID lasts until the next start. Agents select those stored definitions, and dispatch sends their content to the runner, which applies it without a catalogue. Changing a capability needs no server or image rebuild.
 
 Without `/dev/kvm` every chat's VM fails to start, and the runner's log names the reason.
 
 ## Release builds
 
-The `build:bundle` task cleans `apps/server/dist` and builds the server and MCP tools into `dist/bin.mjs` and `dist/runtime`. Both server tests and the full build depend on that one task. The full build also depends on the web build and only replaces `dist/client`; cached bundle outputs exclude the client. Rebuilding or switching a checkout used by a running built server removes that server's assets, so build a release in a separate checkout before switching to it.
+The `build:bundle` task cleans `apps/server/dist` and builds `dist/bin.mjs`. The full build also depends on the web build and only replaces `dist/client`; cached bundle outputs exclude the client. Build `@t45/capabilities` separately and deploy its `dist/built-ins.json` as data, setting `BUILT_INS_FILE` to its path when starting the server. The server has no dependency on the capability package. Rebuilding or switching a checkout used by a running built server removes that server's assets, so build a release in a separate checkout before switching to it.
 
 Capture the checkout's full commit SHA once and pass it to the build:
 

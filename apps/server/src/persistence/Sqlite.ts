@@ -1,4 +1,3 @@
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import * as SqliteClient from "@effect/sql-sqlite-node/SqliteClient";
@@ -8,7 +7,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { setupSchema } from "./Schema.ts";
+import { runMigrations } from "./Migrations.ts";
 import * as ServerConfig from "../config.ts";
 
 // Size the -wal file is cut back to on the first commit after a WAL reset.
@@ -24,7 +23,7 @@ const configure = Effect.gen(function* () {
   yield* sql.unsafe(`PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT_BYTES};`);
 });
 
-const configureAndSetup = Effect.andThen(configure, setupSchema());
+const configureAndSetup = Effect.andThen(configure, runMigrations);
 
 export const layerFromPath = Effect.fnUntraced(function* (dbPath: string) {
   const fs = yield* FileSystem.FileSystem;
@@ -41,8 +40,8 @@ const layerNodeFileSystem = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
 
 // Tests open about a thousand databases per run, and creating the schema in each
 // one dominated their setup. The schema is identical every time, so it is created
-// once per process and every test database starts as a copy of it, fingerprint
-// included.
+// once per process and every test database starts as a copy of it, recorded
+// migrations included.
 const schemaImage = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -54,12 +53,7 @@ const schemaImage = Effect.gen(function* () {
   // once the setup's layer is released.
   yield* configureAndSetup.pipe(Effect.provide(SqliteClient.layer({ filename })));
   return yield* fs.readFile(filename);
-}).pipe(
-  Effect.scoped,
-  Effect.provide(Layer.mergeAll(layerNodeFileSystem, NodeCrypto.layer)),
-  Effect.cached,
-  Effect.runSync,
-);
+}).pipe(Effect.scoped, Effect.provide(layerNodeFileSystem), Effect.cached, Effect.runSync);
 
 /** A fresh database per build, copied from a schema created once per process. */
 export const testLayer = Layer.unwrap(

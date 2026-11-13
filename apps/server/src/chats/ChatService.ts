@@ -1,11 +1,6 @@
 import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
-import {
-  canChatWithMembers,
-  canUse,
-  PROJECT_TOOLS_MCP_NAME,
-  type Agent,
-} from "@t45/contracts/models/Agent";
+import { canChatWithMembers, canUse, type Agent } from "@t45/contracts/models/Agent";
 import { limitRefusal } from "@t45/contracts/models/Attachment";
 import {
   ChatId,
@@ -43,6 +38,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { makeAccess as makeProjectAccess } from "../workflows/ProjectAssistant.ts";
 import { ProjectRepository } from "../workflows/ProjectRepository.ts";
 import * as AgentRepository from "../agents/AgentRepository.ts";
+import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
 import { RunnerService } from "../runner/RunnerService.ts";
 import * as ChatEvents from "./ChatEvents.ts";
@@ -127,7 +123,6 @@ const readMessage = (
   }).pipe(Effect.orDie);
 
 const encodeChatMessage = Schema.encodeSync(Schema.fromJsonString(ChatMessage));
-const hasProjectTools = (agent: Agent) => agent.appTools.includes(PROJECT_TOOLS_MCP_NAME);
 
 const readBytes = (message: ChatMessage) =>
   new TextEncoder().encode(encodeChatMessage(message)).byteLength;
@@ -141,6 +136,15 @@ const make = Effect.gen(function* () {
   const changes = yield* ChatEvents.ChatEvents;
   const runner = yield* RunnerService;
   const agents = yield* AgentRepository.AgentRepository;
+  const capabilities = yield* CapabilityRepository;
+  const requiresProject = (agent: Agent) =>
+    capabilities
+      .listForAgent(agent.id)
+      .pipe(
+        Effect.map((selected) =>
+          selected.some((capability) => capability.requiredContext?.includes("projectId")),
+        ),
+      );
   const projects = yield* ProjectRepository;
   const projectAccess = yield* makeProjectAccess;
   const attachments = yield* AttachmentRepository.AttachmentRepository;
@@ -177,8 +181,8 @@ const make = Effect.gen(function* () {
       if (start.origin.kind === "conversation") {
         if (start.origin.projectId !== null) {
           yield* projectAccess.load(start.origin.ownerUserId, start.origin.projectId);
-          if (!hasProjectTools(agent)) return yield* refuse("agent_unavailable");
-        } else if (hasProjectTools(agent)) return yield* refuse("agent_unavailable");
+          if (!(yield* requiresProject(agent))) return yield* refuse("agent_unavailable");
+        } else if (yield* requiresProject(agent)) return yield* refuse("agent_unavailable");
       }
       yield* repository.insert({ id: post.chatId, ...start, at });
       yield* origins.insert(start.origin);
@@ -368,14 +372,21 @@ const make = Effect.gen(function* () {
         const available = (yield* agents.list).filter(
           (agent) => canChatWithMembers(agent) && canUse(agent, member.userId),
         );
-        const plain = available
-          .filter((agent) => !hasProjectTools(agent))
-          .map((agent) => ({
+        const scoped = yield* Effect.forEach(available, (agent) =>
+          requiresProject(agent).pipe(
+            Effect.map((requiresProject) => ({ agent, requiresProject })),
+          ),
+        );
+        const plain = scoped
+          .filter((entry) => !entry.requiresProject)
+          .map(({ agent }) => ({
             agentId: agent.id,
             name: agent.name,
             projectId: null,
           }));
-        const assistants = available.filter(hasProjectTools);
+        const assistants = scoped
+          .filter((entry) => entry.requiresProject)
+          .map((entry) => entry.agent);
         if (assistants.length === 0) return plain;
         const bound = (yield* projectAccess.list(member.userId)).flatMap((project) =>
           assistants.map((agent) => ({

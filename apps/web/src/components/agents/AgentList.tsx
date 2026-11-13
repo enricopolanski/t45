@@ -92,7 +92,7 @@ function AgentRow({ agent }: { readonly agent: AgentSummary }) {
   const member = useSession();
   const [busy, startTransition] = useTransition();
   const active = agent.status === "active";
-  const canChange = member !== null && canManage(agent, member) && !isBuiltIn(agent.id);
+  const canChange = member !== null && canManage(agent, member) && !isBuiltIn(agent);
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-4 py-3">
       {canChange && active ? (
@@ -111,7 +111,7 @@ function AgentRow({ agent }: { readonly agent: AgentSummary }) {
           Archived
         </Badge>
       )}
-      {isBuiltIn(agent.id) ? (
+      {isBuiltIn(agent) ? (
         <Badge variant="secondary" size="sm">
           Built-in
         </Badge>

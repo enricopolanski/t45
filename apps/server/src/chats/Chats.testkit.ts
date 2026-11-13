@@ -5,12 +5,17 @@ import * as UserRepository from "../org/UserRepository.ts";
 import { AutomationId } from "@t45/contracts/models/Automation";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { Session } from "@opencode/schema/session";
-import { STEP_TOOLS_MCP_NAME } from "@t45/contracts/models/Agent";
+import { agents as presets } from "@t45/capabilities/agents";
+import { stepOperations } from "@t45/capabilities/steps";
+import { projectOperations } from "@t45/capabilities/projects";
+import { workflowDrafting } from "@t45/capabilities/workflows";
+import { webBrowser } from "@t45/capabilities/browser";
 import { ChatId, type Refused } from "@t45/contracts/models/Chat";
 
 import type { ChatEvent, ChatMessage } from "@t45/contracts/resources/Chats";
 import type { NotFound } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -18,6 +23,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as SkillRepository from "../agents/SkillRepository.ts";
+import * as CapabilityRepository from "../capabilities/CapabilityRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
 import * as ServerConfig from "../config.ts";
 import * as CommandLogRepository from "../persistence/CommandLogRepository.ts";
@@ -34,22 +40,48 @@ import * as WorkflowService from "../workflows/WorkflowService.ts";
 export const testChatId = (n: number) =>
   ChatId.make(`00000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
 
-const layerPersistence = Layer.mergeAll(
-  AutomationRepository.layer,
-  ChatRepository.layer,
-  UserRepository.layer,
-  TicketRepository.layer,
-  ProjectRepository.layer,
-  WorkflowRepository.layer,
-  NotificationRepository.layer,
-  CommandLogRepository.layer,
-  AttachmentRepository.layer,
-  AgentRepository.layer,
-  SkillRepository.layer,
-).pipe(
-  Layer.provideMerge(Sqlite.testLayer),
-  Layer.provideMerge(ServerConfig.testLayer("t3-chats-")),
-  Layer.provideMerge(NodeServices.layer),
+const seedPresets = Effect.gen(function* () {
+  yield* (yield* CapabilityRepository.CapabilityRepository).saveAll([
+    stepOperations,
+    projectOperations,
+    workflowDrafting,
+    webBrowser,
+  ]);
+  const agents = yield* AgentRepository.AgentRepository;
+  const now = yield* DateTime.now;
+  for (const preset of presets) {
+    yield* agents.save({
+      ...preset,
+      creatorUserId: null,
+      isPublished: true,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+}).pipe(Effect.orDie);
+
+const layerPersistence = Layer.effectDiscard(seedPresets).pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      AutomationRepository.layer,
+      ChatRepository.layer,
+      UserRepository.layer,
+      TicketRepository.layer,
+      ProjectRepository.layer,
+      WorkflowRepository.layer,
+      NotificationRepository.layer,
+      CommandLogRepository.layer,
+      AttachmentRepository.layer,
+      AgentRepository.layer,
+      SkillRepository.layer,
+      CapabilityRepository.layer,
+    ).pipe(
+      Layer.provideMerge(Sqlite.testLayer),
+      Layer.provideMerge(ServerConfig.testLayer("t3-chats-")),
+      Layer.provideMerge(NodeServices.layer),
+    ),
+  ),
 );
 
 /** Chats over a fresh database. */
@@ -82,11 +114,14 @@ export const addAgent = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const id = `agent-${name.toLowerCase()}`;
-    yield* sql`INSERT INTO agents (id, name, instructions, model, app_tools, is_conversational,
+    yield* sql`INSERT INTO agents (id, name, instructions, model, is_conversational,
         is_published, status, created_at, updated_at)
       VALUES (${id}, ${name}, 'Be brief.', 'opencode-go/test-model',
-        ${options.stepTools === true ? `["${STEP_TOOLS_MCP_NAME}"]` : "[]"},
         ${options.chat === false ? 0 : 1}, 1, ${options.status ?? "active"}, ${AT}, ${AT})`;
+    if (options.stepTools === true) {
+      yield* sql`INSERT INTO agent_capabilities (agent_id, capability_id)
+        VALUES (${id}, ${stepOperations.id})`;
+    }
     return id;
   });
 

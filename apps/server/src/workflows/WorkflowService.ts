@@ -10,7 +10,8 @@ import { ChatRepository } from "../chats/ChatRepository.ts";
 import { ChatEvents } from "../chats/ChatEvents.ts";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import { type AutomationOrigin, effectiveUserIdOf } from "@t45/contracts/models/ChatOrigin";
-import { canUse, canWorkSteps } from "@t45/contracts/models/Agent";
+import { canUse } from "@t45/contracts/models/Agent";
+import { canWorkSteps } from "@t45/contracts/models/Workflow";
 import type { Attachment } from "@t45/contracts/models/Attachment";
 import {
   type Notification,
@@ -78,6 +79,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { AgentRepository } from "../agents/AgentRepository.ts";
+import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
 import { type CommandLogEntry, CommandLogRepository } from "../persistence/CommandLogRepository.ts";
 import { UserRepository } from "../org/UserRepository.ts";
@@ -126,6 +128,7 @@ const make = Effect.gen(function* () {
   const notifications = yield* NotificationRepository;
   const users = yield* UserRepository;
   const agents = yield* AgentRepository;
+  const capabilities = yield* CapabilityRepository;
   const automations = yield* AutomationRepository;
   const files = yield* AttachmentRepository;
   const commandLog = yield* CommandLogRepository;
@@ -658,7 +661,10 @@ const make = Effect.gen(function* () {
         if (edit.type !== "attach_automation") return;
         const automation = yield* automations.get(edit.automationId);
         const agent = automation === null ? null : yield* agents.get(automation.agentId);
-        if (agent === null || !canAttachAgent(agent, workflow, actorId))
+        if (
+          agent === null ||
+          !canAttachAgent(agent, workflow, actorId, yield* capabilities.listForAgent(agent.id))
+        )
           return yield* refuse("invalid_automations");
       }),
       { discard: true },
@@ -1317,7 +1323,12 @@ const make = Effect.gen(function* () {
   const requireStepAutomation = Effect.fnUntraced(function* (id: AutomationId, userId: string) {
     const automation = yield* automations.get(id);
     const agent = automation === null ? null : yield* agents.get(automation.agentId);
-    if (automation === null || agent === null || !canWorkSteps(agent) || !canUse(agent, userId))
+    if (
+      automation === null ||
+      agent === null ||
+      !canWorkSteps(agent, yield* capabilities.listForAgent(agent.id)) ||
+      !canUse(agent, userId)
+    )
       return yield* refuse("invalid_automations");
     return automation;
   });

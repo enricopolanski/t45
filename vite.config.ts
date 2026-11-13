@@ -20,7 +20,11 @@ export default mergeConfig(
           cache: false,
         },
         browser: { command: "node scripts/browser.ts", cache: false },
-        dev: { command: "node --env-file-if-exists=.env scripts/dev.ts", cache: false },
+        dev: {
+          command: "node --env-file-if-exists=.env scripts/dev.ts",
+          dependsOn: ["@t45/capabilities#build"],
+          cache: false,
+        },
         "sync:repos": { command: "node scripts/sync-reference-repos.ts", cache: false },
       },
     },

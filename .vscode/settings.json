@@ -5,12 +5,24 @@
     "source.fixAll.oxc": "always"
   },
   "oxc.unusedDisableDirectives": "warn",
-  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "js/ts.tsdk.path": "node_modules/typescript",
+  "js/ts.experimental.useTsgo": true,
+  "git.autoRepositoryDetection": false,
+  "git.detectSubmodules": false,
+  "git.detectWorktrees": false,
+  "files.exclude": {
+    "**/.claude/worktrees": true,
+    "**/.t45/worktrees": true
+  },
   "files.watcherExclude": {
-    ".repos/**": true
+    ".repos/**": true,
+    "**/.claude/worktrees/**": true,
+    "**/.t45/worktrees/**": true
   },
   "search.exclude": {
-    ".repos/**": true
+    ".repos/**": true,
+    "**/.claude/worktrees/**": true,
+    "**/.t45/worktrees/**": true
   },
   "[typescript]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"

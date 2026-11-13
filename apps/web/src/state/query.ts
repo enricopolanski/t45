@@ -15,10 +15,16 @@ export class LoadFailed extends Error {
   }
 }
 
-export function useLoaded<A, E>(atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>): A {
+export function useLoaded<A, E>(
+  atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
+  options?: { readonly suspendOnWaiting?: boolean },
+): A {
   const refresh = useAtomRefresh(atom);
   const loaded = Option.isSome(AsyncResult.value(useAtomValue(atom)));
-  const result = useAtomSuspense(atom, { includeFailure: true, suspendOnWaiting: !loaded });
+  const result = useAtomSuspense(atom, {
+    includeFailure: true,
+    suspendOnWaiting: options?.suspendOnWaiting ?? !loaded,
+  });
   if (result._tag === "Success") return result.value;
   const previous = AsyncResult.value(result);
   if (Option.isSome(previous)) return previous.value;

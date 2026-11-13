@@ -1,6 +1,7 @@
 import { Agents } from "./Agents.ts";
 import { Assignments } from "./Assignments.ts";
 import { Authorization } from "../Authorization.ts";
+import { Capabilities } from "./Capabilities.ts";
 import { Chats } from "./Chats.ts";
 import { Notifications } from "./Notifications.ts";
 import { Organization } from "./Organization.ts";
@@ -10,6 +11,7 @@ import { Users } from "./Users.ts";
 import { Workflows } from "./Workflows.ts";
 
 export const RpcApi = Skills.merge(
+  Capabilities,
   Agents,
   Users,
   Organization,

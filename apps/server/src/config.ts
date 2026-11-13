@@ -17,6 +17,7 @@ export const serverUrl = Config.String("SERVER_URL").pipe(
   Config.orElse(() => port.pipe(Config.map((port) => `http://host.microsandbox.internal:${port}`))),
 );
 export const toolInstance = Config.String("TOOL_INSTANCE").pipe(Config.withDefault(""));
+export const builtInsFile = Config.String("BUILT_INS_FILE").pipe(Config.option);
 
 const decodeClerkIssuer = (publishableKey: string) =>
   `https://${atob(publishableKey.replace(/^pk_(?:test|live)_/u, "")).replace(/\$$/u, "")}`;

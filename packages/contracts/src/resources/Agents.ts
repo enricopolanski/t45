@@ -15,7 +15,7 @@ class SaveAgentRequest extends Schema.Opaque<SaveAgentRequest>()(
       "model",
       "files",
       "skills",
-      "appTools",
+      "capabilities",
       "permissions",
       "isConversational",
     ]),

@@ -99,10 +99,9 @@ describe("a chat's execution", () => {
         assert.deepEqual(request.agent, {
           instructions: "Use the policy.",
           model: "opencode-go/other-model",
-          mcpServers: {},
+          capabilities: [],
           permissions: { network: "open" },
           files: { "policy.md": "The policy." },
-          tools: {},
           skills: [],
         });
         assert.deepEqual(

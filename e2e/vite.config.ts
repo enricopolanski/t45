@@ -3,8 +3,8 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
   run: {
     tasks: {
-      // E2E's dev build cleans the runtime files consumed by the server tests.
-      test: { command: "playwright test", dependsOn: ["t45#test"], cache: false },
+      // A dev launch may restore the capability build; finish tests that read those assets first.
+      test: { command: "playwright test", dependsOn: ["@t45/capabilities#test"], cache: false },
     },
   },
 });

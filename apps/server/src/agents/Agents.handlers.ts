@@ -14,6 +14,7 @@ import { CommandLogRepository } from "../persistence/CommandLogRepository.ts";
 import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 import { AgentRepository } from "./AgentRepository.ts";
 import { SkillRepository } from "./SkillRepository.ts";
+import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
 
 /** OpenCode Go's models, OpenAI-style (`{ data: [{ id }] }`); listing them needs no key. */
 const MODELS_URL = "https://opencode.ai/zen/go/v1/models";
@@ -26,6 +27,7 @@ export const layer = Agents.middleware(Authorization).toLayer(
   Effect.gen(function* () {
     const agents = yield* AgentRepository;
     const skills = yield* SkillRepository;
+    const capabilities = yield* CapabilityRepository;
     const automations = yield* AutomationRepository;
     const workflows = yield* WorkflowRepository;
     const commandLog = yield* CommandLogRepository;
@@ -42,7 +44,7 @@ export const layer = Agents.middleware(Authorization).toLayer(
     const findCustom = (agentId: string) =>
       find(agentId).pipe(
         Effect.filterOrFail(
-          (agent) => !isBuiltIn(agent.id),
+          (agent) => !isBuiltIn(agent),
           () => new Refused({ reason: "built_in" }),
         ),
       );
@@ -73,6 +75,16 @@ export const layer = Agents.middleware(Authorization).toLayer(
           ),
       );
     const save = (agent: Agent) => agents.save(agent).pipe(Effect.as(agent));
+    const requireCapabilities = (capabilityIds: ReadonlyArray<string>) =>
+      Effect.forEach(capabilityIds, (capabilityId) =>
+        capabilities
+          .get(capabilityId)
+          .pipe(
+            Effect.flatMap((capability) =>
+              capability === null ? new Refused({ reason: "capability_not_found" }) : Effect.void,
+            ),
+          ),
+      );
 
     return Agents.of({
       "agents.list": () =>
@@ -110,6 +122,7 @@ export const layer = Agents.middleware(Authorization).toLayer(
         Effect.gen(function* () {
           yield* requireOfferedModel(draft.model);
           yield* requireSkills(draft.skills);
+          yield* requireCapabilities(draft.capabilities);
           const now = yield* DateTime.now;
           return yield* save({
             id: yield* crypto.randomUUIDv4().pipe(Effect.orDie),
@@ -152,6 +165,7 @@ export const layer = Agents.middleware(Authorization).toLayer(
           const agent = yield* findCustom(agentId);
           if (draft.model !== agent.model) yield* requireOfferedModel(draft.model);
           yield* requireSkills(draft.skills);
+          yield* requireCapabilities(draft.capabilities);
           return yield* save({ ...agent, ...draft, updatedAt: yield* DateTime.now });
         }),
     });

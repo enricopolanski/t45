@@ -9,8 +9,7 @@ Before changing or reviewing code, read and follow [Styles and rules](docs/opera
 ## Schema and dependencies
 
 - Never leave `pnpm-lock.yaml` out of sync with `package.json`; regenerate it with `CI= pnpm install --no-frozen-lockfile` instead of taking a side.
-- Clean slate: until the first release, installations start from an empty database, with no compatibility for older data, servers, or clients. Change the schema by editing `apps/server/src/persistence/Schema.ts` in place; don't add migrations or backward-compat shims. A changed schema refuses databases created by an older one.
-- From the first release, the schema is frozen as the baseline and changes ship as migrations applied on top of it.
+- Change the schema with the next numbered migration in `apps/server/src/persistence/Migrations/`, listed in `Migrations.ts`, carrying existing rows over in the same migration. Startup runs the migrations a database hasn't recorded. Never edit, renumber or remove a listed migration: databases skip every id up to the highest they recorded.
 
 ## Pull requests and validation
 

@@ -1,6 +1,5 @@
 import "vite-plus/test/config";
 import { defineConfig, mergeConfig } from "vite-plus";
-import * as NodeURL from "node:url";
 
 import baseConfig from "../../vite.base.config.ts";
 
@@ -19,10 +18,10 @@ export default mergeConfig(
           command: "vp pack",
           cache: {
             env: ["BUILD_SHA"],
-            output: ["dist/bin.mjs", "dist/bin.mjs.map", "dist/runtime/**"],
+            output: ["dist/bin.mjs", "dist/bin.mjs.map"],
           },
         },
-        test: { command: "vp test run", dependsOn: ["build:bundle"] },
+        test: { command: "vp test run" },
         build: {
           command: "node scripts/build.ts",
           dependsOn: ["build:bundle", "@t45/web#build"],
@@ -31,20 +30,8 @@ export default mergeConfig(
       },
     },
     pack: {
-      entry: {
-        bin: "src/bin.ts",
-        "runtime/step-tools": NodeURL.fileURLToPath(
-          new URL("./src/agent-tools/step-tools.ts", import.meta.url),
-        ),
-        "runtime/project-tools": NodeURL.fileURLToPath(
-          new URL("./src/agent-tools/project-tools.ts", import.meta.url),
-        ),
-        "runtime/workflow-tools": NodeURL.fileURLToPath(
-          new URL("./src/agent-tools/workflow-tools.ts", import.meta.url),
-        ),
-      },
-      // Inject the tool entry points and modules they share with the server together.
-      outputOptions: { chunkFileNames: "runtime/[name]-[hash].mjs" },
+      entry: { bin: "src/bin.ts" },
+      outputOptions: { codeSplitting: false },
       outDir: "dist",
       sourcemap: true,
       clean: true,

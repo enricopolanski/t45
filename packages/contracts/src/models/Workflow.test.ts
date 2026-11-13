@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 
-import { STEP_TOOLS_MCP_NAME } from "./Agent.ts";
 import { AutomationId } from "./Automation.ts";
 import {
   type Step,
@@ -305,21 +304,27 @@ describe("attaching an agent's automation to a workflow", () => {
   };
   const agent = {
     status: "active",
-    appTools: [STEP_TOOLS_MCP_NAME],
     creatorUserId: "creator01",
     isPublished: false,
   } as const;
+  const capabilities = [{ requiredContext: ["stepId"] }];
 
   it("keeps a private agent to its creator's own workflows", () => {
-    assert.isTrue(canAttachAgent(agent, workflow, "creator01"));
+    assert.isTrue(canAttachAgent(agent, workflow, "creator01", capabilities));
     // Another editor can't use it, and its creator can't bring it to someone else's workflow.
-    assert.isFalse(canAttachAgent(agent, workflow, "editor01"));
-    assert.isFalse(canAttachAgent({ ...agent, creatorUserId: "editor01" }, workflow, "editor01"));
-    assert.isTrue(canAttachAgent({ ...agent, isPublished: true }, workflow, "editor01"));
+    assert.isFalse(canAttachAgent(agent, workflow, "editor01", capabilities));
+    assert.isFalse(
+      canAttachAgent({ ...agent, creatorUserId: "editor01" }, workflow, "editor01", capabilities),
+    );
+    assert.isTrue(
+      canAttachAgent({ ...agent, isPublished: true }, workflow, "editor01", capabilities),
+    );
   });
 
   it("refuses an agent that can't work on steps", () => {
-    assert.isFalse(canAttachAgent({ ...agent, appTools: [] }, workflow, "creator01"));
-    assert.isFalse(canAttachAgent({ ...agent, status: "archived" }, workflow, "creator01"));
+    assert.isFalse(canAttachAgent(agent, workflow, "creator01", []));
+    assert.isFalse(
+      canAttachAgent({ ...agent, status: "archived" }, workflow, "creator01", capabilities),
+    );
   });
 });

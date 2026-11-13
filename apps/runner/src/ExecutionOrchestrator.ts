@@ -20,11 +20,12 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
 import * as SandboxManager from "./SandboxManager.ts";
+import { applyCapabilities, type AgentSetup } from "./AgentSetup.ts";
 
 const createOpencodeClient = Effect.fnUntraced(function* (
   url: string,
   password: Redacted.Redacted,
-  agent: ExecutionRequest["agent"],
+  agent: AgentSetup,
 ) {
   const httpClient = (yield* HttpClient.HttpClient).pipe(
     HttpClient.mapRequest(HttpClientRequest.basicAuth("opencode", password)),
@@ -253,6 +254,7 @@ export const layer = RunnerRpcs.toLayer(
       emit: (event: ExecutionUpdate) => Effect.Effect<void>,
     ) {
       const rootId = request.rootId;
+      const agent = applyCapabilities(request);
       const mailbox = yield* Queue.unbounded<OpenCodeEvent>();
       yield* emit({ _tag: "heartbeat" }).pipe(
         Effect.repeat(Schedule.spaced("15 seconds")),
@@ -260,14 +262,15 @@ export const layer = RunnerRpcs.toLayer(
       );
       const sandbox = yield* SandboxManager.start(
         rootId,
-        request.agent,
+        agent,
         request.disk,
         request.serverUrl,
+        request.toolToken,
       );
       const opencodeClient = yield* createOpencodeClient(
         `http://127.0.0.1:${sandbox.port}`,
         sandbox.password,
-        request.agent,
+        agent,
       );
 
       const eventsStream = opencodeClient.event.subscribe();
