@@ -46,7 +46,7 @@ import { useWorkDirectory } from "./useWorkDirectory";
 import { BackLink, WorkFrame } from "./WorkFrame";
 import {
   actorName,
-  historyLabel,
+  summarizeHistory,
   missingFields,
   type StepAct,
   type StepActions,
@@ -230,12 +230,12 @@ function StepHistory({ view }: { readonly view: StepView }) {
   return (
     <CardFold as="aside" title="History">
       <ol className="flex flex-col gap-2 text-sm">
-        {view.history.map((entry, at) => (
+        {summarizeHistory(view.history).map((entry, at) => (
           // oxlint-disable-next-line react/no-array-index-key -- The log only grows at its end.
           <li key={at} className="flex flex-col gap-0.5">
             <ActorName actor={entry.agentId ?? entry.userId} />
             <span className="text-xs text-muted-foreground">
-              {historyLabel(entry.command)} · {formatRelativeTimeLabel(entry.createdAt, now)}
+              {entry.label} · {formatRelativeTimeLabel(entry.createdAt, now)}
             </span>
           </li>
         ))}
@@ -313,7 +313,6 @@ function StepAutomations({
                       </span>
                     </div>
                   )}
-                  {latest !== undefined && <ProgressReport report={latest.latestReport} />}
                   <div className="flex items-center gap-2 text-xs">
                     <RunPill state={state} busy={busy} onAct={onAct} />
                     {state === "completed" && emptyCount > 0 ? (
@@ -322,6 +321,9 @@ function StepAutomations({
                       </span>
                     ) : null}
                   </div>
+                  {latest !== undefined && (
+                    <ProgressReport report={latest.latestReport} isRunning={state === "running"} />
+                  )}
                 </div>
               )}
               {earlier.length > 0 && <EarlierRuns runs={earlier} now={now} />}

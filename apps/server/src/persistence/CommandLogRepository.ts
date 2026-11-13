@@ -3,6 +3,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 /** One successful command: who ran it, on whose authority, and what it acted on. */
@@ -23,6 +24,10 @@ export interface CommandLogEntry {
   readonly createdAt: DateTime.Utc;
 }
 
+const decodeDetails = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   return {
@@ -36,11 +41,20 @@ const make = Effect.gen(function* () {
             ${DateTime.formatIso(entry.createdAt)})`.pipe(Effect.asVoid, Effect.orDie),
     /** What was done on one step of a ticket, oldest first: who, when and which command. */
     listForStep: (ticketId: string, stepId: string) =>
-      sql<Pick<CommandLogEntry, "command" | "userId" | "agentId"> & { readonly createdAt: string }>`
-          SELECT command, user_id AS "userId", agent_id AS "agentId", created_at AS "createdAt"
+      sql<
+        Pick<CommandLogEntry, "command" | "userId" | "agentId"> & {
+          readonly details: string;
+          readonly createdAt: string;
+        }
+      >`
+          SELECT command, user_id AS "userId", agent_id AS "agentId", details, created_at AS "createdAt"
           FROM command_log WHERE ticket_id = ${ticketId} AND step_id = ${stepId} ORDER BY id`.pipe(
         Effect.map((rows) =>
-          rows.map((row) => ({ ...row, createdAt: DateTime.makeUnsafe(row.createdAt) })),
+          rows.map((row) => ({
+            ...row,
+            details: decodeDetails(row.details),
+            createdAt: DateTime.makeUnsafe(row.createdAt),
+          })),
         ),
         Effect.orDie,
       ),

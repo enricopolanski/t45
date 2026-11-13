@@ -178,6 +178,8 @@ export const StepView = Schema.Struct({
       /** Who ran it, or on whose authority an agent did. */
       userId: Schema.NullOr(StringId),
       agentId: Schema.NullOr(StringId),
+      fieldKey: Schema.NullOr(TrimmedNonEmptyString),
+      automation: Schema.NullOr(Schema.Struct({ id: AutomationId, title: TrimmedNonEmptyString })),
       createdAt: Schema.DateTimeUtcFromString,
     }),
   ),

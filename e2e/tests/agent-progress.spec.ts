@@ -63,6 +63,8 @@ test("agents report live progress on steps and settings, retaining reports per r
   ).toBe(true);
   expect(agentApp.readReports(first)).toBeNull();
   await expect(automations.getByRole("button", { name: "Running. Stop" })).toBeVisible();
+  const history = page.getByRole("complementary", { name: "History" });
+  await expect(history.getByText("ran “Check order”")).toBeVisible();
   expect((await agentApp.report(first, "Checking invoices")).isError).not.toBe(true);
   await expect(automations.getByText("Checking invoices", { exact: true })).toBeVisible();
   await expect(settings.getByText("Checking invoices", { exact: true })).toBeVisible();
@@ -83,6 +85,7 @@ test("agents report live progress on steps and settings, retaining reports per r
 
   await automations.getByRole("button", { name: "Running. Stop" }).click();
   await expect(automations.getByRole("button", { name: "Run", exact: true })).toBeVisible();
+  await expect(history.getByText("stopped “Check order”")).toBeVisible();
   expect((await agentApp.report(first, "Late report")).isError).toBe(true);
   expect(agentApp.readReports(first)).toBe(reports);
 

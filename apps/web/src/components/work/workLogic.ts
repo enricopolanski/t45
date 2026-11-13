@@ -1,7 +1,7 @@
 import { type Agent } from "@t45/contracts/models/Agent";
 import type { User } from "@t45/contracts/models/User";
 import type { Step, Ticket } from "@t45/contracts/models/Workflow";
-import type { FieldView } from "@t45/contracts/resources/Workflows";
+import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
 
 /** "27 Oct", with the year when it isn't this year's. `date` starts with `YYYY-MM-DD`. */
 export function formatDay(date: string) {
@@ -68,20 +68,61 @@ export type StepAct = (run: () => Promise<unknown>, quiet?: boolean) => Promise<
 /** What a command did, as a step's history says it after the name of who ran it. */
 const HISTORY_LABELS: Record<string, string> = {
   "workflows.startTicket": "started the item",
-  "workflows.setStepField": "changed a field",
   "workflows.markStepDone": "marked the step done",
   "workflows.setStepAssignee": "changed the assignee",
   "workflows.blockStep": "blocked the step",
   "workflows.unblockStep": "unblocked the step",
   "workflows.commentOnStep": "commented",
-  "workflows.attachStepFile": "attached a file",
-  "workflows.removeStepFile": "removed a file",
   "workflows.runStepAutomation": "ran an automation",
   "workflows.stopStepAutomation": "stopped an automation",
   "workflows.cancelTicket": "cancelled the item",
 };
 
-export const historyLabel = (command: string) => HISTORY_LABELS[command] ?? command;
+type HistoryEntry = StepView["history"][number];
+
+const historyLabel = (entry: HistoryEntry, count: number) => {
+  if (entry.command === "workflows.setStepField")
+    return count === 1 ? "changed a field" : `changed ${count} fields`;
+  if (entry.command === "workflows.attachStepFile")
+    return count === 1 ? "attached a file" : `attached ${count} files`;
+  if (entry.command === "workflows.removeStepFile")
+    return count === 1 ? "removed a file" : `removed ${count} files`;
+  const label =
+    entry.automation !== null &&
+    (entry.command === "workflows.runStepAutomation" ||
+      entry.command === "workflows.stopStepAutomation")
+      ? `${entry.command === "workflows.runStepAutomation" ? "ran" : "stopped"} “${entry.automation.title}”`
+      : (HISTORY_LABELS[entry.command] ?? entry.command);
+  return count === 1 ? label : `${label} ${count} times`;
+};
+
+/** Consecutive actions by the same actor share a row, dated by their latest action. */
+export const summarizeHistory = (history: StepView["history"]) => {
+  const groups: Array<Array<HistoryEntry>> = [];
+  for (const entry of history) {
+    const group = groups.at(-1);
+    const previous = group?.at(-1);
+    if (
+      group !== undefined &&
+      previous?.command === entry.command &&
+      previous.userId === entry.userId &&
+      previous.agentId === entry.agentId &&
+      previous.automation?.id === entry.automation?.id
+    ) {
+      group.push(entry);
+    } else {
+      groups.push([entry]);
+    }
+  }
+  return groups.map((entries) => {
+    const entry = entries.at(-1)!;
+    const count =
+      entry.command === "workflows.setStepField"
+        ? new Set(entries.map(({ fieldKey }) => fieldKey)).size
+        : entries.length;
+    return { ...entry, label: historyLabel(entry, count) };
+  });
+};
 
 export const STEP_STATE_LABELS: Record<Step["status"]["type"], string> = {
   working: "To do",
