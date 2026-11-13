@@ -38,16 +38,16 @@ const spawnWriteLockHolder = (dbPath: string, holdMs: number) =>
       }),
   );
 
-// Schema plus fingerprint: what a database set up from scratch holds.
+// Schema plus recorded migrations: what a database set up from scratch holds.
 const schemaState = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const schema = yield* sql<{ readonly type: string; readonly name: string; readonly sql: string }>`
     SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name
   `;
-  const fingerprint = yield* sql<{ readonly fingerprint: string }>`
-    SELECT fingerprint FROM schema_fingerprint
+  const migrations = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+    SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
   `;
-  return { schema: [...schema], fingerprint: [...fingerprint] };
+  return { schema: [...schema], migrations: [...migrations] };
 });
 
 it.layer(NodeServices.layer)("SqlitePersistence", (it) => {
@@ -95,7 +95,7 @@ it.layer(NodeServices.layer)("SqlitePersistence", (it) => {
     }),
   );
 
-  it.effect("opens test databases with the same schema and fingerprint as a fresh setup", () =>
+  it.effect("opens test databases with the same schema and migrations as a fresh setup", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -104,7 +104,7 @@ it.layer(NodeServices.layer)("SqlitePersistence", (it) => {
         Effect.provide(SqlitePersistence.layerFromPath(path.join(tempDir, "state.sqlite"))),
       );
       const fromImage = yield* schemaState.pipe(Effect.provide(SqlitePersistence.testLayer));
-      assert.lengthOf(fromScratch.fingerprint, 1);
+      assert.isNotEmpty(fromScratch.migrations);
       assert.deepEqual(fromImage, fromScratch);
     }),
   );

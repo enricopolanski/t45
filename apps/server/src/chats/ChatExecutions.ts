@@ -8,6 +8,7 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
@@ -126,7 +127,6 @@ export const make = Effect.gen(function* () {
       const inputs = yield* repository.executionInputs(chat.id);
       const context: Record<string, string> = {
         serverUrl,
-        token,
         instanceId: toolInstance,
         stepId:
           origin?.kind === "automation" && origin.trigger.type === "step"
@@ -139,13 +139,23 @@ export const make = Effect.gen(function* () {
           ...Struct.pick(agent, ["instructions", "model", "permissions", "files"]),
           capabilities: (yield* capabilities.listForAgent(agent.id))
             .filter((capability) => (capability.requiredContext ?? []).every((key) => context[key]))
-            .map((capability) => Struct.pick(capability, ["files", "mcpServers"])),
+            .map((capability) =>
+              Struct.pick(capability, [
+                "files",
+                "mcpServers",
+                "environment",
+                "hosts",
+                "secrets",
+                "note",
+              ]),
+            ),
           skills: (yield* skills.listForAgent(agent.id)).map((skill) =>
             Struct.pick(skill, ["name", "description", "content", "files"]),
           ),
         },
         serverUrl,
         context,
+        toolToken: Redacted.make(token),
         rootId: rootSessionId(chat.id),
         title: titleOf(chat),
         allowQuestions: origin?.kind === "conversation",

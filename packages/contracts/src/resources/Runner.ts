@@ -26,7 +26,16 @@ export const ExecutionRequest = Schema.Struct({
     ...Struct.pick(Agent.fields, ["instructions", "model", "permissions"]),
     /** Resolved bundle content; the runner needs no catalogue or capability IDs. */
     capabilities: Schema.Array(
-      Schema.Struct(Struct.pick(Capability.fields, ["files", "mcpServers"])),
+      Schema.Struct(
+        Struct.pick(Capability.fields, [
+          "files",
+          "mcpServers",
+          "environment",
+          "hosts",
+          "secrets",
+          "note",
+        ]),
+      ),
     ),
     files: FilesByPath(AGENT_SETUP_PATHS),
     skills: Schema.Array(
@@ -34,8 +43,10 @@ export const ExecutionRequest = Schema.Struct({
     ),
   }),
   serverUrl: Schema.String,
-  /** Trusted execution bindings used by declarations, separate from stored per-agent credentials. */
+  /** Trusted execution bindings used by declarations. */
   context: Schema.Record(Schema.String, Schema.String),
+  /** Acts for the execution's member on the server; the VM only ever holds a placeholder. */
+  toolToken: Schema.Redacted(Schema.String),
   rootId: Session.ID,
   title: Schema.String,
   allowQuestions: Schema.Boolean,

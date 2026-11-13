@@ -1,7 +1,7 @@
 # The agent image every chat boots: Node, OpenCode pinned to the server's @opencode/client release, PDF and OCR tools,
-# Playwright CLI for agents with a web browser, which runs outside the VM, a non-root `agent` user. T45 supplies MCP
-# tools with each boot. The runner starts `opencode serve` itself. OpenCode reaches nothing at run time but its
-# provider, so nothing is pre-warmed.
+# Playwright CLI for agents with the Web browser capability (the browser itself runs outside the VM), and a non-root
+# `agent` user. Capabilities supply MCP tools with each boot. The runner starts `opencode serve` itself. OpenCode
+# reaches nothing at run time but its provider, so nothing is pre-warmed.
 FROM node:24-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates poppler-utils tesseract-ocr tesseract-ocr-ita tesseract-ocr-deu python3 \

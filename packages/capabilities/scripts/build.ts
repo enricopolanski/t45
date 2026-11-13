@@ -9,6 +9,7 @@ import { workflowDrafting } from "../src/workflows.ts";
 import { stepOperations } from "../src/steps.ts";
 import { projectOperations } from "../src/projects.ts";
 import { agents } from "../src/agents.ts";
+import { webBrowser } from "../src/browser.ts";
 
 const programs = [
   { name: "workflow-tools", definition: workflowDrafting },
@@ -34,14 +35,17 @@ for (const [index, { name }] of programs.entries()) {
   });
 }
 
-const capabilities = await Promise.all(
-  programs.map(async ({ name, definition }) =>
-    Capability.make({
-      ...definition,
-      files: { [`${name}.mjs`]: await NodeFSP.readFile(`dist/runtime/${name}.mjs`, "utf8") },
-    }),
-  ),
-);
+const capabilities = [
+  ...(await Promise.all(
+    programs.map(async ({ name, definition }) =>
+      Capability.make({
+        ...definition,
+        files: { [`${name}.mjs`]: await NodeFSP.readFile(`dist/runtime/${name}.mjs`, "utf8") },
+      }),
+    ),
+  )),
+  webBrowser,
+];
 
 await NodeFSP.writeFile("dist/capabilities.json", `${encodeCapabilities(capabilities)}\n`);
 await NodeFSP.writeFile("dist/built-ins.json", `${encodeBuiltIns({ capabilities, agents })}\n`);

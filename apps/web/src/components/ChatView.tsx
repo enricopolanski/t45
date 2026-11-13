@@ -255,10 +255,15 @@ export default function ChatView({
 
   const [sendBusy, setSendBusy] = useState(false);
   const [sentIn, setSentIn] = useState<ChatId | null>(null);
-  // An empty chat centers its composer; a send docks it.
+  // An empty chat centers its composer; a send docks it. A long chat's first messages are on
+  // earlier pages not loaded yet, so a chat with earlier pages is never empty.
   const isEmptyChat =
     !readOnly &&
-    (isNew || (ready !== null && !ready.hasUserMessages && pendingInputs.length === 0)) &&
+    (isNew ||
+      (ready !== null &&
+        !ready.hasUserMessages &&
+        !ready.hasEarlier &&
+        pendingInputs.length === 0)) &&
     sentIn !== chatId;
   const startNewChat = () =>
     void newChat().catch((error: unknown) => toastFailure("Couldn't start a new chat", error));

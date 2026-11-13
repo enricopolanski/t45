@@ -260,7 +260,13 @@ export const layer = RunnerRpcs.toLayer(
         Effect.repeat(Schedule.spaced("15 seconds")),
         Effect.forkScoped,
       );
-      const sandbox = yield* SandboxManager.start(rootId, agent, request.disk, request.serverUrl);
+      const sandbox = yield* SandboxManager.start(
+        rootId,
+        agent,
+        request.disk,
+        request.serverUrl,
+        request.toolToken,
+      );
       const opencodeClient = yield* createOpencodeClient(
         `http://127.0.0.1:${sandbox.port}`,
         sandbox.password,

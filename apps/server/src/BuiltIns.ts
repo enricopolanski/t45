@@ -13,7 +13,10 @@ import * as ServerConfig from "./config.ts";
 
 const decodeBuiltIns = Schema.decodeUnknownEffect(Schema.fromJsonString(BuiltIns));
 
-/** Deployment data is imported into the database before any instance serves requests. */
+/**
+ * Every start replaces the supplied capabilities and agents with this deployment's, before any
+ * instance serves requests, so a release's tools reach existing databases.
+ */
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const file = yield* ServerConfig.builtInsFile;
@@ -24,9 +27,7 @@ export const layer = Layer.effectDiscard(
     const capabilities = yield* CapabilityRepository;
     const sql = yield* SqlClient.SqlClient;
     yield* Effect.gen(function* () {
-      for (const capability of builtIns.capabilities) {
-        if ((yield* capabilities.get(capability.id)) === null) yield* capabilities.save(capability);
-      }
+      yield* capabilities.saveAll(builtIns.capabilities);
       const now = yield* DateTime.now;
       for (const preset of builtIns.agents) {
         yield* agents.save({
