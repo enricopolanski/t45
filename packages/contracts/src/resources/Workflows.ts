@@ -201,6 +201,8 @@ export const StepView = Schema.Struct({
         Schema.Struct({
           ranBy: StringId,
           startedAt: Schema.DateTimeUtcFromString,
+          /** Null while it runs. */
+          endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
           status: Schema.Literals(["running", "completed", "failed", "stopped"]),
           latestReport: Schema.NullOr(Report),
         }),

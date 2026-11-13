@@ -1086,10 +1086,11 @@ const make = Effect.gen(function* () {
           const canRun = isRunnable && live.includes(id);
           const runs = attempts
             .filter((run) => run.trigger.automationId === id)
-            .map(({ trigger, startedAt, chatStatus, latestReport }) => ({
+            .map(({ trigger, startedAt, endedAt, chatStatus, latestReport }) => ({
               latestReport,
               ranBy: trigger.effectiveUserId,
               startedAt,
+              endedAt,
               status:
                 chatStatus === null
                   ? ("completed" as const)

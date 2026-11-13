@@ -22,19 +22,16 @@ export function ProgressReport({
     </time>
   );
   return (
-    <div role="status" className="flex min-w-0 flex-col gap-0.5 text-xs">
+    <div role="status" className="flex min-w-0 flex-col gap-1 text-xs">
       {isRunning ? (
         <>
-          <p className="text-muted-foreground">
-            <span className="font-medium">Latest reported activity</span> · {updated}
-          </p>
-          <p className="flex gap-1.5 text-foreground">
-            <span
-              aria-hidden
-              className="mt-1 size-2 shrink-0 animate-breathe rounded-full bg-info"
-            />
+          <p className="flex gap-2 text-foreground">
+            <span aria-hidden className="flex h-4 w-4 shrink-0 items-center justify-center">
+              <span className="size-2 animate-breathe rounded-full bg-info" />
+            </span>
             <span className="min-w-0 wrap-break-word">{report.message}</span>
           </p>
+          <p className="pl-6">{updated}</p>
         </>
       ) : (
         <>
