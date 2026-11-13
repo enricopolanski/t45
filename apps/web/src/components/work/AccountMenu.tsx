@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { LogOutIcon, SettingsIcon, UserIcon, UsersIcon } from "lucide-react";
+import { Building2Icon, LogOutIcon, SettingsIcon, UserIcon } from "lucide-react";
 
 import { signOut } from "../../http/auth";
 import { toastFailure } from "../../state/query";
@@ -38,7 +38,7 @@ export function AccountMenu() {
               Settings
             </MenuLinkItem>
             <MenuLinkItem render={<Link to="/settings/organization" />}>
-              <UsersIcon />
+              <Building2Icon />
               Organization
             </MenuLinkItem>
           </>

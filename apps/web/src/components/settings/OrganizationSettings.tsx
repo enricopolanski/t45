@@ -15,15 +15,23 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 
-/**
- * The organization area, for admins: its name and logo, pending requests, and the member roster
- * with role and lifecycle controls. Role changes and deactivation end the member's sessions.
- */
+/** The organization area, for admins: its name and logo. */
 export function OrganizationSettings() {
-  const users = useUsers();
   return (
     <SettingsPageContainer>
       <OrganizationProfile />
+    </SettingsPageContainer>
+  );
+}
+
+/**
+ * The people area, for admins: pending requests, and the member roster with role and lifecycle
+ * controls. Role changes and deactivation end the member's sessions.
+ */
+export function PeopleSettings() {
+  const users = useUsers();
+  return (
+    <SettingsPageContainer>
       <SettingsSection
         title="Requests"
         description="Review requests to join your organization."

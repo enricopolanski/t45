@@ -60,9 +60,7 @@ const markStepDone = async (member: Page) => {
 };
 
 const expectStep = (member: Page, name: string) =>
-  expect(
-    member.getByRole("region", { name: "Open step" }).getByRole("heading", { name }),
-  ).toBeVisible();
+  expect(member.getByRole("heading", { name, exact: true })).toBeVisible();
 
 const expectNothing = (outsider: Page) =>
   expect(outsider.getByRole("alert")).toHaveText("That no longer exists.");

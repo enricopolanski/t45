@@ -34,6 +34,7 @@ import {
   canSetWorkflowEditors,
   stepIds,
   fieldValueProblem,
+  defaultValues,
   type WorkflowActor,
   findStep,
   rowIds,
@@ -92,7 +93,12 @@ type Caller = string | Extract<CurrentActor["Service"], { agentId: string }>;
 type WorkflowRpc = RpcGroup.Rpcs<typeof Workflows>;
 type Payload<Tag extends string> = Rpc.Payload<Rpc.ExtractTag<WorkflowRpc, `workflows.${Tag}`>>;
 
-const toFile = ({ id, name }: Attachment) => ({ id, name });
+const toFile = ({ id, name, uploader, createdAt }: Attachment) => ({
+  id,
+  name,
+  uploader,
+  createdAt,
+});
 
 /** Encoding the view drops what it doesn't name: the description and the steps' values. */
 const summaryOf = (ticket: Ticket): TicketSummaryView => ({
@@ -529,7 +535,7 @@ const make = Effect.gen(function* () {
       status: { type: "working", at: yield* DateTime.now },
       parentStepId: parent?.id ?? null,
       assignee: Option.getOrNull(assignee),
-      values: {},
+      values: defaultValues(definition.fields),
     });
     putStep(work, step);
     yield* notify({ kind: "to_do", to: step.assignee, project: work.project, step, actorId });
@@ -1061,21 +1067,28 @@ const make = Effect.gen(function* () {
         );
         return attached.map((id) => {
           const canRun = isRunnable && live.includes(id);
-          const latest = attempts.findLast((run) => run.trigger.automationId === id);
-          if (latest === undefined)
-            return {
-              id,
-              statusLabel: "Not run",
-              runLabel: canRun ? ("Run" as const) : null,
-              canStop: false,
-            };
-          const { chatStatus } = latest;
-          const statusLabel = chatStatus === "running" ? "Running" : "Ended";
+          const runs = attempts
+            .filter((run) => run.trigger.automationId === id)
+            .map(({ trigger, startedAt, chatStatus }) => ({
+              ranBy: trigger.effectiveUserId,
+              startedAt,
+              status:
+                chatStatus === null
+                  ? ("completed" as const)
+                  : chatStatus === "interrupted"
+                    ? ("stopped" as const)
+                    : chatStatus,
+            }))
+            .toReversed();
           return {
             id,
-            statusLabel,
-            runLabel: canRun ? ("Run again" as const) : null,
-            canStop: canRun && chatStatus === "running",
+            runs,
+            runLabel: canRun
+              ? runs.length === 0
+                ? ("Run" as const)
+                : ("Run again" as const)
+              : null,
+            canStop: canRun && runs[0]?.status === "running",
           };
         });
       }),
@@ -1102,8 +1115,18 @@ const make = Effect.gen(function* () {
           : null;
     if (problem !== null)
       return yield* new WorkflowRefused({ reason: "invalid_field_value", detail: problem });
-    if (field.type === "group")
-      values = yield* withoutRemovedRows(step, input.fieldKey, rowIds(value));
+    if (field.type === "group") {
+      const before = rowIds(step.values[input.fieldKey]);
+      const added = rowIds(value).filter((rowId) => !before.includes(rowId));
+      values = {
+        ...(yield* withoutRemovedRows(step, input.fieldKey, rowIds(value))),
+        ...Object.fromEntries(
+          added.flatMap((rowId) =>
+            Object.entries(defaultValues(field.fields, `${input.fieldKey}.${rowId}`)),
+          ),
+        ),
+      };
+    }
     const others = Object.fromEntries(
       Object.entries(values).filter(([key]) => key !== input.fieldKey),
     );

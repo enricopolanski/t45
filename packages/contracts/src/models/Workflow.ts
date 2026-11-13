@@ -26,14 +26,22 @@ const FieldBase = {
   ),
 };
 
+const DefaultValue = Schema.optionalKey(
+  Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]).annotate({
+    description: "The value the field starts with; it must fit the field. File fields have none.",
+  }),
+);
+
 const ValueField = Schema.Struct({
   ...FieldBase,
   type: Schema.Literals(["text", "number", "boolean", "date", "file"]),
+  defaultValue: DefaultValue,
 });
 
 const SelectField = Schema.Struct({
   ...FieldBase,
   type: Schema.Literal("select"),
+  defaultValue: DefaultValue,
   options: Schema.Array(TrimmedNonEmptyString)
     .annotate({ description: "Allowed choices, shown as written." })
     .check(Schema.isMinLength(1)),
@@ -53,6 +61,31 @@ export type StepField = typeof ValueField.Type | typeof SelectField.Type | Group
 const fieldIdsAreDistinct = (fields: ReadonlyArray<StepField>): boolean =>
   hasDistinctIds(fields.map((field) => field.id)) &&
   fields.every((field) => field.type !== "group" || fieldIdsAreDistinct(field.fields));
+
+const defaultsFit = (fields: ReadonlyArray<StepField>): boolean =>
+  fields.every((field) =>
+    field.type === "group"
+      ? defaultsFit(field.fields)
+      : field.defaultValue === undefined ||
+        (field.type !== "file" && fieldValueProblem(field, field.id, field.defaultValue) === null),
+  );
+
+/**
+ * The values these fields start with, by key: each default, in a group's fields too. A repeatable
+ * group has no rows yet; `prefix` is the key of the row they start in.
+ */
+export const defaultValues = (
+  fields: ReadonlyArray<StepField>,
+  prefix = "",
+): Record<string, Schema.Json> =>
+  Object.fromEntries(
+    fields.flatMap((field) => {
+      const key = prefix ? `${prefix}.${field.id}` : field.id;
+      if (field.type !== "group")
+        return field.defaultValue === undefined ? [] : [[key, field.defaultValue]];
+      return field.repeatable ? [] : Object.entries(defaultValues(field.fields, key));
+    }),
+  );
 
 /** A field of an earlier step that a step reads: the whole field, a group with all its rows. */
 export const StepInput = Schema.Struct({
@@ -82,6 +115,7 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
   instructions: Schema.String,
   fields: Schema.Array(StepField).check(
     Schema.makeFilter(fieldIdsAreDistinct, { expected: "distinct field ids among siblings" }),
+    Schema.makeFilter(defaultsFit, { expected: "default values that fit their fields" }),
   ),
   subSteps: Schema.Array(
     Schema.suspend((): Schema.Codec<StepDefinition, StepDefinitionEncoded> => StepDefinition),

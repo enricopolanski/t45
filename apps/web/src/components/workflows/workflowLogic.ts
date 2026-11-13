@@ -154,6 +154,18 @@ export function retypeField(field: DraftField, type: FieldType): DraftField {
   return { ...base, type };
 }
 
+/** The select field with these options; its default goes when it is no longer one of them. */
+export function withOptions(
+  field: Extract<DraftField, { type: "select" }>,
+  options: ReadonlyArray<string>,
+): DraftField {
+  const { defaultValue, ...rest } = field;
+  return typeof defaultValue === "string" &&
+    options.some((option) => option.trim() === defaultValue)
+    ? { ...field, options }
+    : { ...rest, options };
+}
+
 export function blankStep(): DraftStep {
   return {
     id: newKey("step"),

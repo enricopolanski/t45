@@ -113,8 +113,13 @@ export type ProjectBoardView = typeof ProjectBoardView.Type;
 const ticket = { ticketId: StringId };
 const step = { stepId: StringId };
 
-export const StepFileView = Schema.Struct(Struct.pick(Attachment.fields, ["id", "name"]));
-export type StepFileView = typeof StepFileView.Type;
+/** The file a field holds. */
+const FieldFileView = Schema.Struct(Struct.pick(Attachment.fields, ["id", "name"]));
+
+/** A step's file: who added it and when. */
+const StepFileView = Schema.Struct(
+  Struct.pick(Attachment.fields, ["id", "name", "uploader", "createdAt"]),
+);
 
 /**
  * A field as a step shows it. `key` is the field's path, which sets its value: a field inside a
@@ -130,7 +135,7 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     options: Schema.Array(Schema.String),
     value: Schema.Json,
     repeatable: Schema.Boolean,
-    file: Schema.NullOr(StepFileView),
+    file: Schema.NullOr(FieldFileView),
     /**
      * A repeatable group's row fields as its definition declares them, rows or not: a row's field
      * key is `group.rowId.id`. Empty for other fields.
@@ -188,7 +193,14 @@ export const StepView = Schema.Struct({
   automations: Schema.Array(
     Schema.Struct({
       id: AutomationId,
-      statusLabel: Schema.String,
+      /** Its runs on this step, newest first: who started each, when, and how it stands. */
+      runs: Schema.Array(
+        Schema.Struct({
+          ranBy: StringId,
+          startedAt: Schema.DateTimeUtcFromString,
+          status: Schema.Literals(["running", "completed", "failed", "stopped"]),
+        }),
+      ),
       runLabel: Schema.NullOr(Schema.Literals(["Run", "Run again"])),
       canStop: Schema.Boolean,
     }),

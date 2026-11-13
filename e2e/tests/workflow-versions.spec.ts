@@ -41,24 +41,18 @@ test("an item keeps the workflow version it started on", async ({ signIn }) => {
 
   // Until the project adopts version 2, its new items still start on version 1.
   await startItem(ada, projectId, "Middle order");
-  await expect(
-    ada.getByRole("region", { name: "Open step" }).getByRole("heading", { name: "Collect" }),
-  ).toBeVisible();
+  await expect(ada.getByRole("heading", { name: "Collect", exact: true })).toBeVisible();
 
   await ada.goto(`/settings/projects/${projectId}/edit`);
   await expect(ada.getByText("Adopt version 2")).toBeVisible();
   await adopt.click();
   await expect(ada.getByText("New tickets start on version 2")).toBeVisible();
   await startItem(ada, projectId, "New order");
-  await expect(
-    ada.getByRole("region", { name: "Open step" }).getByRole("heading", { name: "Gather" }),
-  ).toBeVisible();
+  await expect(ada.getByRole("heading", { name: "Gather", exact: true })).toBeVisible();
 
   // The item started before the adoption stays on its own version, and the board shows each.
   await ada.goto(oldStepUrl);
-  await expect(
-    ada.getByRole("region", { name: "Open step" }).getByRole("heading", { name: "Collect" }),
-  ).toBeVisible();
+  await expect(ada.getByRole("heading", { name: "Collect", exact: true })).toBeVisible();
   await ada.goto(`/boards/${projectId}`);
   await expect(ada.getByRole("region", { name: "Gather" }).getByText("New order")).toBeVisible();
   await expect(ada.getByText("Old order")).toHaveCount(0);

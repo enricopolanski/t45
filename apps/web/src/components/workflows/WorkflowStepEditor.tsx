@@ -14,7 +14,14 @@ import { Textarea } from "../ui/textarea";
 import { FoldChevron } from "../work/CardFold";
 import { StepAutomationsEditor } from "../work/StepAutomationsEditor";
 import { plural } from "../work/workLogic";
-import { blankField, blankStep, FIELD_TYPES, listEntries, retypeField } from "./workflowLogic";
+import {
+  blankField,
+  blankStep,
+  FIELD_TYPES,
+  listEntries,
+  retypeField,
+  withOptions,
+} from "./workflowLogic";
 
 type Placed<A> = ReturnType<typeof listEntries<A>>[number];
 
@@ -111,6 +118,85 @@ function FieldList({
   );
 }
 
+const NO_DEFAULT = "";
+
+/**
+ * What the field holds when a step starts, or a group's entry is added: none for files and groups.
+ * Empty means no default.
+ */
+function DefaultValueInput({
+  field,
+  onChange,
+  disabled,
+}: {
+  readonly field: DraftField;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  if (field.type === "group" || field.type === "file") return null;
+  const { defaultValue, ...rest } = field;
+  const set = (value: string | number | boolean | null) =>
+    onChange(value === null ? rest : { ...rest, defaultValue: value });
+  const choices =
+    field.type === "boolean"
+      ? [
+          { value: "true", label: "Yes" },
+          { value: "false", label: "No" },
+        ]
+      : field.type === "select"
+        ? field.options
+            .map((option) => option.trim())
+            .filter((option) => option !== "")
+            .map((option) => ({ value: option, label: option }))
+        : null;
+  return (
+    <Field label="Default value" size="xs">
+      {choices === null ? (
+        <Input
+          type={field.type}
+          placeholder="Optional"
+          value={defaultValue === undefined ? "" : String(defaultValue)}
+          onChange={(event) => {
+            const typed = event.target.value;
+            set(typed === "" ? null : field.type === "number" ? Number(typed) : typed);
+          }}
+          disabled={disabled}
+        />
+      ) : (
+        <Select
+          value={defaultValue === undefined ? NO_DEFAULT : String(defaultValue)}
+          onValueChange={(choice) =>
+            set(
+              choice === NO_DEFAULT || choice === null
+                ? null
+                : field.type === "boolean"
+                  ? choice === "true"
+                  : choice,
+            )
+          }
+          disabled={disabled}
+        >
+          <SelectTrigger>
+            <SelectValue>
+              {(choice: string) =>
+                choices.find((option) => option.value === choice)?.label ?? "None"
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value={NO_DEFAULT}>None</SelectItem>
+            {choices.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      )}
+    </Field>
+  );
+}
+
 /** What a field's collapsed row says after its label. */
 function fieldSummary(field: DraftField) {
   if (field.type === "select") {
@@ -203,7 +289,7 @@ function FieldCard({
             {field.type === "select" ? (
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs text-muted-foreground">Options</span>
-                {listEntries(field.options, (options) => setField({ ...field, options })).map(
+                {listEntries(field.options, (options) => setField(withOptions(field, options))).map(
                   (option) => (
                     <div key={optionRows.keys[option.index]} className="flex items-center gap-1.5">
                       <Input
@@ -280,6 +366,7 @@ function FieldCard({
                 disabled={disabled}
               />
             </Field>
+            <DefaultValueInput field={field} onChange={setField} disabled={disabled} />
           </div>
         </CollapsiblePanel>
       </Collapsible>

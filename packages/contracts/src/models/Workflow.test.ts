@@ -1,11 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { AutomationId } from "./Automation.ts";
 import {
   type Step,
-  type StepDefinition,
+  StepDefinition,
   type Ticket,
   type Project,
   type WorkflowEdit,
@@ -15,6 +16,7 @@ import {
   canSeeStep,
   completeTicketStep,
   currentStep,
+  defaultValues,
   fieldValueProblem,
   hasValidInputs,
   occupiedStep,
@@ -334,6 +336,77 @@ describe("attaching an agent's automation to a workflow", () => {
 });
 
 const decodeFields = Schema.decodeSync(Schema.Array(StepField));
+
+const decodeStep = Schema.decodeUnknownOption(StepDefinition);
+
+describe("default values", () => {
+  const stepWith = (fields: ReadonlyArray<typeof StepField.Encoded>) =>
+    decodeStep({
+      id: "step01",
+      name: "Quote",
+      instructions: "",
+      fields,
+      subSteps: [],
+    });
+
+  it("start a step's fields, a single group's too, and each new entry of a repeatable group", () => {
+    const fields = decodeFields([
+      { id: "f_discount", label: "Discount", type: "number", defaultValue: 3 },
+      { id: "f_note", label: "Note", type: "text" },
+      {
+        id: "f_terms",
+        label: "Terms",
+        type: "group",
+        repeatable: false,
+        fields: [{ id: "f_paid", label: "Paid", type: "boolean", defaultValue: false }],
+      },
+      {
+        id: "f_variants",
+        label: "Variants",
+        type: "group",
+        repeatable: true,
+        fields: [
+          { id: "f_size", label: "Size", type: "select", options: ["S", "M"], defaultValue: "M" },
+        ],
+      },
+    ]);
+    const variants = fields[3]!;
+    assert.deepStrictEqual(defaultValues(fields), { f_discount: 3, "f_terms.f_paid": false });
+    assert.deepStrictEqual(
+      defaultValues(variants.type === "group" ? variants.fields : [], "f_variants.r1"),
+      { "f_variants.r1.f_size": "M" },
+    );
+  });
+
+  it("must fit their field", () => {
+    assert.isTrue(
+      Option.isSome(stepWith([{ id: "f_rate", label: "Rate", type: "number", defaultValue: 3 }])),
+    );
+    assert.isTrue(
+      Option.isNone(stepWith([{ id: "f_rate", label: "Rate", type: "number", defaultValue: "3" }])),
+    );
+    assert.isTrue(
+      Option.isNone(
+        stepWith([
+          { id: "f_rate", label: "Rate", type: "select", options: ["S"], defaultValue: "M" },
+        ]),
+      ),
+    );
+    assert.isTrue(
+      Option.isNone(
+        stepWith([
+          {
+            id: "f_group",
+            label: "G",
+            type: "group",
+            repeatable: true,
+            fields: [{ id: "f_date", label: "Date", type: "date", defaultValue: "1/12/2026" }],
+          },
+        ]),
+      ),
+    );
+  });
+});
 
 describe("explaining a field that doesn't fit", () => {
   const fields = decodeFields([

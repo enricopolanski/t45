@@ -1,31 +1,50 @@
-import { Button } from "../ui/button";
-import { StepAutomationsEditor } from "./StepAutomationsEditor";
+import type { AutomationId } from "@t45/contracts/models/Automation";
 import { StringId } from "@t45/contracts/models/primitives";
 import type { StepNameView, StepView } from "@t45/contracts/resources/Workflows";
 import { Link, useNavigate } from "@tanstack/react-router";
+import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { AtomRegistry } from "effect/reactivity";
-import { InfoIcon } from "lucide-react";
-import { useState } from "react";
+import {
+  BotIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CircleCheckIcon,
+  CircleStopIcon,
+  CircleXIcon,
+  LoaderCircleIcon,
+  MinusIcon,
+  PlayIcon,
+  RotateCwIcon,
+  XIcon,
+} from "lucide-react";
+import { Fragment, useState } from "react";
 
 import { api, runtime } from "../../rpc/api";
 import { appAtomRegistry } from "../../state/atomRegistry";
+import { stepAutomationList } from "../../state/agents";
 import { apiWatch, useApiQuery } from "../../state/rpc";
+import { useIsAdmin } from "../../state/session";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { ErrorText } from "../ui/error-text";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { ActorName } from "./ActorAvatar";
 import { AssigneePicker } from "./AssigneePicker";
 import { CardFold } from "./CardFold";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { OtherStep } from "./ItemSteps";
 import { ItemDescription } from "./ItemDescription";
 import { StepComments, StepFiles } from "./StepConversation";
 import { attachStepFile, ReadOnlyFields, StepFields } from "./StepFields";
 import { StepStatus } from "./StepStatus";
 import { StepSubSteps } from "./StepSubSteps";
+import { useWorkDirectory } from "./useWorkDirectory";
 import { BackLink, WorkFrame } from "./WorkFrame";
 import {
+  actorName,
   historyLabel,
   missingFields,
   type StepAct,
@@ -118,33 +137,20 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const rootId = view.parents[0]?.id ?? view.step.id;
   const open = (
     <section key="open" aria-label="Open step" className="flex flex-col gap-6">
-      <div className="flex gap-3 rounded-xl border border-info/32 bg-info/4 p-4">
-        <InfoIcon aria-hidden className="mt-1 size-5 shrink-0 text-info" />
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <StepHeading view={view} />
-          {view.definition.instructions ? (
-            <section aria-label="Goal">
-              <p className="text-sm whitespace-pre-wrap">{view.definition.instructions}</p>
-            </section>
-          ) : null}
-        </div>
-      </div>
       {error && <ErrorText text={error} />}
       {missing.length > 0 || unfinished.length > 0 ? (
         <MissingRecap missing={missing} unfinished={unfinished} />
       ) : null}
-      <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-4">
-        <ItemDescription description={view.ticket.description} />
-        <StepFiles
-          view={view}
-          canWrite={writes}
-          busy={busy}
-          onAttach={(file) => void act(() => attachStepFile(view.step.id, file))}
-          onRemove={(attachmentId) =>
-            void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
-          }
-        />
-      </div>
+      <ItemDescription description={view.ticket.description} />
+      <StepFiles
+        view={view}
+        canWrite={writes}
+        busy={busy}
+        onAttach={(file) => void act(() => attachStepFile(view.step.id, file))}
+        onRemove={(attachmentId) =>
+          void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
+        }
+      />
       {view.inputs.length > 0 ? (
         <section aria-label="Inputs" className="flex flex-col gap-2.5">
           <h2 className="text-sm font-semibold">Inputs</h2>
@@ -173,6 +179,14 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
       />
     </section>
   );
+  const hasInstructions = view.definition.instructions !== "";
+  const overview = (
+    <>
+      <ItemDetails view={view} actions={actions} busy={busy} act={act} />
+      <StepAutomations view={view} busy={busy} act={act} />
+      <StepHistory view={view} />
+    </>
+  );
   return (
     <WorkFrame title={view.ticket.title} width="split">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_25rem]">
@@ -186,9 +200,22 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         </div>
         <div className="flex flex-col gap-3">
           <StepStatus view={view} actions={actions} busy={busy} act={act} onMarkDone={markDone} />
-          <ItemDetails view={view} actions={actions} busy={busy} act={act} />
-          <AgentCard view={view} busy={busy} act={act} />
-          <StepHistory view={view} />
+          {hasInstructions ? (
+            <Tabs defaultValue="overview">
+              <TabsList>
+                <TabsTab value="overview">Overview</TabsTab>
+                <TabsTab value="instructions">Instructions</TabsTab>
+              </TabsList>
+              <TabsPanel value="overview">
+                <div className="flex flex-col gap-3">{overview}</div>
+              </TabsPanel>
+              <TabsPanel value="instructions">
+                <StepInstructions view={view} />
+              </TabsPanel>
+            </Tabs>
+          ) : (
+            overview
+          )}
         </div>
       </div>
     </WorkFrame>
@@ -216,8 +243,8 @@ function StepHistory({ view }: { readonly view: StepView }) {
   );
 }
 
-/** The automations the workflow gives this step, each with its latest run and the ways to run it. */
-function AgentCard({
+/** The automations the workflow gives this step, each with its runs and the way to run or stop it. */
+function StepAutomations({
   view,
   busy,
   act,
@@ -226,58 +253,222 @@ function AgentCard({
   readonly busy: boolean;
   readonly act: StepAct;
 }) {
+  const titles = useApiQuery(stepAutomationList);
+  const isAdmin = useIsAdmin();
+  const now = useNowMinute();
   if (view.automations.length === 0) return null;
+  const emptyCount = missingFields(view.fields).length;
+  const call = (
+    tag: "workflows.runStepAutomation" | "workflows.stopStepAutomation",
+    automationId: AutomationId,
+  ) => void act(() => api(tag, { stepId: view.step.id, automationId }));
   return (
     <CardFold as="aside" title="Automations">
-      <StepAutomationsEditor
-        automationIds={view.automations.map((automation) => automation.id)}
-        renderStatus={(id) => {
-          const status = view.automations.find((entry) => entry.id === id);
-          if (status === undefined) return null;
-          return (
+      <div className="flex flex-col gap-3 text-sm">
+        {titles.error && <ErrorText text={titles.error} />}
+        {view.automations.map(({ id, runs, runLabel, canStop }) => {
+          const status = runs[0]?.status;
+          // A stopped run is over: the card offers a new one and lists it among the earlier.
+          const state = status === undefined ? "notRun" : status === "stopped" ? "ready" : status;
+          const latest = state === "ready" ? undefined : runs[0];
+          const earlier = runs.slice(latest === undefined ? 0 : 1);
+          const onAct =
+            state === "running"
+              ? canStop
+                ? () => call("workflows.stopStepAutomation", id)
+                : null
+              : runLabel === null
+                ? null
+                : () => call("workflows.runStepAutomation", id);
+          const title = (
             <>
-              <span>{status.statusLabel}</span>
-              <div className="flex gap-2">
-                {status.runLabel && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      void act(() =>
-                        api("workflows.runStepAutomation", {
-                          stepId: view.step.id,
-                          automationId: status.id,
-                        }),
-                      )
-                    }
-                  >
-                    {status.runLabel}
-                  </Button>
-                )}
-                {status.canStop && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      void act(() =>
-                        api("workflows.stopStepAutomation", {
-                          stepId: view.step.id,
-                          automationId: status.id,
-                        }),
-                      )
-                    }
-                  >
-                    Stop
-                  </Button>
-                )}
-              </div>
+              <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-info/12 text-info">
+                <BotIcon aria-hidden className="size-3.5" />
+              </span>
+              <span className="min-w-0 flex-1 truncate font-medium">
+                {titles.data?.find((automation) => automation.id === id)?.title ??
+                  "Unavailable automation"}
+              </span>
             </>
           );
-        }}
-      />
+          return (
+            <article key={id} className="flex flex-col gap-3 rounded-lg border p-3">
+              {isAdmin ? (
+                <Link to="/settings/automations" className="flex items-center gap-2">
+                  {title}
+                  <ChevronRightIcon aria-hidden className="size-3.5 text-muted-foreground" />
+                </Link>
+              ) : (
+                <div className="flex items-center gap-2">{title}</div>
+              )}
+              {state === "ready" && onAct === null ? null : (
+                <div className="flex flex-col gap-2 border-t pt-3">
+                  {latest !== undefined && (
+                    <div className="flex flex-col gap-0.5">
+                      <ActorName actor={latest.ranBy} />
+                      <span className="text-xs text-muted-foreground">
+                        {state === "running" ? "started" : "ran"} this automation ·{" "}
+                        {formatRelativeTimeLabel(latest.startedAt, now)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 text-xs">
+                    <RunPill state={state} busy={busy} onAct={onAct} />
+                    {state === "completed" && emptyCount > 0 ? (
+                      <span className="min-w-0">
+                        {emptyCount} {emptyCount === 1 ? "field" : "fields"} left empty
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+              {earlier.length > 0 && <EarlierRuns runs={earlier} now={now} />}
+            </article>
+          );
+        })}
+      </div>
     </CardFold>
+  );
+}
+
+const play = <PlayIcon className="size-2.5 fill-current" />;
+const RUN_PILLS = {
+  notRun: {
+    label: "Not run yet",
+    action: "Run",
+    tone: "border-border bg-muted text-foreground",
+    dot: "bg-foreground text-background",
+    act: play,
+    still: <MinusIcon className="size-3" />,
+  },
+  running: {
+    label: "Running",
+    action: "Stop",
+    tone: "border-info/32 bg-info/8 text-info-foreground",
+    dot: "",
+    act: null,
+    still: null,
+  },
+  completed: {
+    label: "Completed",
+    action: "Run again",
+    tone: "border-success/32 bg-success/8 text-success-foreground",
+    dot: "bg-success-foreground text-white",
+    act: play,
+    still: <CheckIcon className="size-3" />,
+  },
+  failed: {
+    label: "Failed",
+    action: "Retry",
+    tone: "border-destructive/32 bg-destructive/8 text-destructive-foreground",
+    dot: "bg-destructive-foreground text-white",
+    act: <RotateCwIcon className="size-3" />,
+    still: <XIcon className="size-3" />,
+  },
+  ready: {
+    label: "Run",
+    action: "Run",
+    tone: "border-border bg-muted text-foreground",
+    dot: "bg-foreground text-background",
+    act: play,
+    still: null,
+  },
+} as const;
+
+/**
+ * How an automation's latest run stands, as a pill that also acts on it for whoever may: running
+ * stops it, any other state runs the automation again. After a stop, it only offers a new run.
+ */
+function RunPill({
+  state,
+  busy,
+  onAct,
+}: {
+  readonly state: keyof typeof RUN_PILLS;
+  readonly busy: boolean;
+  readonly onAct: (() => void) | null;
+}) {
+  const { label, action, tone, dot, act, still } = RUN_PILLS[state];
+  const className = `inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border pr-2.5 pl-1 font-semibold ${tone}`;
+  const content = (
+    <>
+      {state === "running" ? (
+        <span aria-hidden className="grid size-5 shrink-0 place-items-center">
+          <span className="col-start-1 row-start-1 size-5 animate-spin rounded-full border-2 border-info/24 border-t-info" />
+          {onAct !== null && (
+            <span className="col-start-1 row-start-1 size-2 rounded-xs bg-current" />
+          )}
+        </span>
+      ) : (
+        <span aria-hidden className={`grid size-5 shrink-0 place-items-center rounded-full ${dot}`}>
+          {onAct === null ? still : act}
+        </span>
+      )}
+      {label}
+    </>
+  );
+  return onAct === null ? (
+    <span className={className}>{content}</span>
+  ) : (
+    <button
+      type="button"
+      aria-label={label === action ? undefined : `${label}. ${action}`}
+      disabled={busy}
+      onClick={onAct}
+      className={`${className} hover:brightness-95 disabled:opacity-64`}
+    >
+      {content}
+    </button>
+  );
+}
+
+const RUN_OUTCOMES = {
+  running: { label: "Running", Icon: LoaderCircleIcon, tone: "text-info-foreground" },
+  completed: { label: "Completed", Icon: CircleCheckIcon, tone: "text-success-foreground" },
+  failed: { label: "Failed", Icon: CircleXIcon, tone: "text-destructive-foreground" },
+  stopped: { label: "Stopped", Icon: CircleStopIcon, tone: "text-muted-foreground" },
+} as const;
+
+/** An automation's past runs, newest first, folded away at first. */
+function EarlierRuns({
+  runs,
+  now,
+}: {
+  readonly runs: StepView["automations"][number]["runs"];
+  readonly now: number;
+}) {
+  const directory = useWorkDirectory();
+  return (
+    <div className="border-t pt-3 text-xs">
+      <Collapsible>
+        <CollapsibleTrigger className="group flex items-center gap-1 font-medium text-muted-foreground">
+          {runs.length} earlier {runs.length === 1 ? "run" : "runs"}
+          <ChevronDownIcon
+            aria-hidden
+            className="size-3 transition-transform group-data-panel-open:rotate-180"
+          />
+        </CollapsibleTrigger>
+        <CollapsiblePanel>
+          <ol className="flex flex-col gap-2 pt-2">
+            {runs.map((run) => {
+              const { label, Icon, tone } = RUN_OUTCOMES[run.status];
+              return (
+                <li key={DateTime.formatIso(run.startedAt)} className="flex items-start gap-1.5">
+                  <Icon aria-hidden className={`mt-px size-3.5 shrink-0 ${tone}`} />
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className={`font-semibold ${tone}`}>{label}</span>
+                    <span className="text-muted-foreground">
+                      {actorName(directory, run.ranBy)} ·{" "}
+                      {formatRelativeTimeLabel(run.startedAt, now)}
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </CollapsiblePanel>
+      </Collapsible>
+    </div>
   );
 }
 
@@ -326,45 +517,26 @@ function MissingRecap({
 }
 
 /**
- * The way back to the project's board, the item's title, and the step it is in when that isn't
- * the step on the page.
+ * The way back to the project's board, the item's title, and under it the open step with the steps
+ * it sits in and the way to its instructions. Then the step the item is in when that isn't the step
+ * on the page, and why the item was cancelled or the step blocked.
  */
 function ItemHeader({ view }: { readonly view: StepView }) {
-  const current =
-    view.otherSteps.find(({ step }) => step.id !== view.step.id && step.status.type !== "completed")
-      ?.name ?? null;
-  return (
-    <header className="flex flex-col gap-1">
-      <div className="mb-5">
-        <BackLink to="/boards/$slug" params={{ slug: view.ticket.projectId }}>
-          {view.projectName}
-        </BackLink>
-      </div>
-      <h2 className="text-xl font-semibold tracking-tight">{view.ticket.title}</h2>
-      {current !== null ? (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline">In {current}</Badge>
-        </div>
-      ) : null}
-      {view.ticket.status.type === "cancelled" ? (
-        <p className="mt-2 rounded-lg border border-border bg-muted px-3 py-2 text-sm">
-          <span className="font-medium">Cancelled:</span> {view.ticket.status.reason}
-        </p>
-      ) : null}
-    </header>
-  );
-}
-
-/** The open step's name, the steps it sits in, and why it's blocked. */
-function StepHeading({ view }: { readonly view: StepView }) {
   const { step } = view;
+  const current =
+    view.otherSteps.find(
+      ({ step: other }) => other.id !== step.id && other.status.type !== "completed",
+    )?.name ?? null;
   return (
-    <div className="flex flex-col gap-2">
-      {view.parents.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {view.parents.map((parent, at) => (
-            <span key={parent.id}>
-              {at > 0 ? " › " : null}
+    <header className="flex flex-col gap-3">
+      <BackLink to="/boards/$slug" params={{ slug: view.ticket.projectId }}>
+        {view.projectName}
+      </BackLink>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-3xl font-semibold tracking-tight">{view.ticket.title}</h2>
+        <h3 className="text-sm text-muted-foreground">
+          {view.parents.map((parent) => (
+            <Fragment key={parent.id}>
               <Link
                 to="/my-work/$stepId"
                 params={{ stepId: parent.id }}
@@ -372,16 +544,39 @@ function StepHeading({ view }: { readonly view: StepView }) {
               >
                 {parent.name}
               </Link>
-            </span>
+              {" › "}
+            </Fragment>
           ))}
+          {view.definition.name}
+        </h3>
+      </div>
+      {current !== null ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant="outline">In {current}</Badge>
+        </div>
+      ) : null}
+      {view.ticket.status.type === "cancelled" ? (
+        <p className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
+          <span className="font-medium">Cancelled:</span> {view.ticket.status.reason}
         </p>
       ) : null}
-      <h2 className="text-lg font-semibold tracking-tight">{view.definition.name}</h2>
       {step.status.type === "blocked" ? (
         <p className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
           <span className="font-medium">Blocked:</span> {step.status.reason}
         </p>
       ) : null}
+    </header>
+  );
+}
+
+/** The open step's instructions, under its name. */
+function StepInstructions({ view }: { readonly view: StepView }) {
+  return (
+    <div className="card flex flex-col gap-3 p-4">
+      <h2 className="text-base font-medium">{view.definition.name}</h2>
+      <p className="text-sm whitespace-pre-wrap text-foreground/80">
+        {view.definition.instructions}
+      </p>
     </div>
   );
 }

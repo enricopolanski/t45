@@ -6,19 +6,23 @@ import { cn } from "~/lib/utils";
 
 const Select = SelectPrimitive.Root;
 
+/** The select's button; `cell` drops the frame, for a select filling a table cell. */
 function SelectTrigger({
   className,
   size = "default",
+  variant = "default",
   children,
   ...props
-}: SelectPrimitive.Trigger.Props & { size?: "default" | "sm" }) {
+}: SelectPrimitive.Trigger.Props & { size?: "default" | "sm"; variant?: "default" | "cell" }) {
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "control-frame min-w-36 cursor-pointer select-none items-center justify-between gap-2 text-left outline-none transition-[color,box-shadow,background-color] pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 data-disabled:pointer-events-none [&_svg:not([class*='opacity-'])]:opacity-80 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-icon-muted [&_svg]:pointer-events-none [&_svg]:shrink-0",
-        size === "sm"
-          ? "min-h-8 gap-1.5 px-[calc(--spacing(2.5)-1px)] sm:min-h-7"
-          : "min-h-9 px-[calc(--spacing(3)-1px)] sm:min-h-8",
+        "cursor-pointer select-none items-center justify-between gap-2 text-left outline-none transition-[color,box-shadow,background-color] pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 data-disabled:pointer-events-none [&_svg:not([class*='opacity-'])]:opacity-80 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-icon-muted [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        variant === "cell"
+          ? "relative inline-flex min-h-9 w-full px-1.5 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          : size === "sm"
+            ? "control-frame min-w-36 min-h-8 gap-1.5 px-[calc(--spacing(2.5)-1px)] sm:min-h-7"
+            : "control-frame min-w-36 min-h-9 px-[calc(--spacing(3)-1px)] sm:min-h-8",
         className,
       )}
       data-slot="select-trigger"

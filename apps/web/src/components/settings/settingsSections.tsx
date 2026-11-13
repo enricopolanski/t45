@@ -1,4 +1,4 @@
-import { BotIcon, CalendarClockIcon, UsersIcon, WorkflowIcon } from "lucide-react";
+import { BotIcon, Building2Icon, CalendarClockIcon, UsersIcon, WorkflowIcon } from "lucide-react";
 
 import type { NavLink } from "../sidebar/AppNav";
 
@@ -23,6 +23,9 @@ export const SETTINGS_GROUPS: ReadonlyArray<{
   },
   {
     label: "Organization",
-    links: [{ to: "/settings/organization", label: "Organization", icon: <UsersIcon /> }],
+    links: [
+      { to: "/settings/organization", label: "Organization", icon: <Building2Icon /> },
+      { to: "/settings/people", label: "People", icon: <UsersIcon /> },
+    ],
   },
 ];

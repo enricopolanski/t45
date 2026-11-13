@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ProfileRouteImport } from './routes/profile'
-import { Route as PeopleRouteImport } from './routes/people'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AwaitingApprovalRouteImport } from './routes/awaiting-approval'
@@ -19,6 +18,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as MyWorkIndexRouteImport } from './routes/my-work.index'
 import { Route as ChatsIndexRouteImport } from './routes/chats.index'
 import { Route as BoardsIndexRouteImport } from './routes/boards.index'
+import { Route as SettingsPeopleRouteImport } from './routes/settings.people'
 import { Route as SettingsOrganizationRouteImport } from './routes/settings.organization'
 import { Route as SettingsAutomationsRouteImport } from './routes/settings.automations'
 import { Route as MyWorkStepIdRouteImport } from './routes/my-work.$stepId'
@@ -45,11 +45,6 @@ const SettingsRoute = SettingsRouteImport.update({
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PeopleRoute = PeopleRouteImport.update({
-  id: '/people',
-  path: '/people',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OnboardingRoute = OnboardingRouteImport.update({
@@ -86,6 +81,11 @@ const BoardsIndexRoute = BoardsIndexRouteImport.update({
   id: '/boards/',
   path: '/boards/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsPeopleRoute = SettingsPeopleRouteImport.update({
+  id: '/people',
+  path: '/people',
+  getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsOrganizationRoute = SettingsOrganizationRouteImport.update({
   id: '/organization',
@@ -182,7 +182,6 @@ export interface FileRoutesByFullPath {
   '/awaiting-approval': typeof AwaitingApprovalRoute
   '/login': typeof LoginRoute
   '/onboarding': typeof OnboardingRoute
-  '/people': typeof PeopleRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRouteWithChildren
   '/boards/$slug': typeof BoardsSlugRoute
@@ -190,6 +189,7 @@ export interface FileRoutesByFullPath {
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/organization': typeof SettingsOrganizationRoute
+  '/settings/people': typeof SettingsPeopleRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
   '/my-work/': typeof MyWorkIndexRoute
@@ -211,7 +211,6 @@ export interface FileRoutesByTo {
   '/awaiting-approval': typeof AwaitingApprovalRoute
   '/login': typeof LoginRoute
   '/onboarding': typeof OnboardingRoute
-  '/people': typeof PeopleRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRouteWithChildren
   '/boards/$slug': typeof BoardsSlugRoute
@@ -219,6 +218,7 @@ export interface FileRoutesByTo {
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/organization': typeof SettingsOrganizationRoute
+  '/settings/people': typeof SettingsPeopleRoute
   '/boards': typeof BoardsIndexRoute
   '/chats': typeof ChatsIndexRoute
   '/my-work': typeof MyWorkIndexRoute
@@ -241,7 +241,6 @@ export interface FileRoutesById {
   '/awaiting-approval': typeof AwaitingApprovalRoute
   '/login': typeof LoginRoute
   '/onboarding': typeof OnboardingRoute
-  '/people': typeof PeopleRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRouteWithChildren
   '/boards/$slug': typeof BoardsSlugRoute
@@ -249,6 +248,7 @@ export interface FileRoutesById {
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/organization': typeof SettingsOrganizationRoute
+  '/settings/people': typeof SettingsPeopleRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
   '/my-work/': typeof MyWorkIndexRoute
@@ -272,7 +272,6 @@ export interface FileRouteTypes {
     | '/awaiting-approval'
     | '/login'
     | '/onboarding'
-    | '/people'
     | '/profile'
     | '/settings'
     | '/boards/$slug'
@@ -280,6 +279,7 @@ export interface FileRouteTypes {
     | '/my-work/$stepId'
     | '/settings/automations'
     | '/settings/organization'
+    | '/settings/people'
     | '/boards/'
     | '/chats/'
     | '/my-work/'
@@ -301,7 +301,6 @@ export interface FileRouteTypes {
     | '/awaiting-approval'
     | '/login'
     | '/onboarding'
-    | '/people'
     | '/profile'
     | '/settings'
     | '/boards/$slug'
@@ -309,6 +308,7 @@ export interface FileRouteTypes {
     | '/my-work/$stepId'
     | '/settings/automations'
     | '/settings/organization'
+    | '/settings/people'
     | '/boards'
     | '/chats'
     | '/my-work'
@@ -330,7 +330,6 @@ export interface FileRouteTypes {
     | '/awaiting-approval'
     | '/login'
     | '/onboarding'
-    | '/people'
     | '/profile'
     | '/settings'
     | '/boards/$slug'
@@ -338,6 +337,7 @@ export interface FileRouteTypes {
     | '/my-work/$stepId'
     | '/settings/automations'
     | '/settings/organization'
+    | '/settings/people'
     | '/boards/'
     | '/chats/'
     | '/my-work/'
@@ -360,7 +360,6 @@ export interface RootRouteChildren {
   AwaitingApprovalRoute: typeof AwaitingApprovalRoute
   LoginRoute: typeof LoginRoute
   OnboardingRoute: typeof OnboardingRoute
-  PeopleRoute: typeof PeopleRoute
   ProfileRoute: typeof ProfileRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   BoardsSlugRoute: typeof BoardsSlugRoute
@@ -397,13 +396,6 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile'
       preLoaderRoute: typeof ProfileRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/people': {
-      id: '/people'
-      path: '/people'
-      fullPath: '/people'
-      preLoaderRoute: typeof PeopleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding': {
@@ -454,6 +446,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/boards/'
       preLoaderRoute: typeof BoardsIndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/settings/people': {
+      id: '/settings/people'
+      path: '/people'
+      fullPath: '/settings/people'
+      preLoaderRoute: typeof SettingsPeopleRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/settings/organization': {
       id: '/settings/organization'
@@ -580,11 +579,13 @@ declare module '@tanstack/react-router' {
 interface SettingsRouteChildren {
   SettingsAutomationsRoute: typeof SettingsAutomationsRoute
   SettingsOrganizationRoute: typeof SettingsOrganizationRoute
+  SettingsPeopleRoute: typeof SettingsPeopleRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAutomationsRoute: SettingsAutomationsRoute,
   SettingsOrganizationRoute: SettingsOrganizationRoute,
+  SettingsPeopleRoute: SettingsPeopleRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
@@ -596,7 +597,6 @@ const rootRouteChildren: RootRouteChildren = {
   AwaitingApprovalRoute: AwaitingApprovalRoute,
   LoginRoute: LoginRoute,
   OnboardingRoute: OnboardingRoute,
-  PeopleRoute: PeopleRoute,
   ProfileRoute: ProfileRoute,
   SettingsRoute: SettingsRouteWithChildren,
   BoardsSlugRoute: BoardsSlugRoute,

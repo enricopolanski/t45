@@ -54,6 +54,7 @@ const decodeAutomatedRows = Schema.decodeUnknownEffect(
     Schema.Struct({
       origin: Schema.fromJsonString(AutomationOrigin),
       chatStatus: Schema.NullOr(ChatStatus),
+      startedAt: Schema.DateTimeUtcFromString,
     }),
   ),
 );
@@ -83,14 +84,16 @@ const makeOrigins = Effect.gen(function* () {
     listByTrigger: (reference: { readonly ticketId: string; readonly stepId: string }) =>
       sql`SELECT json_object('kind', 'automation', 'chatId', o.chat_id,
           'trigger', json(o.trigger)) AS origin,
-          c.status AS "chatStatus"
+          c.status AS "chatStatus", c.created_at AS "startedAt"
         FROM chat_origins o JOIN chats c ON c.id = o.chat_id
         WHERE o.trigger IS NOT NULL
           AND json_extract(o.trigger, '$.ticketId') = ${reference.ticketId}
           AND json_extract(o.trigger, '$.stepId') = ${reference.stepId}
         ORDER BY c.created_at, c.id`.pipe(
         Effect.flatMap(decodeAutomatedRows),
-        Effect.map((rows) => rows.map(({ origin, chatStatus }) => ({ ...origin, chatStatus }))),
+        Effect.map((rows) =>
+          rows.map(({ origin, chatStatus, startedAt }) => ({ ...origin, chatStatus, startedAt })),
+        ),
         Effect.orDie,
       ),
   };

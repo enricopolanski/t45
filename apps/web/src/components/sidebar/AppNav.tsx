@@ -1,11 +1,5 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import {
-  BotIcon,
-  ContactIcon,
-  InboxIcon,
-  KanbanSquareIcon,
-  MessagesSquareIcon,
-} from "lucide-react";
+import { InboxIcon, KanbanSquareIcon, MessagesSquareIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { api, type ApiSuccess } from "../../rpc/api";
@@ -27,26 +21,21 @@ export type NavLink = {
     | "/boards"
     | "/my-work"
     | "/chats"
-    | "/people"
     | "/settings/projects"
     | "/settings/agents"
     | "/settings/automations"
-    | "/settings/organization";
+    | "/settings/organization"
+    | "/settings/people";
 };
 
 /** Everyone's areas. */
 const MAIN_LINKS: ReadonlyArray<NavLink> = [
   { label: "My work", icon: <InboxIcon />, to: "/my-work" },
   { label: "Chat", icon: <MessagesSquareIcon />, to: "/chats" },
-  { label: "People", icon: <ContactIcon />, to: "/people" },
-  { label: "Agents", icon: <BotIcon />, to: "/settings/agents" },
   { label: "Boards", icon: <KanbanSquareIcon />, to: "/boards" },
 ];
 
-/**
- * The app's main sidebar, for everyone: My work, Chat, People, Agents, and Boards (or the one
- * board).
- */
+/** The app's main sidebar, for everyone: My work, Chat, and Boards (or the one board). */
 export function AppNavSidebar() {
   return (
     <>
