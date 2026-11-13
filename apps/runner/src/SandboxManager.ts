@@ -97,12 +97,15 @@ const sandboxNetwork =
           .substituteInHeaderFields(["authorization", "x-api-key"]),
       )
       // Over plain HTTP no TLS identity vouches for the server, so its host alone decides.
+      // Placeholders the agent reads (in a config file, its environment) end up in the
+      // conversation, so the provider receives them unchanged instead of blocking the chat.
       .secret((secret) =>
         secret
           .env(TOOL_TOKEN_ENV)
           .value(Redacted.value(toolToken))
           .placeholder(TOOL_TOKEN_PLACEHOLDER)
           .allow(endpoint.hostname)
+          .allowPlaceholderFor(PROVIDER_HOST)
           .requireTlsIdentity(endpoint.protocol === "https:")
           .substituteInHeaderFields(["authorization"]),
       );
@@ -114,6 +117,7 @@ const sandboxNetwork =
             .env(name)
             .value(Redacted.value(secretValues.get(name)!))
             .placeholder(secretPlaceholder(name))
+            .allowPlaceholderFor(PROVIDER_HOST)
             .substituteInHeaders(true),
         ),
       );
