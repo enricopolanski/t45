@@ -253,6 +253,24 @@ const make = Effect.gen(function* () {
     });
   const memberChat = (member: Member, chatId: ChatId) =>
     access(member, chatId).pipe(Effect.filterOrFail((chat) => chat !== null, notFound));
+  /**
+   * A chat someone reads: their own, or an automation's run on a step they see. The run shows its
+   * agent's setup, so it reads only to those who can use that agent, as running it does.
+   */
+  const readableChat = (member: Member, chatId: ChatId) =>
+    Effect.gen(function* () {
+      const origin = yield* origins.get(chatId);
+      if (origin?.kind !== "automation") return yield* memberChat(member, chatId);
+      const chat = yield* liveChat(chatId);
+      const agent = yield* agents.get(chat.agentId);
+      const { trigger } = origin;
+      const isReadable =
+        trigger.type === "step" &&
+        agent !== null &&
+        canUse(agent, member.userId) &&
+        (yield* projectAccess.seesStep(member.userId, trigger.ticketId, trigger.stepId));
+      return isReadable ? chat : yield* notFound();
+    });
   const summaryOf = (chat: Chat, agentName: string | null) =>
     Effect.gen(function* () {
       const origin = yield* origins.get(chat.id);
@@ -432,10 +450,10 @@ const make = Effect.gen(function* () {
                 ? change.sessionId === requested
                 : change.kind !== "delta" || change.event.sessionId === requested),
           );
-          const chat = yield* memberChat(member, input.chatId);
+          const chat = yield* readableChat(member, input.chatId);
           const sessionId = yield* sessionOf(chat, requested);
           const snapshotOf = Effect.gen(function* () {
-            const now = yield* memberChat(member, chat.id);
+            const now = yield* readableChat(member, chat.id);
             const first = yield* pageOf(chat.id, sessionId, null);
             return {
               _tag: "snapshot",
@@ -503,7 +521,7 @@ const make = Effect.gen(function* () {
 
     history: (input: Payload<"chats.getHistory">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* memberChat(member, input.chatId);
+        const chat = yield* readableChat(member, input.chatId);
         const sessionId = yield* sessionOf(chat, input.sessionId);
         const before = yield* repository.message(chat.id, sessionId, input.before);
         if (before === null) return yield* notFound();
@@ -512,7 +530,7 @@ const make = Effect.gen(function* () {
 
     message: (input: Payload<"chats.getMessage">, member: Member) =>
       Effect.gen(function* () {
-        const chat = yield* memberChat(member, input.chatId);
+        const chat = yield* readableChat(member, input.chatId);
         const sessionId = yield* sessionOf(chat, input.sessionId);
         const row = yield* repository.message(chat.id, sessionId, input.messageId);
         if (row === null) return yield* notFound();

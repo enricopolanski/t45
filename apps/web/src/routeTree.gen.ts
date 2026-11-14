@@ -35,6 +35,7 @@ import { Route as SettingsWorkflowsWorkflowIdIndexRouteImport } from './routes/s
 import { Route as SettingsWorkflowsWorkflowIdStepsRouteImport } from './routes/settings_.workflows.$workflowId.steps'
 import { Route as SettingsAgentsSkillsNewRouteImport } from './routes/settings_.agents.skills.new'
 import { Route as SettingsAgentsSkillsSkillIdRouteImport } from './routes/settings_.agents.skills.$skillId'
+import { Route as MyWorkStepIdRunsChatIdRouteImport } from './routes/my-work.$stepId_.runs.$chatId'
 import { Route as SettingsProjectsProjectIdEditIndexRouteImport } from './routes/settings_.projects.$projectId.edit.index'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -170,6 +171,11 @@ const SettingsAgentsSkillsSkillIdRoute =
     path: '/settings/agents/skills/$skillId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const MyWorkStepIdRunsChatIdRoute = MyWorkStepIdRunsChatIdRouteImport.update({
+  id: '/my-work/$stepId_/runs/$chatId',
+  path: '/my-work/$stepId/runs/$chatId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsProjectsProjectIdEditIndexRoute =
   SettingsProjectsProjectIdEditIndexRouteImport.update({
     id: '/settings_/projects/$projectId/edit/',
@@ -200,6 +206,7 @@ export interface FileRoutesByFullPath {
   '/settings/agents/': typeof SettingsAgentsIndexRoute
   '/settings/projects/': typeof SettingsProjectsIndexRoute
   '/settings/workflows/': typeof SettingsWorkflowsIndexRoute
+  '/my-work/$stepId/runs/$chatId': typeof MyWorkStepIdRunsChatIdRoute
   '/settings/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
   '/settings/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
   '/settings/workflows/$workflowId/steps': typeof SettingsWorkflowsWorkflowIdStepsRoute
@@ -229,6 +236,7 @@ export interface FileRoutesByTo {
   '/settings/agents': typeof SettingsAgentsIndexRoute
   '/settings/projects': typeof SettingsProjectsIndexRoute
   '/settings/workflows': typeof SettingsWorkflowsIndexRoute
+  '/my-work/$stepId/runs/$chatId': typeof MyWorkStepIdRunsChatIdRoute
   '/settings/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
   '/settings/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
   '/settings/workflows/$workflowId/steps': typeof SettingsWorkflowsWorkflowIdStepsRoute
@@ -259,6 +267,7 @@ export interface FileRoutesById {
   '/settings_/agents/': typeof SettingsAgentsIndexRoute
   '/settings_/projects/': typeof SettingsProjectsIndexRoute
   '/settings_/workflows/': typeof SettingsWorkflowsIndexRoute
+  '/my-work/$stepId_/runs/$chatId': typeof MyWorkStepIdRunsChatIdRoute
   '/settings_/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
   '/settings_/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
   '/settings_/workflows/$workflowId/steps': typeof SettingsWorkflowsWorkflowIdStepsRoute
@@ -290,6 +299,7 @@ export interface FileRouteTypes {
     | '/settings/agents/'
     | '/settings/projects/'
     | '/settings/workflows/'
+    | '/my-work/$stepId/runs/$chatId'
     | '/settings/agents/skills/$skillId'
     | '/settings/agents/skills/new'
     | '/settings/workflows/$workflowId/steps'
@@ -319,6 +329,7 @@ export interface FileRouteTypes {
     | '/settings/agents'
     | '/settings/projects'
     | '/settings/workflows'
+    | '/my-work/$stepId/runs/$chatId'
     | '/settings/agents/skills/$skillId'
     | '/settings/agents/skills/new'
     | '/settings/workflows/$workflowId/steps'
@@ -348,6 +359,7 @@ export interface FileRouteTypes {
     | '/settings_/agents/'
     | '/settings_/projects/'
     | '/settings_/workflows/'
+    | '/my-work/$stepId_/runs/$chatId'
     | '/settings_/agents/skills/$skillId'
     | '/settings_/agents/skills/new'
     | '/settings_/workflows/$workflowId/steps'
@@ -375,6 +387,7 @@ export interface RootRouteChildren {
   SettingsAgentsIndexRoute: typeof SettingsAgentsIndexRoute
   SettingsProjectsIndexRoute: typeof SettingsProjectsIndexRoute
   SettingsWorkflowsIndexRoute: typeof SettingsWorkflowsIndexRoute
+  MyWorkStepIdRunsChatIdRoute: typeof MyWorkStepIdRunsChatIdRoute
   SettingsAgentsSkillsSkillIdRoute: typeof SettingsAgentsSkillsSkillIdRoute
   SettingsAgentsSkillsNewRoute: typeof SettingsAgentsSkillsNewRoute
   SettingsWorkflowsWorkflowIdStepsRoute: typeof SettingsWorkflowsWorkflowIdStepsRoute
@@ -566,6 +579,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAgentsSkillsSkillIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/my-work/$stepId_/runs/$chatId': {
+      id: '/my-work/$stepId_/runs/$chatId'
+      path: '/my-work/$stepId/runs/$chatId'
+      fullPath: '/my-work/$stepId/runs/$chatId'
+      preLoaderRoute: typeof MyWorkStepIdRunsChatIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings_/projects/$projectId/edit/': {
       id: '/settings_/projects/$projectId/edit/'
       path: '/settings/projects/$projectId/edit'
@@ -612,6 +632,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsAgentsIndexRoute: SettingsAgentsIndexRoute,
   SettingsProjectsIndexRoute: SettingsProjectsIndexRoute,
   SettingsWorkflowsIndexRoute: SettingsWorkflowsIndexRoute,
+  MyWorkStepIdRunsChatIdRoute: MyWorkStepIdRunsChatIdRoute,
   SettingsAgentsSkillsSkillIdRoute: SettingsAgentsSkillsSkillIdRoute,
   SettingsAgentsSkillsNewRoute: SettingsAgentsSkillsNewRoute,
   SettingsWorkflowsWorkflowIdStepsRoute: SettingsWorkflowsWorkflowIdStepsRoute,

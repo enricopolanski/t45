@@ -23,7 +23,7 @@ import { Fragment, type ReactNode, useState } from "react";
 import { api, runtime } from "../../rpc/api";
 import { appAtomRegistry } from "../../state/atomRegistry";
 import { stepAutomationList } from "../../state/agents";
-import { apiWatch, useApiQuery } from "../../state/rpc";
+import { useApiQuery } from "../../state/rpc";
 import { describeFailure } from "../../lib/failures";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -55,10 +55,9 @@ import {
 } from "./workLogic";
 import { formatDurationLabel, formatRelativeTimeLabel } from "../../timestampFormat";
 import { useNowMinute } from "../../hooks/useNowMinute";
-import { workChanged } from "../../state/work";
+import { stepViews, workChanged } from "../../state/work";
 
 const isStepId = Schema.is(StringId);
-const stepViews = apiWatch("workflows.watchStep", { idleTtlMs: 0 });
 
 /**
  * An item, opened on one of its steps, like an issue: the item's title and details, what
@@ -245,7 +244,7 @@ function StepHistory({ view }: { readonly view: StepView }) {
   );
 }
 
-const RUN_STATUSES = {
+export const RUN_STATUSES = {
   running: { label: "Running", Icon: LoaderCircleIcon, tone: "animate-spin text-info" },
   completed: { label: "Completed", Icon: CircleCheckIcon, tone: "text-success-foreground" },
   failed: { label: "Failed", Icon: CircleXIcon, tone: "text-destructive-foreground" },
@@ -348,7 +347,14 @@ function StepAutomations({
                 </div>
                 <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                   <p className="pl-6">
-                    #{number} · Manually run by {actorName(directory, run.ranBy)}
+                    <Link
+                      to="/my-work/$stepId/runs/$chatId"
+                      params={{ stepId: view.step.id, chatId: run.chatId }}
+                      className="hover:text-foreground hover:underline"
+                    >
+                      #{number}
+                    </Link>{" "}
+                    · Manually run by {actorName(directory, run.ranBy)}
                   </p>
                   {run.status !== "running" && run.latestReport !== null && (
                     <p className="pl-6 wrap-break-word text-foreground">

@@ -69,7 +69,57 @@ test("agents report live progress on steps and settings, retaining reports per r
   expect((await agentApp.report(first, "Checking invoices")).isError).not.toBe(true);
   await expect(automations.getByText("Checking invoices", { exact: true })).toBeVisible();
   await expect(settings.getByText("Checking invoices", { exact: true })).toBeVisible();
+
+  // The run's number opens its page: how it stands, then its reports, tool calls and session.
+  await automations.getByRole("link", { name: "#1", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Check order #1", level: 2 })).toBeVisible();
+  const summary = page.getByRole("region", { name: "Summary" });
+  await expect(summary).toContainText("Manually triggered");
+  await expect(summary).toContainText("Running");
+  const rows = page.getByRole("tabpanel").getByRole("listitem");
+  await expect(rows).toHaveText([/^Checking invoices/u]);
+  const at = 1_790_000_000_000;
+  first.emit({
+    _tag: "messages",
+    sessionId: first.request.rootId,
+    messages: [
+      {
+        id: "msg_a1",
+        type: "assistant",
+        agent: "build",
+        model: { providerID: "opencode-go", id: "test-model" },
+        content: [
+          {
+            type: "tool",
+            id: "call_1",
+            name: "skill",
+            state: {
+              status: "completed",
+              input: { id: "read-documents" },
+              content: [{ type: "text", text: "Loaded." }],
+            },
+            time: { created: at, completed: at },
+          },
+          { type: "text", text: "Both documents match." },
+        ],
+        cost: 0.5,
+        tokens: { input: 1200, output: 300, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: at, completed: at },
+      },
+    ],
+  });
+  await page.getByRole("tab", { name: "Session", exact: true }).click();
+  await expect(page.getByText('You contribute to the step "Collect"')).toBeVisible();
+  await expect(page.getByText("Both documents match.")).toBeVisible();
+  await page.getByRole("tab", { name: "Tool calls", exact: true }).click();
+  await expect(rows).toHaveText([/skill\{"id":"read-documents"\}$/u]);
   expect((await agentApp.report(first, "Matching purchase orders")).isError).not.toBe(true);
+  await page.getByRole("tab", { name: "Reports", exact: true }).click();
+  await expect(rows).toHaveText([/^Checking invoices/u, /^Matching purchase orders/u]);
+  // The report refreshed the step, which carries what the run used.
+  await expect(summary).toContainText("1.5K");
+  await expect(summary).toContainText("$0.50");
+  await page.getByRole("link", { name: "Order 7", exact: true }).click();
   await expect(automations.getByText("Matching purchase orders", { exact: true })).toBeVisible();
   await expect(settings.getByText("Matching purchase orders", { exact: true })).toBeVisible();
   await expect(automations.getByText("Checking invoices", { exact: true })).toHaveCount(0);
