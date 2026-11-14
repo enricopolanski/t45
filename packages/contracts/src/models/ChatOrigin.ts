@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { AutomationId } from "./Automation.ts";
-import { ChatId } from "./Chat.ts";
+import { ChatId, type ChatStatus } from "./Chat.ts";
 import { StringId } from "./primitives.ts";
 
 /** What started an automation's run, and the member on whose authority it runs. */
@@ -22,6 +22,13 @@ export const Trigger = Schema.Union([
   }),
 ]);
 export type Trigger = typeof Trigger.Type;
+
+/** How an automation's run stands. */
+export const RunStatus = Schema.Literals(["running", "completed", "failed", "stopped"]);
+export type RunStatus = typeof RunStatus.Type;
+/** A run's chat keeps no status once its execution ends well. */
+export const runStatusOf = (status: ChatStatus | null): RunStatus =>
+  status === null ? "completed" : status === "interrupted" ? "stopped" : status;
 
 const Conversation = Schema.Struct({
   kind: Schema.Literal("conversation"),

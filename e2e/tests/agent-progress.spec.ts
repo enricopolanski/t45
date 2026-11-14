@@ -32,12 +32,12 @@ test("agents report live progress on steps and settings, retaining reports per r
 }) => {
   const page = await signIn("ada@example.test");
   await nameOrganization(page);
-  await page.goto("/settings/automations");
+  await page.goto("/settings/automations/runs");
   await page.getByRole("button", { name: "New automation" }).click();
   await page.getByLabel("Name", { exact: true }).fill("Check order");
   await page.getByLabel("Prompt", { exact: true }).fill("Check invoices and purchase orders.");
   await page.getByRole("button", { name: "Create automation" }).click();
-  await expect(page.getByRole("heading", { name: "Check order", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check order", exact: true })).toBeVisible();
 
   const workflowId = await createWorkflow(page, "Orders");
   await page.getByRole("button", { name: "Add step" }).click();
@@ -50,7 +50,8 @@ test("agents report live progress on steps and settings, retaining reports per r
   await expect(page.getByText("New tickets start on version 1")).toBeVisible();
   await startItem(page, projectId, "Order 7");
   const settings = await page.context().newPage();
-  await settings.goto("/settings/automations");
+  await settings.goto("/settings/automations/runs");
+  await settings.getByRole("button", { name: "Check order", exact: true }).click();
   await expect(settings.getByRole("heading", { name: "Check order", exact: true })).toBeVisible();
 
   const automations = page.getByRole("complementary", { name: "Automations" });
@@ -69,6 +70,8 @@ test("agents report live progress on steps and settings, retaining reports per r
   expect((await agentApp.report(first, "Checking invoices")).isError).not.toBe(true);
   await expect(automations.getByText("Checking invoices", { exact: true })).toBeVisible();
   await expect(settings.getByText("Checking invoices", { exact: true })).toBeVisible();
+  // Settings list the run under its ticket, which opens the step.
+  await expect(settings.getByRole("link", { name: "Order 7", exact: true })).toBeVisible();
 
   // The run's number opens its page: how it stands, then its reports, tool calls and session.
   await automations.getByRole("link", { name: "#1", exact: true }).click();
@@ -141,6 +144,7 @@ test("agents report live progress on steps and settings, retaining reports per r
   expect(agentApp.readReports(first)).toBe(reports);
 
   // A manual run uses the same tool and gets its own reports, while the step keeps its run.
+  await settings.getByRole("button", { name: "Check order", exact: true }).click();
   await settings.getByRole("button", { name: "Actions for Check order" }).click();
   await settings.getByRole("menuitem", { name: "Run now", exact: true }).click();
   const second = await agentApp.nextExecution();
@@ -151,7 +155,7 @@ test("agents report live progress on steps and settings, retaining reports per r
   await expect(automations.getByText("Matching purchase orders", { exact: true })).toBeVisible();
   await expect(automations.getByText("Checking a new order", { exact: true })).toHaveCount(0);
   second.finish();
-  await expect(settings.getByText(/Last run: Ended/u)).toBeVisible();
+  await expect(settings.getByRole("img", { name: "Completed" })).toBeVisible();
   await expect(settings.getByText("Checking a new order", { exact: true })).toBeVisible();
   expect((await agentApp.report(second, "After completion")).isError).toBe(true);
 });

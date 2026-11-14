@@ -8,11 +8,15 @@ import { Form } from "@opencode/schema/form";
 import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import type * as Statement from "effect/sql/Statement";
-import { AutomationOrigin, ChatOrigin, Trigger } from "@t45/contracts/models/ChatOrigin";
+import {
+  AutomationOrigin,
+  ChatOrigin,
+  runStatusOf,
+  Trigger,
+} from "@t45/contracts/models/ChatOrigin";
 import { ChatSummary } from "@t45/contracts/resources/Chats";
 import { isSettled } from "@t45/contracts/resources/Runner";
 import type { Agent } from "@t45/contracts/models/Agent";
-import type { AutomationId } from "@t45/contracts/models/Automation";
 import {
   Chat,
   type ChatId,
@@ -52,20 +56,30 @@ export interface MessageRow {
 
 const decodeOrigin = Schema.decodeUnknownEffect(Schema.fromJsonString(ChatOrigin));
 const encodeTrigger = Schema.encodeSync(Schema.fromJsonString(Trigger));
-const decodeAutomatedRows = Schema.decodeUnknownEffect(
+const AutomatedRow = Schema.Struct({
+  origin: Schema.fromJsonString(AutomationOrigin),
+  chatStatus: Schema.NullOr(ChatStatus),
+  startedAt: Schema.DateTimeUtcFromString,
+  endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  latestReport: Schema.NullOr(Schema.fromJsonString(Report)),
+});
+const decodeAutomatedRows = Schema.decodeUnknownEffect(Schema.Array(AutomatedRow));
+const decodeAutomatedRowsWithUsage = Schema.decodeUnknownEffect(
   Schema.Array(
     Schema.Struct({
-      origin: Schema.fromJsonString(AutomationOrigin),
-      chatStatus: Schema.NullOr(ChatStatus),
-      startedAt: Schema.DateTimeUtcFromString,
-      endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
-      latestReport: Schema.NullOr(Schema.fromJsonString(Report)),
+      ...AutomatedRow.fields,
       usage: Schema.fromJsonString(
         Schema.Struct(Struct.pick(Session.Info.fields, ["cost", "tokens"])),
       ),
     }),
   ),
 );
+/** An automation's run as its chat and origin stand. */
+const toRun = <Row extends typeof AutomatedRow.Type>({
+  origin: { chatId, trigger },
+  chatStatus,
+  ...run
+}: Row) => ({ ...run, chatId, trigger, status: runStatusOf(chatStatus) });
 const sumMessages = (path: string) => `TOTAL(json_extract(m.json, '$.${path}'))`;
 /**
  * What a chat used, summed over its messages: a session's own total comes only once its execution
@@ -89,6 +103,11 @@ const makeOrigins = Effect.gen(function* () {
     );
   const get = (chatId: ChatId) =>
     select(sql`chat_id = ${chatId}`).pipe(Effect.map((rows) => rows[0] ?? null));
+  const runColumns = sql.literal(`json_object('kind', 'automation', 'chatId', o.chat_id,
+      'trigger', json(o.trigger)) AS origin,
+    c.status AS "chatStatus", c.created_at AS "startedAt",
+    CASE WHEN c.status = 'running' THEN NULL ELSE c.updated_at END AS "endedAt",
+    json_extract(c.reports, '$[#-1]') AS "latestReport"`);
   return {
     get,
     insert: (origin: ChatOrigin) =>
@@ -99,28 +118,27 @@ const makeOrigins = Effect.gen(function* () {
         Effect.asVoid,
         Effect.orDie,
       ),
+    /** A step's automation runs, oldest first, with what each used. */
     listByTrigger: (reference: { readonly ticketId: string; readonly stepId: string }) =>
-      sql`SELECT json_object('kind', 'automation', 'chatId', o.chat_id,
-          'trigger', json(o.trigger)) AS origin,
-          c.status AS "chatStatus", c.created_at AS "startedAt",
-          CASE WHEN c.status = 'running' THEN NULL ELSE c.updated_at END AS "endedAt",
-          json_extract(c.reports, '$[#-1]') AS "latestReport", ${sql.literal(USAGE)} AS usage
+      sql`SELECT ${runColumns}, ${sql.literal(USAGE)} AS usage
         FROM chat_origins o JOIN chats c ON c.id = o.chat_id
         WHERE o.trigger IS NOT NULL
           AND json_extract(o.trigger, '$.ticketId') = ${reference.ticketId}
           AND json_extract(o.trigger, '$.stepId') = ${reference.stepId}
         ORDER BY c.created_at, c.id`.pipe(
-        Effect.flatMap(decodeAutomatedRows),
-        Effect.map((rows) =>
-          rows.map(({ origin: { chatId, trigger }, usage, ...run }) => ({
-            chatId,
-            trigger,
-            ...usage,
-            ...run,
-          })),
-        ),
+        Effect.flatMap(decodeAutomatedRowsWithUsage),
+        Effect.map((rows) => rows.map(({ usage, ...row }) => ({ ...toRun(row), ...usage }))),
         Effect.orDie,
       ),
+    /** Every automation run, on a step or not, newest first. */
+    listAutomated: sql`SELECT ${runColumns}
+        FROM chat_origins o JOIN chats c ON c.id = o.chat_id
+        WHERE o.trigger IS NOT NULL
+        ORDER BY c.created_at DESC, c.id DESC`.pipe(
+      Effect.flatMap(decodeAutomatedRows),
+      Effect.map((rows) => rows.map(toRun)),
+      Effect.orDie,
+    ),
   };
 });
 
@@ -197,15 +215,6 @@ const make = Effect.gen(function* () {
 
   return {
     get,
-    getLatestAutomationRun: (automationId: AutomationId) =>
-      sql`SELECT ${chatColumns} FROM chats WHERE id = (
-        SELECT c.id FROM chat_origins o JOIN chats c ON c.id = o.chat_id
-        WHERE json_extract(o.trigger, '$.automationId') = ${automationId}
-        ORDER BY c.created_at DESC, c.id DESC LIMIT 1
-      )`.pipe(
-        Effect.flatMap(([row]) => (row === undefined ? Effect.succeed(null) : decodeChat(row))),
-        Effect.orDie,
-      ),
     appendReport: (chatId: ChatId, report: Report) =>
       sql`UPDATE chats SET reports = json_insert(COALESCE(reports, '[]'), '$[#]', json(${encodeReport(report)}))
         WHERE id = ${chatId} AND status = 'running' AND deleted_at IS NULL

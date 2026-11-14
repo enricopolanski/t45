@@ -14,7 +14,15 @@ export const SETTINGS_GROUPS: ReadonlyArray<{
     label: "Work",
     links: [
       { to: "/settings/projects", label: "Projects", icon: <WorkflowIcon /> },
-      { to: "/settings/automations", label: "Automations", icon: <CalendarClockIcon /> },
+      {
+        to: "/settings/automations",
+        label: "Automations",
+        icon: <CalendarClockIcon />,
+        children: [
+          { to: "/settings/automations/runs", label: "Runs" },
+          { to: "/settings/automations/benchmarks", label: "Benchmarks" },
+        ],
+      },
     ],
   },
   {

@@ -382,7 +382,7 @@ function StepAutomations({
   );
 }
 
-function RunDetail({
+export function RunDetail({
   Icon,
   children,
 }: {

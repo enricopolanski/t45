@@ -20,17 +20,19 @@ import { Route as ChatsIndexRouteImport } from './routes/chats.index'
 import { Route as BoardsIndexRouteImport } from './routes/boards.index'
 import { Route as SettingsPeopleRouteImport } from './routes/settings.people'
 import { Route as SettingsOrganizationRouteImport } from './routes/settings.organization'
-import { Route as SettingsAutomationsRouteImport } from './routes/settings.automations'
 import { Route as MyWorkStepIdRouteImport } from './routes/my-work.$stepId'
 import { Route as ChatsChatIdRouteImport } from './routes/chats.$chatId'
 import { Route as BoardsSlugRouteImport } from './routes/boards.$slug'
 import { Route as SettingsWorkflowsIndexRouteImport } from './routes/settings_.workflows.index'
 import { Route as SettingsProjectsIndexRouteImport } from './routes/settings_.projects.index'
 import { Route as SettingsAgentsIndexRouteImport } from './routes/settings_.agents.index'
+import { Route as SettingsAutomationsIndexRouteImport } from './routes/settings.automations.index'
 import { Route as SettingsWorkflowsNewRouteImport } from './routes/settings_.workflows.new'
 import { Route as SettingsProjectsNewRouteImport } from './routes/settings_.projects.new'
 import { Route as SettingsAgentsNewRouteImport } from './routes/settings_.agents.new'
 import { Route as SettingsAgentsAgentIdRouteImport } from './routes/settings_.agents.$agentId'
+import { Route as SettingsAutomationsRunsRouteImport } from './routes/settings.automations.runs'
+import { Route as SettingsAutomationsBenchmarksRouteImport } from './routes/settings.automations.benchmarks'
 import { Route as SettingsWorkflowsWorkflowIdIndexRouteImport } from './routes/settings_.workflows.$workflowId.index'
 import { Route as SettingsWorkflowsWorkflowIdStepsRouteImport } from './routes/settings_.workflows.$workflowId.steps'
 import { Route as SettingsAgentsSkillsNewRouteImport } from './routes/settings_.agents.skills.new'
@@ -93,11 +95,6 @@ const SettingsOrganizationRoute = SettingsOrganizationRouteImport.update({
   path: '/organization',
   getParentRoute: () => SettingsRoute,
 } as any)
-const SettingsAutomationsRoute = SettingsAutomationsRouteImport.update({
-  id: '/automations',
-  path: '/automations',
-  getParentRoute: () => SettingsRoute,
-} as any)
 const MyWorkStepIdRoute = MyWorkStepIdRouteImport.update({
   id: '/my-work/$stepId',
   path: '/my-work/$stepId',
@@ -128,6 +125,12 @@ const SettingsAgentsIndexRoute = SettingsAgentsIndexRouteImport.update({
   path: '/settings/agents/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsAutomationsIndexRoute =
+  SettingsAutomationsIndexRouteImport.update({
+    id: '/automations/',
+    path: '/automations/',
+    getParentRoute: () => SettingsRoute,
+  } as any)
 const SettingsWorkflowsNewRoute = SettingsWorkflowsNewRouteImport.update({
   id: '/settings_/workflows/new',
   path: '/settings/workflows/new',
@@ -148,6 +151,17 @@ const SettingsAgentsAgentIdRoute = SettingsAgentsAgentIdRouteImport.update({
   path: '/settings/agents/$agentId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsAutomationsRunsRoute = SettingsAutomationsRunsRouteImport.update({
+  id: '/automations/runs',
+  path: '/automations/runs',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAutomationsBenchmarksRoute =
+  SettingsAutomationsBenchmarksRouteImport.update({
+    id: '/automations/benchmarks',
+    path: '/automations/benchmarks',
+    getParentRoute: () => SettingsRoute,
+  } as any)
 const SettingsWorkflowsWorkflowIdIndexRoute =
   SettingsWorkflowsWorkflowIdIndexRouteImport.update({
     id: '/settings_/workflows/$workflowId/',
@@ -193,16 +207,18 @@ export interface FileRoutesByFullPath {
   '/boards/$slug': typeof BoardsSlugRoute
   '/chats/$chatId': typeof ChatsChatIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
-  '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/organization': typeof SettingsOrganizationRoute
   '/settings/people': typeof SettingsPeopleRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
   '/my-work/': typeof MyWorkIndexRoute
+  '/settings/automations/benchmarks': typeof SettingsAutomationsBenchmarksRoute
+  '/settings/automations/runs': typeof SettingsAutomationsRunsRoute
   '/settings/agents/$agentId': typeof SettingsAgentsAgentIdRoute
   '/settings/agents/new': typeof SettingsAgentsNewRoute
   '/settings/projects/new': typeof SettingsProjectsNewRoute
   '/settings/workflows/new': typeof SettingsWorkflowsNewRoute
+  '/settings/automations/': typeof SettingsAutomationsIndexRoute
   '/settings/agents/': typeof SettingsAgentsIndexRoute
   '/settings/projects/': typeof SettingsProjectsIndexRoute
   '/settings/workflows/': typeof SettingsWorkflowsIndexRoute
@@ -223,16 +239,18 @@ export interface FileRoutesByTo {
   '/boards/$slug': typeof BoardsSlugRoute
   '/chats/$chatId': typeof ChatsChatIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
-  '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/organization': typeof SettingsOrganizationRoute
   '/settings/people': typeof SettingsPeopleRoute
   '/boards': typeof BoardsIndexRoute
   '/chats': typeof ChatsIndexRoute
   '/my-work': typeof MyWorkIndexRoute
+  '/settings/automations/benchmarks': typeof SettingsAutomationsBenchmarksRoute
+  '/settings/automations/runs': typeof SettingsAutomationsRunsRoute
   '/settings/agents/$agentId': typeof SettingsAgentsAgentIdRoute
   '/settings/agents/new': typeof SettingsAgentsNewRoute
   '/settings/projects/new': typeof SettingsProjectsNewRoute
   '/settings/workflows/new': typeof SettingsWorkflowsNewRoute
+  '/settings/automations': typeof SettingsAutomationsIndexRoute
   '/settings/agents': typeof SettingsAgentsIndexRoute
   '/settings/projects': typeof SettingsProjectsIndexRoute
   '/settings/workflows': typeof SettingsWorkflowsIndexRoute
@@ -254,16 +272,18 @@ export interface FileRoutesById {
   '/boards/$slug': typeof BoardsSlugRoute
   '/chats/$chatId': typeof ChatsChatIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
-  '/settings/automations': typeof SettingsAutomationsRoute
   '/settings/organization': typeof SettingsOrganizationRoute
   '/settings/people': typeof SettingsPeopleRoute
   '/boards/': typeof BoardsIndexRoute
   '/chats/': typeof ChatsIndexRoute
   '/my-work/': typeof MyWorkIndexRoute
+  '/settings/automations/benchmarks': typeof SettingsAutomationsBenchmarksRoute
+  '/settings/automations/runs': typeof SettingsAutomationsRunsRoute
   '/settings_/agents/$agentId': typeof SettingsAgentsAgentIdRoute
   '/settings_/agents/new': typeof SettingsAgentsNewRoute
   '/settings_/projects/new': typeof SettingsProjectsNewRoute
   '/settings_/workflows/new': typeof SettingsWorkflowsNewRoute
+  '/settings/automations/': typeof SettingsAutomationsIndexRoute
   '/settings_/agents/': typeof SettingsAgentsIndexRoute
   '/settings_/projects/': typeof SettingsProjectsIndexRoute
   '/settings_/workflows/': typeof SettingsWorkflowsIndexRoute
@@ -286,16 +306,18 @@ export interface FileRouteTypes {
     | '/boards/$slug'
     | '/chats/$chatId'
     | '/my-work/$stepId'
-    | '/settings/automations'
     | '/settings/organization'
     | '/settings/people'
     | '/boards/'
     | '/chats/'
     | '/my-work/'
+    | '/settings/automations/benchmarks'
+    | '/settings/automations/runs'
     | '/settings/agents/$agentId'
     | '/settings/agents/new'
     | '/settings/projects/new'
     | '/settings/workflows/new'
+    | '/settings/automations/'
     | '/settings/agents/'
     | '/settings/projects/'
     | '/settings/workflows/'
@@ -316,16 +338,18 @@ export interface FileRouteTypes {
     | '/boards/$slug'
     | '/chats/$chatId'
     | '/my-work/$stepId'
-    | '/settings/automations'
     | '/settings/organization'
     | '/settings/people'
     | '/boards'
     | '/chats'
     | '/my-work'
+    | '/settings/automations/benchmarks'
+    | '/settings/automations/runs'
     | '/settings/agents/$agentId'
     | '/settings/agents/new'
     | '/settings/projects/new'
     | '/settings/workflows/new'
+    | '/settings/automations'
     | '/settings/agents'
     | '/settings/projects'
     | '/settings/workflows'
@@ -346,16 +370,18 @@ export interface FileRouteTypes {
     | '/boards/$slug'
     | '/chats/$chatId'
     | '/my-work/$stepId'
-    | '/settings/automations'
     | '/settings/organization'
     | '/settings/people'
     | '/boards/'
     | '/chats/'
     | '/my-work/'
+    | '/settings/automations/benchmarks'
+    | '/settings/automations/runs'
     | '/settings_/agents/$agentId'
     | '/settings_/agents/new'
     | '/settings_/projects/new'
     | '/settings_/workflows/new'
+    | '/settings/automations/'
     | '/settings_/agents/'
     | '/settings_/projects/'
     | '/settings_/workflows/'
@@ -474,13 +500,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsOrganizationRouteImport
       parentRoute: typeof SettingsRoute
     }
-    '/settings/automations': {
-      id: '/settings/automations'
-      path: '/automations'
-      fullPath: '/settings/automations'
-      preLoaderRoute: typeof SettingsAutomationsRouteImport
-      parentRoute: typeof SettingsRoute
-    }
     '/my-work/$stepId': {
       id: '/my-work/$stepId'
       path: '/my-work/$stepId'
@@ -523,6 +542,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAgentsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/automations/': {
+      id: '/settings/automations/'
+      path: '/automations'
+      fullPath: '/settings/automations/'
+      preLoaderRoute: typeof SettingsAutomationsIndexRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings_/workflows/new': {
       id: '/settings_/workflows/new'
       path: '/settings/workflows/new'
@@ -550,6 +576,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/agents/$agentId'
       preLoaderRoute: typeof SettingsAgentsAgentIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/settings/automations/runs': {
+      id: '/settings/automations/runs'
+      path: '/automations/runs'
+      fullPath: '/settings/automations/runs'
+      preLoaderRoute: typeof SettingsAutomationsRunsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/automations/benchmarks': {
+      id: '/settings/automations/benchmarks'
+      path: '/automations/benchmarks'
+      fullPath: '/settings/automations/benchmarks'
+      preLoaderRoute: typeof SettingsAutomationsBenchmarksRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/settings_/workflows/$workflowId/': {
       id: '/settings_/workflows/$workflowId/'
@@ -597,15 +637,19 @@ declare module '@tanstack/react-router' {
 }
 
 interface SettingsRouteChildren {
-  SettingsAutomationsRoute: typeof SettingsAutomationsRoute
   SettingsOrganizationRoute: typeof SettingsOrganizationRoute
   SettingsPeopleRoute: typeof SettingsPeopleRoute
+  SettingsAutomationsBenchmarksRoute: typeof SettingsAutomationsBenchmarksRoute
+  SettingsAutomationsRunsRoute: typeof SettingsAutomationsRunsRoute
+  SettingsAutomationsIndexRoute: typeof SettingsAutomationsIndexRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
-  SettingsAutomationsRoute: SettingsAutomationsRoute,
   SettingsOrganizationRoute: SettingsOrganizationRoute,
   SettingsPeopleRoute: SettingsPeopleRoute,
+  SettingsAutomationsBenchmarksRoute: SettingsAutomationsBenchmarksRoute,
+  SettingsAutomationsRunsRoute: SettingsAutomationsRunsRoute,
+  SettingsAutomationsIndexRoute: SettingsAutomationsIndexRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
