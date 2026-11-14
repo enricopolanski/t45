@@ -9,19 +9,19 @@ import {
 } from "./Field.ts";
 
 const source = { id: "source", label: "Source", type: "url" } as const;
-const link = { url: "https://example.com/listing", label: "Product listing" };
+const link = "https://example.com/listing";
 
 describe("URL fields", () => {
-  it("require a web destination and non-empty link text together", () => {
+  it("hold a web address as a string without a separate label", () => {
     assert.isNull(fieldValueProblem(source, "source", link));
-    assert.isNotNull(fieldValueProblem(source, "source", link.url));
-    assert.isNotNull(fieldValueProblem(source, "source", { url: link.url }));
-    assert.isNotNull(fieldValueProblem(source, "source", { ...link, label: " " }));
-    assert.isNotNull(fieldValueProblem(source, "source", { ...link, url: "https://" }));
-    assert.isNotNull(fieldValueProblem(source, "source", { ...link, url: "javascript:alert(1)" }));
+    assert.isNotNull(fieldValueProblem(source, "source", { url: link, label: "Product listing" }));
+    assert.isNotNull(fieldValueProblem(source, "source", ""));
+    assert.isNotNull(fieldValueProblem(source, "source", "https://"));
+    assert.isNotNull(fieldValueProblem(source, "source", "javascript:alert(1)"));
+    assert.isNotNull(fieldValueProblem(source, "source", "https://example.com/not a url"));
   });
 
-  it("keep each link together through defaults, repeated rows, edits and clearing", () => {
+  it("preserve URL strings through defaults, repeated rows, edits and clearing", () => {
     const fields: ReadonlyArray<Field> = [
       { ...source, defaultValue: link },
       { id: "references", label: "References", type: "group", repeatable: true, fields: [source] },
@@ -32,8 +32,8 @@ describe("URL fields", () => {
     const filled = withFieldValue(fields, rows, "references.first01.source", link);
     assert.isNull(valuesProblem(fields, filled));
     assert.deepStrictEqual(filled["references.first01.source"], link);
-    const changed = withFieldValue(fields, filled, "source", { ...link, label: "Updated listing" });
-    assert.deepStrictEqual(changed.source, { ...link, label: "Updated listing" });
+    const changed = withFieldValue(fields, filled, "source", "https://example.com/updated");
+    assert.strictEqual(changed.source, "https://example.com/updated");
     assert.deepStrictEqual(withFieldValue(fields, changed, "source", null), {
       references: ["first01"],
       "references.first01.source": link,

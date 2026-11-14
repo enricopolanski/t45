@@ -9,7 +9,7 @@ import { ChatId, Report } from "../models/Chat.ts";
 import { RunStatus } from "../models/ChatOrigin.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
-import { Field, FieldPathSegment, UrlFieldValue } from "../models/Field.ts";
+import { Field, FieldPathSegment } from "../models/Field.ts";
 
 import {
   Comment,
@@ -28,12 +28,11 @@ import { AccessDenied, NotFound } from "./errors.ts";
 
 export const WorkflowErrors = Schema.Union([WorkflowRefused, NotFound, AccessDenied]);
 
-/** What a field is set to: text, a number, yes/no, a labeled URL, row ids, or nothing. */
+/** What a field is set to: text (including URLs), a number, yes/no, row ids, or nothing. */
 export const FieldValue = Schema.Union([
   Schema.String,
   Schema.Finite,
   Schema.Boolean,
-  UrlFieldValue,
   Schema.Array(Schema.String),
   Schema.Null,
 ]);

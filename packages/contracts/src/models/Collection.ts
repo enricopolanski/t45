@@ -100,7 +100,7 @@ const REFUSALS = {
   fields_locked: "This collection has records: you can only add new fields.",
   invalid_attachment: "That file can't be attached here.",
   invalid_filter:
-    "Filter on one of the collection's top-level text, number, yes/no, date or select fields.",
+    "Filter on one of the collection's top-level text, URL, number, yes/no, date or select fields.",
 };
 
 export class Refused extends Schema.TaggedError<Refused>()("CollectionRefused", {

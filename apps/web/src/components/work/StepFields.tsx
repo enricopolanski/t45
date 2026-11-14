@@ -1,5 +1,5 @@
 import { Refused } from "@t45/contracts/models/Workflow";
-import { isUrlFieldValue, type UrlFieldValue } from "@t45/contracts/models/Field";
+import { isUrlFieldValue } from "@t45/contracts/models/Field";
 import { AccessDenied } from "@t45/contracts/resources/errors";
 import type { FieldValue as StepFieldValue, FieldView } from "@t45/contracts/resources/Workflows";
 import { ChevronDownIcon, PaperclipIcon, PlusIcon, XIcon } from "lucide-react";
@@ -10,7 +10,6 @@ import { api } from "../../rpc/api";
 import { cn } from "../../lib/utils";
 import { SavedInput, saveTyped } from "../SavedInput";
 import { ExternalUrl } from "../ExternalUrl";
-import { UrlFieldInput } from "../fields/UrlFieldInput";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { ErrorText } from "../ui/error-text";
@@ -107,8 +106,6 @@ function shownValue(field: FieldView) {
       return field.value === true ? "Yes" : "No";
     case "date":
       return typeof field.value === "string" ? formatDay(field.value) : String(field.value);
-    case "url":
-      return isUrlFieldValue(field.value) ? field.value.label : "Not filled in";
     default:
       return String(field.value);
   }
@@ -139,7 +136,7 @@ function FieldValue({ field }: { readonly field: FieldView }) {
     );
   }
   if (field.type === "url" && isUrlFieldValue(field.value)) {
-    return <ExternalUrl href={field.value.url}>{field.value.label}</ExternalUrl>;
+    return <ExternalUrl href={field.value}>{field.label}</ExternalUrl>;
   }
   return (
     <span
@@ -175,58 +172,6 @@ const storedText = (field: FieldView) =>
 const typedValue = (field: FieldView, typed: string): StepFieldValue =>
   typed === "" ? null : field.type === "number" ? Number(typed) : typed;
 
-/** Save the URL and its label together when focus leaves the pair of inputs. */
-function SavedUrlFieldInput({
-  value,
-  onSave,
-  ...control
-}: Omit<ComponentProps<typeof UrlFieldInput>, "onChange"> & {
-  readonly onSave: (value: UrlFieldValue | null) => void;
-}) {
-  const [draft, setDraft] = useState(value);
-  const [error, setError] = useState<string | null>(null);
-  const errorId = useId();
-  const save = () => {
-    const next = draft === null ? null : { url: draft.url.trim(), label: draft.label.trim() };
-    const isCleared = next === null || (next.url === "" && next.label === "");
-    if (!isCleared && !isUrlFieldValue(next)) {
-      setError("Enter an http:// or https:// URL and link text.");
-      return;
-    }
-    setError(null);
-    setDraft(isCleared ? null : next);
-    if (isCleared ? value !== null : next.url !== value?.url || next.label !== value?.label)
-      onSave(isCleared ? null : next);
-  };
-  return (
-    <div
-      className="flex min-w-0 flex-col gap-1"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) save();
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" && event.target instanceof HTMLInputElement) {
-          event.preventDefault();
-          event.target.blur();
-        }
-      }}
-    >
-      <UrlFieldInput
-        {...control}
-        value={draft}
-        onChange={setDraft}
-        aria-invalid={control["aria-invalid"] || error !== null || undefined}
-        aria-describedby={
-          [control["aria-describedby"], error === null ? null : errorId]
-            .filter(Boolean)
-            .join(" ") || undefined
-        }
-      />
-      {error === null ? null : <ErrorText id={errorId} text={error} />}
-    </div>
-  );
-}
-
 /** A field's input, framed; a group has none. */
 function FieldControl({
   field,
@@ -245,13 +190,18 @@ function FieldControl({
   switch (field.type) {
     case "url":
       return (
-        <SavedUrlFieldInput
-          key={JSON.stringify(field.value)}
-          {...control}
-          label={field.label}
-          value={isUrlFieldValue(field.value) ? field.value : null}
-          onSave={save}
-        />
+        <div className="flex min-w-0 flex-col gap-1">
+          <SavedInput
+            {...control}
+            type="url"
+            placeholder="https://example.com"
+            value={storedText(field)}
+            onSave={saveText}
+          />
+          {isUrlFieldValue(field.value) ? (
+            <ExternalUrl href={field.value}>{field.label}</ExternalUrl>
+          ) : null}
+        </div>
       );
     case "text":
       // One line tall at first, growing with what's written.
@@ -591,18 +541,6 @@ function CellControl({
   const stored = storedText(field);
   const save = saveTyped(stored, (typed) => onSave(field.key, typedValue(field, typed)));
   switch (field.type) {
-    case "url":
-      return (
-        <div className="p-1.5">
-          <SavedUrlFieldInput
-            key={JSON.stringify(field.value)}
-            label={label}
-            aria-invalid={isMissing || undefined}
-            value={isUrlFieldValue(field.value) ? field.value : null}
-            onSave={(value) => onSave(field.key, value)}
-          />
-        </div>
-      );
     case "text":
       return (
         <textarea
@@ -616,23 +554,31 @@ function CellControl({
       );
     case "number":
     case "date":
+    case "url":
       return (
-        <input
-          key={stored}
-          {...control}
-          type={field.type}
-          defaultValue={stored}
-          onBlur={save}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-          }}
-          className={cn(
-            cellInput,
-            "h-9",
-            field.type === "number" &&
-              "[appearance:textfield] text-right [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
-          )}
-        />
+        <>
+          <input
+            key={stored}
+            {...control}
+            type={field.type}
+            defaultValue={stored}
+            onBlur={save}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className={cn(
+              cellInput,
+              "h-9",
+              field.type === "number" &&
+                "[appearance:textfield] text-right [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
+            )}
+          />
+          {field.type === "url" && isUrlFieldValue(field.value) ? (
+            <div className="px-1.5 pb-1.5">
+              <ExternalUrl href={field.value}>{field.label}</ExternalUrl>
+            </div>
+          ) : null}
+        </>
       );
     case "select":
       return (

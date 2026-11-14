@@ -52,8 +52,8 @@ function cellContent(
       return plural(rowIds(value).length, "entry", "entries");
     case "url":
       return isUrlFieldValue(value) ? (
-        <ExternalUrl href={value.url} onClick={(event) => event.stopPropagation()}>
-          {value.label}
+        <ExternalUrl href={value} onClick={(event) => event.stopPropagation()}>
+          {field.label}
         </ExternalUrl>
       ) : (
         ""
