@@ -160,6 +160,7 @@ test("admins define collections whose records people and agents look up and save
   await ben.goto("/settings/collections");
   await ben.getByRole("link", { name: /^Listings/u }).click();
   await expect(ben.getByRole("table", { name: "Records" })).toContainText("B0BEN");
+  await expect(ben.getByRole("switch", { name: "Reorder", exact: true })).toHaveCount(0);
   expect((await ben.request.get(manualUrl!)).status()).toBe(200);
   chat.finish();
 });

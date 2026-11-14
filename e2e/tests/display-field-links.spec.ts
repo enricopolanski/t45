@@ -22,7 +22,7 @@ const serveFavicons = (page: Page) =>
     }),
   );
 
-test("a collection displays a URL on other fields, including when linked from a step", async ({
+test("a collection keeps its links and column order when linked from a step", async ({
   signIn,
 }) => {
   const ada = await signIn("ada@example.test");
@@ -112,6 +112,46 @@ test("a collection displays a URL on other fields, including when linked from a 
   await ada.getByRole("button", { name: "Save collection" }).click();
   await expect(row).toBeVisible();
 
+  // Reordering moves visible columns, including the update time, without changing the record.
+  const records = ada.getByRole("table", { name: "Records" });
+  await expect(records.getByRole("button", { name: /^Move /u })).toHaveCount(0);
+  await ada.getByRole("switch", { name: "Reorder", exact: true }).click();
+  await expect(records.getByRole("button", { name: "Move Key left", exact: true })).toBeDisabled();
+  await expect(
+    records.getByRole("button", { name: "Move Last update right", exact: true }),
+  ).toBeDisabled();
+  await records.getByRole("button", { name: "Move Product title left", exact: true }).click();
+  await expect(records.getByRole("columnheader")).toHaveText([
+    "Product title",
+    "Key",
+    "Price",
+    "Last update",
+  ]);
+  await records.getByRole("button", { name: "Move Last update left", exact: true }).click();
+  await expect(records.getByRole("columnheader")).toHaveText([
+    "Product title",
+    "Key",
+    "Last update",
+    "Price",
+  ]);
+  await records.getByRole("button", { name: "Move Key right", exact: true }).click();
+  const columnOrder = ["Product title", "Last update", "Key", "Price"];
+  await expect(records.getByRole("columnheader")).toHaveText(columnOrder);
+  await ada.getByRole("switch", { name: "Reorder", exact: true }).click();
+  await expect(records.getByRole("button", { name: /^Move /u })).toHaveCount(0);
+  await ada.reload();
+  await expect(records.getByRole("columnheader")).toHaveText(columnOrder);
+  await expect(row.getByRole("cell").nth(2)).toHaveText("B0ABC");
+  await expect(row.getByRole("cell").nth(3)).toHaveText("12.5");
+  await expect(row.getByRole("link", { name: "Blue masking tape", exact: true })).toHaveAttribute(
+    "href",
+    "https://example.com/blue",
+  );
+  // Editing collection settings preserves the saved table order.
+  await ada.getByRole("link", { name: "Edit collection" }).click();
+  await ada.getByRole("button", { name: "Save collection" }).click();
+  await expect(records.getByRole("columnheader")).toHaveText(columnOrder);
+
   const workflowId = await createWorkflow(ada, "Market check");
   await ada.getByRole("button", { name: "Add step" }).click();
   await ada.getByLabel("Step title").fill("Collect listings");
@@ -129,10 +169,10 @@ test("a collection displays a URL on other fields, including when linked from a 
   await ada
     .getByRole("dialog", { name: "Link a record to Competitors" })
     .getByRole("row", { name: "Record B0ABC" })
-    .getByRole("cell")
-    .first()
+    .getByRole("cell", { name: "B0ABC", exact: true })
     .click();
   const table = ada.getByRole("table", { name: "Competitors" });
+  await expect(table.getByRole("columnheader")).toHaveText([...columnOrder, "Remove"]);
   await expect(table.getByRole("link", { name: "Blue masking tape", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/blue",

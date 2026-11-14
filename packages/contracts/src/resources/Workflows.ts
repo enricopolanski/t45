@@ -158,7 +158,15 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     rowFields: Schema.Array(Field),
     /** A records field's collection; null for other fields, or when the collection is gone. */
     collection: Schema.NullOr(
-      Schema.Struct(Struct.pick(Collection.fields, ["id", "title", "fields", "primaryKeyFieldId"])),
+      Schema.Struct(
+        Struct.pick(Collection.fields, [
+          "id",
+          "title",
+          "fields",
+          "primaryKeyFieldId",
+          "columnOrder",
+        ]),
+      ),
     ),
     /** A records field's records, in the order it links them. Empty for other fields. */
     records: Schema.Array(CollectionRecordView),

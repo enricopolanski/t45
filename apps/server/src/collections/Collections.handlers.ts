@@ -10,6 +10,7 @@ export const layer = Collections.middleware(Authorization).toLayer(
     return Collections.of({
       "collections.create": (input) => collections.create(input),
       "collections.update": (input) => collections.update(input),
+      "collections.reorderColumns": (input) => collections.reorderColumns(input),
       "collections.list": () => Effect.flatMap(CurrentActor, collections.list),
       "collections.get": ({ collectionId }) =>
         Effect.flatMap(CurrentActor, (actor) => collections.get(actor, collectionId)),
