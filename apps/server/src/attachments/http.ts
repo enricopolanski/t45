@@ -12,6 +12,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import { member, uploader } from "../auth/http.ts";
 import { ChatService } from "../chats/ChatService.ts";
+import { CollectionService } from "../collections/CollectionService.ts";
 import { WorkflowService } from "../workflows/WorkflowService.ts";
 import {
   AttachmentRepository,
@@ -84,7 +85,10 @@ const attachmentRoute = HttpRouter.add(
 
     const chats = yield* ChatService;
     const workflows = yield* WorkflowService;
+    const collections = yield* CollectionService;
     const readable = Effect.gen(function* () {
+      if (attachment.collectionId !== null)
+        return yield* collections.canReadFile(currentUser.userId, attachment);
       const holders = yield* files.chatsHolding(attachment.id);
       if (attachment.stepId === null && holders.length === 0) {
         return attachment.uploader === currentUser.userId;

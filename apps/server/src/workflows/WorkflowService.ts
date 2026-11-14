@@ -33,13 +33,8 @@ import {
   canEditWorkflow,
   canSetWorkflowEditors,
   stepIds,
-  fieldValueProblem,
-  defaultValues,
   type WorkflowActor,
   findStep,
-  rowIds,
-  groupRows,
-  resolveFieldPath,
   isActionable,
   isLive,
   canManageProject,
@@ -57,7 +52,6 @@ import {
   lastAdminRefusal,
   Step,
   StepDefinition,
-  type StepField,
   type Ticket,
   type Project,
   type Workflow,
@@ -66,7 +60,16 @@ import {
   type WorkflowVersion,
   Refused as WorkflowRefused,
 } from "@t45/contracts/models/Workflow";
+import {
+  defaultValues,
+  type Field,
+  fieldValueProblem,
+  missingRow,
+  resolveFieldPath,
+  rowIds,
+} from "@t45/contracts/models/Field";
 import type { AssignmentView } from "@t45/contracts/resources/Assignments";
+import { buildFieldViews } from "@t45/core/fieldViews";
 import { NotFound } from "@t45/contracts/resources/errors";
 import type { NotificationView } from "@t45/contracts/resources/Notifications";
 import type { FieldView, TicketSummaryView } from "@t45/contracts/resources/Workflows";
@@ -81,7 +84,7 @@ import * as Stream from "effect/Stream";
 
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
-import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
+import { AttachmentRepository, isAttachmentId } from "../attachments/AttachmentRepository.ts";
 import { type CommandLogEntry, CommandLogRepository } from "../persistence/CommandLogRepository.ts";
 import { UserRepository } from "../org/UserRepository.ts";
 import { NotificationRepository } from "./NotificationRepository.ts";
@@ -139,44 +142,15 @@ const make = Effect.gen(function* () {
   const automations = yield* AutomationRepository;
   const files = yield* AttachmentRepository;
   const commandLog = yield* CommandLogRepository;
-  const buildCurrentStepFieldViews = (
-    fields: ReadonlyArray<StepField>,
-    prefix: string,
-    values: Step["values"],
-  ): Effect.Effect<Array<FieldView>> =>
-    Effect.forEach(fields, (field) =>
-      Effect.gen(function* () {
-        const path = prefix ? `${prefix}.${field.id}` : field.id;
-        const value = values[path];
-        const rows =
-          field.type === "group"
-            ? yield* Effect.forEach(groupRows(field, value), (rowId) =>
-                Effect.map(
-                  buildCurrentStepFieldViews(
-                    field.fields,
-                    rowId === null ? path : `${path}.${rowId}`,
-                    values,
-                  ),
-                  (children) => ({ id: rowId, fields: children }),
-                ),
-              )
-            : [];
-        const file =
-          field.type === "file" && typeof value === "string" ? yield* files.get(value) : null;
-        return {
-          file: file === null ? null : toFile(file),
-          key: path,
-          label: field.label,
-          description: field.description ?? "",
-          type: field.type,
-          options: field.type === "select" ? field.options : [],
-          value: field.type === "group" ? null : (value ?? null),
-          repeatable: field.type === "group" && field.repeatable,
-          rowFields: field.type === "group" && field.repeatable ? field.fields : [],
-          rows,
-        };
-      }),
-    );
+  /** The fields with their values, and the files those values hold. */
+  const buildCurrentStepFieldViews = (fields: ReadonlyArray<Field>, values: Step["values"]) =>
+    files
+      .forIds(Object.values(values).filter(isAttachmentId))
+      .pipe(
+        Effect.map((held) =>
+          buildFieldViews(fields, values, (id) => held.find((file) => file.id === id) ?? null),
+        ),
+      );
 
   const chats = yield* ChatService;
   const chatRepository = yield* ChatRepository;
@@ -550,10 +524,8 @@ const make = Effect.gen(function* () {
     const resolved = resolveFieldPath(definitionOf(work, step).fields, path);
     if (typeof resolved === "string")
       return Effect.fail(new WorkflowRefused({ reason: "invalid_field_value", detail: resolved }));
-    const missing = resolved.rows.find(
-      (row) => !rowIds(step.values[row.groupPath]).includes(row.rowId),
-    );
-    if (missing !== undefined) {
+    const missing = missingRow(resolved.rows, step.values);
+    if (missing !== null) {
       const existing = rowIds(step.values[missing.groupPath]);
       return Effect.fail(
         new WorkflowRefused({
@@ -581,12 +553,12 @@ const make = Effect.gen(function* () {
   });
 
   const buildStepFieldViews = (work: Work, step: Step) =>
-    buildCurrentStepFieldViews(definitionOf(work, step).fields, "", step.values);
+    buildCurrentStepFieldViews(definitionOf(work, step).fields, step.values);
   /** The fields of earlier steps the step declares as inputs: all it gets of them. */
   const buildInputViews = (work: Work, step: Step) =>
     Effect.forEach(
       stepInputFields(work.version.steps, work.ticket, definitionOf(work, step)),
-      ({ source, field }) => buildCurrentStepFieldViews([field], "", source.values),
+      ({ source, field }) => buildCurrentStepFieldViews([field], source.values),
     ).pipe(Effect.map((views) => views.flat()));
 
   const listProjects = Effect.fnUntraced(function* (actorId: string) {

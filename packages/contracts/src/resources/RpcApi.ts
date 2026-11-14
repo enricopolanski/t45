@@ -3,6 +3,7 @@ import { Assignments } from "./Assignments.ts";
 import { Authorization } from "../Authorization.ts";
 import { Capabilities } from "./Capabilities.ts";
 import { Chats } from "./Chats.ts";
+import { Collections } from "./Collections.ts";
 import { Notifications } from "./Notifications.ts";
 import { Organization } from "./Organization.ts";
 import { Automations } from "./Automations.ts";
@@ -20,4 +21,5 @@ export const RpcApi = Skills.merge(
   Assignments,
   Notifications,
   Workflows,
+  Collections,
 ).middleware(Authorization);

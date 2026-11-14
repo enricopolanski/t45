@@ -4,6 +4,7 @@ import {
   CurrentUser,
   CurrentActor,
 } from "@t45/contracts/Authorization";
+import { CollectionRecordOperations } from "@t45/contracts/resources/Collections";
 import { AccessDenied } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,6 +16,12 @@ import { RpcSchema } from "effect/rpc";
 
 import { ChatService } from "../chats/ChatService.ts";
 import { UserService } from "../org/UserService.ts";
+
+/** What an execution token reaches; each operation checks what the agent may do with it. */
+const isAgentOperation = (tag: string) =>
+  tag.startsWith("workflows.") ||
+  tag === "chats.report" ||
+  CollectionRecordOperations.requests.has(tag);
 
 const denied = new AccessDenied({ message: "Only active members can use this server." });
 const signedOut = new AccessDenied({ message: "This session was signed out." });
@@ -40,8 +47,7 @@ export const Authorization = {
         });
       return AuthorizationMiddleware.of((effect, { rpc, headers }) => {
         if (headers.authorization !== undefined) {
-          if (!rpc._tag.startsWith("workflows.") && rpc._tag !== "chats.report")
-            return Effect.fail(denied);
+          if (!isAgentOperation(rpc._tag)) return Effect.fail(denied);
           return chats.authenticateAgent(headers.authorization.replace(/^Bearer /, "")).pipe(
             Effect.catchTags({ NotFound: () => Effect.fail(denied) }),
             Effect.flatMap((actor) => Effect.provideService(effect, CurrentActor, actor)),

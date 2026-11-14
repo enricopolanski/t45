@@ -18,6 +18,9 @@ import { HttpRouter } from "effect/http";
 import { UserService } from "../org/UserService.ts";
 import { SessionInvalidError } from "../auth/Authentication.ts";
 import * as Fixture from "../chats/Chats.testkit.ts";
+import * as CollectionRecordRepository from "../collections/CollectionRecordRepository.ts";
+import * as CollectionRepository from "../collections/CollectionRepository.ts";
+import * as CollectionService from "../collections/CollectionService.ts";
 import * as ServerConfig from "../config.ts";
 import * as AttachmentRepository from "./AttachmentRepository.ts";
 import * as Attachments from "./Attachments.testkit.ts";
@@ -131,6 +134,13 @@ describe("attachment routes", () => {
         : Effect.fail(new SessionInvalidError({})),
   });
   const layerContext = layerAuth.pipe(
+    Layer.provideMerge(
+      CollectionService.layer.pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(CollectionRepository.layer, CollectionRecordRepository.layer),
+        ),
+      ),
+    ),
     Layer.provideMerge(Fixture.layer),
     Layer.provideMerge(layerFileResponse),
   );

@@ -7,85 +7,16 @@ import * as Struct from "effect/Struct";
 import { type Agent, canUse } from "./Agent.ts";
 import type { Capability } from "./Capability.ts";
 import { AutomationId } from "./Automation.ts";
-import { AttachmentId, NonNegativeInt, StringId, TrimmedNonEmptyString } from "./primitives.ts";
-
-const isFieldPathSegment = Schema.isPattern(/^[A-Za-z0-9_-]+$/);
-
-/** A field or row ID; dots separate these IDs in field paths. */
-export const FieldPathSegment = StringId.check(isFieldPathSegment);
-
-const hasDistinctIds = (ids: ReadonlyArray<string>) => new Set(ids).size === ids.length;
-
-const FieldBase = {
-  id: FieldPathSegment.annotate({
-    description: "Identifier unique among sibling fields; used in dotted field paths.",
-  }),
-  label: TrimmedNonEmptyString,
-  description: Schema.optionalKey(
-    Schema.String.annotate({ description: "Guidance shown below the field label." }),
-  ),
-};
-
-const DefaultValue = Schema.optionalKey(
-  Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]).annotate({
-    description: "The value the field starts with; it must fit the field. File fields have none.",
-  }),
-);
-
-const ValueField = Schema.Struct({
-  ...FieldBase,
-  type: Schema.Literals(["text", "number", "boolean", "date", "file"]),
-  defaultValue: DefaultValue,
-});
-
-const SelectField = Schema.Struct({
-  ...FieldBase,
-  type: Schema.Literal("select"),
-  defaultValue: DefaultValue,
-  options: Schema.Array(TrimmedNonEmptyString)
-    .annotate({ description: "Allowed choices, shown as written." })
-    .check(Schema.isMinLength(1)),
-});
-
-class GroupField extends Schema.Class<GroupField>("GroupField")({
-  ...FieldBase,
-  type: Schema.Literal("group"),
-  repeatable: Schema.Boolean.annotate({ description: "Whether the group allows multiple rows." }),
-  fields: Schema.Array(Schema.suspend((): Schema.Codec<StepField> => StepField)),
-}) {}
-
-export const StepField = Schema.Union([ValueField, SelectField, GroupField]);
-
-export type StepField = typeof ValueField.Type | typeof SelectField.Type | GroupField;
-
-const fieldIdsAreDistinct = (fields: ReadonlyArray<StepField>): boolean =>
-  hasDistinctIds(fields.map((field) => field.id)) &&
-  fields.every((field) => field.type !== "group" || fieldIdsAreDistinct(field.fields));
-
-const defaultsFit = (fields: ReadonlyArray<StepField>): boolean =>
-  fields.every((field) =>
-    field.type === "group"
-      ? defaultsFit(field.fields)
-      : field.defaultValue === undefined ||
-        (field.type !== "file" && fieldValueProblem(field, field.id, field.defaultValue) === null),
-  );
-
-/**
- * The values these fields start with, by key: each default, in a group's fields too. A repeatable
- * group has no rows yet; `prefix` is the key of the row they start in.
- */
-export const defaultValues = (
-  fields: ReadonlyArray<StepField>,
-  prefix = "",
-): Record<string, Schema.Json> =>
-  Object.fromEntries(
-    fields.flatMap((field) => {
-      const key = prefix ? `${prefix}.${field.id}` : field.id;
-      if (field.type !== "group")
-        return field.defaultValue === undefined ? [] : [[key, field.defaultValue]];
-      return field.repeatable ? [] : Object.entries(defaultValues(field.fields, key));
-    }),
-  );
+import {
+  Field,
+  FieldPathSegment,
+  Fields,
+  FieldValues,
+  groupRows,
+  hasDistinctIds,
+  holdsData,
+} from "./Field.ts";
+import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 
 /** A field of an earlier step that a step reads: the whole field, a group with all its rows. */
 export const StepInput = Schema.Struct({
@@ -101,7 +32,7 @@ export interface StepDefinitionEncoded {
   readonly id: string;
   readonly name: string;
   readonly instructions: string;
-  readonly fields: ReadonlyArray<typeof StepField.Encoded>;
+  readonly fields: ReadonlyArray<typeof Field.Encoded>;
   readonly subSteps: ReadonlyArray<StepDefinitionEncoded>;
   readonly inputs?: ReadonlyArray<StepInput>;
   readonly automationIds?: ReadonlyArray<string>;
@@ -113,10 +44,7 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
   }),
   name: TrimmedNonEmptyString,
   instructions: Schema.String,
-  fields: Schema.Array(StepField).check(
-    Schema.makeFilter(fieldIdsAreDistinct, { expected: "distinct field ids among siblings" }),
-    Schema.makeFilter(defaultsFit, { expected: "default values that fit their fields" }),
-  ),
+  fields: Fields,
   subSteps: Schema.Array(
     Schema.suspend((): Schema.Codec<StepDefinition, StepDefinitionEncoded> => StepDefinition),
   ).annotate({
@@ -258,9 +186,7 @@ export class Step extends Schema.Opaque<Step>()(
     status: StepStatus,
     assignee: Schema.NullOr(StringId),
     /** The values assigned to the fields of the step */
-    values: Schema.Record(Schema.String, Schema.Json).check(
-      Schema.isPropertyNames(Schema.toType(TrimmedNonEmptyString)),
-    ),
+    values: FieldValues,
   }),
 ) {}
 
@@ -374,59 +300,7 @@ export class Refused extends Schema.TaggedError<Refused>()("WorkflowRefused", {
 
 type Values = Step["values"];
 
-const holdsData = (value: Schema.Json | undefined): boolean =>
-  value !== undefined &&
-  value !== null &&
-  (typeof value !== "string" || value.trim() !== "") &&
-  (!Array.isArray(value) || value.length > 0);
-
-const isRowIds = Schema.is(Schema.UniqueArray(FieldPathSegment));
-const isFiniteNumber = Schema.is(Schema.Finite);
-const isAttachmentId = Schema.is(AttachmentId);
-
-export const rowIds = (value: Schema.Json | undefined): ReadonlyArray<string> =>
-  isRowIds(value) ? value : [];
-
-export const groupRows = (field: StepField, value: Schema.Json | undefined) =>
-  field.type === "group" && field.repeatable ? rowIds(value) : [null];
-
-/** The field at a dotted path and the rows it sits in, or why the path names no field. */
-export const resolveFieldPath = (
-  fields: ReadonlyArray<StepField>,
-  path: string,
-):
-  | {
-      readonly field: StepField;
-      readonly rows: ReadonlyArray<{ readonly groupPath: string; readonly rowId: string }>;
-    }
-  | string => {
-  const segments = path.split(".");
-  const rows: Array<{ groupPath: string; rowId: string }> = [];
-  let list = fields;
-  let prefix = "";
-  for (let at = 0; at < segments.length;) {
-    const field = list.find((candidate) => candidate.id === segments[at]);
-    if (field === undefined)
-      return `There is no field ${path}. The fields ${prefix ? `in ${prefix} ` : ""}are:\n${describeFields(list, prefix)}`;
-    const parent = prefix;
-    prefix = prefix ? `${prefix}.${field.id}` : field.id;
-    at += 1;
-    if (at === segments.length) return { field, rows };
-    if (field.type !== "group") return `${prefix} is a ${field.type} field, with no fields inside.`;
-    if (field.repeatable) {
-      const rowId = segments[at];
-      at += 1;
-      if (rowId === undefined || at === segments.length)
-        return `${prefix} is a repeatable group: set ${prefix} to its row ids, or a row's field as ${prefix}.<rowId>.<field>.\n${describeFields([field], parent)}`;
-      rows.push({ groupPath: prefix, rowId });
-      prefix = `${prefix}.${rowId}`;
-    }
-    list = field.fields;
-  }
-  return `There is no field ${path}.`;
-};
-
-const fieldsComplete = (fields: ReadonlyArray<StepField>, values: Values, prefix = ""): boolean =>
+const fieldsComplete = (fields: ReadonlyArray<Field>, values: Values, prefix = ""): boolean =>
   fields.every((field) => {
     const path = prefix ? `${prefix}.${field.id}` : field.id;
     if (field.type !== "group") return holdsData(values[path]);
@@ -529,81 +403,6 @@ export const stepCompletionRefusal = (
   ticket.steps.some((child) => child.parentStepId === step.id && child.status.type !== "completed")
     ? ("step_incomplete" as const)
     : null;
-
-const decodeDateFieldValue = Schema.decodeUnknownOption(Schema.DateTimeUtcFromString);
-const isDay = (value: unknown) =>
-  typeof value === "string" &&
-  /^\d{4}-\d{2}-\d{2}$/u.test(value) &&
-  Option.isSome(decodeDateFieldValue(value));
-
-/** What a field takes, said the way someone filling it reads it. */
-const expectation = (field: StepField) => {
-  switch (field.type) {
-    case "text":
-      return "text";
-    case "number":
-      return "a number, like 0.5";
-    case "boolean":
-      return "true or false";
-    case "date":
-      return "a date as YYYY-MM-DD";
-    case "select":
-      return `one of ${field.options.map((option) => JSON.stringify(option)).join(", ")}`;
-    case "file":
-      return "a file attached with this field's key";
-    case "group":
-      return field.repeatable
-        ? `the list of its row ids, like ["r1", "r2"] (letters, digits, _ and -, each once)`
-        : "values in its fields";
-  }
-};
-
-const describeValue = (value: Schema.Json) => {
-  if (typeof value === "string")
-    return `the text ${JSON.stringify(value.length > 60 ? `${value.slice(0, 60)}…` : value)}`;
-  if (Array.isArray(value)) return "a list";
-  if (value === null) return "nothing";
-  return typeof value === "object" ? "an object" : `${typeof value} ${String(value)}`;
-};
-
-/** Each settable key of these fields and what it takes, one per line. */
-const describeFields = (fields: ReadonlyArray<StepField>, prefix = ""): string =>
-  fields
-    .map((field) => {
-      const key = prefix ? `${prefix}.${field.id}` : field.id;
-      if (field.type !== "group") return `${key}: ${expectation(field)}`;
-      if (!field.repeatable) return describeFields(field.fields, key);
-      return [
-        `${key}: ${expectation(field)}; each row's fields are:`,
-        describeFields(field.fields, `${key}.<rowId>`),
-      ].join("\n");
-    })
-    .join("\n");
-
-/**
- * Why a value doesn't fit the field at `key`, or null when it does. Checked before attachment
- * access checks or writes.
- */
-export const fieldValueProblem = (field: StepField, key: string, value: Schema.Json) => {
-  const fits =
-    field.type === "select"
-      ? typeof value === "string" && field.options.includes(value)
-      : field.type === "group"
-        ? field.repeatable && isRowIds(value)
-        : field.type === "text"
-          ? typeof value === "string"
-          : field.type === "number"
-            ? isFiniteNumber(value)
-            : field.type === "boolean"
-              ? typeof value === "boolean"
-              : field.type === "date"
-                ? isDay(value)
-                : isAttachmentId(value);
-  if (fits) return null;
-  if (field.type === "group" && !field.repeatable)
-    return `${key} is a group: set its fields instead.\n${describeFields(field.fields, key)}`;
-  return `${key} takes ${expectation(field)}; got ${describeValue(value)}.`;
-};
 
 export const stepInTicket = (ticket: Ticket, stepId: string | null) =>
   ticket.steps.find((step) => step.id === stepId) ?? null;
@@ -743,11 +542,11 @@ export const WorkflowEdit = Schema.Union([
     type: Schema.Literal("add_field"),
     ...stepRef,
     index: NonNegativeInt,
-    field: StepField,
+    field: Field,
   }),
   Schema.Struct({ type: Schema.Literal("remove_field"), ...stepRef, fieldId: FieldPathSegment }),
   /** Replaces the step's field that has this field's id; a group comes with its own fields. */
-  Schema.Struct({ type: Schema.Literal("change_field"), ...stepRef, field: StepField }),
+  Schema.Struct({ type: Schema.Literal("change_field"), ...stepRef, field: Field }),
   Schema.Struct({
     type: Schema.Literal("move_field"),
     ...stepRef,
@@ -806,8 +605,7 @@ export const isSameInput = (input: StepInput) => (other: StepInput) =>
 const applyWorkflowEdit = (steps: StepList, edit: WorkflowEdit): StepList | null => {
   const fieldIndex = (step: StepDefinition, fieldId: string) =>
     step.fields.findIndex((field) => field.id === fieldId);
-  const withFields = (fields: ReadonlyArray<StepField> | null) =>
-    fields === null ? null : { fields };
+  const withFields = (fields: ReadonlyArray<Field> | null) => (fields === null ? null : { fields });
   switch (edit.type) {
     case "add_step": {
       const added = {

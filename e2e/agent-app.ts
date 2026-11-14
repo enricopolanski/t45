@@ -26,6 +26,25 @@ import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServer } from "effect/http";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 
+import { test as base } from "./fixtures.ts";
+
+/** A test with its own app, whose runner the test drives. */
+export const test = base.extend<{ agentApp: Awaited<ReturnType<typeof startAgentApp>> }>({
+  // Playwright requires destructuring even for fixtures without dependencies.
+  // eslint-disable-next-line no-empty-pattern
+  agentApp: async ({}, use) => {
+    const app = await startAgentApp();
+    try {
+      await use(app);
+    } finally {
+      await app.close();
+    }
+  },
+  baseURL: async ({ agentApp }, use) => use(agentApp.url),
+  // This fixture already owns a whole app and database for each test.
+  extraHTTPHeaders: {},
+});
+
 const decodeBuiltIns = Schema.decodeUnknownSync(Schema.fromJsonString(BuiltIns));
 const encodeBuiltIns = Schema.encodeSync(Schema.fromJsonString(BuiltIns));
 const decodeUpdate = Schema.decodeUnknownSync(ExecutionUpdate);
@@ -122,7 +141,7 @@ export async function startAgentApp() {
           model: "opencode-go/test-model",
           files: {},
           skills: [],
-          capabilities: ["step-operations"],
+          capabilities: ["step-operations", "collections"],
           permissions: { network: "provider" },
           isConversational: true,
         },
@@ -192,41 +211,51 @@ export async function startAgentApp() {
         db.close();
       }
     },
-    /** Runs the dispatched MCP program, with the token the real runner substitutes at its network boundary. */
-    report: async (execution: Execution, message: string) => {
-      const capability = execution.request.agent.capabilities.find(
-        (entry) => entry.files?.["report-tools.mjs"],
-      );
-      if (capability === undefined) throw new Error("Reporting was not supplied to the agent");
-      const path = NodePath.join(directory, "report-tools.mjs");
-      await NodeFSP.writeFile(path, capability.files!["report-tools.mjs"]!);
-      const tool = NodeChildProcess.spawn(process.execPath, [path], {
-        cwd: directory,
-        env: {
-          ...process.env,
-          T45_SERVER_URL: url,
-          T45_TOOL_TOKEN: Redacted.value(execution.request.toolToken),
-          T45_TOOL_INSTANCE: "",
-        },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      let output = "";
-      let errors = "";
-      tool.stdout.on("data", (chunk: Buffer) => {
-        output += chunk.toString();
-      });
-      tool.stderr.on("data", (chunk: Buffer) => {
-        errors += chunk.toString();
-      });
-      const closed = NodeEvents.EventEmitter.once(tool, "close");
-      tool.stdin.end(
-        `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "report", arguments: { message } } })}\n`,
-      );
-      const [code] = await closed;
-      if (code !== 0) throw new Error(errors);
-      return (
-        JSON.parse(output) as { result: { isError?: boolean; content: Array<{ text: string }> } }
-      ).result;
-    },
+    report: (execution: Execution, message: string) =>
+      callTool(execution, "report-tools.mjs", "report", { message }),
+    callTool,
   };
+
+  /**
+   * Calls a tool of the dispatched MCP program, with the token the real runner substitutes at its
+   * network boundary.
+   */
+  async function callTool(
+    execution: Execution,
+    program: string,
+    name: string,
+    args: Record<string, unknown>,
+  ) {
+    const capability = execution.request.agent.capabilities.find((entry) => entry.files?.[program]);
+    if (capability === undefined) throw new Error(`${program} was not supplied to the agent`);
+    const path = NodePath.join(directory, program);
+    await NodeFSP.writeFile(path, capability.files![program]!);
+    const tool = NodeChildProcess.spawn(process.execPath, [path], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        T45_SERVER_URL: url,
+        T45_TOOL_TOKEN: Redacted.value(execution.request.toolToken),
+        T45_TOOL_INSTANCE: "",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let output = "";
+    let errors = "";
+    tool.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    tool.stderr.on("data", (chunk: Buffer) => {
+      errors += chunk.toString();
+    });
+    const closed = NodeEvents.EventEmitter.once(tool, "close");
+    tool.stdin.end(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } })}\n`,
+    );
+    const [code] = await closed;
+    if (code !== 0) throw new Error(errors);
+    return (
+      JSON.parse(output) as { result: { isError?: boolean; content: Array<{ text: string }> } }
+    ).result;
+  }
 }

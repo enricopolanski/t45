@@ -1,4 +1,11 @@
-import { BotIcon, Building2Icon, CalendarClockIcon, UsersIcon, WorkflowIcon } from "lucide-react";
+import {
+  BotIcon,
+  Building2Icon,
+  CalendarClockIcon,
+  DatabaseIcon,
+  UsersIcon,
+  WorkflowIcon,
+} from "lucide-react";
 
 import type { NavLink } from "../sidebar/AppNav";
 
@@ -23,6 +30,7 @@ export const SETTINGS_GROUPS: ReadonlyArray<{
           { to: "/settings/automations/benchmarks", label: "Benchmarks" },
         ],
       },
+      { to: "/settings/collections", label: "Collections", icon: <DatabaseIcon /> },
     ],
   },
   {

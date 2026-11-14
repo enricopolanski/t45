@@ -20,8 +20,8 @@ import { newKey } from "../workflows/workflowLogic";
 import { CardFold } from "./CardFold";
 import { formatDay, missingFields } from "./workLogic";
 
-/** Uploads a file to the step; with `fieldKey`, it becomes that file field's value. */
-export async function attachStepFile(stepId: string, file: File, fieldKey?: string) {
+/** Uploads a file as the member's pending attachment, ready to be given to a field; answers its id. */
+export async function uploadFile(file: File) {
   const response = await fetch(
     attachmentUploadUrl({
       type: "file",
@@ -35,10 +35,14 @@ export async function attachStepFile(stepId: string, file: File, fieldKey?: stri
       ? new AccessDenied({ message: "Your session ended. Sign in again." })
       : new Refused({ reason: "invalid_attachment" });
   }
-  const { attachmentId } = decodeUploadResult(await response.text());
+  return decodeUploadResult(await response.text()).attachmentId;
+}
+
+/** Uploads a file to the step; with `fieldKey`, it becomes that file field's value. */
+export async function attachStepFile(stepId: string, file: File, fieldKey?: string) {
   await api("workflows.attachStepFile", {
     stepId,
-    attachmentId,
+    attachmentId: await uploadFile(file),
     ...(fieldKey === undefined ? {} : { fieldKey }),
   });
 }
@@ -288,7 +292,7 @@ function FieldEditor({
 }
 
 /** Fields in order: one after another close together, and each group set apart. */
-function FieldList({
+export function FieldInputs({
   fields,
   ...props
 }: Omit<EditorProps, "field"> & { readonly fields: ReadonlyArray<FieldView> }) {
@@ -338,7 +342,7 @@ function GroupEditor({ field, ...props }: EditorProps) {
     <div data-field-key={field.key} className="col-span-full flex flex-col gap-2">
       <GroupHeading field={field} />
       <div className="rounded-lg border p-3">
-        <FieldList {...props} fields={field.rows.flatMap((row) => row.fields)} />
+        <FieldInputs {...props} fields={field.rows.flatMap((row) => row.fields)} />
       </div>
     </div>
   );
@@ -668,7 +672,7 @@ export function StepFields({
   return (
     <CardFold title="Fields" held={missing.size > 0}>
       {editable ? (
-        <FieldList fields={fields} missing={missing} onSave={onSave} onUpload={onUpload} />
+        <FieldInputs fields={fields} missing={missing} onSave={onSave} onUpload={onUpload} />
       ) : (
         <ReadOnlyFields fields={fields} />
       )}

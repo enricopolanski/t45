@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
-import { applyWorkflowEdits, StepField, stepIds } from "@t45/contracts/models/Workflow";
+import { Field } from "@t45/contracts/models/Field";
+import { applyWorkflowEdits, stepIds } from "@t45/contracts/models/Workflow";
 import type { DraftField, DraftStep } from "./workflowLogic";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -13,7 +14,7 @@ import {
   updateStep,
 } from "./workflowLogic";
 
-const encodeFields = Schema.encodeSync(Schema.Array(StepField));
+const encodeFields = Schema.encodeSync(Schema.Array(Field));
 
 const step = (id: string, name: string, extra: Partial<DraftStep> = {}): DraftStep => ({
   id,

@@ -7,6 +7,7 @@ import { cn } from "../lib/utils";
 const SECTIONS = [
   { label: "Agents", to: "/settings/agents" },
   { label: "Automations", to: "/settings/automations" },
+  { label: "Collections", to: "/settings/collections" },
   { label: "Projects", to: "/settings/projects" },
   { label: "Workflows", to: "/settings/workflows" },
   { label: "My work", to: "/my-work" },

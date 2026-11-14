@@ -16,19 +16,16 @@ import {
   canSeeStep,
   completeTicketStep,
   currentStep,
-  defaultValues,
-  fieldValueProblem,
   hasValidInputs,
   occupiedStep,
   putTicketStep,
-  resolveFieldPath,
-  StepField,
   stepEntryRefusal,
   stepIds,
   stepsAssignedUnder,
   ticketAccess,
   ticketStartRefusal,
 } from "./Workflow.ts";
+import { defaultValues, Field, fieldValueProblem, resolveFieldPath } from "./Field.ts";
 
 const at = DateTime.makeUnsafe("2026-10-26T12:00:00.000Z");
 const project: Project = {
@@ -335,12 +332,12 @@ describe("attaching an agent's automation to a workflow", () => {
   });
 });
 
-const decodeFields = Schema.decodeSync(Schema.Array(StepField));
+const decodeFields = Schema.decodeSync(Schema.Array(Field));
 
 const decodeStep = Schema.decodeUnknownOption(StepDefinition);
 
 describe("default values", () => {
-  const stepWith = (fields: ReadonlyArray<typeof StepField.Encoded>) =>
+  const stepWith = (fields: ReadonlyArray<typeof Field.Encoded>) =>
     decodeStep({
       id: "step01",
       name: "Quote",

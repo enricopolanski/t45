@@ -25,6 +25,9 @@ import * as AutomationRepository from "./automations/AutomationRepository.ts";
 import * as CapabilityRepository from "./capabilities/CapabilityRepository.ts";
 import * as ChatRepository from "./chats/ChatRepository.ts";
 import { ChatService } from "./chats/ChatService.ts";
+import * as CollectionRecordRepository from "./collections/CollectionRecordRepository.ts";
+import * as CollectionRepository from "./collections/CollectionRepository.ts";
+import * as CollectionService from "./collections/CollectionService.ts";
 import * as ServerConfig from "./config.ts";
 import * as HttpServer from "./http.ts";
 import * as OrgHttp from "./org/http.ts";
@@ -69,6 +72,10 @@ const ChatServices = ChatService.layer.pipe(
 
 const Org = OrganizationRepository.layer.pipe(Layer.provideMerge(ChatServices));
 
+const Collections = CollectionService.layer.pipe(
+  Layer.provideMerge(Layer.mergeAll(CollectionRepository.layer, CollectionRecordRepository.layer)),
+);
+
 /**
  * Groups the resources and services owned by one isolated app instance.
  * They get built afresh under a common separate data instance:
@@ -77,6 +84,7 @@ const Org = OrganizationRepository.layer.pipe(Layer.provideMerge(ChatServices));
 const InstanceDependencies = Layer.effect(UserService, UserService.make).pipe(
   Layer.provide(Authentication.layer),
   Layer.provideMerge(WorkflowService.layer),
+  Layer.provideMerge(Collections),
   Layer.provideMerge(AutomationRepository.layer),
   Layer.provideMerge(Org),
 );
