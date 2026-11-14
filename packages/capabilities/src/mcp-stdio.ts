@@ -2,6 +2,7 @@
 import * as NodeReadline from "node:readline";
 import { Authorization } from "@t45/contracts/Authorization";
 import { ReportProgress } from "@t45/contracts/resources/Chats";
+import { CollectionRecordOperations } from "@t45/contracts/resources/Collections";
 import { Workflows } from "@t45/contracts/resources/Workflows";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -24,6 +25,7 @@ export const apiHeaders = {
 export const apiUrl = (path: string) => new URL(path, process.env.T45_SERVER_URL).toString();
 const operations = Workflows.omit("workflows.watchStep")
   .add(ReportProgress)
+  .merge(CollectionRecordOperations)
   .middleware(Authorization);
 const client = RpcClient.make(operations, { disableTracing: true, flatten: true });
 const protocol = () =>
@@ -73,7 +75,8 @@ export const rpcTool = (
       const payload = decodeArguments({ ...input, ...bound });
       const result = await Effect.runPromise(
         client.pipe(
-          Effect.flatMap((api) => api(tag, payload)),
+          // One tool calls one operation; its exact result type doesn't matter here.
+          Effect.flatMap((api): Effect.Effect<unknown, unknown> => api(tag, payload)),
           Effect.scoped,
           Effect.provide(protocol()),
           Effect.result,

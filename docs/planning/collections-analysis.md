@@ -122,14 +122,47 @@ Use model tests for collection-owned rules and real frontend E2Es for persistenc
 
 No production scrape, paid automation run, or live Amazon test is needed for this feature's initial validation. Actual savings and agent adherence remain unmeasured until a separately requested run.
 
-## Questions to resolve
+## Questions and answers
 
-1. **How recent must an Amazon observation be, and may an older price be reported if refresh fails?** Choose an explicit maximum age. Recommend putting that policy in the price-checker instructions/configuration and using `checkedAt`, rather than imposing one expiry policy on every collection. No duration is assumed here.
-2. **Should adding an existing key fail, or update that record?** Recommend separate add and update operations, with refresh explicitly using update. A single save operation that inserts or replaces is also possible; the overwrite behavior needs to be agreed.
-3. **Who may read and write rows?** Collection definitions are admin-managed. Are rows available to all active members and every agent with the capability, or should access be selected per collection? This determines both API permissions and who needs a row-browsing UI outside admin settings.
-4. **Does the first release include every step field type, including files and nested/repeatable groups?** The existing model supports them, so full parity is a reasonable reading of the request. Files require the ownership and retention work described above; the initial price checker itself needs only scalar fields.
-5. **Can the primary key initially be a top-level text field?** That covers ASIN. If other key types are needed immediately, identify them so their equality rules can be defined deliberately.
-6. **What should “search rows” include beyond exact ASIN lookup?** Recommend scalar equality filters and pagination initially. Confirm whether people also need free-text matching on titles or other fields.
-7. **Should cached listings replace Amazon search results as the source of candidates?** Recommend initially keeping the existing organic-result selection and skipping only eligible product-page reads. Searching the collection first for all competitors could save more navigation, but changes how candidates are selected.
-8. **How should the checker handle a selected bundle/variant whose own ASIN cannot be verified?** Recommend saving only observations tied to a verified selected ASIN in this collection. This keeps the requested key meaningful without silently collapsing distinct offers.
-9. **What field changes should admins be able to make after rows exist?** Labels and descriptions can change without changing record identity. Changing field types, removing populated fields, or changing the primary key needs a stated policy before enabling those edits; no schema-versioning system is assumed.
+These answers record the agreed decisions and supersede conflicting recommendations earlier in this analysis.
+
+### 1. How recent must an Amazon observation be, and may an older price be reported if refresh fails?
+
+- Price data (listing price, currency, availability) is reusable for one week from `checkedAt`.
+- Product data (pack count, width, length, material, title/brand) is reusable for one month.
+- The policy lives in the price-checker instructions/configuration, not in the generic collection.
+- A row is overwritten only after a successful collection. A 503, timeout, or incomplete extraction leaves the existing row and its original `checkedAt` untouched.
+
+### 2. Should adding an existing key fail, or update that record?
+
+Adding a row whose key already exists updates that row (insert-or-update). No LLM consistency check: the server validates values against the field definitions and the write replaces the row atomically.
+
+### 3. Who may read and write rows?
+
+- People: only admins and members explicitly enabled on a collection can see and edit its rows. Access is set per collection.
+- Agents with the Collections capability can always write (add/update rows after collecting data).
+- Reads by agents must not leak data: in a chat, the agent acts with the permissions of the person using it; in automations, with the permissions granted by the capability.
+
+### 4. Does the first release include every step field type, including files and nested/repeatable groups?
+
+Full parity with step fields in the first release, including files and nested/repeatable groups. Files need collection ownership, download authorization, and retention in the attachment system.
+
+### 5. Can the primary key initially be a top-level text field?
+
+Top-level text field only.
+
+### 6. What should “search rows” include beyond exact ASIN lookup?
+
+Exact primary-key lookup, equality filters on scalar fields (AND), pagination, and free-text search in the first release.
+
+### 7. Should cached listings replace Amazon search results as the source of candidates?
+
+The price checker keeps searching Amazon as today and skips product pages for ASINs already in the collection with data recent enough under rule 1. The collection does not replace Amazon search as the candidate source.
+
+### 8. How should the checker handle a selected bundle/variant whose own ASIN cannot be verified?
+
+If the ASIN of the selected variant cannot be verified, the observation is not saved in the collection; it is reported only in the step output.
+
+### 9. What field changes should admins be able to make after rows exist?
+
+Admins can only add new nullable fields. Existing fields (type, removal, primary key) cannot be changed.

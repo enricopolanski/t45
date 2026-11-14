@@ -1,23 +1,23 @@
 import {
   isSameInput,
-  StepField,
   type StepDefinition,
   type StepDefinitionEncoded,
   type StepInput,
   type WorkflowEdit,
   WorkflowVersion,
 } from "@t45/contracts/models/Workflow";
+import { Field } from "@t45/contracts/models/Field";
 import * as Schema from "effect/Schema";
 
 import { randomUUID } from "../../lib/utils";
 
-export type DraftField = typeof StepField.Encoded;
+export type DraftField = typeof Field.Encoded;
 export type FieldType = DraftField["type"];
 export type DraftStep = StepDefinitionEncoded;
 
 export const cleanSteps = Schema.decodeSync(WorkflowVersion.fields.steps);
 
-const isSameField = Schema.toEquivalence(StepField);
+const isSameField = Schema.toEquivalence(Field);
 
 /**
  * The edits that reorder the list `was` into `now`, by id: whatever is new is added in its place,

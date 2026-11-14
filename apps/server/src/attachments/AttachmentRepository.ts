@@ -109,6 +109,13 @@ export class AttachmentRepository extends Context.Service<
       readonly stepId: string;
       readonly fieldKey: string | null;
     }) => Effect.Effect<Attachment | null>;
+    /** Gives a pending upload of `actor` to a collection record's file field. */
+    readonly claimForCollection: (input: {
+      readonly id: AttachmentId;
+      readonly actor: string;
+      readonly collectionId: string;
+      readonly fieldKey: string;
+    }) => Effect.Effect<Attachment | null>;
     readonly detach: (id: AttachmentId) => Effect.Effect<void>;
     readonly release: (chatId: ChatId) => Effect.Effect<void>;
     readonly sweep: Effect.Effect<void>;
@@ -117,7 +124,8 @@ export class AttachmentRepository extends Context.Service<
 >()("t45/attachments/AttachmentRepository") {}
 
 const COLUMNS = `id, name, mime_type AS "mimeType", size_bytes AS "sizeBytes",
-  uploader_id AS "uploader", step_id AS "stepId", field_key AS "fieldKey", created_at AS "createdAt"`;
+  uploader_id AS "uploader", step_id AS "stepId", collection_id AS "collectionId",
+  field_key AS "fieldKey", created_at AS "createdAt"`;
 
 const decodeAttachment = Schema.decodeUnknownEffect(Attachment);
 const decodeAttachments = Schema.decodeUnknownEffect(Schema.Array(Attachment));
@@ -130,7 +138,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-  const unheld = sql.literal(`step_id IS NULL
+  const unheld = sql.literal(`step_id IS NULL AND collection_id IS NULL
     AND NOT EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id)`);
 
   const columns = sql.literal(COLUMNS);
@@ -249,11 +257,12 @@ const make = Effect.gen(function* () {
         readonly id: string;
         readonly sizeBytes: number;
         readonly stepId: string | null;
+        readonly collectionId: string | null;
         readonly uploaderId: string;
         readonly bound: number;
         readonly held: number;
       }>`SELECT id, size_bytes AS "sizeBytes", step_id AS "stepId",
-          uploader_id AS "uploaderId",
+          collection_id AS "collectionId", uploader_id AS "uploaderId",
           EXISTS (SELECT 1 FROM chat_attachments c
             WHERE c.attachment_id = attachments.id AND c.chat_id = ${chatId}) AS "bound",
           EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id) AS "held"
@@ -265,7 +274,10 @@ const make = Effect.gen(function* () {
         const usable =
           from === null
             ? row.stepId !== null
-            : row.stepId === null && row.held === 0 && row.uploaderId === from;
+            : row.stepId === null &&
+              row.collectionId === null &&
+              row.held === 0 &&
+              row.uploaderId === from;
         if (!usable) return yield* unavailable();
       }
       yield* sql`INSERT INTO chat_attachments ${sql.insert(
@@ -291,12 +303,23 @@ const make = Effect.gen(function* () {
         Effect.map(([claimed]) => claimed ?? null),
       ),
 
-    // Called inside workflow transactions: leave byte deletion to the sweep so rollback keeps the file.
+    claimForCollection: (input) =>
+      sql`UPDATE attachments SET collection_id = ${input.collectionId},
+          field_key = ${input.fieldKey}
+        WHERE id = ${input.id} AND ${unheld} AND uploader_id = ${input.actor}
+        RETURNING ${columns}`.pipe(
+        Effect.flatMap(decodeAttachments),
+        Effect.orDie,
+        Effect.map(([claimed]) => claimed ?? null),
+      ),
+
+    // Called inside workflow and collection transactions: leave byte deletion to the sweep so rollback keeps the file.
     detach: (id) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
-            yield* sql`UPDATE attachments SET step_id = NULL, field_key = NULL WHERE id = ${id}`;
+            yield* sql`UPDATE attachments SET step_id = NULL, collection_id = NULL, field_key = NULL
+              WHERE id = ${id}`;
             yield* sql`DELETE FROM attachments WHERE id = ${id} AND ${unheld}`;
           }),
         )

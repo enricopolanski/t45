@@ -9,15 +9,14 @@ import { ChatId, Report } from "../models/Chat.ts";
 import { RunStatus } from "../models/ChatOrigin.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
+import { Field, FieldPathSegment } from "../models/Field.ts";
 
 import {
   Comment,
-  FieldPathSegment,
   Refused as WorkflowRefused,
   Slug,
   Step,
   StepDefinition,
-  StepField,
   Ticket,
   Project,
   Workflow,
@@ -133,7 +132,7 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     key: TrimmedNonEmptyString,
     label: TrimmedNonEmptyString,
     description: Schema.String,
-    type: Schema.Union(StepField.members.map((member) => member.fields.type)),
+    type: Schema.Union(Field.members.map((member) => member.fields.type)),
     /** A select field's choices, else empty. */
     options: Schema.Array(Schema.String),
     value: Schema.Json,
@@ -143,7 +142,7 @@ export class FieldView extends Schema.Opaque<FieldView>()(
      * A repeatable group's row fields as its definition declares them, rows or not: a row's field
      * key is `group.rowId.id`. Empty for other fields.
      */
-    rowFields: Schema.Array(StepField),
+    rowFields: Schema.Array(Field),
     /** A group's rows: one with a null id for a group that doesn't repeat. Empty for other fields. */
     rows: Schema.Array(
       Schema.Struct({

@@ -79,8 +79,10 @@ export class Attachment extends Schema.Opaque<Attachment>()(
     mimeType: TrimmedNonEmptyString,
     sizeBytes: NonNegativeInt,
     uploader: TrimmedNonEmptyString,
-    /** The step it was uploaded to; null for a chat's attachment. */
+    /** The step it was uploaded to; null for a chat's or a collection's attachment. */
     stepId: Schema.NullOr(StringId),
+    /** The collection whose record holds it in a file field. */
+    collectionId: Schema.NullOr(StringId),
     fieldKey: Schema.NullOr(TrimmedNonEmptyString),
     createdAt: Schema.DateTimeUtcFromString,
   }),

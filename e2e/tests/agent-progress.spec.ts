@@ -1,5 +1,5 @@
-import { test as base, expect } from "../fixtures.ts";
-import { startAgentApp } from "../agent-app.ts";
+import { expect } from "../fixtures.ts";
+import { test } from "../agent-app.ts";
 import {
   addStepMembers,
   chooseOption,
@@ -9,22 +9,6 @@ import {
   saveSteps,
   startItem,
 } from "../actions.ts";
-
-const test = base.extend<{ agentApp: Awaited<ReturnType<typeof startAgentApp>> }>({
-  // Playwright requires destructuring even for fixtures without dependencies.
-  // eslint-disable-next-line no-empty-pattern
-  agentApp: async ({}, use) => {
-    const app = await startAgentApp();
-    try {
-      await use(app);
-    } finally {
-      await app.close();
-    }
-  },
-  baseURL: async ({ agentApp }, use) => use(agentApp.url),
-  // This fixture already owns a whole app and database for each test.
-  extraHTTPHeaders: {},
-});
 
 test("agents report live progress on steps and settings, retaining reports per run", async ({
   agentApp,

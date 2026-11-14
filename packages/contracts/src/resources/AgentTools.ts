@@ -10,6 +10,9 @@ export const WORKFLOW_DRAFT_TOOL_NAME = "workflows_draft";
 /** The supplied reporting capability is included in every execution. */
 export const REPORTING_CAPABILITY_ID = "progress-reporting";
 
+/** The capability whose tools read and write collections' records. */
+export const COLLECTIONS_CAPABILITY_ID = "collections";
+
 export const WorkflowDraft = Schema.Struct({
   name: Workflow.fields.name,
   steps: WorkflowVersion.fields.steps,

@@ -22,6 +22,7 @@ export type NavLink = {
     | "/my-work"
     | "/chats"
     | "/settings/projects"
+    | "/settings/collections"
     | "/settings/agents"
     | "/settings/automations"
     | "/settings/organization"

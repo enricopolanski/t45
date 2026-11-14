@@ -11,12 +11,14 @@ import { projectOperations } from "../src/projects.ts";
 import { agents } from "../src/agents.ts";
 import { webBrowser } from "../src/browser.ts";
 import { progressReporting } from "../src/reporting.ts";
+import { collections } from "../src/collections.ts";
 
 const programs = [
   { name: "report-tools", definition: progressReporting },
   { name: "workflow-tools", definition: workflowDrafting },
   { name: "step-tools", definition: stepOperations },
   { name: "project-tools", definition: projectOperations },
+  { name: "collection-tools", definition: collections },
 ];
 const encodeCapabilities = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Capability)));
 const encodeBuiltIns = Schema.encodeSync(Schema.fromJsonString(BuiltIns));
