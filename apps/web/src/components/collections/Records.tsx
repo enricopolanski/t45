@@ -1,4 +1,4 @@
-import type { Collection } from "@t45/contracts/models/Collection";
+import { type Collection, UPDATED_AT_COLUMN } from "@t45/contracts/models/Collection";
 import {
   isUrlFieldValue,
   type FieldValues,
@@ -7,7 +7,7 @@ import {
 } from "@t45/contracts/models/Field";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
 import { buildFieldViews, getFieldLink } from "@t45/core/fieldViews";
-import { XIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
@@ -32,7 +32,7 @@ import { formatDay, plural } from "../work/workLogic";
 type RecordFiles = CollectionRecordView["files"];
 
 /** What a collection holds of its records: their fields and which one keys them. */
-type RecordShape = Pick<Collection, "fields" | "primaryKeyFieldId">;
+type RecordShape = Pick<Collection, "fields" | "primaryKeyFieldId" | "columnOrder">;
 
 /** A record's value as text, so a displayed link never wraps another link. */
 function formatCellValue(
@@ -110,6 +110,7 @@ export function RecordTable({
   records,
   onOpen,
   remove,
+  reorder,
 }: {
   readonly label: string;
   readonly collection: RecordShape;
@@ -119,8 +120,14 @@ export function RecordTable({
     readonly label: string;
     readonly onRemove: () => void;
   };
+  readonly reorder?:
+    | {
+        readonly disabled: boolean;
+        readonly onChange: (columnOrder: ReadonlyArray<string>) => void;
+      }
+    | undefined;
 }) {
-  const columns = collection.fields.filter(
+  const fields = collection.fields.filter(
     (field) =>
       field.id === collection.primaryKeyFieldId ||
       (isTableColumn(field) &&
@@ -130,19 +137,58 @@ export function RecordTable({
             (source) => source.type === "url" && source.displayLinkOn === field.id,
           ))),
   );
+  const order = [
+    ...new Set([
+      ...(collection.columnOrder ?? []),
+      ...collection.fields.map((field) => field.id),
+      UPDATED_AT_COLUMN,
+    ]),
+  ];
+  const columns = order.flatMap((id) => {
+    const field = fields.find((candidate) => candidate.id === id) ?? null;
+    if (field === null && id !== UPDATED_AT_COLUMN) return [];
+    return [{ id, label: field?.label ?? "Last update", field }];
+  });
+  const move = (from: string, to: string) => {
+    const next = [...order];
+    const fromIndex = next.indexOf(from);
+    const toIndex = next.indexOf(to);
+    next[fromIndex] = to;
+    next[toIndex] = from;
+    reorder?.onChange(next);
+  };
   return (
     <div className="overflow-x-auto rounded-lg border">
       <table aria-label={label} className="w-full border-separate border-spacing-0 text-sm">
         <thead>
           <tr>
-            {columns.map((field) => (
-              <th key={field.id} scope="col" className={headerCell}>
-                {field.label}
+            {columns.map((column, index) => (
+              <th key={column.id} scope="col" className={headerCell}>
+                {reorder === undefined ? null : (
+                  <div className="-ml-1 mb-1 flex gap-0.5">
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Move ${column.label} left`}
+                      disabled={reorder.disabled || index === 0}
+                      onClick={() => move(column.id, columns[index - 1]!.id)}
+                    >
+                      <ArrowLeftIcon />
+                    </Button>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Move ${column.label} right`}
+                      disabled={reorder.disabled || index === columns.length - 1}
+                      onClick={() => move(column.id, columns[index + 1]!.id)}
+                    >
+                      <ArrowRightIcon />
+                    </Button>
+                  </div>
+                )}
+                {column.label}
               </th>
             ))}
-            <th scope="col" className={headerCell}>
-              Last update
-            </th>
             {remove === undefined ? null : (
               <th scope="col" className={headerCell}>
                 <span className="sr-only">Remove</span>
@@ -169,19 +215,18 @@ export function RecordTable({
                     onOpen?.(record);
                 }}
               >
-                {columns.map((field) => (
-                  <td key={field.id} className="max-w-64 truncate border-t px-3 py-2">
-                    {renderCell(
-                      field,
-                      record.values[field.id],
-                      record.files,
-                      getFieldLink(field.id, collection.fields, record.values),
-                    )}
+                {columns.map(({ id, field }) => (
+                  <td key={id} className="max-w-64 truncate border-t px-3 py-2">
+                    {field === null
+                      ? formatRelativeTimeLabel(record.updatedAt)
+                      : renderCell(
+                          field,
+                          record.values[field.id],
+                          record.files,
+                          getFieldLink(field.id, collection.fields, record.values),
+                        )}
                   </td>
                 ))}
-                <td className="border-t px-3 py-2 whitespace-nowrap">
-                  {formatRelativeTimeLabel(record.updatedAt)}
-                </td>
                 {removal === undefined ? null : (
                   <td className="w-8 border-t text-center">
                     <Button

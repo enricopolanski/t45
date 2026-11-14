@@ -5,7 +5,12 @@ import * as Struct from "effect/Struct";
 
 import { AdminOnly } from "../Authorization.ts";
 import { Attachment } from "../models/Attachment.ts";
-import { Collection, CollectionRecord, Refused } from "../models/Collection.ts";
+import {
+  Collection,
+  CollectionColumnOrder,
+  CollectionRecord,
+  Refused,
+} from "../models/Collection.ts";
 import { FieldPathSegment, FieldValues } from "../models/Field.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { AccessDenied, NotFound } from "./errors.ts";
@@ -90,6 +95,11 @@ export const Collections = RpcGroup.make(
   }),
   Rpc.make("update", {
     payload: { collectionId: StringId, ...CollectionDraft.fields },
+    success: Collection,
+    error: CollectionErrors,
+  }),
+  Rpc.make("reorderColumns", {
+    payload: { collectionId: StringId, columnOrder: CollectionColumnOrder },
     success: Collection,
     error: CollectionErrors,
   }),

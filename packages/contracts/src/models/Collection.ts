@@ -10,6 +10,12 @@ import { Field, FieldPathSegment, Fields, FieldValues, valuesProblem } from "./F
 import type { Role, State } from "./User.ts";
 import { StringId, Title, TrimmedNonEmptyString } from "./primitives.ts";
 
+/** The record's update time is a column alongside the collection's own fields. */
+export const UPDATED_AT_COLUMN = "$updatedAt";
+export const CollectionColumnOrder = Schema.UniqueArray(
+  Schema.Union([FieldPathSegment, Schema.Literal(UPDATED_AT_COLUMN)]),
+);
+
 /** A collection's primary key is one of its own top-level text fields. */
 export const primaryKeyRefusal = (collection: {
   readonly fields: ReadonlyArray<Field>;
@@ -27,6 +33,8 @@ export class Collection extends Schema.Opaque<Collection>()(
     title: Title,
     fields: Fields,
     primaryKeyFieldId: FieldPathSegment,
+    /** Table order; fields without an entry follow in their definition order. */
+    columnOrder: Schema.optionalKey(CollectionColumnOrder),
     /** The members, besides admins, who see and edit its records. */
     memberUserIds: Schema.UniqueArray(StringId),
     createdAt: Schema.DateTimeUtcFromString,

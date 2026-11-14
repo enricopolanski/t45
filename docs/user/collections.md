@@ -8,6 +8,8 @@ Use **New record** to add a record, and click a record to change it. Saving a re
 
 Turn off **Show in table** on a field to keep it out of the records table; it still shows when you open a record. Fields in a group with multiple entries work the same way: an entry's hidden fields show under its **Details**.
 
+Admins can turn on **Reorder** above the collection's table and use the arrows above each column to move it left or right. Each move saves automatically, and the same column order appears wherever the collection's records are shown, including steps.
+
 Once a collection has records, its admin can add fields and change which show in the table, but can't change or remove the fields it has or its primary key.
 
 ## Records in a step

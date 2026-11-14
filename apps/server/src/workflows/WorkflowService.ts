@@ -176,7 +176,13 @@ const make = Effect.gen(function* () {
         );
         return {
           ...view,
-          collection: Struct.pick(collection, ["id", "title", "fields", "primaryKeyFieldId"]),
+          collection: Struct.pick(collection, [
+            "id",
+            "title",
+            "fields",
+            "primaryKeyFieldId",
+            "columnOrder",
+          ]),
           records: yield* Effect.forEach(
             linked.filter((record) => record !== null),
             (record) =>

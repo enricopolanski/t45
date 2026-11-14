@@ -137,6 +137,17 @@ const make = Effect.gen(function* () {
     list: visible,
     get: find,
 
+    reorderColumns: Effect.fnUntraced(function* ({
+      collectionId,
+      columnOrder,
+    }: Payload<"reorderColumns">) {
+      const before = yield* collections.get(collectionId);
+      if (before === null) return yield* new NotFound();
+      const collection = { ...before, columnOrder, updatedAt: yield* DateTime.now };
+      yield* collections.save(collection);
+      return collection;
+    }),
+
     create: Effect.fnUntraced(function* (input: Payload<"create">) {
       yield* requireDraft(input);
       const now = yield* DateTime.now;
