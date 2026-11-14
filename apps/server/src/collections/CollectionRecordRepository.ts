@@ -77,8 +77,9 @@ export const layer = Layer.effect(
             ...(text === null
               ? []
               : [
-                  sql`EXISTS (SELECT 1 FROM json_each(field_values) AS value
-                    WHERE value.type = 'text' AND instr(lower(value.value), lower(${text})) > 0)`,
+                  sql`EXISTS (SELECT 1 FROM json_tree(field_values) AS value
+                    WHERE value.type = 'text' AND typeof(value.key) = 'text'
+                      AND instr(lower(value.value), lower(${text})) > 0)`,
                 ]),
           ]),
           sql`LIMIT ${limit} OFFSET ${offset}`,

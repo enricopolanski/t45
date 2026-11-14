@@ -96,7 +96,9 @@ describe("field changes after records exist", () => {
       fieldsChangeRefusal(listings, {
         ...listings,
         fields: fields.map((field) =>
-          field.id === "f_price" ? { ...field, type: "text" as const } : field,
+          field.id === "f_price" && field.type === "number"
+            ? { ...field, type: "text" as const }
+            : field,
         ),
       }),
       "fields_locked",

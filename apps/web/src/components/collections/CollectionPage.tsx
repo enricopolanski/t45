@@ -1,6 +1,7 @@
 import type { Collection } from "@t45/contracts/models/Collection";
 import {
   defaultValues,
+  isUrlFieldValue,
   type FieldValues,
   rowIds,
   withFieldValue,
@@ -16,6 +17,7 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { api } from "../../rpc/api";
 import { useIsAdmin } from "../../state/session";
 import { Button } from "../ui/button";
+import { ExternalUrl } from "../ExternalUrl";
 import {
   Dialog,
   DialogFooter,
@@ -48,6 +50,14 @@ function cellContent(
       return files.find((file) => file.id === value)?.name ?? "";
     case "group":
       return plural(rowIds(value).length, "entry", "entries");
+    case "url":
+      return isUrlFieldValue(value) ? (
+        <ExternalUrl href={value.url} onClick={(event) => event.stopPropagation()}>
+          {value.label}
+        </ExternalUrl>
+      ) : (
+        ""
+      );
     case "text":
       // A web address shows as a link, so long URLs don't crowd the table.
       return typeof value === "string" && /^https?:\/\/\S+$/u.test(value.trim()) ? (
@@ -200,7 +210,7 @@ export function CollectionPage({ collectionId }: { readonly collectionId: string
                   className="cursor-pointer hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
                   onClick={() => setOpen({ values: record.values, files: record.files })}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter")
+                    if (event.key === "Enter" && event.target === event.currentTarget)
                       setOpen({ values: record.values, files: record.files });
                   }}
                 >
