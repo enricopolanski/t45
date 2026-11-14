@@ -244,6 +244,15 @@ export const make = Effect.gen(function* () {
               chatId: chat.id,
               cause,
             });
+            // The last report says why, where a run shows what it is doing.
+            const failure = Cause.findErrorOption(cause);
+            yield* repository.appendReport(chat.id, {
+              message:
+                failure._tag === "Some" && failure.value._tag === "ExecutionFailed"
+                  ? `Failed: ${failure.value.reason}`
+                  : "Failed: the run stopped unexpectedly. The server log has the details.",
+              at: yield* DateTime.now,
+            });
             yield* clearQuestions(chat.id);
             yield* end(chat.id, onEnd, "failed");
           }),

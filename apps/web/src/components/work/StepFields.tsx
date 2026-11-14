@@ -1,17 +1,25 @@
 import { Refused } from "@t45/contracts/models/Workflow";
-import { isUrlFieldValue } from "@t45/contracts/models/Field";
+import {
+  defaultValues,
+  type FieldValues,
+  isUrlFieldValue,
+  recordKeys,
+} from "@t45/contracts/models/Field";
 import { AccessDenied } from "@t45/contracts/resources/errors";
 import type { FieldValue as StepFieldValue, FieldView } from "@t45/contracts/resources/Workflows";
-import { ChevronDownIcon, PaperclipIcon, PlusIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, LinkIcon, PaperclipIcon, PlusIcon, XIcon } from "lucide-react";
 import { type ComponentProps, type ReactNode, useId, useRef, useState } from "react";
 
 import { attachmentUploadUrl, attachmentUrl, decodeUploadResult } from "../../lib/attachmentUrl";
 import { api } from "../../rpc/api";
 import { cn } from "../../lib/utils";
+import { RecordDialog, RecordPicker, RecordTable } from "../collections/Records";
 import { SavedInput, saveTyped } from "../SavedInput";
 import { ExternalUrl } from "../ExternalUrl";
+import { isTableColumn } from "../fields/fieldPresentation";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ErrorText } from "../ui/error-text";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -20,7 +28,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { newKey } from "../workflows/workflowLogic";
 import { CardFold } from "./CardFold";
-import { formatDay, missingFields } from "./workLogic";
+import { formatDay, missingFields, plural } from "./workLogic";
 
 /** Uploads a file as the member's pending attachment, ready to be given to a field; answers its id. */
 export async function uploadFile(file: File) {
@@ -50,7 +58,11 @@ export async function attachStepFile(stepId: string, file: File, fieldKey?: stri
 }
 
 /** A download link for a step's file. */
-function AttachmentLink({ attachment }: { readonly attachment: NonNullable<FieldView["file"]> }) {
+export function AttachmentLink({
+  attachment,
+}: {
+  readonly attachment: NonNullable<FieldView["file"]>;
+}) {
   return (
     <a
       href={attachmentUrl(attachment)}
@@ -99,7 +111,9 @@ export function FilePickButton({
   );
 }
 
-function shownValue(field: FieldView) {
+export function shownValue(field: FieldView) {
+  if (field.type === "file") return field.file?.name ?? field.label;
+  if (field.type === "group" || field.type === "records") return field.label;
   if (field.value === null) return "Not filled in";
   switch (field.type) {
     case "boolean":
@@ -111,7 +125,16 @@ function shownValue(field: FieldView) {
   }
 }
 
-function FieldValue({ field }: { readonly field: FieldView }) {
+export function FieldValue({ field }: { readonly field: FieldView }) {
+  if (field.linkUrl !== undefined && field.type !== "group" && field.type !== "records")
+    return <ExternalUrl href={field.linkUrl}>{shownValue(field)}</ExternalUrl>;
+  if (field.type === "records") {
+    return field.collection === null || field.records.length === 0 ? (
+      <span className="text-sm text-muted-foreground">No records</span>
+    ) : (
+      <RecordTable label={field.label} collection={field.collection} records={field.records} />
+    );
+  }
   if (field.type === "group") {
     if (field.rows.length === 0)
       return <span className="text-sm text-muted-foreground">No entries</span>;
@@ -155,6 +178,8 @@ type EditorProps = {
   readonly missing: ReadonlySet<string>;
   readonly onSave: (fieldKey: string, value: StepFieldValue) => void;
   readonly onUpload: (fieldKey: string, file: File) => void;
+  /** Shows a linked record as it was just saved. */
+  readonly onRecordSaved?: () => void;
 };
 
 /** A repeatable group's entries: rows with an id. */
@@ -255,6 +280,7 @@ function FieldControl({
           />
         </div>
       );
+    case "records":
     case "group":
       return null;
   }
@@ -273,6 +299,7 @@ function FieldEditor({
 }) {
   const { field, missing } = props;
   const id = useId();
+  if (field.type === "records") return <LinkedRecords {...props} />;
   if (field.type === "group") {
     return field.repeatable ? <EntriesEditor {...props} /> : <GroupEditor {...props} />;
   }
@@ -304,6 +331,9 @@ function FieldEditor({
           {...props}
           control={{ id, "aria-describedby": describedBy, "aria-invalid": invalid }}
         />
+        {field.linkUrl === undefined ? null : (
+          <ExternalUrl href={field.linkUrl}>{shownValue(field)}</ExternalUrl>
+        )}
         {isStacked && guidance}
         {invalid && <ErrorText id={`${id}-missing`} text="Required" />}
       </div>
@@ -311,7 +341,10 @@ function FieldEditor({
   );
 }
 
-/** Fields in order: one after another close together, and each group set apart. */
+const isSetApart = (field: FieldView | undefined) =>
+  field?.type === "group" || field?.type === "records";
+
+/** Fields in order: one after another close together, and each group or record list set apart. */
 export function FieldInputs({
   fields,
   ...props
@@ -319,7 +352,7 @@ export function FieldInputs({
   const runs: Array<Array<FieldView>> = [];
   for (const field of fields) {
     const run = runs.at(-1);
-    if (field.type !== "group" && run?.[0]?.type !== "group" && run !== undefined) run.push(field);
+    if (!isSetApart(field) && !isSetApart(run?.[0]) && run !== undefined) run.push(field);
     else runs.push([field]);
   }
   return (
@@ -346,7 +379,13 @@ function GroupHeading({
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h3 className="text-sm/6 font-medium">{field.label}</h3>
+        <h3 className="text-sm/6 font-medium">
+          {field.linkUrl === undefined ? (
+            field.label
+          ) : (
+            <ExternalUrl href={field.linkUrl}>{field.label}</ExternalUrl>
+          )}
+        </h3>
         {children}
       </div>
       {field.description ? (
@@ -364,6 +403,92 @@ function GroupEditor({ field, ...props }: EditorProps) {
       <div className="rounded-lg border p-3">
         <FieldInputs {...props} fields={field.rows.flatMap((row) => row.fields)} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * A records field: the collection's records it links, listed as the collection lists them. A
+ * record opens to edit it; others are linked from the collection, or added to it and linked.
+ */
+function LinkedRecords({ field, missing, onSave, onRecordSaved }: EditorProps) {
+  const [opened, setOpened] = useState<{
+    readonly values: FieldValues;
+    readonly files: FieldView["records"][number]["files"];
+  } | null>(null);
+  const [isPicking, setIsPicking] = useState(false);
+  const { collection } = field;
+  const keys = recordKeys(field.value);
+  const link = (key: string) => onSave(field.key, [...keys, key]);
+  return (
+    <div data-field-key={field.key} className="col-span-full flex flex-col gap-2">
+      <GroupHeading field={field}>
+        <span className="text-xs text-muted-foreground">
+          {plural(field.records.length, "record", "records")}
+        </span>
+      </GroupHeading>
+      {missing.has(field.key) && <ErrorText text="Link at least one record" />}
+      {collection === null ? (
+        <p className="text-sm text-muted-foreground">Its collection is gone.</p>
+      ) : (
+        <>
+          {field.records.length > 0 ? (
+            <RecordTable
+              label={field.label}
+              collection={collection}
+              records={field.records}
+              onOpen={setOpened}
+              remove={(record) => ({
+                label: `Unlink record ${record.key}`,
+                onRemove: () =>
+                  onSave(
+                    field.key,
+                    keys.filter((key) => key !== record.key),
+                  ),
+              })}
+            />
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={() => setIsPicking(true)}>
+              <LinkIcon />
+              Link record
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setOpened({ values: defaultValues(collection.fields), files: [] })}
+            >
+              <PlusIcon />
+              New record
+            </Button>
+          </div>
+          {opened === null ? null : (
+            <RecordDialog
+              collection={collection}
+              record={opened}
+              onClose={() => setOpened(null)}
+              onSaved={(record) => {
+                setOpened(null);
+                if (keys.includes(record.key)) onRecordSaved?.();
+                else link(record.key);
+              }}
+            />
+          )}
+          {isPicking ? (
+            <RecordPicker
+              label={field.label}
+              collection={collection}
+              linked={keys}
+              onClose={() => setIsPicking(false)}
+              onPick={(record) => {
+                setIsPicking(false);
+                link(record.key);
+              }}
+            />
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -456,8 +581,16 @@ type EntriesProps = EditorProps & {
 const headerCell =
   "border-l border-border/60 bg-muted px-1.5 py-2 text-left align-top text-xs font-medium text-foreground/80 wrap-break-word";
 
-/** The entries as rows of a table, a column per field, typed into in place. */
-function EntryTable({ field, entries, remove, missing, onSave, onUpload }: EntriesProps) {
+/**
+ * The entries as rows of a table, a column per field shown in the table, typed into in place; when
+ * some fields show only in details, each entry opens to all its fields.
+ */
+function EntryTable({ entries, remove, ...props }: EntriesProps) {
+  const { field, missing, onSave, onUpload } = props;
+  const isColumn = field.rowFields.map(isTableColumn);
+  const hasDetails = isColumn.includes(false);
+  const [detailsAt, setDetailsAt] = useState<number | null>(null);
+  const opened = detailsAt === null ? undefined : entries[detailsAt];
   return (
     <div className="overflow-x-auto rounded-lg border">
       <table className="w-full min-w-xl table-fixed border-separate border-spacing-0 text-sm">
@@ -469,28 +602,35 @@ function EntryTable({ field, entries, remove, missing, onSave, onUpload }: Entri
             >
               #
             </th>
-            {field.rowFields.map((child) => (
-              <th
-                key={child.id}
-                scope="col"
-                className={cn(headerCell, child.type === "number" && "text-right")}
-              >
-                {child.description ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span className="cursor-help underline decoration-dotted underline-offset-2" />
-                      }
-                    >
-                      {child.label}
-                    </TooltipTrigger>
-                    <TooltipPopup>{child.description}</TooltipPopup>
-                  </Tooltip>
-                ) : (
-                  child.label
-                )}
+            {field.rowFields
+              .filter((_, at) => isColumn[at])
+              .map((child) => (
+                <th
+                  key={child.id}
+                  scope="col"
+                  className={cn(headerCell, child.type === "number" && "text-right")}
+                >
+                  {child.description ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span className="cursor-help underline decoration-dotted underline-offset-2" />
+                        }
+                      >
+                        {child.label}
+                      </TooltipTrigger>
+                      <TooltipPopup>{child.description}</TooltipPopup>
+                    </Tooltip>
+                  ) : (
+                    child.label
+                  )}
+                </th>
+              ))}
+            {hasDetails ? (
+              <th scope="col" className={cn(headerCell, "w-18")}>
+                <span className="sr-only">Details</span>
               </th>
-            ))}
+            ) : null}
             <th scope="col" className={cn(headerCell, "w-8")}>
               <span className="sr-only">Remove</span>
             </th>
@@ -500,21 +640,50 @@ function EntryTable({ field, entries, remove, missing, onSave, onUpload }: Entri
           {entries.map((entry, at) => (
             <tr key={entry.id}>
               <td className="h-9 border-t text-center text-xs text-muted-foreground">{at + 1}</td>
-              {entry.fields.map((child) => (
-                <td
-                  key={child.key}
-                  data-field-key={child.key}
-                  className="border-t border-l border-l-border/60 p-0 align-top has-aria-invalid:bg-destructive/8"
-                >
-                  <CellControl
-                    field={child}
-                    label={`${child.label}, entry ${at + 1}`}
-                    isMissing={missing.has(child.key)}
-                    onSave={onSave}
-                    onUpload={onUpload}
-                  />
+              {entry.fields
+                .filter((_, column) => isColumn[column])
+                .map((child) => (
+                  <td
+                    key={child.key}
+                    data-field-key={child.key}
+                    className="border-t border-l border-l-border/60 p-0 align-top has-aria-invalid:bg-destructive/8"
+                  >
+                    <CellControl
+                      field={child}
+                      label={`${child.label}, entry ${at + 1}`}
+                      isMissing={missing.has(child.key)}
+                      onSave={onSave}
+                      onUpload={onUpload}
+                    />
+                  </td>
+                ))}
+              {hasDetails ? (
+                <td className="border-t border-l border-l-border/60 text-center">
+                  {/* Each field shown only in details leads to this button, as a missing field's link does. */}
+                  {entry.fields
+                    .filter((_, column) => !isColumn[column])
+                    .reduceRight(
+                      (button, child) => (
+                        <span data-field-key={child.key}>{button}</span>
+                      ),
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant={
+                          entry.fields.some(
+                            (child, column) => !isColumn[column] && missing.has(child.key),
+                          )
+                            ? "destructive-outline"
+                            : "ghost"
+                        }
+                        aria-label={`Details of entry ${at + 1} of ${field.label}`}
+                        onClick={() => setDetailsAt(at)}
+                      >
+                        Details
+                      </Button>,
+                    )}
                 </td>
-              ))}
+              ) : null}
               <td className="border-t border-l border-l-border/60 text-center">
                 <RemoveEntry {...remove(at)} />
               </td>
@@ -522,6 +691,22 @@ function EntryTable({ field, entries, remove, missing, onSave, onUpload }: Entri
           ))}
         </tbody>
       </table>
+      {opened === undefined ? null : (
+        <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : setDetailsAt(null))}>
+          <DialogPopup className="sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>{`${field.label}, entry ${(detailsAt ?? 0) + 1}`}</DialogTitle>
+            </DialogHeader>
+            <DialogPanel>
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(12.5rem,100%),1fr))] gap-3">
+                {opened.fields.map((child) => (
+                  <FieldEditor key={child.key} {...props} field={child} isStacked />
+                ))}
+              </div>
+            </DialogPanel>
+          </DialogPopup>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -537,6 +722,12 @@ function CellControl({
   onSave,
   onUpload,
 }: Omit<EditorProps, "missing"> & { readonly label: string; readonly isMissing: boolean }) {
+  if (field.linkUrl !== undefined)
+    return (
+      <div className="min-h-9 px-1.5 py-2">
+        <ExternalUrl href={field.linkUrl}>{shownValue(field)}</ExternalUrl>
+      </div>
+    );
   const control = { "aria-label": label, "aria-invalid": isMissing || undefined };
   const stored = storedText(field);
   const save = saveTyped(stored, (typed) => onSave(field.key, typedValue(field, typed)));
@@ -619,6 +810,7 @@ function CellControl({
           />
         </div>
       );
+    case "records":
     case "group":
       return null;
   }
@@ -688,6 +880,7 @@ export function StepFields({
   missing,
   onSave,
   onUpload,
+  onRecordSaved,
 }: {
   readonly fields: ReadonlyArray<FieldView>;
   readonly editable: boolean;
@@ -695,12 +888,19 @@ export function StepFields({
   readonly missing: ReadonlySet<string>;
   readonly onSave: (fieldKey: string, value: StepFieldValue) => void;
   readonly onUpload: (fieldKey: string, file: File) => void;
+  readonly onRecordSaved: () => void;
 }) {
   if (fields.length === 0) return null;
   return (
     <CardFold title="Fields" held={missing.size > 0}>
       {editable ? (
-        <FieldInputs fields={fields} missing={missing} onSave={onSave} onUpload={onUpload} />
+        <FieldInputs
+          fields={fields}
+          missing={missing}
+          onSave={onSave}
+          onUpload={onUpload}
+          onRecordSaved={onRecordSaved}
+        />
       ) : (
         <ReadOnlyFields fields={fields} />
       )}
@@ -712,7 +912,13 @@ export function StepFields({
 export function ReadOnlyFields({ fields }: { readonly fields: ReadonlyArray<FieldView> }) {
   return fields.map((field) => (
     <div key={field.key} className="flex flex-col gap-0.5">
-      <span className="text-xs text-muted-foreground">{field.label}</span>
+      <span className="text-xs text-muted-foreground">
+        {field.linkUrl !== undefined && isSetApart(field) ? (
+          <ExternalUrl href={field.linkUrl}>{field.label}</ExternalUrl>
+        ) : (
+          field.label
+        )}
+      </span>
       <FieldValue field={field} />
     </div>
   ));

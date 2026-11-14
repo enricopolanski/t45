@@ -40,7 +40,8 @@ import { CardFold } from "./CardFold";
 import { OtherStep } from "./ItemSteps";
 import { ItemDescription } from "./ItemDescription";
 import { StepComments, StepFiles } from "./StepConversation";
-import { attachStepFile, ReadOnlyFields, StepFields } from "./StepFields";
+import { attachStepFile, StepFields } from "./StepFields";
+import { StepInputs } from "./StepInputs";
 import { StepStatus } from "./StepStatus";
 import { StepSubSteps } from "./StepSubSteps";
 import { useWorkDirectory } from "./useWorkDirectory";
@@ -137,7 +138,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   // The workflow's step this one is, or sits in, shown among all the others.
   const rootId = view.parents[0]?.id ?? view.step.id;
   const open = (
-    <section key="open" aria-label="Open step" className="flex flex-col gap-6">
+    <section key="open" aria-label="Open step" className="flex flex-col gap-4">
       {error && <ErrorText text={error} />}
       {missing.length > 0 || unfinished.length > 0 ? (
         <MissingRecap missing={missing} unfinished={unfinished} />
@@ -152,14 +153,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
         }
       />
-      {view.inputs.length > 0 ? (
-        <section aria-label="Inputs" className="flex flex-col gap-2.5">
-          <h2 className="text-sm font-semibold">Inputs</h2>
-          <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-            <ReadOnlyFields fields={view.inputs} />
-          </div>
-        </section>
-      ) : null}
+      {view.inputs.length > 0 ? <StepInputs fields={view.inputs} /> : null}
       <StepFields
         fields={view.fields}
         editable={actions.canEditFields}
@@ -168,6 +162,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           void act(() => api("workflows.setStepField", { ...step, fieldKey, value }))
         }
         onUpload={(fieldKey, file) => void act(() => attachStepFile(view.step.id, file, fieldKey))}
+        onRecordSaved={() => void act(() => Promise.resolve())}
       />
       <StepSubSteps view={view} />
       <StepComments
@@ -189,9 +184,9 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     </>
   );
   return (
-    <WorkFrame title={view.ticket.title} width="split">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_25rem]">
-        <div className="flex min-w-0 flex-col gap-6">
+    <WorkFrame title={view.ticket.title} width="full" contentClassName="p-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="flex min-w-0 flex-col gap-4">
           <ItemHeader view={view} />
           <div className="flex flex-col gap-3">
             {view.otherSteps.map((entry) =>
@@ -513,12 +508,12 @@ function ItemHeader({ view }: { readonly view: StepView }) {
       ({ step: other }) => other.id !== step.id && other.status.type !== "completed",
     )?.name ?? null;
   return (
-    <header className="flex flex-col gap-3">
+    <header className="flex flex-col gap-2">
       <BackLink to="/boards/$slug" params={{ slug: view.ticket.projectId }}>
         {view.projectName}
       </BackLink>
-      <div className="flex flex-col gap-2">
-        <h2 className="text-3xl font-semibold tracking-tight">{view.ticket.title}</h2>
+      <div className="flex flex-col gap-1">
+        <h2 className="text-2xl font-semibold tracking-tight">{view.ticket.title}</h2>
         <h3 className="text-sm text-muted-foreground">
           {view.parents.map((parent) => (
             <Fragment key={parent.id}>

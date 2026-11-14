@@ -66,6 +66,7 @@ import {
   fieldValueProblem,
   missingRow,
   resolveFieldPath,
+  recordKeys,
   rowIds,
 } from "@t45/contracts/models/Field";
 import type { AssignmentView } from "@t45/contracts/resources/Assignments";
@@ -81,10 +82,14 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as Struct from "effect/Struct";
 
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
 import { AttachmentRepository, isAttachmentId } from "../attachments/AttachmentRepository.ts";
+import { CollectionRecordRepository } from "../collections/CollectionRecordRepository.ts";
+import { CollectionRepository } from "../collections/CollectionRepository.ts";
+import { CollectionService } from "../collections/CollectionService.ts";
 import { type CommandLogEntry, CommandLogRepository } from "../persistence/CommandLogRepository.ts";
 import { UserRepository } from "../org/UserRepository.ts";
 import { NotificationRepository } from "./NotificationRepository.ts";
@@ -142,15 +147,60 @@ const make = Effect.gen(function* () {
   const automations = yield* AutomationRepository;
   const files = yield* AttachmentRepository;
   const commandLog = yield* CommandLogRepository;
-  /** The fields with their values, and the files those values hold. */
+  const collections = yield* CollectionRepository;
+  const collectionRecords = yield* CollectionRecordRepository;
+  const collectionAccess = yield* CollectionService;
+  /** The views of `fields` with the records their records fields link, as long as those exist. */
+  const linkRecords = (
+    fields: ReadonlyArray<Field>,
+    views: ReadonlyArray<FieldView>,
+  ): Effect.Effect<Array<FieldView>> =>
+    Effect.forEach(views, (view, at) =>
+      Effect.gen(function* () {
+        const field = fields[at];
+        if (field?.type === "group")
+          return {
+            ...view,
+            rows: yield* Effect.forEach(view.rows, (row) =>
+              Effect.map(linkRecords(field.fields, row.fields), (linked) => ({
+                ...row,
+                fields: linked,
+              })),
+            ),
+          };
+        if (field?.type !== "records") return view;
+        const collection = yield* collections.get(field.collectionId);
+        if (collection === null) return view;
+        const linked = yield* Effect.forEach(recordKeys(view.value), (key) =>
+          collectionRecords.get(collection.id, key),
+        );
+        return {
+          ...view,
+          collection: Struct.pick(collection, ["id", "title", "fields", "primaryKeyFieldId"]),
+          records: yield* Effect.forEach(
+            linked.filter((record) => record !== null),
+            (record) =>
+              Effect.map(
+                files.forIds(Object.values(record.values).filter(isAttachmentId)),
+                (held) => ({
+                  ...record,
+                  files: held.map(({ id, name }) => ({ id, name })),
+                }),
+              ),
+          ),
+        };
+      }),
+    );
+  /** The fields with their values, the files those values hold and the records they link. */
   const buildCurrentStepFieldViews = (fields: ReadonlyArray<Field>, values: Step["values"]) =>
-    files
-      .forIds(Object.values(values).filter(isAttachmentId))
-      .pipe(
-        Effect.map((held) =>
+    files.forIds(Object.values(values).filter(isAttachmentId)).pipe(
+      Effect.flatMap((held) =>
+        linkRecords(
+          fields,
           buildFieldViews(fields, values, (id) => held.find((file) => file.id === id) ?? null),
         ),
-      );
+      ),
+    );
 
   const chats = yield* ChatService;
   const chatRepository = yield* ChatRepository;
@@ -455,7 +505,7 @@ const make = Effect.gen(function* () {
     return {
       text: [
         `You contribute to ${subject} of "${brief.ticketTitle}" in the project "${brief.projectName}". The step is below as JSON: its instructions, the fields of earlier steps it reads as inputs, its own fields, its comments and its files. That is all you can see of this ticket.`,
-        "Fill the step's fields with step_set_field, using each field's key and type below; a repeatable group's rowFields name the fields of its rows. Read the step again with step_get_step, report progress with progress_report, share results with step_comment, and attach files with step_attach. Each tool returns the actual operation result, or exactly why it refused. When your contribution is finished, end the conversation.",
+        "Fill the step's fields with step_set_field, using each field's key and type below; a repeatable group's rowFields name the fields of its rows; a records field shows its collection and the records it links, and takes the keys of all the records it links, so save a new record with the collection tools before you add its key. Read the step again with step_get_step, report progress with progress_report, share results with step_comment, and attach files with step_attach. Each tool returns the actual operation result, or exactly why it refused. When your contribution is finished, end the conversation.",
         "You work in a folder of your own. Follow AGENTS.md if it is there.",
         instructions ? `Instructions for this step:\n${instructions}` : "",
         formatAutomationContext(brief),
@@ -556,10 +606,22 @@ const make = Effect.gen(function* () {
     buildCurrentStepFieldViews(definitionOf(work, step).fields, step.values);
   /** The fields of earlier steps the step declares as inputs: all it gets of them. */
   const buildInputViews = (work: Work, step: Step) =>
-    Effect.forEach(
-      stepInputFields(work.version.steps, work.ticket, definitionOf(work, step)),
-      ({ source, field }) => buildCurrentStepFieldViews([field], source.values),
-    ).pipe(Effect.map((views) => views.flat()));
+    Effect.gen(function* () {
+      const inputs = stepInputFields(work.version.steps, work.ticket, definitionOf(work, step));
+      const bySource = new Map<Step, Array<Field>>();
+      for (const { source, field } of inputs)
+        bySource.set(source, [...(bySource.get(source) ?? []), field]);
+      // Resolve links only among the fields the receiving step is allowed to read.
+      const views = new Map(
+        yield* Effect.forEach([...bySource], ([source, fields]) =>
+          Effect.map(
+            buildCurrentStepFieldViews(fields, source.values),
+            (shown) => [source.id, new Map(shown.map((field) => [field.key, field]))] as const,
+          ),
+        ),
+      );
+      return inputs.flatMap(({ source, field }) => views.get(source.id)?.get(field.id) ?? []);
+    });
 
   const listProjects = Effect.fnUntraced(function* (actorId: string) {
     const actor = yield* actorOf(actorId);
@@ -1095,6 +1157,16 @@ const make = Effect.gen(function* () {
           : null;
     if (problem !== null)
       return yield* new WorkflowRefused({ reason: "invalid_field_value", detail: problem });
+    if (field.type === "records") {
+      yield* collectionAccess.requireReadable(caller, field.collectionId);
+      for (const key of recordKeys(value)) {
+        if ((yield* collectionRecords.get(field.collectionId, key)) === null)
+          return yield* new WorkflowRefused({
+            reason: "invalid_field_value",
+            detail: `Collection ${field.collectionId} has no record ${key}: save it with the collection tools first.`,
+          });
+      }
+    }
     if (field.type === "group") {
       const before = rowIds(step.values[input.fieldKey]);
       const added = rowIds(value).filter((rowId) => !before.includes(rowId));

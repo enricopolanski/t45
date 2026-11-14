@@ -2,6 +2,7 @@ import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XIcon } from "lucide-react";
 import { useId, useState } from "react";
 
 import { useRowKeys } from "../../hooks/useRowKeys";
+import { isTableColumn } from "./fieldPresentation";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Field } from "../ui/field";
@@ -89,22 +90,118 @@ export function MoveRemove({
   );
 }
 
-/** Fields as a step or a collection defines them, with a way to add one; `depth` counts the groups around them. */
+/** Whether a field shows as a column of the table listing its entries or records. */
+export function ColumnSwitch({
+  field,
+  onChange,
+  disabled,
+}: {
+  readonly field: DraftField;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  if (field.type === "url" && field.displayLinkOn !== undefined) return null;
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <Switch
+        size="sm"
+        checked={isTableColumn(field)}
+        onCheckedChange={(checked) => {
+          const { isDetailOnly: _, ...rest } = field;
+          onChange(checked ? rest : { ...rest, isDetailOnly: true });
+        }}
+        disabled={disabled}
+      />
+      Show in table
+    </label>
+  );
+}
+
+/** The other field whose value opens this URL. All sibling field types can display the link. */
+export function LinkDisplaySelect({
+  field,
+  fields,
+  onChange,
+  disabled,
+}: {
+  readonly field: DraftField;
+  readonly fields: ReadonlyArray<DraftField>;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  if (field.type !== "url") return null;
+  const choices = fields.filter((other) => other.id !== field.id);
+  return (
+    <Field label="Display link on" size="xs">
+      <Select
+        value={field.displayLinkOn ?? ""}
+        onValueChange={(target) => {
+          const { displayLinkOn: _, ...rest } = field;
+          onChange(target ? { ...rest, displayLinkOn: target } : rest);
+        }}
+        disabled={disabled}
+      >
+        <SelectTrigger>
+          <SelectValue>
+            {(target: string) =>
+              target === ""
+                ? "Own field"
+                : choices.find(({ id }) => id === target)?.label || "Untitled field"
+            }
+          </SelectValue>
+        </SelectTrigger>
+        <SelectPopup>
+          <SelectItem value="">Own field</SelectItem>
+          {choices.map((other) => (
+            <SelectItem key={other.id} value={other.id}>
+              {other.label || "Untitled field"}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+    </Field>
+  );
+}
+
+/** A collection a records field can link. */
+export type LinkableCollection = { readonly id: string; readonly title: string };
+
+/**
+ * Fields as a step or a collection defines them, with a way to add one; `depth` counts the groups
+ * around them. `areColumns` when a table lists them, each a column but `keyFieldId`'s, which
+ * always is one. With `collections`, a field can link records of one of them.
+ */
 export function FieldsEditor({
   fields,
+  siblings = fields,
   depth,
+  areColumns,
+  keyFieldId,
+  collections,
   onChange,
   disabled,
 }: {
   readonly fields: ReadonlyArray<DraftField>;
+  readonly siblings?: ReadonlyArray<DraftField>;
   readonly depth: number;
+  readonly areColumns: boolean;
+  readonly keyFieldId?: string;
+  readonly collections?: ReadonlyArray<LinkableCollection>;
   readonly onChange: (fields: ReadonlyArray<DraftField>) => void;
   readonly disabled: boolean;
 }) {
   return (
     <>
       {listEntries(fields, onChange).map((place) => (
-        <FieldCard key={place.entry.id} place={place} depth={depth} disabled={disabled} />
+        <FieldCard
+          key={place.entry.id}
+          place={place}
+          siblings={siblings}
+          depth={depth}
+          isColumn={areColumns && place.entry.id !== keyFieldId}
+          collections={collections}
+          disabled={disabled}
+        />
       ))}
       <AddButton
         label="Add field"
@@ -130,7 +227,7 @@ function DefaultValueInput({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
-  if (field.type === "group" || field.type === "file") return null;
+  if (field.type === "group" || field.type === "file" || field.type === "records") return null;
   const { defaultValue, ...rest } = field;
   const set = (value: string | number | boolean | null) =>
     onChange(value === null ? rest : { ...rest, defaultValue: value });
@@ -208,15 +305,22 @@ function fieldSummary(field: DraftField) {
 
 /**
  * A field summary row that opens to edit it; a new, unlabelled field starts open. A group lists
- * its own fields, and a group inside a group can't hold a group.
+ * its own fields, and a group inside a group can't hold a group. A field links records only where
+ * `collections` are offered.
  */
 function FieldCard({
   place,
+  siblings,
   depth,
+  isColumn,
+  collections,
   disabled,
 }: {
   readonly place: Placed<DraftField>;
+  readonly siblings: ReadonlyArray<DraftField>;
   readonly depth: number;
+  readonly isColumn: boolean;
+  readonly collections: ReadonlyArray<LinkableCollection> | undefined;
   readonly disabled: boolean;
 }) {
   const id = useId();
@@ -265,7 +369,11 @@ function FieldCard({
                   </SelectTrigger>
                   <SelectPopup>
                     {Object.entries(FIELD_TYPES)
-                      .filter(([type]) => type !== "group" || depth < 2)
+                      .filter(
+                        ([type]) =>
+                          (type !== "group" || depth < 2) &&
+                          (type !== "records" || collections !== undefined),
+                      )
                       .map(([type, label]) => (
                         <SelectItem key={type} value={type}>
                           {label}
@@ -275,6 +383,12 @@ function FieldCard({
                 </Select>
               </Field>
             </div>
+            <LinkDisplaySelect
+              field={field}
+              fields={siblings}
+              onChange={setField}
+              disabled={disabled}
+            />
             {field.type === "select" ? (
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs text-muted-foreground">Options</span>
@@ -313,6 +427,35 @@ function FieldCard({
                 />
               </div>
             ) : null}
+            {field.type === "records" ? (
+              <Field label="Collection" size="xs">
+                <Select
+                  value={field.collectionId === "" ? null : field.collectionId}
+                  onValueChange={(collectionId) =>
+                    collectionId === null ? undefined : setField({ ...field, collectionId })
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue>
+                      {(collectionId: string | null) =>
+                        collectionId === null
+                          ? "Choose one"
+                          : (collections?.find(({ id }) => id === collectionId)?.title ??
+                            collectionId)
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {collections?.map((collection) => (
+                      <SelectItem key={collection.id} value={collection.id}>
+                        {collection.title}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </Field>
+            ) : null}
             {field.type === "group" ? (
               <div className="flex flex-col gap-2">
                 <div className="flex items-start gap-2">
@@ -337,6 +480,7 @@ function FieldCard({
                 <FieldsEditor
                   fields={field.fields}
                   depth={depth + 1}
+                  areColumns={field.repeatable === true}
                   onChange={(fields) => setField({ ...field, fields })}
                   disabled={disabled}
                 />
@@ -356,6 +500,9 @@ function FieldCard({
               />
             </Field>
             <DefaultValueInput field={field} onChange={setField} disabled={disabled} />
+            {isColumn ? (
+              <ColumnSwitch field={field} onChange={setField} disabled={disabled} />
+            ) : null}
           </div>
         </CollapsiblePanel>
       </Collapsible>

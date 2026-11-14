@@ -94,6 +94,11 @@ export const isSettled = (message: SessionMessage.Info) => {
   }
 };
 
+/** Why an execution stopped before it finished, said for whoever reads the run. */
+export class ExecutionFailed extends Schema.TaggedError<ExecutionFailed>()("ExecutionFailed", {
+  reason: Schema.String,
+}) {}
+
 export class QuestionGone extends Schema.TaggedError<QuestionGone>()("QuestionGone", {}) {}
 
 export class AnswerInvalid extends Schema.TaggedError<AnswerInvalid>()("AnswerInvalid", {}) {}
@@ -105,6 +110,7 @@ export const RunnerRpcs = RpcGroup.make(
   Rpc.make("execute", {
     payload: ExecutionRequest,
     success: ExecutionUpdate,
+    error: ExecutionFailed,
     stream: true,
   }),
   Rpc.make("send", { payload: { rootId: Session.ID, message: Message, files: Files } }),

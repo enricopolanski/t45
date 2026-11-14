@@ -82,12 +82,43 @@ describe("records", () => {
 });
 
 describe("field changes after records exist", () => {
-  it("only add fields, keeping the others and the primary key as they were", () => {
+  it("allow choosing and clearing a URL's display field without unlocking stored fields", () => {
+    const before = {
+      ...listings,
+      fields: decodeFields([
+        ...encodeFields(fields),
+        { id: "product_url", label: "Product URL", type: "url" },
+      ]),
+    };
+    const after = {
+      ...before,
+      fields: before.fields.map((field) =>
+        field.type === "url" ? { ...field, displayLinkOn: "f_asin" } : field,
+      ),
+    };
+    assert.isNull(fieldsChangeRefusal(before, after));
+    assert.isNull(fieldsChangeRefusal(after, before));
+    assert.strictEqual(
+      fieldsChangeRefusal(after, {
+        ...after,
+        fields: after.fields.map((field) =>
+          field.type === "url" ? { ...field, type: "text" as const } : field,
+        ),
+      }),
+      "fields_locked",
+    );
+  });
+
+  it("only add fields or change which show as columns, keeping the rest as it was", () => {
     const added = decodeFields([
       ...encodeFields(fields),
       { id: "f_checked", label: "Checked at", type: "text" },
     ]);
     assert.isNull(fieldsChangeRefusal(listings, { ...listings, fields: added }));
+    const detailOnly = decodeFields(
+      encodeFields(fields).map((field) => ({ ...field, isDetailOnly: field.id === "f_manual" })),
+    );
+    assert.isNull(fieldsChangeRefusal(listings, { ...listings, fields: detailOnly }));
     assert.strictEqual(
       fieldsChangeRefusal(listings, { ...listings, fields: fields.slice(1) }),
       "fields_locked",

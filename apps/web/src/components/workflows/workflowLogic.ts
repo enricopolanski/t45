@@ -121,6 +121,7 @@ export const FIELD_TYPES: Record<FieldType, string> = {
   date: "Date",
   file: "File",
   select: "Select",
+  records: "Collection records",
   group: "Group",
 };
 
@@ -137,14 +138,15 @@ export function blankField(): DraftField {
 }
 
 /**
- * The field as `type`: a select starts with one blank option and a group with one blank field;
- * options and fields go when the type no longer has them.
+ * The field as `type`: a select starts with one blank option, a group with one blank field and a
+ * records field with no collection chosen; options and fields go when the type no longer has them.
  */
 export function retypeField(field: DraftField, type: FieldType): DraftField {
   const base = {
     id: field.id,
     label: field.label,
     ...(field.description === undefined ? {} : { description: field.description }),
+    ...(field.isDetailOnly === undefined ? {} : { isDetailOnly: field.isDetailOnly }),
   };
   if (type === "select")
     return { ...base, type, options: field.type === "select" ? field.options : [""] };
@@ -152,6 +154,8 @@ export function retypeField(field: DraftField, type: FieldType): DraftField {
     return field.type === "group"
       ? field
       : { ...base, type, fields: [blankField()], repeatable: false };
+  if (type === "records")
+    return { ...base, type, collectionId: field.type === "records" ? field.collectionId : "" };
   return { ...base, type };
 }
 

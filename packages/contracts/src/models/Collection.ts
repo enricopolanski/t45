@@ -76,10 +76,22 @@ export const recordProblem = (
     : null);
 
 const isSameField = Schema.toEquivalence(Field);
+const encodeField = Schema.encodeSync(Field);
+const decodeField = Schema.decodeSync(Field);
+
+/** The field as it holds values, leaving out its display settings. */
+const asHeld = (field: Field): Field =>
+  decodeField(
+    JSON.parse(
+      JSON.stringify(encodeField(field), (key, value: unknown) =>
+        key === "isDetailOnly" || key === "displayLinkOn" ? undefined : value,
+      ),
+    ),
+  );
 
 /**
- * Once a collection has records, its fields only grow: every field it had stays as it was, and
- * its primary key stays the same.
+ * Once a collection has records, its fields only grow: every field it had stays as it was, save
+ * its display settings, and its primary key stays the same.
  */
 export const fieldsChangeRefusal = (
   before: Pick<Collection, "fields" | "primaryKeyFieldId">,
@@ -88,7 +100,7 @@ export const fieldsChangeRefusal = (
   after.primaryKeyFieldId === before.primaryKeyFieldId &&
   before.fields.every((field) => {
     const kept = after.fields.find((candidate) => candidate.id === field.id);
-    return kept !== undefined && isSameField(field, kept);
+    return kept !== undefined && isSameField(asHeld(field), asHeld(kept));
   })
     ? null
     : ("fields_locked" as const);

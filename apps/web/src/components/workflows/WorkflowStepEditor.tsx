@@ -3,6 +3,7 @@ import type { DraftStep, inputSourcesFor } from "./workflowLogic";
 import { XIcon } from "lucide-react";
 import { useState } from "react";
 
+import { apiQuery, useApiQuery } from "../../state/rpc";
 import {
   AddButton,
   FieldsEditor,
@@ -59,6 +60,9 @@ function SubStepRow({
   );
 }
 
+/** The collections whose records a step's fields can link: those the editor uses. */
+const linkableCollections = apiQuery("collections.list")(undefined);
+
 /**
  * One step or sub-step: its name, instructions, fields, and sub-steps.
  * Sub-steps show as their titles and open in an editor of their own. A step in the list
@@ -83,6 +87,7 @@ export function WorkflowStepEditor({
 }) {
   // A sub-step's own editor is always open; a step in the list starts open only when new.
   const [startsOpen] = useState(position === null || step.name === "");
+  const collections = useApiQuery(linkableCollections).data ?? [];
   const inputs = step.inputs ?? [];
   const inputKey = (input: (typeof inputs)[number]) => `${input.stepId}.${input.fieldId}`;
   const unboundSources = inputSources.filter(({ input }) => !inputs.some(isSameInput(input)));
@@ -144,6 +149,8 @@ export function WorkflowStepEditor({
             <FieldsEditor
               fields={step.fields}
               depth={0}
+              areColumns={false}
+              collections={collections}
               onChange={(fields) => onChange({ ...step, fields })}
               disabled={disabled}
             />

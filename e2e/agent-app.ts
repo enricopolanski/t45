@@ -11,6 +11,7 @@ import * as NodeSqlite from "node:sqlite";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { BuiltIns } from "@t45/contracts/resources/BuiltIns";
 import {
+  ExecutionFailed,
   type ExecutionRequest,
   ExecutionUpdate,
   RunnerRpcs,
@@ -54,6 +55,8 @@ interface Execution {
   /** Sends what the agent's sandbox would, as OpenCode encodes it. */
   readonly emit: (update: typeof ExecutionUpdate.Encoded) => void;
   readonly finish: () => void;
+  /** Ends the execution the way the runner reports a failure, with its reason. */
+  readonly fail: (reason: string) => void;
 }
 
 /** A real app with an isolated database and a runner controlled by the browser test. */
@@ -63,7 +66,7 @@ export async function startAgentApp() {
   const started = Effect.runSync(Queue.unbounded<Execution>());
   const handlers = RunnerRpcs.toLayer({
     execute: (request) =>
-      Stream.callback<ExecutionUpdate>((events) =>
+      Stream.callback<ExecutionUpdate, ExecutionFailed>((events) =>
         Effect.gen(function* () {
           const now = yield* DateTime.now;
           yield* Queue.offer(events, {
@@ -86,6 +89,8 @@ export async function startAgentApp() {
               });
               Queue.endUnsafe(events);
             },
+            fail: (reason) =>
+              void Effect.runSync(Queue.fail(events, new ExecutionFailed({ reason }))),
           });
           return yield* Effect.never;
         }),

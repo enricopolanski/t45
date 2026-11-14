@@ -142,4 +142,17 @@ test("agents report live progress on steps and settings, retaining reports per r
   await expect(settings.getByRole("img", { name: "Completed" })).toBeVisible();
   await expect(settings.getByText("Checking a new order", { exact: true })).toBeVisible();
   expect((await agentApp.report(second, "After completion")).isError).toBe(true);
+
+  // A run that fails says why, where it shows what it is doing.
+  await settings.getByRole("button", { name: "Actions for Check order" }).click();
+  await settings.getByRole("menuitem", { name: "Run now", exact: true }).click();
+  const third = await agentApp.nextExecution();
+  third.fail("The agent's tools didn't connect within a minute: collections (failed: no schema).");
+  await expect(settings.getByRole("img", { name: "Failed" })).toBeVisible();
+  await expect(
+    settings.getByText(
+      "Failed: The agent's tools didn't connect within a minute: collections (failed: no schema).",
+      { exact: true },
+    ),
+  ).toBeVisible();
 });

@@ -5,7 +5,7 @@ import { XIcon } from "lucide-react";
 import { useCallback, useId, useState } from "react";
 
 import { api } from "../../rpc/api";
-import { FieldsEditor } from "../fields/FieldsEditor";
+import { ColumnSwitch, FieldsEditor, LinkDisplaySelect } from "../fields/FieldsEditor";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
@@ -33,6 +33,50 @@ const newDraft = (): Draft => {
   const key = { ...blankField(), label: "Key" };
   return { title: "", fields: [key], primaryKeyFieldId: key.id, memberUserIds: [] };
 };
+
+/** A field the collection's records hold: only its display settings can change. */
+function LockedField({
+  field,
+  fields,
+  isColumn,
+  onChange,
+  disabled,
+}: {
+  readonly field: DraftField;
+  readonly fields: ReadonlyArray<DraftField>;
+  readonly isColumn: boolean;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-medium">{field.label}</span>
+        <span className="text-xs text-muted-foreground">{FIELD_TYPES[field.type]}</span>
+        <LinkDisplaySelect field={field} fields={fields} onChange={onChange} disabled={disabled} />
+        {isColumn ? (
+          <span className="ml-auto">
+            <ColumnSwitch field={field} onChange={onChange} disabled={disabled} />
+          </span>
+        ) : null}
+      </div>
+      {field.type === "group" ? (
+        <div className="flex flex-col gap-1 pl-4">
+          {field.fields.map((child, at) => (
+            <LockedField
+              key={child.id}
+              field={child}
+              fields={field.fields}
+              isColumn={field.repeatable}
+              onChange={(changed) => onChange({ ...field, fields: field.fields.with(at, changed) })}
+              disabled={disabled}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Where an admin defines a collection: its title, fields, primary key and the members who use its
@@ -76,8 +120,9 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
       </WorkFrame>
     );
   const { hasRecords } = detail;
-  const locked = hasRecords ? encodeFields(detail.collection?.fields ?? []) : [];
-  const editable = draft.fields.slice(locked.length);
+  const lockedCount = hasRecords ? (detail.collection?.fields.length ?? 0) : 0;
+  const locked = draft.fields.slice(0, lockedCount);
+  const editable = draft.fields.slice(lockedCount);
   const keyChoices = draft.fields.filter((field) => field.type === "text");
   const save = () =>
     void run(async () => {
@@ -114,24 +159,33 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
             <>
               <p className="text-xs text-muted-foreground">
                 This collection has records: add fields, but its fields and primary key stay as they
-                are.
+                are. You can change which show in the table and where links are displayed.
               </p>
               <ul className="flex flex-col gap-1">
-                {locked.map((field) => (
-                  <li
-                    key={field.id}
-                    className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
-                  >
-                    <span className="font-medium">{field.label}</span>
-                    <span className="text-xs text-muted-foreground">{FIELD_TYPES[field.type]}</span>
-                  </li>
-                ))}
+                {locked.map((field, at) => {
+                  const setField = (changed: DraftField) =>
+                    setDraft({ ...draft, fields: draft.fields.with(at, changed) });
+                  return (
+                    <li key={field.id} className="flex flex-col gap-1 rounded-lg border px-3 py-2">
+                      <LockedField
+                        field={field}
+                        fields={draft.fields}
+                        isColumn={field.id !== draft.primaryKeyFieldId}
+                        onChange={setField}
+                        disabled={busy}
+                      />
+                    </li>
+                  );
+                })}
               </ul>
             </>
           ) : null}
           <FieldsEditor
             fields={editable}
+            siblings={draft.fields}
             depth={0}
+            areColumns
+            keyFieldId={draft.primaryKeyFieldId}
             onChange={(fields) => setDraft({ ...draft, fields: [...locked, ...fields] })}
             disabled={busy}
           />
