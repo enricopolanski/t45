@@ -29,8 +29,17 @@ const CollectionDraft = Schema.Struct(
   Struct.pick(Collection.fields, ["title", "fields", "primaryKeyFieldId", "memberUserIds"]),
 );
 
-/** What members and agents do with collections' records; agents' collection tools call these. */
-export const CollectionRecordOperations = RpcGroup.make(
+/**
+ * What members and agents do with collections, each checking the caller's access itself; agents'
+ * collection tools call these.
+ */
+export const CollectionOperations = RpcGroup.make(
+  /** An admin creates collections, and so does an agent in a chat with one. */
+  Rpc.make("create", {
+    payload: CollectionDraft,
+    success: Collection,
+    error: CollectionErrors,
+  }),
   Rpc.make("list", {
     success: Schema.Array(Collection),
     error: AccessDenied,
@@ -88,11 +97,6 @@ export const CollectionRecordOperations = RpcGroup.make(
 ).prefix("collections.");
 
 export const Collections = RpcGroup.make(
-  Rpc.make("create", {
-    payload: CollectionDraft,
-    success: Collection,
-    error: CollectionErrors,
-  }),
   Rpc.make("update", {
     payload: { collectionId: StringId, ...CollectionDraft.fields },
     success: Collection,
@@ -105,6 +109,6 @@ export const Collections = RpcGroup.make(
   }),
 )
   .prefix("collections.")
-  // Middleware applies only to existing RPCs: admins define collections; records are shared.
+  // Middleware applies only to existing RPCs: admins change collections; the rest check access.
   .middleware(AdminOnly)
-  .merge(CollectionRecordOperations);
+  .merge(CollectionOperations);

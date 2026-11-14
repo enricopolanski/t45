@@ -69,6 +69,14 @@ const make = Effect.gen(function* () {
     return owner !== null && canEditRecords(owner, collection);
   });
 
+  /** Whether the caller creates collections: an admin, or an agent in an admin's chat. */
+  const canCreate = Effect.fnUntraced(function* (caller: Caller) {
+    if ("userId" in caller) return caller.role === "admin";
+    yield* requireCapability(caller);
+    if (caller.origin.kind === "automation") return false;
+    return (yield* users.get(caller.origin.ownerUserId))?.role === "admin";
+  });
+
   /** The collections whose definitions the caller sees: an agent with the capability, all. */
   const visible = Effect.fnUntraced(function* (caller: Caller) {
     const all = yield* collections.list;
@@ -148,7 +156,11 @@ const make = Effect.gen(function* () {
       return collection;
     }),
 
-    create: Effect.fnUntraced(function* (input: Payload<"create">) {
+    create: Effect.fnUntraced(function* (caller: Caller, input: Payload<"create">) {
+      if (!(yield* canCreate(caller)))
+        return yield* new AccessDenied({
+          message: "Creating a collection needs an admin, or an agent chatting with one.",
+        });
       yield* requireDraft(input);
       const now = yield* DateTime.now;
       const collection = {

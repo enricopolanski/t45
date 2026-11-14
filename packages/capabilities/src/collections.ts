@@ -4,7 +4,7 @@ import { COLLECTIONS_CAPABILITY_ID } from "@t45/contracts/resources/AgentTools";
 export const collections = Capability.make({
   id: COLLECTIONS_CAPABILITY_ID,
   name: "Collections",
-  description: "Looks up, adds and updates records in the organization's collections.",
+  description: "Creates collections, and looks up, adds and updates their records.",
   mcpServers: {
     collections: {
       type: "local",

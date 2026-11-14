@@ -4,7 +4,7 @@ import {
   CurrentUser,
   CurrentActor,
 } from "@t45/contracts/Authorization";
-import { CollectionRecordOperations } from "@t45/contracts/resources/Collections";
+import { CollectionOperations } from "@t45/contracts/resources/Collections";
 import { AccessDenied } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -19,9 +19,7 @@ import { UserService } from "../org/UserService.ts";
 
 /** What an execution token reaches; each operation checks what the agent may do with it. */
 const isAgentOperation = (tag: string) =>
-  tag.startsWith("workflows.") ||
-  tag === "chats.report" ||
-  CollectionRecordOperations.requests.has(tag);
+  tag.startsWith("workflows.") || tag === "chats.report" || CollectionOperations.requests.has(tag);
 
 const denied = new AccessDenied({ message: "Only active members can use this server." });
 const signedOut = new AccessDenied({ message: "This session was signed out." });

@@ -10,6 +10,7 @@ import { stepOperations } from "@t45/capabilities/steps";
 import { projectOperations } from "@t45/capabilities/projects";
 import { workflowDrafting } from "@t45/capabilities/workflows";
 import { webBrowser } from "@t45/capabilities/browser";
+import { collections } from "@t45/capabilities/collections";
 import { ChatId, type Refused } from "@t45/contracts/models/Chat";
 
 import type { ChatEvent, ChatMessage } from "@t45/contracts/resources/Chats";
@@ -49,6 +50,7 @@ const seedPresets = Effect.gen(function* () {
     projectOperations,
     workflowDrafting,
     webBrowser,
+    collections,
   ]);
   const agents = yield* AgentRepository.AgentRepository;
   const now = yield* DateTime.now;
