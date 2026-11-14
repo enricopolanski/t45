@@ -22,7 +22,7 @@ const serveFavicons = (page: Page) =>
     }),
   );
 
-test("collection URL fields keep their destination and label, and open without editing the record", async ({
+test("collection URL fields take one address and use the field label for their links", async ({
   signIn,
 }) => {
   const ada = await signIn("ada@example.test");
@@ -42,13 +42,14 @@ test("collection URL fields keep their destination and label, and open without e
   await ada.getByRole("button", { name: "New record" }).click();
   const dialog = ada.getByRole("dialog", { name: "Record" });
   await dialog.getByLabel("Key", { exact: true }).fill("first");
-  await dialog.getByLabel("Listing URL", { exact: true }).fill("https://example.com/listing");
-  await dialog.getByLabel("Listing link text", { exact: true }).fill("Product listing");
+  await dialog.getByLabel("Listing", { exact: true }).fill("https://example.com/listing");
+  await expect(dialog.locator('input[type="url"]')).toHaveCount(1);
+  await expect(dialog.getByLabel(/link text/iu)).toHaveCount(0);
   await dialog.getByRole("button", { name: "Save record" }).click();
   await expect(dialog).toHaveCount(0);
 
   const row = ada.getByRole("row", { name: "Record first" });
-  const link = row.getByRole("link", { name: "Product listing", exact: true });
+  const link = row.getByRole("link", { name: "Listing", exact: true });
   await expect(link).toHaveAttribute("href", "https://example.com/listing");
   await expect(link.locator("img")).toHaveAttribute(
     "src",
@@ -62,16 +63,16 @@ test("collection URL fields keep their destination and label, and open without e
   await expect(dialog).toHaveCount(0);
 
   await row.getByRole("cell").first().click();
-  await expect(dialog.getByLabel("Listing URL", { exact: true })).toHaveValue(
+  await expect(dialog.getByLabel("Listing", { exact: true })).toHaveValue(
     "https://example.com/listing",
   );
-  await dialog.getByLabel("Listing link text", { exact: true }).fill("Updated listing");
+  await dialog.getByLabel("Listing", { exact: true }).fill("https://example.com/updated");
   await dialog.getByRole("button", { name: "Save record" }).click();
   await expect(dialog).toHaveCount(0);
   await ada.reload();
-  await expect(row.getByRole("link", { name: "Updated listing" })).toHaveAttribute(
+  await expect(row.getByRole("link", { name: "Listing", exact: true })).toHaveAttribute(
     "href",
-    "https://example.com/listing",
+    "https://example.com/updated",
   );
   await ada.getByLabel("Search records").fill("missing");
   await expect(row).toHaveCount(0);
@@ -83,7 +84,7 @@ test("collection URL fields keep their destination and label, and open without e
   await expect(row).toBeVisible();
 });
 
-test("step URL fields show labeled links while editing and after completion, including repeated groups", async ({
+test("step URL fields take one address in defaults, repeated groups and completed steps", async ({
   signIn,
 }) => {
   const ada = await signIn("ada@example.test");
@@ -95,8 +96,8 @@ test("step URL fields show labeled links while editing and after completion, inc
   await ada.getByRole("button", { name: "Add field" }).click();
   await ada.getByLabel("Label", { exact: true }).fill("Source");
   await chooseOption(ada, "Type", "URL");
-  await ada.getByLabel("Source default URL", { exact: true }).fill("https://example.com/reference");
-  await ada.getByLabel("Source default link text", { exact: true }).fill("Starting source");
+  await ada.getByLabel("Default value", { exact: true }).fill("https://example.com/reference");
+  await expect(ada.getByLabel(/link text/iu)).toHaveCount(0);
   await ada.getByRole("button", { name: "Add field", exact: true }).click();
   await ada.getByLabel("Label", { exact: true }).nth(1).fill("References");
   await chooseOption(ada, "Type", "Group", 1);
@@ -110,42 +111,41 @@ test("step URL fields show labeled links while editing and after completion, inc
   await expect(ada.getByText("New tickets start on version 1")).toBeVisible();
   await startItem(ada, projectId, "First review");
   const stepUrl = ada.url();
-  await expect(ada.getByRole("link", { name: "Starting source" })).toHaveAttribute(
+  await expect(ada.getByRole("link", { name: "Source", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/reference",
   );
 
-  await ada.getByLabel("Source URL", { exact: true }).fill("https://example.com/updated");
-  await ada.getByLabel("Source link text", { exact: true }).fill("Updated source");
-  await ada.getByLabel("Source link text", { exact: true }).blur();
+  await ada.getByLabel("Source", { exact: true }).fill("https://example.com/updated");
+  await ada.getByLabel("Source", { exact: true }).blur();
   const history = ada.getByRole("complementary", { name: "History" });
   await expect(history.getByText("changed a field", { exact: false })).toBeVisible();
   await ada.reload();
-  await expect(ada.getByLabel("Source URL", { exact: true })).toHaveValue(
+  await expect(ada.getByLabel("Source", { exact: true })).toHaveValue(
     "https://example.com/updated",
   );
-  await expect(ada.getByRole("link", { name: "Updated source" })).toHaveAttribute(
+  await expect(ada.getByRole("link", { name: "Source", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/updated",
   );
 
   await ada.getByRole("button", { name: "Add entry", exact: true }).click();
   await ada
-    .getByLabel("Reference, entry 1 URL", { exact: true })
+    .getByLabel("Reference, entry 1", { exact: true })
     .fill("https://example.com/documentation");
-  await ada.getByLabel("Reference, entry 1 link text", { exact: true }).fill("Documentation");
-  await ada.getByLabel("Reference, entry 1 link text", { exact: true }).blur();
+  await expect(ada.getByLabel(/link text/iu)).toHaveCount(0);
+  await ada.getByLabel("Reference, entry 1", { exact: true }).blur();
   await expect(history.getByText("changed 3 fields", { exact: false })).toBeVisible();
   await ada.getByRole("button", { name: /^Status: To do/u }).click();
   await ada.getByRole("menuitem", { name: "Mark done" }).click();
   await ada.waitForURL(/\/my-work$/u);
   await ada.goto(stepUrl);
-  await expect(ada.getByLabel("Source URL", { exact: true })).toHaveCount(0);
-  await expect(ada.getByRole("link", { name: "Updated source" })).toHaveAttribute(
+  await expect(ada.getByLabel("Source", { exact: true })).toHaveCount(0);
+  await expect(ada.getByRole("link", { name: "Source", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/updated",
   );
-  await expect(ada.getByRole("link", { name: "Documentation" })).toHaveAttribute(
+  await expect(ada.getByRole("link", { name: "Reference", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/documentation",
   );

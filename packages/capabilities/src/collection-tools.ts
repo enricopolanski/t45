@@ -32,7 +32,7 @@ serve({
     rpcTool(
       "save_record",
       "collections.saveRecord",
-      "Save a record: values by field key, the primary key included, as on a step: text and dates (YYYY-MM-DD) as strings, numbers as JSON numbers, yes/no as booleans, selects as one of their options, URLs as objects with url (an http:// or https:// address) and label (the link text). A repeatable group holds its row ids, and each row's field is group.rowId.field. A file field holds the id upload_file returned. The values replace the record with that key whole, or add it when there is none, so give every value the record keeps. Answers the saved record; a refusal says exactly what didn't fit.",
+      "Save a record: values by field key, the primary key included, as on a step: text and dates (YYYY-MM-DD) as strings, numbers as JSON numbers, yes/no as booleans, selects as one of their options, URLs as http:// or https:// strings. A repeatable group holds its row ids, and each row's field is group.rowId.field. A file field holds the id upload_file returned. The values replace the record with that key whole, or add it when there is none, so give every value the record keeps. Answers the saved record; a refusal says exactly what didn't fit.",
     ),
     {
       name: "upload_file",

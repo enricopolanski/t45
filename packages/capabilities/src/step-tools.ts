@@ -33,7 +33,7 @@ serve({
     rpcTool(
       "set_field",
       "workflows.setStepField",
-      "Fill a step field by its key: text and dates (YYYY-MM-DD) as strings, numbers as JSON numbers, yes/no as booleans, selects as one of their options, URLs as objects with url (an http:// or https:// address) and label (the link text); null clears it. Nested fields use dotted keys. Set a repeatable group to the list of its row ids, then fill each row's fields as group.rowId.field, with the field ids in the group's rowFields. A refusal says exactly what didn't fit.",
+      "Fill a step field by its key: text and dates (YYYY-MM-DD) as strings, numbers as JSON numbers, yes/no as booleans, selects as one of their options, URLs as http:// or https:// strings; null clears it. Nested fields use dotted keys. Set a repeatable group to the list of its row ids, then fill each row's fields as group.rowId.field, with the field ids in the group's rowFields. A refusal says exactly what didn't fit.",
       step,
     ),
     rpcTool(

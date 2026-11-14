@@ -10,7 +10,6 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { FoldChevron } from "../work/CardFold";
 import { plural } from "../work/workLogic";
-import { UrlFieldInput } from "./UrlFieldInput";
 import {
   blankField,
   type DraftField,
@@ -132,22 +131,6 @@ function DefaultValueInput({
   readonly disabled: boolean;
 }) {
   if (field.type === "group" || field.type === "file") return null;
-  if (field.type === "url") {
-    return (
-      <div className="flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Default value</span>
-        <UrlFieldInput
-          label={`${field.label || "Field"} default`}
-          value={field.defaultValue ?? null}
-          onChange={(value) => {
-            const { defaultValue: _, ...rest } = field;
-            onChange(value === null ? rest : { ...rest, defaultValue: value });
-          }}
-          disabled={disabled}
-        />
-      </div>
-    );
-  }
   const { defaultValue, ...rest } = field;
   const set = (value: string | number | boolean | null) =>
     onChange(value === null ? rest : { ...rest, defaultValue: value });

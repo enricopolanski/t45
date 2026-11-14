@@ -34,26 +34,13 @@ const DefaultValue = Schema.optionalKey(
 
 const ValueField = Schema.Struct({
   ...FieldBase,
-  type: Schema.Literals(["text", "number", "boolean", "date", "file"]),
+  type: Schema.Literals(["text", "url", "number", "boolean", "date", "file"]),
   defaultValue: DefaultValue,
 });
 
-/** A web destination and the text shown for its link. */
-export const UrlFieldValue = Schema.Struct({
-  url: TrimmedNonEmptyString.check(Schema.isPattern(/^https?:\/\/\S+$/iu)),
-  label: TrimmedNonEmptyString,
-});
-export type UrlFieldValue = typeof UrlFieldValue.Type;
-
-const hasUrlFieldShape = Schema.is(UrlFieldValue);
-export const isUrlFieldValue = (value: unknown): value is UrlFieldValue =>
-  hasUrlFieldShape(value) && URL.canParse(value.url);
-
-const UrlField = Schema.Struct({
-  ...FieldBase,
-  type: Schema.Literal("url"),
-  defaultValue: Schema.optionalKey(UrlFieldValue),
-});
+/** A URL field holds one web address; its field label supplies the visible link text. */
+export const isUrlFieldValue = (value: unknown): value is string =>
+  typeof value === "string" && /^https?:\/\/\S+$/iu.test(value) && URL.canParse(value);
 
 const SelectField = Schema.Struct({
   ...FieldBase,
@@ -71,13 +58,9 @@ class GroupField extends Schema.Class<GroupField>("GroupField")({
   fields: Schema.Array(Schema.suspend((): Schema.Codec<Field> => Field)),
 }) {}
 
-export const Field = Schema.Union([ValueField, UrlField, SelectField, GroupField]);
+export const Field = Schema.Union([ValueField, SelectField, GroupField]);
 
-export type Field =
-  | typeof ValueField.Type
-  | typeof UrlField.Type
-  | typeof SelectField.Type
-  | GroupField;
+export type Field = typeof ValueField.Type | typeof SelectField.Type | GroupField;
 
 const fieldIdsAreDistinct = (fields: ReadonlyArray<Field>): boolean =>
   hasDistinctIds(fields.map((field) => field.id)) &&
@@ -190,7 +173,7 @@ const expectation = (field: Field) => {
     case "text":
       return "text";
     case "url":
-      return 'a web link as {"url":"https://example.com","label":"Example"}';
+      return "an http:// or https:// URL as a string";
     case "number":
       return "a number, like 0.5";
     case "boolean":
