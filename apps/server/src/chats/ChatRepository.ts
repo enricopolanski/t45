@@ -28,6 +28,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
@@ -59,9 +60,22 @@ const decodeAutomatedRows = Schema.decodeUnknownEffect(
       startedAt: Schema.DateTimeUtcFromString,
       endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
       latestReport: Schema.NullOr(Schema.fromJsonString(Report)),
+      usage: Schema.fromJsonString(
+        Schema.Struct(Struct.pick(Session.Info.fields, ["cost", "tokens"])),
+      ),
     }),
   ),
 );
+const sumMessages = (path: string) => `TOTAL(json_extract(m.json, '$.${path}'))`;
+/**
+ * What a chat used, summed over its messages: a session's own total comes only once its execution
+ * finishes, so a stopped run would show none.
+ */
+const USAGE = `(SELECT json_object('cost', ${sumMessages("cost")}, 'tokens', json_object(
+  'input', ${sumMessages("tokens.input")}, 'output', ${sumMessages("tokens.output")},
+  'reasoning', ${sumMessages("tokens.reasoning")}, 'cache', json_object(
+    'read', ${sumMessages("tokens.cache.read")}, 'write', ${sumMessages("tokens.cache.write")})))
+  FROM chat_messages m WHERE m.chat_id = c.id)`;
 
 const makeOrigins = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -90,14 +104,21 @@ const makeOrigins = Effect.gen(function* () {
           'trigger', json(o.trigger)) AS origin,
           c.status AS "chatStatus", c.created_at AS "startedAt",
           CASE WHEN c.status = 'running' THEN NULL ELSE c.updated_at END AS "endedAt",
-          json_extract(c.reports, '$[#-1]') AS "latestReport"
+          json_extract(c.reports, '$[#-1]') AS "latestReport", ${sql.literal(USAGE)} AS usage
         FROM chat_origins o JOIN chats c ON c.id = o.chat_id
         WHERE o.trigger IS NOT NULL
           AND json_extract(o.trigger, '$.ticketId') = ${reference.ticketId}
           AND json_extract(o.trigger, '$.stepId') = ${reference.stepId}
         ORDER BY c.created_at, c.id`.pipe(
         Effect.flatMap(decodeAutomatedRows),
-        Effect.map((rows) => rows.map(({ origin, ...run }) => ({ ...origin, ...run }))),
+        Effect.map((rows) =>
+          rows.map(({ origin: { chatId, trigger }, usage, ...run }) => ({
+            chatId,
+            trigger,
+            ...usage,
+            ...run,
+          })),
+        ),
         Effect.orDie,
       ),
   };

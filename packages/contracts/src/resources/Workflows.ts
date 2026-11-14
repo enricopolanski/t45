@@ -1,10 +1,11 @@
+import { Session } from "@opencode/schema/session";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import { AutomationId } from "../models/Automation.ts";
-import { Report } from "../models/Chat.ts";
+import { ChatId, Report } from "../models/Chat.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 
@@ -199,12 +200,16 @@ export const StepView = Schema.Struct({
       /** Its runs on this step, newest first: who started each, when, and how it stands. */
       runs: Schema.Array(
         Schema.Struct({
+          /** The chat it runs in. */
+          chatId: ChatId,
           ranBy: StringId,
           startedAt: Schema.DateTimeUtcFromString,
           /** Null while it runs. */
           endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
           status: Schema.Literals(["running", "completed", "failed", "stopped"]),
           latestReport: Schema.NullOr(Report),
+          /** What it used so far. */
+          ...Struct.pick(Session.Info.fields, ["cost", "tokens"]),
         }),
       ),
       runLabel: Schema.NullOr(Schema.Literals(["Run", "Run again"])),

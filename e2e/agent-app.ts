@@ -12,7 +12,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { BuiltIns } from "@t45/contracts/resources/BuiltIns";
 import {
   type ExecutionRequest,
-  type ExecutionUpdate,
+  ExecutionUpdate,
   RunnerRpcs,
 } from "@t45/contracts/resources/Runner";
 import * as DateTime from "effect/DateTime";
@@ -28,9 +28,12 @@ import { RpcSerialization, RpcServer } from "effect/rpc";
 
 const decodeBuiltIns = Schema.decodeUnknownSync(Schema.fromJsonString(BuiltIns));
 const encodeBuiltIns = Schema.encodeSync(Schema.fromJsonString(BuiltIns));
+const decodeUpdate = Schema.decodeUnknownSync(ExecutionUpdate);
 
 interface Execution {
   readonly request: ExecutionRequest;
+  /** Sends what the agent's sandbox would, as OpenCode encodes it. */
+  readonly emit: (update: typeof ExecutionUpdate.Encoded) => void;
   readonly finish: () => void;
 }
 
@@ -55,6 +58,7 @@ export async function startAgentApp() {
           });
           yield* Queue.offer(started, {
             request,
+            emit: (update) => void Queue.offerUnsafe(events, decodeUpdate(update)),
             finish: () => {
               Queue.offerUnsafe(events, {
                 _tag: "finished",

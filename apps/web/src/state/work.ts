@@ -2,7 +2,7 @@ import { Atom } from "effect/reactivity";
 
 import { appAtomRegistry } from "./atomRegistry";
 import { useLoaded } from "./query";
-import { apiQuery } from "./rpc";
+import { apiQuery, apiWatch } from "./rpc";
 
 const myWork = apiQuery("assignments.listAssignments")(undefined).pipe(Atom.refreshOnWindowFocus);
 export const notifications = apiQuery("notifications.list")(undefined).pipe(
@@ -11,6 +11,7 @@ export const notifications = apiQuery("notifications.list")(undefined).pipe(
 );
 
 const startable = apiQuery("workflows.listStartableProjects")(undefined);
+export const stepViews = apiWatch("workflows.watchStep", { idleTtlMs: 0 });
 
 export const useMyWork = () => useLoaded(myWork);
 export const useStartableProjects = () => useLoaded(startable);
