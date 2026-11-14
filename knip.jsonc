@@ -29,8 +29,6 @@
       "ignoreDependencies": ["@effect/platform-node-shared", "@t45/web"],
     },
     "apps/web": {
-      // ExternalUrl is deliberately available for future use without adding it to any screens.
-      "entry": ["src/components/ExternalUrl.tsx"],
       // The tsconfig plugin name is read by the Effect diagnostics that `effect-tsgo patch` adds to tsgo.
       "ignoreDependencies": ["@effect/language-service"],
     },
