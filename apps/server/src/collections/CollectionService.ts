@@ -175,7 +175,10 @@ const make = Effect.gen(function* () {
       for (const [fieldId, value] of Object.entries(filters)) {
         const field = collection.fields.find(({ id }) => id === fieldId);
         const problem =
-          field === undefined || field.type === "group" || field.type === "file"
+          field === undefined ||
+          field.type === "group" ||
+          field.type === "file" ||
+          field.type === "url"
             ? `${fieldId} isn't one.`
             : fieldValueProblem(field, fieldId, value);
         if (problem !== null)

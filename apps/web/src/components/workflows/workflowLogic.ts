@@ -115,6 +115,7 @@ export function editsBetween(
 
 export const FIELD_TYPES: Record<FieldType, string> = {
   text: "Text",
+  url: "URL",
   number: "Number",
   boolean: "Yes/no",
   date: "Date",

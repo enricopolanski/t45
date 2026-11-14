@@ -38,6 +38,23 @@ const ValueField = Schema.Struct({
   defaultValue: DefaultValue,
 });
 
+/** A web destination and the text shown for its link. */
+export const UrlFieldValue = Schema.Struct({
+  url: TrimmedNonEmptyString.check(Schema.isPattern(/^https?:\/\/\S+$/iu)),
+  label: TrimmedNonEmptyString,
+});
+export type UrlFieldValue = typeof UrlFieldValue.Type;
+
+const hasUrlFieldShape = Schema.is(UrlFieldValue);
+export const isUrlFieldValue = (value: unknown): value is UrlFieldValue =>
+  hasUrlFieldShape(value) && URL.canParse(value.url);
+
+const UrlField = Schema.Struct({
+  ...FieldBase,
+  type: Schema.Literal("url"),
+  defaultValue: Schema.optionalKey(UrlFieldValue),
+});
+
 const SelectField = Schema.Struct({
   ...FieldBase,
   type: Schema.Literal("select"),
@@ -54,9 +71,13 @@ class GroupField extends Schema.Class<GroupField>("GroupField")({
   fields: Schema.Array(Schema.suspend((): Schema.Codec<Field> => Field)),
 }) {}
 
-export const Field = Schema.Union([ValueField, SelectField, GroupField]);
+export const Field = Schema.Union([ValueField, UrlField, SelectField, GroupField]);
 
-export type Field = typeof ValueField.Type | typeof SelectField.Type | GroupField;
+export type Field =
+  | typeof ValueField.Type
+  | typeof UrlField.Type
+  | typeof SelectField.Type
+  | GroupField;
 
 const fieldIdsAreDistinct = (fields: ReadonlyArray<Field>): boolean =>
   hasDistinctIds(fields.map((field) => field.id)) &&
@@ -168,6 +189,8 @@ const expectation = (field: Field) => {
   switch (field.type) {
     case "text":
       return "text";
+    case "url":
+      return 'a web link as {"url":"https://example.com","label":"Example"}';
     case "number":
       return "a number, like 0.5";
     case "boolean":
@@ -219,13 +242,15 @@ export const fieldValueProblem = (field: Field, key: string, value: Schema.Json)
         ? field.repeatable && isRowIds(value)
         : field.type === "text"
           ? typeof value === "string"
-          : field.type === "number"
-            ? isFiniteNumber(value)
-            : field.type === "boolean"
-              ? typeof value === "boolean"
-              : field.type === "date"
-                ? isDay(value)
-                : isAttachmentId(value);
+          : field.type === "url"
+            ? isUrlFieldValue(value)
+            : field.type === "number"
+              ? isFiniteNumber(value)
+              : field.type === "boolean"
+                ? typeof value === "boolean"
+                : field.type === "date"
+                  ? isDay(value)
+                  : isAttachmentId(value);
   if (fits) return null;
   if (field.type === "group" && !field.repeatable)
     return `${key} is a group: set its fields instead.\n${describeFields(field.fields, key)}`;
