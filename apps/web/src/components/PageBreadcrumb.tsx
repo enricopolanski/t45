@@ -6,6 +6,7 @@ import { cn } from "../lib/utils";
 /** The app's sections whose pages have pages below them, by path prefix. */
 const SECTIONS = [
   { label: "Agents", to: "/settings/agents" },
+  { label: "Automations", to: "/settings/automations" },
   { label: "Projects", to: "/settings/projects" },
   { label: "Workflows", to: "/settings/workflows" },
   { label: "My work", to: "/my-work" },

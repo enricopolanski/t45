@@ -1086,16 +1086,7 @@ const make = Effect.gen(function* () {
           const canRun = isRunnable && live.includes(id);
           const runs = attempts
             .filter((run) => run.trigger.automationId === id)
-            .map(({ trigger, chatStatus, ...run }) => ({
-              ...run,
-              ranBy: trigger.effectiveUserId,
-              status:
-                chatStatus === null
-                  ? ("completed" as const)
-                  : chatStatus === "interrupted"
-                    ? ("stopped" as const)
-                    : chatStatus,
-            }))
+            .map(({ trigger, ...run }) => ({ ...run, ranBy: trigger.effectiveUserId }))
             .toReversed();
           return {
             id,

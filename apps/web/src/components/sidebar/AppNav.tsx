@@ -26,6 +26,11 @@ export type NavLink = {
     | "/settings/automations"
     | "/settings/organization"
     | "/settings/people";
+  /** Pages listed below it, always shown. */
+  readonly children?: ReadonlyArray<{
+    readonly label: string;
+    readonly to: "/settings/automations/runs" | "/settings/automations/benchmarks";
+  }>;
 };
 
 /** Everyone's areas. */
@@ -62,6 +67,17 @@ export function NavLinks({ links }: { readonly links: ReadonlyArray<NavLink> }) 
           {link.icon}
           <span>{link.label}</span>
         </SidebarMenuButton>
+        {link.children === undefined ? null : (
+          <SidebarMenuSub>
+            {link.children.map((child) => (
+              <SidebarMenuItem key={child.to}>
+                <SidebarMenuButton onClick={closeMobileSidebar} render={<Link to={child.to} />}>
+                  <span>{child.label}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenuSub>
+        )}
       </SidebarMenuItem>
     ),
   );

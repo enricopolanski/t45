@@ -11,8 +11,9 @@ import { useEscapeToGoBack } from "../hooks/useEscapeToGoBack";
 function SettingsContentLayout() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const title =
-    SETTINGS_GROUPS.flatMap((group) => group.links).find((section) => section.to === pathname)
-      ?.label ?? "Settings";
+    SETTINGS_GROUPS.flatMap((group) => group.links)
+      .flatMap((link) => [link, ...(link.children ?? [])])
+      .find((section) => section.to === pathname)?.label ?? "Settings";
   const navigateToMainApp = useNavigateToMainApp();
   useEscapeToGoBack(navigateToMainApp);
 
@@ -35,7 +36,7 @@ export const Route = createFileRoute("/settings")({
   beforeLoad: async ({ location }) => {
     await requireAdmin();
     if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/automations", replace: true });
+      throw redirect({ to: "/settings/automations/runs", replace: true });
     }
   },
   component: SettingsContentLayout,

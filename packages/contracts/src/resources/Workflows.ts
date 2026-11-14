@@ -6,6 +6,7 @@ import * as Struct from "effect/Struct";
 
 import { AutomationId } from "../models/Automation.ts";
 import { ChatId, Report } from "../models/Chat.ts";
+import { RunStatus } from "../models/ChatOrigin.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 
@@ -206,7 +207,7 @@ export const StepView = Schema.Struct({
           startedAt: Schema.DateTimeUtcFromString,
           /** Null while it runs. */
           endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
-          status: Schema.Literals(["running", "completed", "failed", "stopped"]),
+          status: RunStatus,
           latestReport: Schema.NullOr(Report),
           /** What it used so far. */
           ...Struct.pick(Session.Info.fields, ["cost", "tokens"]),

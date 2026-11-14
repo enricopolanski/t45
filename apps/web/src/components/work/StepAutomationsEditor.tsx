@@ -60,7 +60,7 @@ export function StepAutomationsEditor({
         </SelectPopup>
       </Select>
       {isAdmin && (
-        <Link to="/settings/automations" className="text-sm text-muted-foreground underline">
+        <Link to="/settings/automations/runs" className="text-sm text-muted-foreground underline">
           Manage automations
         </Link>
       )}

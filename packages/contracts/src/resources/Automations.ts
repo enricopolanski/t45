@@ -3,7 +3,9 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { Chat, Refused as ChatRefused, Report } from "../models/Chat.ts";
+import { ChatId, Refused as ChatRefused, Report } from "../models/Chat.ts";
+import { RunStatus } from "../models/ChatOrigin.ts";
+import { StringId } from "../models/primitives.ts";
 import { Refused as AutomationRefused, Automation, AutomationId } from "../models/Automation.ts";
 import { AdminOnly } from "../Authorization.ts";
 import { AccessDenied, NotFound } from "./errors.ts";
@@ -11,15 +13,24 @@ import { AccessDenied, NotFound } from "./errors.ts";
 const Settings = Struct.pick(Automation.fields, ["title", "prompt", "agentId"]);
 const Errors = Schema.Union([AutomationRefused, NotFound, AccessDenied]);
 
+export const AutomationRun = Schema.Struct({
+  /** The chat it runs in. */
+  chatId: ChatId,
+  /** The step it ran on; null for a run started from settings. */
+  stepId: Schema.NullOr(StringId),
+  ranBy: StringId,
+  startedAt: Schema.DateTimeUtcFromString,
+  /** Null while it runs. */
+  endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  status: RunStatus,
+  latestReport: Schema.NullOr(Report),
+});
+export type AutomationRun = typeof AutomationRun.Type;
+
 export const AutomationSummary = Schema.Struct({
   ...Automation.fields,
-  lastRun: Schema.NullOr(
-    Schema.Struct({
-      statusLabel: Schema.String,
-      at: Chat.fields.lastActivityAt,
-      latestReport: Schema.NullOr(Report),
-    }),
-  ),
+  /** Newest first. */
+  runs: Schema.Array(AutomationRun),
 });
 export type AutomationSummary = typeof AutomationSummary.Type;
 

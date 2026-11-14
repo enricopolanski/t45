@@ -53,24 +53,19 @@ export const layer = Automations.middleware(Authorization).toLayer(
       return automation;
     });
 
-    const list = Effect.flatMap(automations.list, (entries) =>
-      Effect.forEach(entries, (automation) =>
-        Effect.gen(function* () {
-          const chat = yield* chatRepository.getLatestAutomationRun(automation.id);
-          return {
-            ...automation,
-            lastRun:
-              chat === null
-                ? null
-                : {
-                    statusLabel: chat.status === "running" ? "Running" : "Ended",
-                    at: chat.lastActivityAt,
-                    latestReport: chat.reports?.at(-1) ?? null,
-                  },
-          };
-        }),
-      ),
-    );
+    const list = Effect.gen(function* () {
+      const runs = yield* chatRepository.origins.listAutomated;
+      return (yield* automations.list).map((automation) => ({
+        ...automation,
+        runs: runs
+          .filter(({ trigger }) => trigger.automationId === automation.id)
+          .map(({ trigger, ...run }) => ({
+            ...run,
+            stepId: trigger.type === "step" ? trigger.stepId : null,
+            ranBy: trigger.effectiveUserId,
+          })),
+      }));
+    });
 
     return Automations.of({
       "automations.list": () => list,
