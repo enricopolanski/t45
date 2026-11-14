@@ -104,6 +104,10 @@ test("step URL fields take one address in defaults, repeated groups and complete
   await ada.getByRole("switch", { name: "Multiple entries" }).click();
   await ada.getByLabel("Label", { exact: true }).nth(2).fill("Reference");
   await chooseOption(ada, "Type", "URL", 2);
+  // A field shown only in an entry's details.
+  await ada.getByRole("button", { name: "Add field", exact: true }).first().click();
+  await ada.getByLabel("Label", { exact: true }).nth(3).fill("Note");
+  await ada.getByRole("switch", { name: "Show in table" }).nth(1).click();
   await saveSteps(ada);
   const projectId = await createProject(ada, workflowId);
   await addStepMembers(ada, "Collect", ["ada"]);
@@ -136,6 +140,14 @@ test("step URL fields take one address in defaults, repeated groups and complete
   await expect(ada.getByLabel(/link text/iu)).toHaveCount(0);
   await ada.getByLabel("Reference, entry 1", { exact: true }).blur();
   await expect(history.getByText("changed 3 fields", { exact: false })).toBeVisible();
+  await expect(ada.getByLabel("Note, entry 1", { exact: true })).toHaveCount(0);
+  await ada.getByRole("button", { name: "Details of entry 1 of References" }).click();
+  const details = ada.getByRole("dialog", { name: "References, entry 1" });
+  await details.getByLabel("Note", { exact: true }).fill("Primary docs");
+  await details.getByLabel("Note", { exact: true }).blur();
+  await ada.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+  await expect(history.getByText("changed 4 fields", { exact: false })).toBeVisible();
   await ada.getByRole("button", { name: /^Status: To do/u }).click();
   await ada.getByRole("menuitem", { name: "Mark done" }).click();
   await ada.waitForURL(/\/my-work$/u);
@@ -149,4 +161,5 @@ test("step URL fields take one address in defaults, repeated groups and complete
     "href",
     "https://example.com/documentation",
   );
+  await expect(ada.getByText("Primary docs", { exact: true })).toBeVisible();
 });

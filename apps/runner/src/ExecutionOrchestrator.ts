@@ -2,6 +2,7 @@ import { type Form, Model, OpenCode, Session, SessionMessage } from "@opencode/c
 import type { OpenCodeEvent } from "@opencode/protocol/groups/event";
 import {
   AnswerInvalid,
+  ExecutionFailed,
   type ExecutionRequest,
   type ExecutionUpdate,
   isSettled,
@@ -43,23 +44,50 @@ const createOpencodeClient = Effect.fnUntraced(function* (
     Effect.provideService(HttpClient.HttpClient, httpClient),
   );
 
-  yield* client.server
-    .info()
-    .pipe(Effect.retry(Schedule.spaced("250 millis")), Effect.timeout("1 minute"));
+  yield* client.server.info().pipe(
+    Effect.retry(Schedule.spaced("250 millis")),
+    Effect.timeout("1 minute"),
+    Effect.catchTags({
+      TimeoutError: () =>
+        Effect.fail(
+          new ExecutionFailed({ reason: "The agent's OpenCode didn't start within a minute." }),
+        ),
+    }),
+  );
   // OpenCode answers before its MCP servers connect, and a turn started then finds no tools.
   // A disabled server never connects.
   const servers = Object.entries(agent.mcpServers)
     .filter(([, server]) => server.disabled !== true)
     .map(([name]) => name);
   if (servers.length > 0) {
+    const unconnected = ({ data }: Effect.Success<ReturnType<typeof client.mcp.list>>) =>
+      servers.flatMap((name) => {
+        const status = data.find((server) => server.name === name)?.status;
+        if (status?.status === "connected") return [];
+        return [
+          status === undefined
+            ? `${name} (not started)`
+            : "error" in status
+              ? `${name} (${status.status}: ${status.error})`
+              : `${name} (${status.status})`,
+        ];
+      });
     yield* client.mcp.list().pipe(
-      Effect.filterOrFail(({ data }) =>
-        servers.every((name) =>
-          data.some((server) => server.name === name && server.status.status === "connected"),
-        ),
-      ),
+      Effect.filterOrFail((listed) => unconnected(listed).length === 0),
       Effect.retry(Schedule.spaced("500 millis")),
       Effect.timeout("1 minute"),
+      Effect.catchTags({
+        TimeoutError: () =>
+          client.mcp.list().pipe(
+            Effect.flatMap((listed) =>
+              Effect.fail(
+                new ExecutionFailed({
+                  reason: `The agent's tools didn't connect within a minute: ${unconnected(listed).join(", ")}.`,
+                }),
+              ),
+            ),
+          ),
+      }),
     );
   }
   return client;
@@ -386,7 +414,13 @@ export const layer = RunnerRpcs.toLayer(
             Effect.tapError((error) =>
               Effect.logError("An execution failed", { rootId: request.rootId, error }),
             ),
-            Effect.orDie,
+            Effect.mapError((error) =>
+              error._tag === "ExecutionFailed"
+                ? error
+                : new ExecutionFailed({
+                    reason: `The runner failed: ${"message" in error && error.message ? error.message : error._tag}.`,
+                  }),
+            ),
             Effect.andThen(Queue.end(queue)),
           ),
         ),

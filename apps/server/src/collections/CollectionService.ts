@@ -239,6 +239,19 @@ const make = Effect.gen(function* () {
       return yield* viewOf(saved);
     }),
 
+    /**
+     * The collection, when the member by id or the agent reads its records, as linking them to a
+     * step needs.
+     */
+    requireReadable: Effect.fnUntraced(function* (actor: string | Agent, collectionId: string) {
+      if (typeof actor !== "string") return yield* findReadable(actor, collectionId);
+      const user = yield* users.get(actor);
+      const collection = yield* collections.get(collectionId);
+      if (user !== null && collection !== null && canEditRecords(user, collection))
+        return collection;
+      return yield* new NotFound();
+    }),
+
     /** Whether the member opens a file a collection's record holds. */
     canReadFile: Effect.fnUntraced(function* (userId: string, file: Attachment) {
       const collection =

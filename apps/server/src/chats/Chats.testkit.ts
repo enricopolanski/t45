@@ -25,6 +25,9 @@ import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as SkillRepository from "../agents/SkillRepository.ts";
 import * as CapabilityRepository from "../capabilities/CapabilityRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
+import * as CollectionRecordRepository from "../collections/CollectionRecordRepository.ts";
+import * as CollectionRepository from "../collections/CollectionRepository.ts";
+import * as CollectionService from "../collections/CollectionService.ts";
 import * as ServerConfig from "../config.ts";
 import * as CommandLogRepository from "../persistence/CommandLogRepository.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
@@ -76,6 +79,8 @@ const layerPersistence = Layer.effectDiscard(seedPresets).pipe(
       AgentRepository.layer,
       SkillRepository.layer,
       CapabilityRepository.layer,
+      CollectionRepository.layer,
+      CollectionRecordRepository.layer,
     ).pipe(
       Layer.provideMerge(Sqlite.testLayer),
       Layer.provideMerge(ServerConfig.testLayer("t3-chats-")),
@@ -86,6 +91,7 @@ const layerPersistence = Layer.effectDiscard(seedPresets).pipe(
 
 /** Chats over a fresh database. */
 export const layer = WorkflowService.layer.pipe(
+  Layer.provideMerge(CollectionService.layer),
   Layer.provideMerge(ChatService.layer),
   Layer.provideMerge(FakeRunner.layer),
   Layer.provideMerge(layerPersistence),

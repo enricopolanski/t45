@@ -66,7 +66,8 @@ export const rpcTool = (
             : [],
           $defs: document.definitions,
         }
-      : schema;
+      : // MCP tools take an object of arguments; an operation without a payload takes none.
+        { type: "object", properties: {} };
   return {
     name,
     description,

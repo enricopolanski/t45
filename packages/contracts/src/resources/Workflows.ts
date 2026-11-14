@@ -9,7 +9,9 @@ import { ChatId, Report } from "../models/Chat.ts";
 import { RunStatus } from "../models/ChatOrigin.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
+import { Collection } from "../models/Collection.ts";
 import { Field, FieldPathSegment } from "../models/Field.ts";
+import { CollectionRecordView } from "./Collections.ts";
 
 import {
   Comment,
@@ -123,6 +125,15 @@ const StepFileView = Schema.Struct(
   Struct.pick(Attachment.fields, ["id", "name", "uploader", "createdAt"]),
 );
 
+/** A field view as it is sent, where its records' times are ISO strings. */
+interface FieldViewEncoded extends Omit<FieldView, "records" | "rows"> {
+  readonly records: ReadonlyArray<typeof CollectionRecordView.Encoded>;
+  readonly rows: ReadonlyArray<{
+    readonly id: string | null;
+    readonly fields: ReadonlyArray<FieldViewEncoded>;
+  }>;
+}
+
 /**
  * A field as a step shows it. `key` is the field's path, which sets its value: a field inside a
  * group is `group.field`, and inside a repeatable group's row `group.rowId.field`.
@@ -136,6 +147,8 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     /** A select field's choices, else empty. */
     options: Schema.Array(Schema.String),
     value: Schema.Json,
+    /** A sibling URL displayed on this field; its value is still kept in that URL field. */
+    linkUrl: Schema.optionalKey(Schema.String),
     repeatable: Schema.Boolean,
     file: Schema.NullOr(FieldFileView),
     /**
@@ -143,11 +156,19 @@ export class FieldView extends Schema.Opaque<FieldView>()(
      * key is `group.rowId.id`. Empty for other fields.
      */
     rowFields: Schema.Array(Field),
+    /** A records field's collection; null for other fields, or when the collection is gone. */
+    collection: Schema.NullOr(
+      Schema.Struct(Struct.pick(Collection.fields, ["id", "title", "fields", "primaryKeyFieldId"])),
+    ),
+    /** A records field's records, in the order it links them. Empty for other fields. */
+    records: Schema.Array(CollectionRecordView),
     /** A group's rows: one with a null id for a group that doesn't repeat. Empty for other fields. */
     rows: Schema.Array(
       Schema.Struct({
         id: Schema.NullOr(FieldPathSegment),
-        fields: Schema.Array(Schema.suspend((): Schema.Codec<FieldView> => FieldView)),
+        fields: Schema.Array(
+          Schema.suspend((): Schema.Codec<FieldView, FieldViewEncoded> => FieldView),
+        ),
       }),
     ),
   }),

@@ -90,8 +90,7 @@ test("an open item shows only to the members of the step it is in", async ({ sig
   await cy.getByRole("region", { name: "Review" }).getByText("Order 7").click();
   await expectStep(cy, "Review");
   const inputs = cy.getByRole("region", { name: "Inputs" });
-  await expect(inputs.getByText("Amount")).toBeVisible();
-  await expect(inputs.getByText("120")).toBeVisible();
+  await expect(inputs.getByLabel("Amount")).toHaveValue("120");
   await expect(cy.getByText("Supplier")).toHaveCount(0);
   await expect(cy.getByText("Acme")).toHaveCount(0);
 });

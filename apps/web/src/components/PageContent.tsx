@@ -4,7 +4,6 @@ import { cn } from "../lib/utils";
 
 const WIDTHS = {
   column: "max-w-[60rem]",
-  split: "max-w-7xl",
   full: "",
 };
 
@@ -14,7 +13,7 @@ export function PageContent({
   className,
   ...props
 }: ComponentPropsWithoutRef<"div"> & {
-  /** A centered column; wider for an item beside its side cards; the full width for boards. */
+  /** A centered column, or the full available width. */
   readonly width?: keyof typeof WIDTHS;
 }) {
   return (

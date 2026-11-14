@@ -18,6 +18,7 @@ export function WorkFrame({
   parent,
   actions,
   width = "column",
+  contentClassName,
   children,
 }: {
   readonly title: string;
@@ -26,6 +27,7 @@ export function WorkFrame({
   /** Right-aligned above the content. */
   readonly actions?: ReactNode;
   readonly width?: ComponentProps<typeof PageContent>["width"];
+  readonly contentClassName?: string;
   readonly children: ReactNode;
 }) {
   return (
@@ -33,7 +35,7 @@ export function WorkFrame({
       <PageHeader className="sticky top-0 z-10">
         <PageBreadcrumb title={title} parent={parent} />
       </PageHeader>
-      <PageContent width={width}>
+      <PageContent width={width} className={contentClassName}>
         {actions ? (
           <div className="flex flex-wrap items-center justify-end gap-3">{actions}</div>
         ) : null}
