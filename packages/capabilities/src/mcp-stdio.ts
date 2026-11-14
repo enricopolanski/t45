@@ -2,7 +2,7 @@
 import * as NodeReadline from "node:readline";
 import { Authorization } from "@t45/contracts/Authorization";
 import { ReportProgress } from "@t45/contracts/resources/Chats";
-import { CollectionRecordOperations } from "@t45/contracts/resources/Collections";
+import { CollectionOperations } from "@t45/contracts/resources/Collections";
 import { Workflows } from "@t45/contracts/resources/Workflows";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -25,7 +25,7 @@ export const apiHeaders = {
 export const apiUrl = (path: string) => new URL(path, process.env.T45_SERVER_URL).toString();
 const operations = Workflows.omit("workflows.watchStep")
   .add(ReportProgress)
-  .merge(CollectionRecordOperations)
+  .merge(CollectionOperations)
   .middleware(Authorization);
 const client = RpcClient.make(operations, { disableTracing: true, flatten: true });
 const protocol = () =>
@@ -34,10 +34,28 @@ const protocol = () =>
     transformClient: HttpClient.mapRequest(HttpClientRequest.setHeaders(apiHeaders)),
   }).pipe(Layer.provide(RpcSerialization.layerNdjson), Layer.provide(FetchHttpClient.layer));
 
+type OperationTag = RpcGroup.Rpcs<typeof operations>["_tag"];
+
+/** Calls one operation; its failure comes back as the message to show the agent. */
+export const callOperation = async (tag: OperationTag, payload: unknown) => {
+  const result = await Effect.runPromise(
+    client.pipe(
+      // One call runs one operation; its exact result type doesn't matter here.
+      Effect.flatMap((api): Effect.Effect<unknown, unknown> => api(tag, payload as never)),
+      Effect.scoped,
+      Effect.provide(protocol()),
+      Effect.result,
+    ),
+  );
+  return Result.mapError(result, (failure) =>
+    failure instanceof Error ? failure.message : "The operation failed.",
+  );
+};
+
 /** The API payload supplies the tool schema; bound IDs come from its execution. */
 export const rpcTool = (
   name: string,
-  tag: RpcGroup.Rpcs<typeof operations>["_tag"],
+  tag: OperationTag,
   description: string,
   bound: Record<string, string> = {},
 ) => {
@@ -73,18 +91,8 @@ export const rpcTool = (
     description,
     inputSchema,
     call: async (input: Record<string, unknown>) => {
-      const payload = decodeArguments({ ...input, ...bound });
-      const result = await Effect.runPromise(
-        client.pipe(
-          // One tool calls one operation; its exact result type doesn't matter here.
-          Effect.flatMap((api): Effect.Effect<unknown, unknown> => api(tag, payload)),
-          Effect.scoped,
-          Effect.provide(protocol()),
-          Effect.result,
-        ),
-      );
-      if (Result.isFailure(result))
-        refuse(result.failure instanceof Error ? result.failure.message : "The operation failed.");
+      const result = await callOperation(tag, decodeArguments({ ...input, ...bound }));
+      if (Result.isFailure(result)) refuse(result.failure);
       return JSON.stringify(result.success) ?? "Done.";
     },
   };
