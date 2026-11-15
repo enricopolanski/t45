@@ -40,11 +40,15 @@ test("admins define collections whose records people and agents look up and save
   await ada.getByRole("button", { name: "Add field" }).click();
   await ada.getByLabel("Label").fill("Price");
   await chooseOption(ada, "Type", "Number");
+  await chooseOption(ada, "Decimals", "2");
+  await ada.getByLabel("Unit").fill("€");
   await ada.getByRole("button", { name: "Add field" }).click();
   await ada.getByLabel("Label").last().fill("Manual");
   await chooseOption(ada, "Type", "File", 1);
   // The manual shows only in a record's details.
   await ada.getByRole("switch", { name: "Show in table" }).last().click();
+  await ada.getByRole("button", { name: "Add field" }).click();
+  await ada.getByLabel("Label").last().fill("Notes");
   await ada.getByRole("button", { name: "Create collection" }).click();
   await expect(ada.getByRole("heading", { name: "Listings", level: 1 })).toBeVisible();
   const collectionId = new URL(ada.url()).pathname.split("/")[3]!;
@@ -60,7 +64,7 @@ test("admins define collections whose records people and agents look up and save
     return url!;
   };
   await saveRecord(ada, "B0ABC", "4.5", "manual.pdf");
-  await expect(records.getByRole("row", { name: "Record B0ABC" })).toContainText("4.5");
+  await expect(records.getByRole("row", { name: "Record B0ABC" })).toContainText("4.50 €");
   await expect(records.getByRole("columnheader", { name: "Price" })).toBeVisible();
   await expect(records.getByRole("columnheader", { name: "Manual" })).toHaveCount(0);
   const firstUrl = await fileUrl("manual.pdf");
@@ -163,4 +167,18 @@ test("admins define collections whose records people and agents look up and save
   await expect(ben.getByRole("switch", { name: "Reorder", exact: true })).toHaveCount(0);
   expect((await ben.request.get(manualUrl!)).status()).toBe(200);
   chat.finish();
+
+  // A layout that hides a column leaves that field to a record's details.
+  await ada.goto(`/settings/collections/${collectionId}/edit`);
+  await ada.getByRole("button", { name: "Layout" }).click();
+  const layout = ada.getByRole("dialog", { name: "Layout — Listings" });
+  const preview = layout.getByRole("table", { name: "Records" });
+  await expect(preview.getByRole("columnheader", { name: "Price" })).toBeVisible();
+  await layout.getByRole("checkbox", { name: "Price" }).click();
+  await expect(preview.getByRole("columnheader", { name: "Price" })).toHaveCount(0);
+  await layout.getByRole("button", { name: "Save layout" }).click();
+  await expect(layout).toHaveCount(0);
+  await ada.goto(`/settings/collections/${collectionId}`);
+  await expect(records.getByRole("row", { name: "Record B0ABC" })).toBeVisible();
+  await expect(records.getByRole("columnheader", { name: "Price" })).toHaveCount(0);
 });

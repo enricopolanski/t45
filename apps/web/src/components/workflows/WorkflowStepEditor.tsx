@@ -20,6 +20,7 @@ import { Textarea } from "../ui/textarea";
 import { FoldChevron } from "../work/CardFold";
 import { StepAutomationsEditor } from "../work/StepAutomationsEditor";
 import { plural } from "../work/workLogic";
+import { GroupLayoutButton } from "./GroupLayout";
 import { blankStep, listEntries } from "./workflowLogic";
 
 /** What a step holds, shown beside its title, e.g. "5 fields · 1 sub-step". */
@@ -69,6 +70,7 @@ const linkableCollections = apiQuery("collections.list")(undefined);
  * of the workflow's steps moves and is removed here; a sub-step, from its parent.
  */
 export function WorkflowStepEditor({
+  workflow,
   step,
   inputSources,
   position,
@@ -76,6 +78,8 @@ export function WorkflowStepEditor({
   onOpenSubStep,
   disabled,
 }: {
+  /** The workflow the step is of, whose tickets preview a group's layout. */
+  readonly workflow: { readonly id: string; readonly name: string };
   readonly step: DraftStep;
   /** The fields of earlier steps it may read. */
   readonly inputSources: ReturnType<typeof inputSourcesFor>;
@@ -151,6 +155,16 @@ export function WorkflowStepEditor({
               depth={0}
               areColumns={false}
               collections={collections}
+              groupLayout={(group, setGroup) => (
+                <GroupLayoutButton
+                  workflowId={workflow.id}
+                  stepId={step.id}
+                  trail={`${workflow.name} · ${step.name}`}
+                  group={group}
+                  onChange={setGroup}
+                  disabled={disabled}
+                />
+              )}
               onChange={(fields) => onChange({ ...step, fields })}
               disabled={disabled}
             />

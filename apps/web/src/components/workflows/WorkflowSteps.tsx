@@ -139,7 +139,7 @@ export function WorkflowSteps({
     >
       <p className="text-sm text-muted-foreground">
         {version.isFrozen
-          ? `Version ${version.number} is in use and no longer changes: saving starts version ${version.number + 1}. `
+          ? `Version ${version.number} is in use and no longer changes: saving starts version ${version.number + 1}. Layouts are the exception: every version takes them in place. `
           : `Version ${version.number} is a draft until a project adopts it. `}
         Tickets keep the version they started on.
       </p>
@@ -157,6 +157,7 @@ export function WorkflowSteps({
             <div className="overflow-hidden rounded-xl border border-border bg-card">
               <WorkflowStepEditor
                 key={open.id}
+                workflow={workflow}
                 step={open}
                 inputSources={inputSourcesFor(steps, open.id)}
                 position={null}
@@ -177,6 +178,7 @@ export function WorkflowSteps({
                     className="overflow-hidden rounded-xl border border-border bg-card"
                   >
                     <WorkflowStepEditor
+                      workflow={workflow}
                       step={place.entry}
                       inputSources={inputSourcesFor(steps, place.entry.id)}
                       position={place}

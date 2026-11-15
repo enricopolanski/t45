@@ -1,3 +1,4 @@
+import type { Collection } from "@t45/contracts/models/Collection";
 import { Fields } from "@t45/contracts/models/Field";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
@@ -5,7 +6,12 @@ import { XIcon } from "lucide-react";
 import { useCallback, useId, useState } from "react";
 
 import { api } from "../../rpc/api";
-import { ColumnSwitch, FieldsEditor, LinkDisplaySelect } from "../fields/FieldsEditor";
+import {
+  ColumnSwitch,
+  FieldsEditor,
+  LinkDisplaySelect,
+  MarkdownSwitch,
+} from "../fields/FieldsEditor";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
@@ -16,6 +22,7 @@ import { useWorkDirectory } from "../work/useWorkDirectory";
 import { WorkFrame } from "../work/WorkFrame";
 import { actorName } from "../work/workLogic";
 import { useWorkflowData } from "../workflows/useWorkflowData";
+import { CollectionLayoutButton } from "./CollectionLayout";
 import { blankField, type DraftField, FIELD_TYPES } from "../workflows/workflowLogic";
 
 const encodeFields = Schema.encodeSync(Fields);
@@ -54,6 +61,7 @@ function LockedField({
         <span className="font-medium">{field.label}</span>
         <span className="text-xs text-muted-foreground">{FIELD_TYPES[field.type]}</span>
         <LinkDisplaySelect field={field} fields={fields} onChange={onChange} disabled={disabled} />
+        <MarkdownSwitch field={field} onChange={onChange} disabled={disabled} />
         {isColumn ? (
           <span className="ml-auto">
             <ColumnSwitch field={field} onChange={onChange} disabled={disabled} />
@@ -67,7 +75,7 @@ function LockedField({
               key={child.id}
               field={child}
               fields={field.fields}
-              isColumn={field.repeatable}
+              isColumn={field.repeatable && field.layout?.table?.columns === undefined}
               onChange={(changed) => onChange({ ...field, fields: field.fields.with(at, changed) })}
               disabled={disabled}
             />
@@ -87,6 +95,8 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
   const navigate = useNavigate();
   const directory = useWorkDirectory();
   const [draft, setDraft] = useState<Draft | null>(null);
+  // The layout saves on its own, apart from the draft.
+  const [layout, setLayout] = useState<NonNullable<Collection["layout"]>>({});
   const load = useCallback(async () => {
     if (collectionId === null) return { collection: null, hasRecords: false };
     const [collection, { records }] = await Promise.all([
@@ -95,20 +105,19 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
     ]);
     return { collection, hasRecords: records.length > 0 };
   }, [collectionId]);
-  const onLoad = useCallback(
-    ({ collection }: Awaited<ReturnType<typeof load>>) =>
-      setDraft(
-        collection === null
-          ? newDraft()
-          : {
-              title: collection.title,
-              fields: encodeFields(collection.fields),
-              primaryKeyFieldId: collection.primaryKeyFieldId,
-              memberUserIds: collection.memberUserIds,
-            },
-      ),
-    [],
-  );
+  const onLoad = useCallback(({ collection }: Awaited<ReturnType<typeof load>>) => {
+    setLayout(collection?.layout ?? {});
+    setDraft(
+      collection === null
+        ? newDraft()
+        : {
+            title: collection.title,
+            fields: encodeFields(collection.fields),
+            primaryKeyFieldId: collection.primaryKeyFieldId,
+            memberUserIds: collection.memberUserIds,
+          },
+    );
+  }, []);
   const { detail, busy, error, run } = useWorkflowData(load, onLoad);
   const title = collectionId === null ? "New collection" : "Edit collection";
   if (detail === null || draft === null)
@@ -120,6 +129,8 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
       </WorkFrame>
     );
   const { hasRecords } = detail;
+  // A layout's columns replace "Show in table".
+  const hasLayoutColumns = layout.table?.columns !== undefined;
   const lockedCount = hasRecords ? (detail.collection?.fields.length ?? 0) : 0;
   const locked = draft.fields.slice(0, lockedCount);
   const editable = draft.fields.slice(lockedCount);
@@ -154,7 +165,16 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
           />
         </div>
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Fields</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium">Fields</span>
+            {detail.collection === null ? null : (
+              <CollectionLayoutButton
+                collection={{ ...detail.collection, layout }}
+                disabled={busy}
+                onSaved={setLayout}
+              />
+            )}
+          </div>
           {hasRecords ? (
             <>
               <p className="text-xs text-muted-foreground">
@@ -170,7 +190,7 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
                       <LockedField
                         field={field}
                         fields={draft.fields}
-                        isColumn={field.id !== draft.primaryKeyFieldId}
+                        isColumn={!hasLayoutColumns && field.id !== draft.primaryKeyFieldId}
                         onChange={setField}
                         disabled={busy}
                       />
@@ -184,7 +204,7 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
             fields={editable}
             siblings={draft.fields}
             depth={0}
-            areColumns
+            areColumns={!hasLayoutColumns}
             keyFieldId={draft.primaryKeyFieldId}
             onChange={(fields) => setDraft({ ...draft, fields: [...locked, ...fields] })}
             disabled={busy}

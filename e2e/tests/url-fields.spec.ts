@@ -157,9 +157,9 @@ test("step URL fields take one address in defaults, repeated groups and complete
     "href",
     "https://example.com/updated",
   );
-  await expect(ada.getByRole("link", { name: "Reference", exact: true })).toHaveAttribute(
-    "href",
-    "https://example.com/documentation",
-  );
-  await expect(ada.getByText("Primary docs", { exact: true })).toBeVisible();
+  // Each entry reads as its form.
+  await expect(
+    ada.getByRole("link", { name: "https://example.com/documentation", exact: true }),
+  ).toHaveAttribute("href", "https://example.com/documentation");
+  await expect(ada.getByLabel("Note", { exact: true })).toHaveValue("Primary docs");
 });

@@ -10,7 +10,7 @@ import { RunStatus } from "../models/ChatOrigin.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { Collection } from "../models/Collection.ts";
-import { Field, FieldPathSegment } from "../models/Field.ts";
+import { Field, FieldDecimals, FieldPathSegment, FieldTones, Layout } from "../models/Field.ts";
 import { CollectionRecordView } from "./Collections.ts";
 
 import {
@@ -147,6 +147,16 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     /** A select field's choices, else empty. */
     options: Schema.Array(Schema.String),
     value: Schema.Json,
+    /** A number field's decimal places to show, when it sets them. */
+    decimals: Schema.optionalKey(FieldDecimals),
+    /** A number field's unit, when it has one. */
+    unit: Schema.optionalKey(TrimmedNonEmptyString),
+    /** A select field's tones by option, when it sets them. */
+    tones: Schema.optionalKey(FieldTones),
+    /** How a repeatable group's entries are shown, when it sets that. */
+    layout: Schema.optionalKey(Layout),
+    /** Whether the text is shown as Markdown; its value stays the original source. */
+    isMarkdown: Schema.optionalKey(Schema.Boolean),
     /** A sibling URL displayed on this field; its value is still kept in that URL field. */
     linkUrl: Schema.optionalKey(Schema.String),
     repeatable: Schema.Boolean,
@@ -165,6 +175,7 @@ export class FieldView extends Schema.Opaque<FieldView>()(
           "fields",
           "primaryKeyFieldId",
           "columnOrder",
+          "layout",
         ]),
       ),
     ),

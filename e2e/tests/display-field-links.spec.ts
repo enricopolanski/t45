@@ -210,6 +210,7 @@ test("step table links use the URL from their own row and carry into the next st
   await ada.getByRole("button", { name: "Adopt", exact: true }).click();
   await expect(ada.getByText("New tickets start on version 1")).toBeVisible();
   await startItem(ada, projectId, "Tape check");
+  const step = ada.getByRole("region", { name: "Open step" });
   for (const [at, name] of ["Blue tape", "Yellow tape"].entries()) {
     await ada.getByRole("button", { name: "Add entry", exact: true }).click();
     await ada.getByRole("button", { name: `Details of entry ${at + 1} of Listings` }).click();
@@ -225,7 +226,29 @@ test("step table links use the URL from their own row and carry into the next st
     await ada.keyboard.press("Escape");
     await expect(details).toHaveCount(0);
   }
-  await ada.reload();
+  // Laying out the adopted version changes it in place: the open ticket shows its entries by
+  // name, last first, wrapping it.
+  const stepUrl = ada.url();
+  await ada.goto(`/settings/workflows/${workflowId}/steps`);
+  await ada.getByRole("button", { name: /^1 Collect/u }).click();
+  await ada
+    .getByRole("button", { name: /Listings/u })
+    .first()
+    .click();
+  await ada.getByRole("button", { name: "Layout", exact: true }).click();
+  const layout = ada.getByRole("dialog", { name: "Layout — Listings" });
+  await layout.getByRole("checkbox", { name: "Wrap" }).click();
+  await layout.getByRole("button", { name: "Sort rows" }).click();
+  await chooseOption(ada, "Sort 1 direction", "Descending");
+  await layout.getByRole("button", { name: "Save layout" }).click();
+  await expect(layout).toHaveCount(0);
+  await saveSteps(ada);
+  await expect(ada.getByText("Version 1 is in use and no longer changes")).toBeVisible();
+  await ada.goto(stepUrl);
+  await expect(step.getByRole("link", { name: / tape$/u })).toHaveText([
+    "Yellow tape",
+    "Blue tape",
+  ]);
   await expect(ada.getByRole("link", { name: "Blue tape", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/1",
@@ -242,6 +265,10 @@ test("step table links use the URL from their own row and carry into the next st
   await ada.getByRole("region", { name: "Review", exact: true }).getByText("Tape check").click();
   await ada.getByRole("button", { name: "Inputs" }).click();
   const table = ada.getByRole("table", { name: "Listings", exact: true });
+  await expect(table.getByRole("link", { name: / tape$/u })).toHaveText([
+    "Yellow tape",
+    "Blue tape",
+  ]);
   await expect(table.getByRole("link", { name: "Blue tape", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/1",

@@ -15,6 +15,7 @@ import {
   groupRows,
   hasDistinctIds,
   holdsData,
+  type Layout,
 } from "./Field.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 
@@ -701,3 +702,59 @@ export const applyWorkflowEdits = (
   }
   return Option.getOrNull(decodeSteps(next));
 };
+
+const encodeSteps = Schema.encodeSync(Steps);
+
+/** Each group's layout in the steps, by its step's id and the ids of the fields leading to it. */
+const groupLayouts = (steps: StepList): ReadonlyMap<string, Layout | undefined> => {
+  const ofFields = (
+    fields: ReadonlyArray<Field>,
+    path: string,
+  ): ReadonlyArray<readonly [string, Layout | undefined]> =>
+    fields.flatMap((field) =>
+      field.type === "group"
+        ? [[`${path}/${field.id}`, field.layout], ...ofFields(field.fields, `${path}/${field.id}`)]
+        : [],
+    );
+  return new Map(stepNodes(steps).flatMap(({ step }) => ofFields(step.fields, step.id)));
+};
+
+/** The groups whose layout `edited` changes from `saved`'s, each with its new layout. */
+export const changedLayouts = (saved: StepList, edited: StepList) => {
+  const was = groupLayouts(saved);
+  return new Map(
+    [...groupLayouts(edited)].filter(
+      ([key, layout]) => JSON.stringify(layout) !== JSON.stringify(was.get(key)),
+    ),
+  );
+};
+
+/** The steps with each group in `layouts` taking the layout given there, none when undefined. */
+export const setLayouts = (
+  steps: StepList,
+  layouts: ReadonlyMap<string, Layout | undefined>,
+): StepList => {
+  const ofFields = (fields: ReadonlyArray<Field>, path: string): ReadonlyArray<Field> =>
+    fields.map((field) => {
+      if (field.type !== "group") return field;
+      const key = `${path}/${field.id}`;
+      const { layout, ...rest } = field;
+      const next = layouts.has(key) ? layouts.get(key) : layout;
+      return { ...rest, fields: ofFields(field.fields, key), ...(next && { layout: next }) };
+    });
+  const ofSteps = (list: StepList): StepList =>
+    list.map((step) => ({
+      ...step,
+      fields: ofFields(step.fields, step.id),
+      subSteps: ofSteps(step.subSteps),
+    }));
+  return Option.getOrThrow(decodeSteps(ofSteps(steps)));
+};
+
+/**
+ * Whether `edited` changes nothing of `saved` but the layout of its groups. A layout is how
+ * entries show, not what a step holds, so it changes in place on every version.
+ */
+export const isLayoutChangeOnly = (saved: StepList, edited: StepList) =>
+  JSON.stringify(encodeSteps(setLayouts(edited, groupLayouts(saved)))) ===
+  JSON.stringify(encodeSteps(saved));

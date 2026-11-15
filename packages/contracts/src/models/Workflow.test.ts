@@ -14,6 +14,9 @@ import {
   applyWorkflowEdits,
   canAttachAgent,
   canSeeStep,
+  changedLayouts,
+  isLayoutChangeOnly,
+  setLayouts,
   completeTicketStep,
   currentStep,
   hasValidInputs,
@@ -25,7 +28,7 @@ import {
   ticketAccess,
   ticketStartRefusal,
 } from "./Workflow.ts";
-import { defaultValues, Field, fieldValueProblem, resolveFieldPath } from "./Field.ts";
+import { defaultValues, Field, fieldValueProblem, type Layout, resolveFieldPath } from "./Field.ts";
 
 const at = DateTime.makeUnsafe("2026-10-26T12:00:00.000Z");
 const project: Project = {
@@ -294,6 +297,40 @@ describe("editing a version's steps", () => {
     assert.equal(apply([attach, attach]), null);
     assert.equal(apply([detach]), null);
     assert.deepEqual(apply([attach, detach])?.[1]?.automationIds, []);
+  });
+});
+
+describe("laying out a group", () => {
+  const group = (layout?: Layout) =>
+    ({
+      id: "group01",
+      label: "Lines",
+      type: "group",
+      repeatable: true,
+      fields: [{ id: "name01", label: "Name", type: "text" }],
+      ...(layout && { layout }),
+    }) as Field;
+  const stepsWith = (field: Field, extra: Partial<StepDefinition> = {}) =>
+    Schema.decodeUnknownSync(Schema.Array(StepDefinition))([
+      definition("first01", [definition("child01", [], { fields: [field], ...extra })]),
+    ]);
+  const layoutOf = (steps: ReadonlyArray<StepDefinition>) => {
+    const field = steps[0]!.subSteps[0]!.fields[0]!;
+    return field.type === "group" ? field.layout : null;
+  };
+  const sorted = { table: { sortBy: [{ field: "name01", direction: "asc" as const }] } };
+
+  it("changes only how a group shows, and carries to every version holding the group", () => {
+    const saved = stepsWith(group());
+    const edited = stepsWith(group(sorted));
+    assert.isTrue(isLayoutChangeOnly(saved, edited));
+    assert.isFalse(isLayoutChangeOnly(saved, stepsWith(group(sorted), { name: "Renamed" })));
+    const layouts = changedLayouts(saved, edited);
+    assert.deepEqual([...layouts.keys()], ["child01/group01"]);
+    const older = setLayouts(stepsWith(group(), { instructions: "Older" }), layouts);
+    assert.deepEqual(layoutOf(older), sorted);
+    assert.equal(older[0]!.subSteps[0]!.instructions, "Older");
+    assert.isUndefined(layoutOf(setLayouts(edited, changedLayouts(edited, saved))));
   });
 });
 

@@ -33,13 +33,13 @@ serve({
     rpcTool(
       "set_field",
       "workflows.setStepField",
-      "Fill a step field by its key: text and dates (YYYY-MM-DD) as strings, numbers as JSON numbers, yes/no as booleans, selects as one of their options, URLs as http:// or https:// strings; null clears it. Nested fields use dotted keys. Set a repeatable group to the list of its row ids, then fill each row's fields as group.rowId.field, with the field ids in the group's rowFields. A refusal says exactly what didn't fit.",
+      "Fill a step field by its key: text and dates (YYYY-MM-DD) as strings (text fields marked isMarkdown render Markdown: use short paragraphs, lists and labelled links with real newlines, not literal backslash-n sequences, and no enclosing code fence), numbers as JSON numbers, yes/no as booleans, selects as one of their options, URLs as http:// or https:// strings; null clears it. Nested fields use dotted keys. Set a repeatable group to the list of its row ids, then fill each row's fields as group.rowId.field, with the field ids in the group's rowFields. A refusal says exactly what didn't fit.",
       step,
     ),
     rpcTool(
       "comment",
       "workflows.commentOnStep",
-      "Post a comment on your step: a question or your result. Use progress_report for progress updates.",
+      "Post a Markdown comment on your step: a question or your result. Use short paragraphs separated by blank lines, lists and labelled source links, with real newlines in the saved text, not literal backslash-n sequences. Do not wrap the comment in a code fence. Use progress_report for progress updates.",
       step,
     ),
     {

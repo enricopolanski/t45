@@ -29,6 +29,9 @@ import {
   currentStep,
   ticketStartRefusal,
   applyWorkflowEdits,
+  changedLayouts,
+  isLayoutChangeOnly,
+  setLayouts,
   canAttachAgent,
   canEditWorkflow,
   canSetWorkflowEditors,
@@ -182,6 +185,7 @@ const make = Effect.gen(function* () {
             "fields",
             "primaryKeyFieldId",
             "columnOrder",
+            "layout",
           ]),
           records: yield* Effect.forEach(
             linked.filter((record) => record !== null),
@@ -512,6 +516,7 @@ const make = Effect.gen(function* () {
       text: [
         `You contribute to ${subject} of "${brief.ticketTitle}" in the project "${brief.projectName}". The step is below as JSON: its instructions, the fields of earlier steps it reads as inputs, its own fields, its comments and its files. That is all you can see of this ticket.`,
         "Fill the step's fields with step_set_field, using each field's key and type below; a repeatable group's rowFields name the fields of its rows; a records field shows its collection and the records it links, and takes the keys of all the records it links, so save a new record with the collection tools before you add its key. Read the step again with step_get_step, report progress with progress_report, share results with step_comment, and attach files with step_attach. Each tool returns the actual operation result, or exactly why it refused. When your contribution is finished, end the conversation.",
+        "Step comments and text fields marked isMarkdown are rendered as Markdown. Use short paragraphs separated by blank lines, lists for separate points, and labelled links for sources. Use actual newline characters in the saved text, not literal backslash-n sequences. Send Markdown directly, without an enclosing code fence; keep plain text in fields not marked isMarkdown.",
         "You work in a folder of your own. Follow AGENTS.md if it is there.",
         instructions ? `Instructions for this step:\n${instructions}` : "",
         formatAutomationContext(brief),
@@ -808,17 +813,27 @@ const make = Effect.gen(function* () {
     if (steps === null) return yield* refuse("invalid_edit");
     if (!hasValidInputs(steps)) return yield* refuse("invalid_input");
     yield* requireAttachable(actorId, workflow, input.edits);
-    const saved: WorkflowVersion = latest.isFrozen
-      ? {
-          id: generateId(),
-          workflowId: workflow.id,
-          number: latest.number + 1,
-          revision: 0,
-          isFrozen: false,
-          steps,
-        }
-      : { ...latest, revision: latest.revision + 1, steps };
+    const saved: WorkflowVersion =
+      latest.isFrozen && !isLayoutChangeOnly(latest.steps, steps)
+        ? {
+            id: generateId(),
+            workflowId: workflow.id,
+            number: latest.number + 1,
+            revision: 0,
+            isFrozen: false,
+            steps,
+          }
+        : { ...latest, revision: latest.revision + 1, steps };
     yield* workflows.versions.save(saved);
+    // Tickets show a group the way it is laid out now, whatever version they started on.
+    const layouts = changedLayouts(latest.steps, steps);
+    if (layouts.size > 0) {
+      for (const version of versions) {
+        if (version.id !== saved.id)
+          yield* workflows.versions.save({ ...version, steps: setLayouts(version.steps, layouts) });
+      }
+      yield* tickets.publishChange();
+    }
     yield* record(
       "workflows.saveWorkflowDraft",
       actorId,

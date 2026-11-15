@@ -5,17 +5,22 @@ import {
   rowIds,
   withFieldValue,
 } from "@t45/contracts/models/Field";
+import { isTableColumn, resolveTableLayout, sortRows } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
 import { buildFieldViews, getFieldLink } from "@t45/core/fieldViews";
 import { ArrowLeftIcon, ArrowRightIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
+import { cn } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { api } from "../../rpc/api";
 import { Button } from "../ui/button";
 import { ExternalUrl } from "../ExternalUrl";
-import { isTableColumn } from "../fields/fieldPresentation";
+import { FIXED_WIDTHS } from "../fields/fieldPresentation";
+import { OneLineValue } from "../fields/OneLineValue";
+import { MarkdownText } from "../markdown/MarkdownText";
+import { OptionValue } from "../fields/OptionValue";
 import {
   Dialog,
   DialogFooter,
@@ -26,13 +31,13 @@ import {
 } from "../ui/dialog";
 import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
-import { FieldInputs, uploadFile } from "../work/StepFields";
-import { formatDay, plural } from "../work/workLogic";
+import { FormGrid, layOutForm, uploadFile } from "../work/StepFields";
+import { formatDay, formatNumber, plural } from "../work/workLogic";
 
 type RecordFiles = CollectionRecordView["files"];
 
 /** What a collection holds of its records: their fields and which one keys them. */
-type RecordShape = Pick<Collection, "fields" | "primaryKeyFieldId" | "columnOrder">;
+type RecordShape = Pick<Collection, "fields" | "primaryKeyFieldId" | "columnOrder" | "layout">;
 
 /** A record's value as text, so a displayed link never wraps another link. */
 function formatCellValue(
@@ -48,6 +53,8 @@ function formatCellValue(
       return value === true ? "Yes" : "No";
     case "date":
       return formatDay(String(value));
+    case "number":
+      return typeof value === "number" ? formatNumber(value, field) : String(value);
     case "file":
       return files.find((file) => file.id === value)?.name ?? "";
     default:
@@ -61,6 +68,7 @@ function renderCell(
   value: FieldValues[string] | undefined,
   files: RecordFiles,
   linkUrl: string | undefined,
+  isWrapped: boolean,
 ) {
   if (linkUrl !== undefined)
     return (
@@ -78,6 +86,8 @@ function renderCell(
         ""
       );
     case "text":
+      if (field.isMarkdown && typeof value === "string")
+        return <MarkdownText text={value} isClamped={!isWrapped} />;
       // A web address shows as a link, so long URLs don't crowd the table.
       return typeof value === "string" && /^https?:\/\/\S+$/u.test(value.trim()) ? (
         <a
@@ -92,17 +102,75 @@ function renderCell(
       ) : (
         formatCellValue(field, value, files)
       );
+    case "select":
+      return typeof value === "string" ? <OptionValue option={value} tones={field.tones} /> : "";
     default:
       return formatCellValue(field, value, files);
   }
 }
 
+/**
+ * The value as text that can run long, which a cell wraps or cuts as its field says: text, a web
+ * address, or a choice without a tone icon.
+ */
+const findLongText = (
+  field: Collection["fields"][number],
+  value: FieldValues[string] | undefined,
+) =>
+  typeof value === "string" &&
+  (field.type === "text" ||
+    field.type === "url" ||
+    (field.type === "select" && field.tones?.[value] === undefined))
+    ? value
+    : undefined;
+
+/** Every column of the records table in the column order, the last update included. */
+const listColumnOrder = (collection: RecordShape) => [
+  ...new Set([
+    ...(collection.columnOrder ?? []),
+    ...collection.fields.map((field) => field.id),
+    UPDATED_AT_COLUMN,
+  ]),
+];
+
+/**
+ * The fields the records table lists when its layout lists none, in the column order: the primary
+ * key always, and each field shown in the table but a group that neither repeats nor shows a link.
+ */
+export const listDefaultColumns = (collection: RecordShape) =>
+  listColumnOrder(collection).flatMap((id) =>
+    collection.fields.filter(
+      (field) =>
+        field.id === id &&
+        (field.id === collection.primaryKeyFieldId ||
+          (isTableColumn(field) &&
+            (field.type !== "group" ||
+              field.repeatable ||
+              collection.fields.some(
+                (source) => source.type === "url" && source.displayLinkOn === field.id,
+              )))),
+    ),
+  );
+
 const headerCell =
   "bg-muted px-3 py-2 text-left text-xs font-medium whitespace-nowrap text-foreground/80";
 
+/** A fixed width holds a column however long its values; without one the table fits them. */
+const makeFixedWidthStyle = (width: keyof typeof FIXED_WIDTHS | undefined) => {
+  if (width === undefined) return undefined;
+  const fixed = `${FIXED_WIDTHS[width]}ch`;
+  return { width: fixed, minWidth: fixed, maxWidth: fixed };
+};
+
+/** A table's density for cells padded around their values. */
+const CELL_DENSITY = { compact: "[&_td]:py-1", normal: "", relaxed: "[&_td]:py-3" };
+
 /**
- * Records as a table: a column per field shown in the table, the primary key always. With `onOpen`
- * a row opens the record, and with `remove` each row has a way to take it off the list.
+ * Records as a table, in the order the collection's layout sorts them: a column per field its
+ * layout lists, then the last update; without that list, a column per field shown in the table,
+ * the primary key always, in the column order. With `onOpen` a row opens the record, and with
+ * `remove` each row has a way to take it off the list, and with `reorder` columns move in the
+ * column order.
  */
 export function RecordTable({
   label,
@@ -127,28 +195,21 @@ export function RecordTable({
       }
     | undefined;
 }) {
-  const fields = collection.fields.filter(
-    (field) =>
-      field.id === collection.primaryKeyFieldId ||
-      (isTableColumn(field) &&
-        (field.type !== "group" ||
-          field.repeatable ||
-          collection.fields.some(
-            (source) => source.type === "url" && source.displayLinkOn === field.id,
-          ))),
+  const order = listColumnOrder(collection);
+  const table = resolveTableLayout(
+    collection.fields,
+    collection.layout,
+    listDefaultColumns(collection),
   );
-  const order = [
-    ...new Set([
-      ...(collection.columnOrder ?? []),
-      ...collection.fields.map((field) => field.id),
-      UPDATED_AT_COLUMN,
-    ]),
+  const hasLayoutColumns = collection.layout?.table?.columns !== undefined;
+  const shown = [
+    ...table.columns.map((column) => ({ id: column.field.id, label: column.header, column })),
+    { id: UPDATED_AT_COLUMN, label: "Last update", column: null },
   ];
-  const columns = order.flatMap((id) => {
-    const field = fields.find((candidate) => candidate.id === id) ?? null;
-    if (field === null && id !== UPDATED_AT_COLUMN) return [];
-    return [{ id, label: field?.label ?? "Last update", field }];
-  });
+  const columns = hasLayoutColumns
+    ? shown
+    : order.flatMap((id) => shown.filter((column) => column.id === id));
+  const sorted = sortRows(records, table.sortBy, (record, fieldId) => record.values[fieldId]);
   const move = (from: string, to: string) => {
     const next = [...order];
     const fromIndex = next.indexOf(from);
@@ -159,11 +220,26 @@ export function RecordTable({
   };
   return (
     <div className="overflow-x-auto rounded-lg border">
-      <table aria-label={label} className="w-full border-separate border-spacing-0 text-sm">
+      <table
+        aria-label={label}
+        className={cn(
+          "w-full border-separate border-spacing-0 text-sm",
+          CELL_DENSITY[table.density],
+        )}
+      >
         <thead>
           <tr>
             {columns.map((column, index) => (
-              <th key={column.id} scope="col" className={headerCell}>
+              <th
+                key={column.id}
+                scope="col"
+                // A fixed width holds a long header too, wrapping it.
+                style={makeFixedWidthStyle(column.column?.width)}
+                className={cn(
+                  headerCell,
+                  column.column?.width !== undefined && "whitespace-normal",
+                )}
+              >
                 {reorder === undefined ? null : (
                   <div className="-ml-1 mb-1 flex gap-0.5">
                     <Button
@@ -197,7 +273,7 @@ export function RecordTable({
           </tr>
         </thead>
         <tbody>
-          {records.map((record) => {
+          {sorted.map((record) => {
             const removal = remove?.(record);
             return (
               <tr
@@ -209,24 +285,52 @@ export function RecordTable({
                     ? undefined
                     : "cursor-pointer hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
                 }
-                onClick={() => onOpen?.(record)}
+                onClick={(event) => {
+                  if (event.target instanceof Element && event.target.closest("a, button")) return;
+                  onOpen?.(record);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && event.target === event.currentTarget)
                     onOpen?.(record);
                 }}
               >
-                {columns.map(({ id, field }) => (
-                  <td key={id} className="max-w-64 truncate border-t px-3 py-2">
-                    {field === null
-                      ? formatRelativeTimeLabel(record.updatedAt)
-                      : renderCell(
-                          field,
-                          record.values[field.id],
-                          record.files,
-                          getFieldLink(field.id, collection.fields, record.values),
-                        )}
-                  </td>
-                ))}
+                {columns.map(({ id, column }) => {
+                  if (column === null)
+                    return (
+                      <td key={id} className="max-w-64 truncate border-t px-3 py-2">
+                        {formatRelativeTimeLabel(record.updatedAt)}
+                      </td>
+                    );
+                  const { field } = column;
+                  const value = record.values[field.id];
+                  const cell = renderCell(
+                    field,
+                    value,
+                    record.files,
+                    getFieldLink(field.id, collection.fields, record.values),
+                    column.isWrapped,
+                  );
+                  const text = findLongText(field, value);
+                  const isWrapped = text !== undefined && column.isWrapped;
+                  return (
+                    <td
+                      key={id}
+                      style={makeFixedWidthStyle(column.width)}
+                      className={cn(
+                        "max-w-64 border-t px-3 py-2",
+                        isWrapped ? "wrap-break-word" : "truncate",
+                      )}
+                    >
+                      {text === undefined ||
+                      isWrapped ||
+                      (field.type === "text" && field.isMarkdown) ? (
+                        cell
+                      ) : (
+                        <OneLineValue value={text}>{cell}</OneLineValue>
+                      )}
+                    </td>
+                  );
+                })}
                 {removal === undefined ? null : (
                   <td className="w-8 border-t text-center">
                     <Button
@@ -275,6 +379,19 @@ export function RecordDialog({
     values,
     (id) => files.find((file) => file.id === id) ?? null,
   );
+  const editor = {
+    missing: new Set<string>(),
+    onSave: set,
+    onUpload: (key: string, file: File) =>
+      void uploadFile(file).then(
+        (id) => {
+          setFiles((current) => [...current, { id, name: file.name }]);
+          set(key, id);
+        },
+        (cause: unknown) => setError(describeFailure(cause)),
+      ),
+  };
+  const form = layOutForm(collection.fields, collection.layout, fields, "");
   const save = () => {
     setBusy(true);
     setError(null);
@@ -288,7 +405,16 @@ export function RecordDialog({
   };
   return (
     <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : onClose())}>
-      <DialogPopup aria-label="Record" className="sm:max-w-3xl">
+      <DialogPopup
+        aria-label="Record"
+        className={
+          form.dialogWidth === 1024
+            ? "sm:max-w-5xl"
+            : form.dialogWidth === 1280
+              ? "sm:max-w-7xl"
+              : "sm:max-w-3xl"
+        }
+      >
         <form
           className="flex min-h-0 flex-col"
           onSubmit={(event) => {
@@ -301,20 +427,7 @@ export function RecordDialog({
           </DialogHeader>
           <DialogPanel>
             <div className="flex flex-col gap-4">
-              <FieldInputs
-                fields={fields}
-                missing={new Set()}
-                onSave={set}
-                onUpload={(key, file) =>
-                  void uploadFile(file).then(
-                    (id) => {
-                      setFiles((current) => [...current, { id, name: file.name }]);
-                      set(key, id);
-                    },
-                    (cause: unknown) => setError(describeFailure(cause)),
-                  )
-                }
-              />
+              <FormGrid {...editor} form={form} />
               {error && <ErrorText text={error} />}
             </div>
           </DialogPanel>

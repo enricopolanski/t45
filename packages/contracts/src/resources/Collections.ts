@@ -26,7 +26,13 @@ export type CollectionRecordView = typeof CollectionRecordView.Type;
 
 /** What an admin sets of a collection. */
 const CollectionDraft = Schema.Struct(
-  Struct.pick(Collection.fields, ["title", "fields", "primaryKeyFieldId", "memberUserIds"]),
+  Struct.pick(Collection.fields, [
+    "title",
+    "fields",
+    "primaryKeyFieldId",
+    "memberUserIds",
+    "layout",
+  ]),
 );
 
 /**

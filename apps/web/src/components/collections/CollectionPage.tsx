@@ -127,7 +127,8 @@ export function CollectionPage({ collectionId }: { readonly collectionId: string
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
-        {isAdmin ? (
+        {/* A layout's columns replace the column order, so it reorders only without them. */}
+        {isAdmin && collection.layout?.table?.columns === undefined ? (
           <label className="flex shrink-0 items-center gap-2 text-sm">
             <Switch size="sm" checked={isReordering} onCheckedChange={setIsReordering} />
             Reorder
