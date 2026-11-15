@@ -9,7 +9,7 @@ import { expect, it } from "vite-plus/test";
 const runtime = new URL("../dist/runtime/", import.meta.url);
 
 it("lists every tool with an object of arguments, those without arguments too", () => {
-  const programs = NodeFS.readdirSync(runtime).filter((file) => file.endsWith(".mjs"));
+  const programs = NodeFS.readdirSync(runtime).filter((file) => file.endsWith("-tools.mjs"));
   expect(programs).toContain("collection-tools.mjs");
   for (const program of programs) {
     const run = NodeChildProcess.spawnSync("node", [new URL(program, runtime).pathname], {

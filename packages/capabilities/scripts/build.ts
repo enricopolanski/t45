@@ -19,6 +19,7 @@ const programs = [
   { name: "step-tools", definition: stepOperations },
   { name: "project-tools", definition: projectOperations },
   { name: "collection-tools", definition: collections },
+  { name: "browser-open", definition: webBrowser },
 ];
 const encodeCapabilities = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Capability)));
 const encodeBuiltIns = Schema.encodeSync(Schema.fromJsonString(BuiltIns));
@@ -39,17 +40,14 @@ for (const [index, { name }] of programs.entries()) {
   });
 }
 
-const capabilities = [
-  ...(await Promise.all(
-    programs.map(async ({ name, definition }) =>
-      Capability.make({
-        ...definition,
-        files: { [`${name}.mjs`]: await NodeFSP.readFile(`dist/runtime/${name}.mjs`, "utf8") },
-      }),
-    ),
-  )),
-  webBrowser,
-];
+const capabilities = await Promise.all(
+  programs.map(async ({ name, definition }) =>
+    Capability.make({
+      ...definition,
+      files: { [`${name}.mjs`]: await NodeFSP.readFile(`dist/runtime/${name}.mjs`, "utf8") },
+    }),
+  ),
+);
 
 await NodeFSP.writeFile("dist/capabilities.json", `${encodeCapabilities(capabilities)}\n`);
 await NodeFSP.writeFile("dist/built-ins.json", `${encodeBuiltIns({ capabilities, agents })}\n`);

@@ -1,4 +1,5 @@
 import { isUrlFieldValue } from "@t45/contracts/models/Field";
+import { resolveTableLayout } from "@t45/contracts/models/Layout";
 import type { FieldView } from "@t45/contracts/resources/Workflows";
 import { LockIcon } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
@@ -6,13 +7,26 @@ import { type ReactNode, useId, useState } from "react";
 import { cn } from "../../lib/utils";
 import { RecordTable } from "../collections/Records";
 import { ExternalUrl } from "../ExternalUrl";
-import { isTableColumn } from "../fields/fieldPresentation";
+import { CONTROL_CELL_DENSITY, FORM_GRIDS, FORM_SPANS } from "../fields/fieldPresentation";
+import { OneLineValue } from "../fields/OneLineValue";
+import { MarkdownText } from "../markdown/MarkdownText";
+import { OptionValue } from "../fields/OptionValue";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { FoldChevron } from "./CardFold";
-import { AttachmentLink, FieldValue, shownValue } from "./StepFields";
+import {
+  AttachmentLink,
+  measureColumnWidths,
+  type Entry,
+  layOutEntryForm,
+  type layOutForm,
+  FieldValue,
+  findEntryField,
+  sortEntries,
+  shownValue,
+} from "./StepFields";
 import { plural } from "./workLogic";
 
 // Read-only: no text cursor or caret, so nothing suggests typing; the value still selects and copies.
@@ -24,13 +38,25 @@ const readOnlyBox = cn(
 
 /** A field's value runs over lines, so it takes the whole row. */
 const isMultiline = (field: FieldView) =>
-  field.type === "text" && typeof field.value === "string" && field.value.includes("\n");
+  field.type === "text" &&
+  (field.isMarkdown === true || (typeof field.value === "string" && field.value.includes("\n")));
 
 const isBlock = (field: FieldView | undefined) =>
   field?.type === "group" || field?.type === "records";
 
-/** A field's value in a read-only control, selectable and copyable. */
-function ReadOnlyControl({ field, id }: { readonly field: FieldView; readonly id: string }) {
+/**
+ * A field's value in a read-only control, selectable and copyable; `isStacked` in an entry's form,
+ * where text and a choice show all of their value.
+ */
+function ReadOnlyControl({
+  field,
+  id,
+  isStacked,
+}: {
+  readonly field: FieldView;
+  readonly id: string;
+  readonly isStacked: boolean;
+}) {
   if (field.linkUrl !== undefined)
     return (
       <div id={id} className={cn(readOnlyBox, "flex min-h-8 items-center px-2.5 py-1")}>
@@ -55,14 +81,22 @@ function ReadOnlyControl({ field, id }: { readonly field: FieldView; readonly id
     );
   }
   const value = field.value === null ? "" : shownValue(field);
-  return isMultiline(field) ? (
+  if (field.type === "text" && field.isMarkdown && value !== "")
+    return (
+      <div id={id} className={cn(readOnlyBox, "px-2.5 py-1.5")}>
+        <MarkdownText text={value} />
+      </div>
+    );
+  return isMultiline(field) || (isStacked && (field.type === "text" || field.type === "select")) ? (
     <textarea
       id={id}
       readOnly
       value={value}
+      placeholder="Not filled in"
       className={cn(
         readOnlyBox,
-        "block min-h-18 w-full resize-none px-2.5 py-1.5 field-sizing-content",
+        "block w-full resize-none px-2.5 field-sizing-content placeholder:text-muted-foreground",
+        isStacked ? "min-h-8 py-1.5 leading-4.5" : "min-h-18 py-1.5",
       )}
     />
   ) : (
@@ -76,13 +110,13 @@ function ReadOnlyControl({ field, id }: { readonly field: FieldView; readonly id
   );
 }
 
-/** A field with its label beside the control, or `isStacked` above it, as in an entry's form. */
+/** A field with its label beside the control, or with a form's `span` above it. */
 function InputField({
   field,
-  isStacked = false,
+  span,
 }: {
   readonly field: FieldView;
-  readonly isStacked?: boolean;
+  readonly span?: keyof typeof FORM_SPANS;
 }) {
   const id = useId();
   if (isBlock(field)) {
@@ -102,7 +136,9 @@ function InputField({
   const label = (
     <label
       htmlFor={id}
-      className={isStacked ? "text-xs font-medium text-foreground/80" : "text-sm font-medium"}
+      className={
+        span !== undefined ? "text-xs font-medium text-foreground/80" : "text-sm font-medium"
+      }
     >
       {field.label}
     </label>
@@ -110,10 +146,10 @@ function InputField({
   const hint = field.description ? (
     <p className="text-xs text-muted-foreground">{field.description}</p>
   ) : null;
-  return isStacked ? (
-    <div className={cn("flex min-w-0 flex-col gap-1", isMultiline(field) && "col-span-full")}>
+  return span !== undefined ? (
+    <div className={cn("flex min-w-0 flex-col gap-1", FORM_SPANS[span])}>
       {label}
-      <ReadOnlyControl field={field} id={id} />
+      <ReadOnlyControl field={field} id={id} isStacked />
       {hint}
     </div>
   ) : (
@@ -128,7 +164,7 @@ function InputField({
         {hint}
       </div>
       <div className="min-w-0 flex-1 basis-60">
-        <ReadOnlyControl field={field} id={id} />
+        <ReadOnlyControl field={field} id={id} isStacked={false} />
       </div>
     </div>
   );
@@ -172,93 +208,128 @@ function BlockHeading({
   );
 }
 
-/** Columns weigh by what they hold: numbers, dates and switches half as wide as text. */
-const columnWeight = (field: FieldView["rowFields"][number]) =>
-  field.type === "number" || field.type === "date" || field.type === "boolean" ? 1 : 2;
-
-type Entry = { readonly id: string; readonly fields: ReadonlyArray<FieldView> };
-
-/** An entry's field as a table cell holds it: unframed, named by `label`. */
-function CellValue({ field, label }: { readonly field: FieldView; readonly label: string }) {
-  if (field.linkUrl !== undefined)
-    return (
-      <div className="flex min-h-9 items-center bg-muted px-2 py-1 text-sm">
+/**
+ * An entry's field as a table cell holds it: unframed, named by `label`. Text, a web address or a
+ * choice wraps when its column is `isWrapped`, else shows one line, whole in its tooltip.
+ */
+function CellValue({
+  field,
+  label,
+  isWrapped,
+}: {
+  readonly field: FieldView;
+  readonly label: string;
+  readonly isWrapped: boolean;
+}) {
+  if (field.linkUrl !== undefined || field.type === "url") {
+    const link =
+      field.linkUrl !== undefined ? (
         <ExternalUrl href={field.linkUrl}>{shownValue(field)}</ExternalUrl>
+      ) : isUrlFieldValue(field.value) ? (
+        <ExternalUrl href={field.value} />
+      ) : null;
+    const box = "min-h-9 bg-muted px-2 py-2 text-sm";
+    return isWrapped || field.value === null ? (
+      <div className={cn(box, "wrap-break-word")}>{link}</div>
+    ) : (
+      <OneLineValue value={shownValue(field)} className={box}>
+        {link}
+      </OneLineValue>
+    );
+  }
+  if (
+    field.type === "select" &&
+    typeof field.value === "string" &&
+    field.tones?.[field.value] !== undefined
+  )
+    return (
+      <div className="flex min-h-9 items-center bg-muted px-2 py-1 text-sm text-foreground/80">
+        <OptionValue option={field.value} tones={field.tones} />
       </div>
     );
-  if (field.type === "file" || field.type === "url") {
+  if (field.type === "file") {
     return (
       <div className="flex min-h-9 items-center bg-muted px-2 py-1 text-sm">
-        {field.type === "file" ? (
-          field.file === null ? null : (
-            <AttachmentLink attachment={field.file} />
-          )
-        ) : isUrlFieldValue(field.value) ? (
-          <ExternalUrl href={field.value} />
-        ) : null}
+        {field.file === null ? null : <AttachmentLink attachment={field.file} />}
       </div>
     );
   }
-  return (
+  if (field.type === "text" && field.isMarkdown && typeof field.value === "string")
+    return (
+      <MarkdownText
+        text={field.value}
+        isClamped={!isWrapped}
+        className="min-h-9 bg-muted px-2 py-2"
+      />
+    );
+  const isOneLine = !isWrapped && (field.type === "text" || field.type === "select");
+  const shown = field.value === null ? "" : shownValue(field);
+  const value = (
     <textarea
       aria-label={label}
       readOnly
       rows={1}
-      value={field.value === null ? "" : shownValue(field)}
+      value={shown}
       className={cn(
         readOnlyCursor,
-        "block min-h-9 w-full resize-none bg-muted px-2 py-2 text-sm text-foreground/80 outline-none field-sizing-content focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        "block min-h-9 w-full resize-none bg-muted px-2 py-2 text-sm text-foreground/80 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
         field.type === "number" && "text-right",
+        isOneLine ? "truncate" : "field-sizing-content",
       )}
     />
   );
+  return isOneLine && shown !== "" ? <OneLineValue value={shown}>{value}</OneLineValue> : value;
 }
 
 const headerCell =
-  "border-t border-l border-border bg-muted/50 p-2 text-left align-top text-xs font-medium text-foreground/80 wrap-break-word";
+  "border-t border-l border-border bg-muted/50 p-2 first:border-l-0 text-left align-top text-xs font-medium text-foreground/80";
 
-/** The entries as rows, a column per field shown in the table; each entry opens to all its fields. */
-function EntryTable({
+/**
+ * The entries as rows, a column per field its layout shows in the table; each entry opens to all
+ * its fields.
+ */
+export function EntryTable({
   field,
   entries,
 }: {
   readonly field: FieldView;
   readonly entries: ReadonlyArray<Entry>;
 }) {
-  const isColumn = field.rowFields.map(isTableColumn);
-  const hasDetails = isColumn.includes(false);
+  const { columns, density } = resolveTableLayout(field.rowFields, field.layout);
+  const hasDetails = field.rowFields.some(
+    (child) => !columns.some((column) => column.field.id === child.id),
+  );
   const [detailsAt, setDetailsAt] = useState<number | null>(null);
   const opened = detailsAt === null ? undefined : entries[detailsAt];
-  const columns = field.rowFields.filter((_, at) => isColumn[at]);
-  const weights = columns.reduce((sum, child) => sum + columnWeight(child), 0);
+  const form = opened === undefined ? null : layOutEntryForm(field, opened);
+  // Columns share the table by the width they want, which it never squeezes: it scrolls instead.
+  const widths = measureColumnWidths(field, columns, entries);
+  const total = widths.reduce((sum, width) => sum + width, 0);
   return (
-    <>
+    <div className="overflow-x-auto">
       <table
         aria-label={field.label}
-        className="w-full table-fixed border-separate border-spacing-0 text-sm"
+        className={cn(
+          "w-full table-fixed border-separate border-spacing-0 text-sm",
+          CONTROL_CELL_DENSITY[density],
+        )}
+        style={{ minWidth: `calc(${total}ch + ${hasDetails ? 5 : 0}rem)` }}
       >
         <colgroup>
-          <col className="w-10" />
-          {columns.map((child) => (
-            <col key={child.id} style={{ width: `${(100 * columnWeight(child)) / weights}%` }} />
+          {columns.map((column, at) => (
+            <col key={column.field.id} style={{ width: `${(100 * widths[at]!) / total}%` }} />
           ))}
           {hasDetails ? <col className="w-20" /> : null}
         </colgroup>
         <thead>
           <tr>
-            <th
-              scope="col"
-              className="border-t border-border bg-muted/50 py-2 pr-2 pl-4 text-left align-top text-xs font-medium text-muted-foreground"
-            >
-              #
-            </th>
-            {columns.map((child) => (
+            {columns.map(({ field: child, header }) => (
               <th
                 key={child.id}
                 scope="col"
                 className={cn(headerCell, child.type === "number" && "text-right")}
               >
-                {child.label}
+                {header}
               </th>
             ))}
             {hasDetails ? (
@@ -271,16 +342,23 @@ function EntryTable({
         <tbody>
           {entries.map((entry, at) => (
             <tr key={entry.id}>
-              <td className="border-t border-border bg-muted/50 pr-2 pl-4 text-muted-foreground">
-                {at + 1}
-              </td>
-              {entry.fields
-                .filter((_, column) => isColumn[column])
-                .map((child) => (
-                  <td key={child.key} className="border-t border-l border-border p-0 align-top">
-                    <CellValue field={child} label={`${child.label}, entry ${at + 1}`} />
+              {columns.map((column) => {
+                const child = findEntryField(field, entry, column.field.id);
+                return (
+                  <td
+                    key={column.field.id}
+                    className="border-t border-l border-border p-0 align-top first:border-l-0"
+                  >
+                    {child === undefined ? null : (
+                      <CellValue
+                        field={child}
+                        label={`${child.label}, entry ${at + 1}`}
+                        isWrapped={column.isWrapped}
+                      />
+                    )}
                   </td>
-                ))}
+                );
+              })}
               {hasDetails ? (
                 <td className="border-t border-l border-border text-center">
                   <Button
@@ -298,28 +376,36 @@ function EntryTable({
           ))}
         </tbody>
       </table>
-      {opened === undefined ? null : (
+      {form === null ? null : (
         <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : setDetailsAt(null))}>
-          <DialogPopup className="sm:max-w-3xl">
+          <DialogPopup
+            className={
+              form.dialogWidth === 768
+                ? "sm:max-w-3xl"
+                : form.dialogWidth === 1280
+                  ? "sm:max-w-7xl"
+                  : "sm:max-w-5xl"
+            }
+          >
             <DialogHeader>
               <DialogTitle>{`${field.label}, entry ${(detailsAt ?? 0) + 1}`}</DialogTitle>
             </DialogHeader>
             <DialogPanel>
-              <EntryFields fields={opened.fields} />
+              <ReadOnlyForm form={form} />
             </DialogPanel>
           </DialogPopup>
         </Dialog>
       )}
-    </>
+    </div>
   );
 }
 
-/** An entry's fields, labels above, as many to a row as fit at 200px each. */
-function EntryFields({ fields }: { readonly fields: ReadonlyArray<FieldView> }) {
+/** A form's fields as `layOutForm` lays them out, read-only, labels above. */
+export function ReadOnlyForm({ form }: { readonly form: ReturnType<typeof layOutForm> }) {
   return (
-    <div className="grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(min(12.5rem,100%),1fr))] gap-3">
-      {fields.map((child) => (
-        <InputField key={child.key} field={child} isStacked />
+    <div className={cn(FORM_GRIDS[form.spacing], "min-w-0 flex-1")}>
+      {form.fields.map(({ view, span }) => (
+        <InputField key={view.key} field={view} span={span} />
       ))}
     </div>
   );
@@ -329,9 +415,7 @@ function EntryFields({ fields }: { readonly fields: ReadonlyArray<FieldView> }) 
 function Entries({ field }: { readonly field: FieldView }) {
   const isTable = field.rowFields.every((child) => child.type !== "group");
   const [shown, setShown] = useState(isTable ? "table" : "form");
-  const entries = field.rows.flatMap((row) =>
-    row.id === null ? [] : [{ id: row.id, fields: row.fields }],
-  );
+  const entries = sortEntries(field);
   return (
     <Tabs value={shown} onValueChange={setShown}>
       <div className="py-2 pr-3 pl-4">
@@ -366,7 +450,7 @@ function Entries({ field }: { readonly field: FieldView }) {
                   <span aria-hidden className="w-4 shrink-0 text-xs text-muted-foreground">
                     {at + 1}
                   </span>
-                  <EntryFields fields={entry.fields} />
+                  <ReadOnlyForm form={layOutEntryForm(field, entry)} />
                 </li>
               ))}
             </ol>

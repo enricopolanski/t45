@@ -82,6 +82,26 @@ describe("records", () => {
 });
 
 describe("field changes after records exist", () => {
+  it("allows Markdown display to change without changing a text field's stored values or type", () => {
+    const after = {
+      ...listings,
+      fields: listings.fields.map((field) =>
+        field.type === "text" ? { ...field, isMarkdown: true } : field,
+      ),
+    };
+    assert.isNull(fieldsChangeRefusal(listings, after));
+    assert.isNull(fieldsChangeRefusal(after, listings));
+    assert.strictEqual(
+      fieldsChangeRefusal(after, {
+        ...after,
+        fields: after.fields.map((field) =>
+          field.type === "text" ? { ...field, type: "number" as const } : field,
+        ),
+      }),
+      "fields_locked",
+    );
+  });
+
   it("allow choosing and clearing a URL's display field without unlocking stored fields", () => {
     const before = {
       ...listings,
@@ -119,6 +139,20 @@ describe("field changes after records exist", () => {
       encodeFields(fields).map((field) => ({ ...field, isDetailOnly: field.id === "f_manual" })),
     );
     assert.isNull(fieldsChangeRefusal(listings, { ...listings, fields: detailOnly }));
+    const rounded = decodeFields(
+      encodeFields(fields).map((field) =>
+        field.id === "f_price" ? { ...field, decimals: 2, unit: "€" } : field,
+      ),
+    );
+    assert.isNull(fieldsChangeRefusal(listings, { ...listings, fields: rounded }));
+    const laidOut = decodeFields(
+      encodeFields(fields).map((field) =>
+        field.id === "f_packs"
+          ? { ...field, layout: { table: { sortBy: [{ field: "f_rolls", direction: "desc" }] } } }
+          : field,
+      ),
+    );
+    assert.isNull(fieldsChangeRefusal(listings, { ...listings, fields: laidOut }));
     assert.strictEqual(
       fieldsChangeRefusal(listings, { ...listings, fields: fields.slice(1) }),
       "fields_locked",

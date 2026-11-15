@@ -1,10 +1,18 @@
 import { Refused } from "@t45/contracts/models/Workflow";
 import {
   defaultValues,
+  type Field,
   type FieldValues,
   isUrlFieldValue,
+  type Layout,
   recordKeys,
 } from "@t45/contracts/models/Field";
+import {
+  resolveFormLayout,
+  resolveTableLayout,
+  sortRows,
+  type TableColumn,
+} from "@t45/contracts/models/Layout";
 import { AccessDenied } from "@t45/contracts/resources/errors";
 import type { FieldValue as StepFieldValue, FieldView } from "@t45/contracts/resources/Workflows";
 import { ChevronDownIcon, LinkIcon, PaperclipIcon, PlusIcon, XIcon } from "lucide-react";
@@ -16,7 +24,16 @@ import { cn } from "../../lib/utils";
 import { RecordDialog, RecordPicker, RecordTable } from "../collections/Records";
 import { SavedInput, saveTyped } from "../SavedInput";
 import { ExternalUrl } from "../ExternalUrl";
-import { isTableColumn } from "../fields/fieldPresentation";
+import {
+  measureColumnWidth,
+  CONTROL_CELL_DENSITY,
+  FORM_SPANS,
+  FORM_GRIDS,
+} from "../fields/fieldPresentation";
+import { OneLineValue } from "../fields/OneLineValue";
+import { MarkdownInput } from "../fields/MarkdownInput";
+import { MarkdownText } from "../markdown/MarkdownText";
+import { OptionValue } from "../fields/OptionValue";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
@@ -28,7 +45,8 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { newKey } from "../workflows/workflowLogic";
 import { CardFold } from "./CardFold";
-import { formatDay, missingFields, plural } from "./workLogic";
+import { ReadOnlyForm } from "./StepInputs";
+import { formatDay, formatNumber, missingFields, plural } from "./workLogic";
 
 /** Uploads a file as the member's pending attachment, ready to be given to a field; answers its id. */
 export async function uploadFile(file: File) {
@@ -120,6 +138,10 @@ export function shownValue(field: FieldView) {
       return field.value === true ? "Yes" : "No";
     case "date":
       return typeof field.value === "string" ? formatDay(field.value) : String(field.value);
+    case "number":
+      return typeof field.value === "number"
+        ? formatNumber(field.value, field)
+        : String(field.value);
     default:
       return String(field.value);
   }
@@ -140,14 +162,20 @@ export function FieldValue({ field }: { readonly field: FieldView }) {
       return <span className="text-sm text-muted-foreground">No entries</span>;
     return (
       <div className="flex flex-col gap-2">
-        {field.rows.map((row) => (
-          <div
-            key={row.id ?? "row"}
-            className="flex flex-col gap-2 rounded-lg border border-border p-3"
-          >
-            <ReadOnlyFields fields={row.fields} />
-          </div>
-        ))}
+        {field.repeatable
+          ? sortEntries(field).map((entry) => (
+              <div key={entry.id} className="rounded-lg border border-border p-3">
+                <ReadOnlyForm form={layOutEntryForm(field, entry)} />
+              </div>
+            ))
+          : field.rows.map((row) => (
+              <div
+                key={row.id ?? "row"}
+                className="flex flex-col gap-2 rounded-lg border border-border p-3"
+              >
+                <ReadOnlyFields fields={row.fields} />
+              </div>
+            ))}
       </div>
     );
   }
@@ -161,6 +189,8 @@ export function FieldValue({ field }: { readonly field: FieldView }) {
   if (field.type === "url" && isUrlFieldValue(field.value)) {
     return <ExternalUrl href={field.value}>{field.label}</ExternalUrl>;
   }
+  if (field.type === "text" && field.isMarkdown && typeof field.value === "string")
+    return <MarkdownText text={field.value} />;
   return (
     <span
       className={
@@ -183,15 +213,81 @@ type EditorProps = {
 };
 
 /** A repeatable group's entries: rows with an id. */
-type Entry = { readonly id: string; readonly fields: ReadonlyArray<FieldView> };
+export type Entry = { readonly id: string; readonly fields: ReadonlyArray<FieldView> };
 
-/** The field's stored value as an input holds it; a date input takes the day alone. */
+/** An entry's field of the group's row field `fieldId`, if the entry shows it. */
+export const findEntryField = (group: FieldView, entry: Entry, fieldId: string) =>
+  entry.fields.find((view) => view.key === `${group.key}.${entry.id}.${fieldId}`);
+
+/** A repeatable group's entries in the order its layout sorts them; they stay kept as added. */
+export const sortEntries = (field: FieldView): ReadonlyArray<Entry> =>
+  sortRows(
+    field.rows.flatMap((row) => (row.id === null ? [] : [{ id: row.id, fields: row.fields }])),
+    resolveTableLayout(field.rowFields, field.layout).sortBy,
+    (entry, fieldId) => findEntryField(field, entry, fieldId)?.value,
+  );
+
+/** How many ch each of a group's table `columns` wants, from what its entries show in it. */
+export const measureColumnWidths = (
+  group: FieldView,
+  columns: ReadonlyArray<TableColumn>,
+  entries: ReadonlyArray<Entry>,
+) =>
+  columns.map((column) =>
+    measureColumnWidth(
+      column,
+      entries.flatMap((entry) => {
+        const view = findEntryField(group, entry, column.field.id);
+        return view === undefined || view.value === null ? [] : [shownValue(view)];
+      }),
+    ),
+  );
+
+/**
+ * A form's `views` as `layout` lays out the fields they show, each with the span it takes; a
+ * view's key is `prefix` and its field's id.
+ */
+export const layOutForm = (
+  fields: ReadonlyArray<Field>,
+  layout: Layout | undefined,
+  views: ReadonlyArray<FieldView>,
+  prefix: string,
+) => {
+  const form = resolveFormLayout(fields, layout);
+  return {
+    ...form,
+    fields: form.fields.flatMap(({ field, span }) =>
+      views.filter((view) => view.key === `${prefix}${field.id}`).map((view) => ({ view, span })),
+    ),
+  };
+};
+
+/** A number field's unit beside its input, so what's typed stays a plain number. */
+function UnitSuffix({
+  field,
+  className,
+}: {
+  readonly field: FieldView;
+  readonly className?: string;
+}) {
+  return field.unit === undefined ? null : (
+    <span className={cn("shrink-0 text-muted-foreground", className)}>{field.unit}</span>
+  );
+}
+
+/**
+ * The field's stored value as an input holds it: a date input takes the day alone, a number its
+ * decimals but not its unit. Leaving the input unchanged saves nothing, so a shown rounding never
+ * replaces the value.
+ */
 const storedText = (field: FieldView) =>
   field.value === null
     ? ""
     : field.type === "date"
       ? String(field.value).slice(0, 10)
-      : String(field.value);
+      : field.type === "number" && typeof field.value === "number"
+        ? formatNumber(field.value, { decimals: field.decimals })
+        : String(field.value);
 
 /** What the field saves from what was typed into it: nothing, a number, or the text. */
 const typedValue = (field: FieldView, typed: string): StepFieldValue =>
@@ -201,9 +297,11 @@ const typedValue = (field: FieldView, typed: string): StepFieldValue =>
 function FieldControl({
   field,
   control,
+  isStacked,
   onSave,
   onUpload,
 }: Omit<EditorProps, "missing"> & {
+  readonly isStacked: boolean;
   readonly control: {
     readonly id: string;
     readonly "aria-describedby": string | undefined;
@@ -229,17 +327,41 @@ function FieldControl({
         </div>
       );
     case "text":
-      // One line tall at first, growing with what's written.
+      if (field.isMarkdown)
+        return (
+          <MarkdownInput
+            {...control}
+            label={field.label}
+            value={storedText(field)}
+            onSave={saveText}
+          />
+        );
+      // One line tall at first, growing with what's written; in an entry's form, to show all of it.
       return (
         <SavedInput
           {...control}
           multiline
-          className="[&_textarea]:min-h-0 [&_textarea]:resize-none"
+          className={cn(
+            "[&_textarea]:min-h-0 [&_textarea]:resize-none",
+            isStacked && "[&_textarea]:max-h-none",
+          )}
           value={storedText(field)}
           onSave={saveText}
         />
       );
     case "number":
+      return (
+        <div className="flex items-center gap-1.5 text-sm">
+          <SavedInput
+            {...control}
+            type="number"
+            className="flex-1"
+            value={storedText(field)}
+            onSave={saveText}
+          />
+          <UnitSuffix field={field} />
+        </div>
+      );
     case "date":
       return (
         <SavedInput {...control} type={field.type} value={storedText(field)} onSave={saveText} />
@@ -247,7 +369,7 @@ function FieldControl({
     case "select":
       return (
         <Select value={typeof field.value === "string" ? field.value : null} onValueChange={save}>
-          <SelectTrigger {...control}>
+          <SelectTrigger {...control} isWrapped={isStacked}>
             <SelectValue placeholder="Choose one" />
           </SelectTrigger>
           <SelectPopup>
@@ -287,17 +409,18 @@ function FieldControl({
 }
 
 /**
- * A field with its label: beside the input, wrapping above it when narrow, or `isStacked` always
- * above it, as in an entry's form, where the guidance goes under the input so inputs side by side
- * line up. A group shows its own way.
+ * A field with its label: beside the input, wrapping above it when narrow, or with a form's `span`
+ * always above it, where the guidance goes under the input so inputs side by side line up. A
+ * group shows its own way.
  */
 function FieldEditor({
-  isStacked = false,
+  span,
   ...props
 }: EditorProps & {
-  readonly isStacked?: boolean;
+  readonly span?: keyof typeof FORM_SPANS;
 }) {
   const { field, missing } = props;
+  const isStacked = span !== undefined;
   const id = useId();
   if (field.type === "records") return <LinkedRecords {...props} />;
   if (field.type === "group") {
@@ -317,7 +440,9 @@ function FieldEditor({
     <div
       data-field-key={field.key}
       className={
-        isStacked ? "flex min-w-0 flex-col gap-1" : "flex flex-wrap items-start gap-x-4 gap-y-1"
+        isStacked
+          ? cn("flex min-w-0 flex-col gap-1", FORM_SPANS[span])
+          : "flex flex-wrap items-start gap-x-4 gap-y-1"
       }
     >
       <div className={cn("flex min-w-0 flex-col gap-0.5", !isStacked && "grow basis-55 py-2")}>
@@ -329,6 +454,7 @@ function FieldEditor({
       <div className={cn("flex min-w-0 flex-col gap-1", !isStacked && "grow-2 basis-70")}>
         <FieldControl
           {...props}
+          isStacked={isStacked}
           control={{ id, "aria-describedby": describedBy, "aria-invalid": invalid }}
         />
         {field.linkUrl === undefined ? null : (
@@ -345,7 +471,7 @@ const isSetApart = (field: FieldView | undefined) =>
   field?.type === "group" || field?.type === "records";
 
 /** Fields in order: one after another close together, and each group or record list set apart. */
-export function FieldInputs({
+function FieldInputs({
   fields,
   ...props
 }: Omit<EditorProps, "field"> & { readonly fields: ReadonlyArray<FieldView> }) {
@@ -363,6 +489,28 @@ export function FieldInputs({
             <FieldEditor key={field.key} {...props} field={field} />
           ))}
         </div>
+      ))}
+    </div>
+  );
+}
+
+/** An entry's form, as its group's layout lays it out. */
+export const layOutEntryForm = (group: FieldView, entry: Entry) =>
+  layOutForm(group.rowFields, group.layout, entry.fields, `${group.key}.${entry.id}.`);
+
+/** A form's fields as `layOutForm` lays them out, labels above. */
+export function FormGrid({
+  form,
+  className,
+  ...props
+}: Omit<EditorProps, "field"> & {
+  readonly form: ReturnType<typeof layOutForm>;
+  readonly className?: string;
+}) {
+  return (
+    <div className={cn(FORM_GRIDS[form.spacing], className)}>
+      {form.fields.map(({ view, span }) => (
+        <FieldEditor key={view.key} {...props} field={view} span={span} />
       ))}
     </div>
   );
@@ -515,13 +663,15 @@ function EntriesEditor(props: EditorProps) {
   const { field, missing, onSave } = props;
   const isTable = field.rowFields.every((child) => child.type !== "group");
   const [shown, setShown] = useState(isTable ? "table" : "form");
-  const entries = field.rows.flatMap((row) =>
-    row.id === null ? [] : [{ id: row.id, fields: row.fields }],
-  );
-  const ids = entries.map((entry) => entry.id);
+  const entries = sortEntries(field);
+  const ids = field.rows.flatMap((row) => (row.id === null ? [] : [row.id]));
   const remove = (at: number) => ({
     label: `Remove entry ${at + 1} of ${field.label}`,
-    onRemove: () => onSave(field.key, ids.toSpliced(at, 1)),
+    onRemove: () =>
+      onSave(
+        field.key,
+        ids.filter((id) => id !== entries[at]?.id),
+      ),
   });
   return (
     <Tabs
@@ -579,59 +729,74 @@ type EntriesProps = EditorProps & {
 };
 
 const headerCell =
-  "border-l border-border/60 bg-muted px-1.5 py-2 text-left align-top text-xs font-medium text-foreground/80 wrap-break-word";
+  "border-l border-border/60 bg-muted px-1.5 first:border-l-0 py-2 text-left align-top text-xs font-medium text-foreground/80";
 
 /**
- * The entries as rows of a table, a column per field shown in the table, typed into in place; when
- * some fields show only in details, each entry opens to all its fields.
+ * The entries as rows of a table, a column per field its layout shows in the table, typed into in
+ * place; when some fields show only in details, each entry opens to all its fields.
  */
 function EntryTable({ entries, remove, ...props }: EntriesProps) {
   const { field, missing, onSave, onUpload } = props;
-  const isColumn = field.rowFields.map(isTableColumn);
-  const hasDetails = isColumn.includes(false);
-  const [detailsAt, setDetailsAt] = useState<number | null>(null);
-  const opened = detailsAt === null ? undefined : entries[detailsAt];
+  const { columns, density } = resolveTableLayout(field.rowFields, field.layout);
+  const isColumn = (child: FieldView, entry: Entry) =>
+    columns.some((column) => child.key === `${field.key}.${entry.id}.${column.field.id}`);
+  const hasDetails = field.rowFields.some(
+    (child) => !columns.some((column) => column.field.id === child.id),
+  );
+  // By id, as editing a sort field in the details moves its entry.
+  const [detailsId, setDetailsId] = useState<string | null>(null);
+  const detailsAt = entries.findIndex((entry) => entry.id === detailsId);
+  const opened = entries[detailsAt];
+  const form = opened === undefined ? null : layOutEntryForm(field, opened);
+  // Columns share the table by the width they want, which it never squeezes: it scrolls instead.
+  const widths = measureColumnWidths(field, columns, entries);
+  const total = widths.reduce((sum, width) => sum + width, 0);
   return (
     <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full min-w-xl table-fixed border-separate border-spacing-0 text-sm">
+      <table
+        className={cn(
+          "w-full table-fixed border-separate border-spacing-0 text-sm",
+          CONTROL_CELL_DENSITY[density],
+        )}
+        style={{ minWidth: `calc(${total}ch + ${hasDetails ? 6.5 : 2}rem)` }}
+      >
+        <colgroup>
+          {columns.map((column, at) => (
+            <col key={column.field.id} style={{ width: `${(100 * widths[at]!) / total}%` }} />
+          ))}
+          {hasDetails ? <col className="w-18" /> : null}
+          <col className="w-8" />
+        </colgroup>
         <thead>
           <tr>
-            <th
-              scope="col"
-              className="w-8 bg-muted py-2 align-top text-xs font-medium text-muted-foreground"
-            >
-              #
-            </th>
-            {field.rowFields
-              .filter((_, at) => isColumn[at])
-              .map((child) => (
-                <th
-                  key={child.id}
-                  scope="col"
-                  className={cn(headerCell, child.type === "number" && "text-right")}
-                >
-                  {child.description ? (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <span className="cursor-help underline decoration-dotted underline-offset-2" />
-                        }
-                      >
-                        {child.label}
-                      </TooltipTrigger>
-                      <TooltipPopup>{child.description}</TooltipPopup>
-                    </Tooltip>
-                  ) : (
-                    child.label
-                  )}
-                </th>
-              ))}
+            {columns.map(({ field: child, header }) => (
+              <th
+                key={child.id}
+                scope="col"
+                className={cn(headerCell, child.type === "number" && "text-right")}
+              >
+                {child.description ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className="cursor-help underline decoration-dotted underline-offset-2" />
+                      }
+                    >
+                      {header}
+                    </TooltipTrigger>
+                    <TooltipPopup>{child.description}</TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  header
+                )}
+              </th>
+            ))}
             {hasDetails ? (
-              <th scope="col" className={cn(headerCell, "w-18")}>
+              <th scope="col" className={headerCell}>
                 <span className="sr-only">Details</span>
               </th>
             ) : null}
-            <th scope="col" className={cn(headerCell, "w-8")}>
+            <th scope="col" className={headerCell}>
               <span className="sr-only">Remove</span>
             </th>
           </tr>
@@ -639,29 +804,32 @@ function EntryTable({ entries, remove, ...props }: EntriesProps) {
         <tbody>
           {entries.map((entry, at) => (
             <tr key={entry.id}>
-              <td className="h-9 border-t text-center text-xs text-muted-foreground">{at + 1}</td>
-              {entry.fields
-                .filter((_, column) => isColumn[column])
-                .map((child) => (
+              {columns.map((column) => {
+                const child = findEntryField(field, entry, column.field.id);
+                return (
                   <td
-                    key={child.key}
-                    data-field-key={child.key}
-                    className="border-t border-l border-l-border/60 p-0 align-top has-aria-invalid:bg-destructive/8"
+                    key={column.field.id}
+                    data-field-key={child?.key}
+                    className="border-t border-l border-l-border/60 p-0 align-top first:border-l-0 has-aria-invalid:bg-destructive/8"
                   >
-                    <CellControl
-                      field={child}
-                      label={`${child.label}, entry ${at + 1}`}
-                      isMissing={missing.has(child.key)}
-                      onSave={onSave}
-                      onUpload={onUpload}
-                    />
+                    {child === undefined ? null : (
+                      <CellControl
+                        field={child}
+                        label={`${child.label}, entry ${at + 1}`}
+                        isWrapped={column.isWrapped}
+                        isMissing={missing.has(child.key)}
+                        onSave={onSave}
+                        onUpload={onUpload}
+                      />
+                    )}
                   </td>
-                ))}
+                );
+              })}
               {hasDetails ? (
                 <td className="border-t border-l border-l-border/60 text-center">
                   {/* Each field shown only in details leads to this button, as a missing field's link does. */}
                   {entry.fields
-                    .filter((_, column) => !isColumn[column])
+                    .filter((child) => !isColumn(child, entry))
                     .reduceRight(
                       (button, child) => (
                         <span data-field-key={child.key}>{button}</span>
@@ -671,13 +839,13 @@ function EntryTable({ entries, remove, ...props }: EntriesProps) {
                         size="xs"
                         variant={
                           entry.fields.some(
-                            (child, column) => !isColumn[column] && missing.has(child.key),
+                            (child) => !isColumn(child, entry) && missing.has(child.key),
                           )
                             ? "destructive-outline"
                             : "ghost"
                         }
                         aria-label={`Details of entry ${at + 1} of ${field.label}`}
-                        onClick={() => setDetailsAt(at)}
+                        onClick={() => setDetailsId(entry.id)}
                       >
                         Details
                       </Button>,
@@ -691,18 +859,22 @@ function EntryTable({ entries, remove, ...props }: EntriesProps) {
           ))}
         </tbody>
       </table>
-      {opened === undefined ? null : (
-        <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : setDetailsAt(null))}>
-          <DialogPopup className="sm:max-w-3xl">
+      {form === null ? null : (
+        <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : setDetailsId(null))}>
+          <DialogPopup
+            className={
+              form.dialogWidth === 768
+                ? "sm:max-w-3xl"
+                : form.dialogWidth === 1280
+                  ? "sm:max-w-7xl"
+                  : "sm:max-w-5xl"
+            }
+          >
             <DialogHeader>
-              <DialogTitle>{`${field.label}, entry ${(detailsAt ?? 0) + 1}`}</DialogTitle>
+              <DialogTitle>{`${field.label}, entry ${detailsAt + 1}`}</DialogTitle>
             </DialogHeader>
             <DialogPanel>
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(12.5rem,100%),1fr))] gap-3">
-                {opened.fields.map((child) => (
-                  <FieldEditor key={child.key} {...props} field={child} isStacked />
-                ))}
-              </div>
+              <FormGrid {...props} form={form} />
             </DialogPanel>
           </DialogPopup>
         </Dialog>
@@ -714,56 +886,74 @@ function EntryTable({ entries, remove, ...props }: EntriesProps) {
 const cellInput =
   "w-full bg-transparent px-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
-/** A field's input as a table cell holds it: unframed, named by `label`. */
+/** A field's input as a table cell holds it: unframed, named by `label`, `isWrapped` as its column. */
 function CellControl({
   field,
   label,
+  isWrapped,
   isMissing,
   onSave,
   onUpload,
-}: Omit<EditorProps, "missing"> & { readonly label: string; readonly isMissing: boolean }) {
-  if (field.linkUrl !== undefined)
-    return (
-      <div className="min-h-9 px-1.5 py-2">
-        <ExternalUrl href={field.linkUrl}>{shownValue(field)}</ExternalUrl>
-      </div>
+}: Omit<EditorProps, "missing"> & {
+  readonly label: string;
+  readonly isWrapped: boolean;
+  readonly isMissing: boolean;
+}) {
+  if (field.linkUrl !== undefined) {
+    const link = <ExternalUrl href={field.linkUrl}>{shownValue(field)}</ExternalUrl>;
+    return isWrapped ? (
+      <div className="min-h-9 px-1.5 py-2 wrap-break-word">{link}</div>
+    ) : (
+      <OneLineValue value={shownValue(field)} className="min-h-9 px-1.5 py-2">
+        {link}
+      </OneLineValue>
     );
+  }
   const control = { "aria-label": label, "aria-invalid": isMissing || undefined };
   const stored = storedText(field);
+  if (field.type === "text" && field.isMarkdown)
+    return (
+      <MarkdownInput
+        aria-invalid={isMissing || undefined}
+        label={label}
+        value={stored}
+        onSave={(typed) => onSave(field.key, typedValue(field, typed))}
+        isClamped={!isWrapped}
+        className="min-h-9 rounded-none border-0"
+      />
+    );
   const save = saveTyped(stored, (typed) => onSave(field.key, typedValue(field, typed)));
   switch (field.type) {
     case "text":
-      return (
+    case "url": {
+      // Unless wrapped, one line until focused, then all of it, so long text stays editable.
+      const input = (
         <textarea
           key={stored}
           {...control}
           rows={1}
           defaultValue={stored}
           onBlur={save}
-          className={cn(cellInput, "block min-h-9 resize-none py-2 field-sizing-content")}
+          inputMode={field.type === "url" ? "url" : undefined}
+          onKeyDown={(event) => {
+            // A web address is one line: Enter saves it, as in the other one-line cells.
+            if (field.type === "url" && event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
+          className={cn(
+            cellInput,
+            "block min-h-9 resize-none py-2",
+            isWrapped
+              ? "field-sizing-content"
+              : "truncate focus:field-sizing-content focus:whitespace-pre-wrap",
+          )}
         />
       );
-    case "number":
-    case "date":
-    case "url":
       return (
         <>
-          <input
-            key={stored}
-            {...control}
-            type={field.type}
-            defaultValue={stored}
-            onBlur={save}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-            }}
-            className={cn(
-              cellInput,
-              "h-9",
-              field.type === "number" &&
-                "[appearance:textfield] text-right [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
-            )}
-          />
+          {isWrapped || stored === "" ? input : <OneLineValue value={stored}>{input}</OneLineValue>}
           {field.type === "url" && isUrlFieldValue(field.value) ? (
             <div className="px-1.5 pb-1.5">
               <ExternalUrl href={field.value}>{field.label}</ExternalUrl>
@@ -771,14 +961,59 @@ function CellControl({
           ) : null}
         </>
       );
-    case "select":
+    }
+    case "number": {
+      // The unit stands beside a value only, so an empty cell stays empty.
+      const hasUnit = field.unit !== undefined && field.value !== null;
       return (
+        <div className={cn("flex items-center", hasUnit && "pr-1.5")}>
+          <input
+            key={stored}
+            {...control}
+            type="number"
+            defaultValue={stored}
+            onBlur={save}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className={cn(
+              cellInput,
+              "h-9 min-w-0 [appearance:textfield] text-right [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
+              hasUnit && "pr-0",
+            )}
+          />
+          {hasUnit ? (
+            <UnitSuffix field={field} className={cn(field.unit !== "%" && "pl-1")} />
+          ) : null}
+        </div>
+      );
+    }
+    case "date":
+      return (
+        <input
+          key={stored}
+          {...control}
+          type={field.type}
+          defaultValue={stored}
+          onBlur={save}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          className={cn(cellInput, "h-9")}
+        />
+      );
+    case "select": {
+      const select = (
         <Select
           value={typeof field.value === "string" ? field.value : null}
           onValueChange={(value) => onSave(field.key, value)}
         >
-          <SelectTrigger {...control} variant="cell">
-            <SelectValue placeholder="Choose one" />
+          <SelectTrigger {...control} variant="cell" isWrapped={isWrapped}>
+            <SelectValue>
+              {(value: string | null) =>
+                value === null ? "Choose one" : <OptionValue option={value} tones={field.tones} />
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectPopup>
             {field.options.map((option) => (
@@ -789,6 +1024,15 @@ function CellControl({
           </SelectPopup>
         </Select>
       );
+      // A choice cut to one line shows whole in its tooltip; a tone icon names itself.
+      return isWrapped ||
+        typeof field.value !== "string" ||
+        field.tones?.[field.value] !== undefined ? (
+        select
+      ) : (
+        <OneLineValue value={field.value}>{select}</OneLineValue>
+      );
+    }
     case "boolean":
       return (
         <div className="flex h-9 items-center px-1.5">
@@ -821,6 +1065,7 @@ function CellControl({
  * open. An entry's header shows its first field's value and how many of its fields are filled.
  */
 function EntryForms({ entries, remove, ...props }: EntriesProps) {
+  const { field } = props;
   const [openId, setOpenId] = useState(entries[0]?.id ?? null);
   return (
     <div className="divide-y overflow-hidden rounded-lg border">
@@ -860,11 +1105,7 @@ function EntryForms({ entries, remove, ...props }: EntriesProps) {
               <RemoveEntry {...remove(at)} />
             </div>
             <CollapsiblePanel>
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(12.5rem,100%),1fr))] gap-3 border-t p-3">
-                {entry.fields.map((child) => (
-                  <FieldEditor key={child.key} {...props} field={child} isStacked />
-                ))}
-              </div>
+              <FormGrid {...props} form={layOutEntryForm(field, entry)} className="border-t p-3" />
             </CollapsiblePanel>
           </Collapsible>
         );

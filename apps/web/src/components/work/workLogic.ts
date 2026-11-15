@@ -13,6 +13,21 @@ export function formatDay(date: string) {
   });
 }
 
+/**
+ * A number field's value as shown: with `decimals`, exactly that many, else as stored; then its
+ * unit, "%" against the number and any other a space after it.
+ */
+export const formatNumber = (
+  value: number,
+  {
+    decimals,
+    unit,
+  }: { readonly decimals?: number | undefined; readonly unit?: string | undefined },
+) => {
+  const shown = decimals === undefined ? String(value) : value.toFixed(decimals);
+  return unit === undefined ? shown : `${shown}${unit === "%" ? "" : " "}${unit}`;
+};
+
 /** "1 field", "3 fields". */
 export const plural = (count: number, one: string, many: string) =>
   `${count} ${count === 1 ? one : many}`;

@@ -12,6 +12,7 @@ import {
   moveEntry,
   stepPath,
   updateStep,
+  withOptions,
 } from "./workflowLogic";
 
 const encodeFields = Schema.encodeSync(Schema.Array(Field));
@@ -49,6 +50,21 @@ describe("select fields", () => {
       },
       { id: "group01", label: "Notes", type: "text" },
     ]);
+  });
+
+  it("keep an option's tone while it is retyped and drop it with the option", () => {
+    const rating = {
+      id: "field01",
+      label: "Rating",
+      type: "select",
+      options: ["Good", "Bad"],
+      tones: { Good: "positive", Bad: "negative" },
+    } as const;
+    expect(withOptions(rating, ["Great", "Bad"])).toMatchObject({
+      tones: { Great: "positive", Bad: "negative" },
+    });
+    expect(withOptions(rating, ["Bad"])).toMatchObject({ tones: { Bad: "negative" } });
+    expect(withOptions(rating, ["Okay"])).not.toHaveProperty("tones");
   });
 });
 

@@ -159,16 +159,30 @@ export function retypeField(field: DraftField, type: FieldType): DraftField {
   return { ...base, type };
 }
 
-/** The select field with these options; its default goes when it is no longer one of them. */
+/**
+ * The select field with these options: its default goes when it is no longer one of them, and a
+ * tone follows its option as it is retyped and goes when it is removed.
+ */
 export function withOptions(
   field: Extract<DraftField, { type: "select" }>,
   options: ReadonlyArray<string>,
 ): DraftField {
-  const { defaultValue, ...rest } = field;
-  return typeof defaultValue === "string" &&
-    options.some((option) => option.trim() === defaultValue)
-    ? { ...field, options }
-    : { ...rest, options };
+  const { defaultValue, tones, ...rest } = field;
+  const isRetyping = options.length === field.options.length;
+  const kept = Object.fromEntries(
+    options.flatMap((option, at) => {
+      const tone = tones?.[(isRetyping ? (field.options[at] ?? "") : option).trim()];
+      return tone === undefined ? [] : [[option.trim(), tone] as const];
+    }),
+  );
+  return {
+    ...rest,
+    options,
+    ...(typeof defaultValue === "string" && options.some((option) => option.trim() === defaultValue)
+      ? { defaultValue }
+      : {}),
+    ...(Object.keys(kept).length === 0 ? {} : { tones: kept }),
+  };
 }
 
 export function blankStep(): DraftStep {

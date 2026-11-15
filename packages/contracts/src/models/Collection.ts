@@ -6,7 +6,7 @@
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { Field, FieldPathSegment, Fields, FieldValues, valuesProblem } from "./Field.ts";
+import { Field, FieldPathSegment, Fields, FieldValues, Layout, valuesProblem } from "./Field.ts";
 import type { Role, State } from "./User.ts";
 import { StringId, Title, TrimmedNonEmptyString } from "./primitives.ts";
 
@@ -35,6 +35,13 @@ export class Collection extends Schema.Opaque<Collection>()(
     primaryKeyFieldId: FieldPathSegment,
     /** Table order; fields without an entry follow in their definition order. */
     columnOrder: Schema.optionalKey(CollectionColumnOrder),
+    /**
+     * How its records show; with table columns, they replace `columnOrder` and the fields'
+     * `isDetailOnly`. It changes freely, records or not.
+     */
+    layout: Schema.optionalKey(
+      Layout.annotate({ description: "How the collection's records are shown." }),
+    ),
     /** The members, besides admins, who see and edit its records. */
     memberUserIds: Schema.UniqueArray(StringId),
     createdAt: Schema.DateTimeUtcFromString,
@@ -92,7 +99,17 @@ const asHeld = (field: Field): Field =>
   decodeField(
     JSON.parse(
       JSON.stringify(encodeField(field), (key, value: unknown) =>
-        key === "isDetailOnly" || key === "displayLinkOn" ? undefined : value,
+        [
+          "isDetailOnly",
+          "isMarkdown",
+          "displayLinkOn",
+          "decimals",
+          "unit",
+          "tones",
+          "layout",
+        ].includes(key)
+          ? undefined
+          : value,
       ),
     ),
   );

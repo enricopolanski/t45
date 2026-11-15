@@ -40,8 +40,43 @@ const DefaultValue = Schema.optionalKey(
 
 const ValueField = Schema.Struct({
   ...FieldBase,
-  type: Schema.Literals(["text", "number", "boolean", "date", "file"]),
+  type: Schema.Literals(["boolean", "date", "file"]),
   defaultValue: DefaultValue,
+});
+
+const TextField = Schema.Struct({
+  ...FieldBase,
+  type: Schema.Literal("text"),
+  defaultValue: DefaultValue,
+  isMarkdown: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "Render this text as Markdown. Write readable paragraphs, lists and links with real newlines; the stored value remains a string.",
+    }),
+  ),
+});
+
+/** How many decimal places a number field shows. */
+export const FieldDecimals = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: 6 }),
+).annotate({
+  description: "Decimal places to show; values are stored as entered.",
+});
+
+/**
+ * What a number field counts in, such as "%", "€" or "kg". Described on the string as sent, the
+ * side the JSON schema agents read shows.
+ */
+const FieldUnit = Schema.String.annotate({
+  description: "Shown after the value, like 43.0% or 47.60 €.",
+}).pipe(Schema.decodeTo(TrimmedNonEmptyString));
+
+const NumberField = Schema.Struct({
+  ...FieldBase,
+  type: Schema.Literal("number"),
+  defaultValue: DefaultValue,
+  decimals: Schema.optionalKey(FieldDecimals),
+  unit: Schema.optionalKey(FieldUnit),
 });
 
 const UrlField = Schema.Struct({
@@ -59,6 +94,15 @@ const UrlField = Schema.Struct({
 export const isUrlFieldValue = (value: unknown): value is string =>
   typeof value === "string" && /^https?:\/\/\S+$/iu.test(value) && URL.canParse(value);
 
+/** How an option of a select field reads at a glance. */
+export const FieldTone = Schema.Literals(["positive", "neutral", "warning", "negative"]);
+
+/** The tones of a select field's options, by option. */
+export const FieldTones = Schema.Record(Schema.String, FieldTone).annotate({
+  description:
+    "A tone for some options, by option text: tables show those options as an icon, the option text as its tooltip.",
+});
+
 const SelectField = Schema.Struct({
   ...FieldBase,
   type: Schema.Literal("select"),
@@ -66,6 +110,7 @@ const SelectField = Schema.Struct({
   options: Schema.Array(TrimmedNonEmptyString)
     .annotate({ description: "Allowed choices, shown as written." })
     .check(Schema.isMinLength(1)),
+  tones: Schema.optionalKey(FieldTones),
 });
 
 /**
@@ -78,17 +123,122 @@ const RecordsField = Schema.Struct({
   collectionId: StringId.annotate({ description: "The collection whose records it links." }),
 });
 
+/** Short text in place of a field's label, described on the string as sent, as `FieldUnit` is. */
+const LayoutHeader = Schema.String.annotate({
+  description:
+    "Short header text shown in place of the field's label; its description stays the header's tooltip.",
+}).pipe(Schema.decodeTo(TrimmedNonEmptyString));
+
+const LayoutFieldId = FieldPathSegment.annotate({
+  description: "Id of one of the fields; ids of fields that are gone are ignored.",
+});
+
+/** One column of a table listing entries or records. */
+const LayoutColumn = Schema.Struct({
+  field: LayoutFieldId,
+  header: Schema.optionalKey(LayoutHeader),
+  width: Schema.optionalKey(
+    Schema.Literals(["narrow", "medium", "wide"]).annotate({
+      description: "A fixed width; without it the column fits the values it shows.",
+    }),
+  ),
+  isWrapped: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "Long values wrap onto more lines; otherwise a cell shows one line and the whole value on hover.",
+    }),
+  ),
+});
+
+/**
+ * How entries of a repeatable group, or records of a collection, are shown: the table listing them
+ * and the form of each. It changes only how they look; stored values and their order stay the same.
+ */
+export const Layout = Schema.Struct({
+  table: Schema.optionalKey(
+    Schema.Struct({
+      columns: Schema.optionalKey(
+        Schema.Array(LayoutColumn).annotate({
+          description:
+            "The table's columns, in order; fields not listed show only in an entry's or record's details. Without it, every field not marked isDetailOnly, in definition order.",
+        }),
+      ),
+      sortBy: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            field: LayoutFieldId,
+            direction: Schema.Literals(["asc", "desc"]).annotate({
+              description: "asc from smallest to largest, desc the reverse.",
+            }),
+          }),
+        )
+          .annotate({
+            description:
+              "Up to three fields the rows are shown ordered by, each settling ties of the one before; numbers inside text compare as numbers, so 19MM comes before 100MM, and empty values come last. Without it, rows show in the order they were added.",
+          })
+          .check(Schema.isMaxLength(3)),
+      ),
+      density: Schema.optionalKey(
+        Schema.Literals(["compact", "normal", "relaxed"]).annotate({
+          description: "How much room cells leave around their values; normal without it.",
+        }),
+      ),
+    }).annotate({ description: "The table listing the entries or records." }),
+  ),
+  form: Schema.optionalKey(
+    Schema.Struct({
+      fields: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            field: LayoutFieldId,
+            span: Schema.Literals(["third", "half", "two-thirds", "full"]).annotate({
+              description: "How much of a row of the form the field takes.",
+            }),
+          }),
+        ).annotate({
+          description:
+            "The form's fields, in order; fields not listed follow, text taking a whole row, a choice half and others a third. Without it, those defaults with text fields last.",
+        }),
+      ),
+      spacing: Schema.optionalKey(
+        Schema.Literals(["compact", "normal", "relaxed"]).annotate({
+          description: "The gap between the form's fields; normal without it.",
+        }),
+      ),
+      dialogWidth: Schema.optionalKey(
+        Schema.Literals([768, 1024, 1280]).annotate({
+          description: "The widest the details dialog grows, in pixels.",
+        }),
+      ),
+    }).annotate({ description: "The form of one entry or record, as its details show it." }),
+  ),
+});
+export type Layout = typeof Layout.Type;
+
 class GroupField extends Schema.Class<GroupField>("GroupField")({
   ...FieldBase,
   type: Schema.Literal("group"),
   repeatable: Schema.Boolean.annotate({ description: "Whether the group allows multiple rows." }),
   fields: Schema.Array(Schema.suspend((): Schema.Codec<Field> => Field)),
+  layout: Schema.optionalKey(
+    Layout.annotate({ description: "How a repeatable group's entries are shown." }),
+  ),
 }) {}
 
-export const Field = Schema.Union([ValueField, UrlField, SelectField, RecordsField, GroupField]);
+export const Field = Schema.Union([
+  ValueField,
+  TextField,
+  NumberField,
+  UrlField,
+  SelectField,
+  RecordsField,
+  GroupField,
+]);
 
 export type Field =
   | typeof ValueField.Type
+  | typeof TextField.Type
+  | typeof NumberField.Type
   | typeof UrlField.Type
   | typeof SelectField.Type
   | typeof RecordsField.Type

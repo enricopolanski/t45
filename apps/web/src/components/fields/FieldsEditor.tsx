@@ -1,8 +1,9 @@
+import { FieldTone } from "@t45/contracts/models/Field";
+import { isTableColumn } from "@t45/contracts/models/Layout";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 import { useRowKeys } from "../../hooks/useRowKeys";
-import { isTableColumn } from "./fieldPresentation";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Field } from "../ui/field";
@@ -117,6 +118,33 @@ export function ColumnSwitch({
   );
 }
 
+/** How a text field is read; its original source stays editable. */
+export function MarkdownSwitch({
+  field,
+  onChange,
+  disabled,
+}: {
+  readonly field: DraftField;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  if (field.type !== "text") return null;
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <Switch
+        size="sm"
+        checked={field.isMarkdown === true}
+        onCheckedChange={(checked) => {
+          const { isMarkdown: _, ...rest } = field;
+          onChange(checked ? { ...rest, isMarkdown: true } : rest);
+        }}
+        disabled={disabled}
+      />
+      Render as Markdown
+    </label>
+  );
+}
+
 /** The other field whose value opens this URL. All sibling field types can display the link. */
 export function LinkDisplaySelect({
   field,
@@ -163,13 +191,137 @@ export function LinkDisplaySelect({
   );
 }
 
+const AS_ENTERED = "";
+
+/** How many decimal places a number field shows; values stay as entered. */
+function DecimalsSelect({
+  field,
+  onChange,
+  disabled,
+}: {
+  readonly field: DraftField;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  if (field.type !== "number") return null;
+  const { decimals, ...rest } = field;
+  return (
+    <Field label="Decimals" size="xs">
+      <Select
+        value={decimals === undefined ? AS_ENTERED : String(decimals)}
+        onValueChange={(choice) =>
+          onChange(
+            choice === AS_ENTERED || choice === null ? rest : { ...rest, decimals: Number(choice) },
+          )
+        }
+        disabled={disabled}
+      >
+        <SelectTrigger>
+          <SelectValue>
+            {(choice: string) => (choice === AS_ENTERED ? "As entered" : choice)}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectPopup>
+          <SelectItem value={AS_ENTERED}>As entered</SelectItem>
+          {["0", "1", "2", "3", "4", "5", "6"].map((choice) => (
+            <SelectItem key={choice} value={choice}>
+              {choice}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+    </Field>
+  );
+}
+
+/** What a number field counts in, shown after its values. */
+function UnitInput({
+  field,
+  onChange,
+  disabled,
+}: {
+  readonly field: DraftField;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  if (field.type !== "number") return null;
+  const { unit, ...rest } = field;
+  return (
+    <Field label="Unit" size="xs">
+      <Input
+        placeholder="%, €, kg"
+        value={unit ?? ""}
+        onChange={(event) =>
+          onChange(event.target.value.trim() === "" ? rest : { ...rest, unit: event.target.value })
+        }
+        disabled={disabled}
+      />
+    </Field>
+  );
+}
+
+const NO_TONE = "";
+
+const TONE_LABELS: Record<string, string> = {
+  [NO_TONE]: "No tone",
+  positive: "Positive",
+  neutral: "Neutral",
+  warning: "Warning",
+  negative: "Negative",
+};
+
+/** How a select's option reads at a glance: tables show an option with a tone as its icon. */
+function ToneSelect({
+  field,
+  option,
+  onChange,
+  disabled,
+}: {
+  readonly field: Extract<DraftField, { type: "select" }>;
+  readonly option: string;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  const { tones = {}, ...rest } = field;
+  const { [option.trim()]: tone, ...others } = tones;
+  return (
+    <Select
+      value={tone ?? NO_TONE}
+      onValueChange={(choice) => {
+        const chosen = FieldTone.literals.find((candidate) => candidate === choice);
+        const next = chosen === undefined ? others : { ...others, [option.trim()]: chosen };
+        onChange(Object.keys(next).length === 0 ? rest : { ...rest, tones: next });
+      }}
+      disabled={disabled}
+    >
+      <SelectTrigger size="sm" aria-label={`Tone of option ${option}`} className="min-w-28">
+        <SelectValue>{(choice: string) => TONE_LABELS[choice]}</SelectValue>
+      </SelectTrigger>
+      <SelectPopup>
+        {Object.entries(TONE_LABELS).map(([choice, label]) => (
+          <SelectItem key={choice} value={choice}>
+            {label}
+          </SelectItem>
+        ))}
+      </SelectPopup>
+    </Select>
+  );
+}
+
 /** A collection a records field can link. */
 export type LinkableCollection = { readonly id: string; readonly title: string };
+
+/** A way to edit a repeatable group's layout, shown with its fields. */
+type GroupLayoutControl = (
+  group: Extract<DraftField, { type: "group" }>,
+  onChange: (group: DraftField) => void,
+) => ReactNode;
 
 /**
  * Fields as a step or a collection defines them, with a way to add one; `depth` counts the groups
  * around them. `areColumns` when a table lists them, each a column but `keyFieldId`'s, which
- * always is one. With `collections`, a field can link records of one of them.
+ * always is one. With `collections`, a field can link records of one of them. With
+ * `groupLayout`, a repeatable group's layout is edited there.
  */
 export function FieldsEditor({
   fields,
@@ -178,6 +330,7 @@ export function FieldsEditor({
   areColumns,
   keyFieldId,
   collections,
+  groupLayout,
   onChange,
   disabled,
 }: {
@@ -187,6 +340,7 @@ export function FieldsEditor({
   readonly areColumns: boolean;
   readonly keyFieldId?: string;
   readonly collections?: ReadonlyArray<LinkableCollection>;
+  readonly groupLayout?: GroupLayoutControl | undefined;
   readonly onChange: (fields: ReadonlyArray<DraftField>) => void;
   readonly disabled: boolean;
 }) {
@@ -200,6 +354,7 @@ export function FieldsEditor({
           depth={depth}
           isColumn={areColumns && place.entry.id !== keyFieldId}
           collections={collections}
+          groupLayout={groupLayout}
           disabled={disabled}
         />
       ))}
@@ -314,6 +469,7 @@ function FieldCard({
   depth,
   isColumn,
   collections,
+  groupLayout,
   disabled,
 }: {
   readonly place: Placed<DraftField>;
@@ -321,6 +477,7 @@ function FieldCard({
   readonly depth: number;
   readonly isColumn: boolean;
   readonly collections: ReadonlyArray<LinkableCollection> | undefined;
+  readonly groupLayout: GroupLayoutControl | undefined;
   readonly disabled: boolean;
 }) {
   const id = useId();
@@ -404,6 +561,12 @@ function FieldCard({
                         disabled={disabled}
                         className="min-w-0 flex-1"
                       />
+                      <ToneSelect
+                        field={field}
+                        option={option.entry}
+                        onChange={setField}
+                        disabled={disabled}
+                      />
                       <Button
                         type="button"
                         size="icon-xs"
@@ -476,11 +639,19 @@ function FieldCard({
                     </p>
                   </div>
                 </div>
-                <span className="text-xs text-muted-foreground">Fields</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">Fields</span>
+                  {field.repeatable ? groupLayout?.(field, setField) : null}
+                </div>
                 <FieldsEditor
                   fields={field.fields}
                   depth={depth + 1}
-                  areColumns={field.repeatable === true}
+                  // A layout's columns replace "Show in table".
+                  areColumns={
+                    field.repeatable === true && field.layout?.table?.columns === undefined
+                  }
+                  // Only a step's own repeatable groups preview a ticket's entries.
+                  groupLayout={field.repeatable ? undefined : groupLayout}
                   onChange={(fields) => setField({ ...field, fields })}
                   disabled={disabled}
                 />
@@ -500,6 +671,13 @@ function FieldCard({
               />
             </Field>
             <DefaultValueInput field={field} onChange={setField} disabled={disabled} />
+            <MarkdownSwitch field={field} onChange={setField} disabled={disabled} />
+            {field.type === "number" ? (
+              <div className="flex flex-wrap items-end gap-2">
+                <DecimalsSelect field={field} onChange={setField} disabled={disabled} />
+                <UnitInput field={field} onChange={setField} disabled={disabled} />
+              </div>
+            ) : null}
             {isColumn ? (
               <ColumnSwitch field={field} onChange={setField} disabled={disabled} />
             ) : null}

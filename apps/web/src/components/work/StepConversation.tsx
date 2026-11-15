@@ -10,6 +10,7 @@ import { attachmentUrl } from "../../lib/attachmentUrl";
 import { cn } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
+import { MarkdownText } from "../markdown/MarkdownText";
 import { Textarea } from "../ui/textarea";
 import { ActorName } from "./ActorAvatar";
 import { FilePickButton } from "./StepFields";
@@ -188,14 +189,19 @@ export function StepComments({
                 </span>
                 <span>{formatRelativeTimeLabel(comment.createdAt, now)}</span>
               </div>
-              <p className="text-sm whitespace-pre-wrap">{comment.body}</p>
+              <MarkdownText text={comment.body} />
             </li>
           ))}
         </ul>
       )}
       {canWrite ? (
         <form className="flex flex-col items-end gap-2" onSubmit={onSubmit}>
-          <Textarea name="body" required aria-label="New comment" placeholder="Write a comment" />
+          <Textarea
+            name="body"
+            required
+            aria-label="New comment"
+            placeholder="Write a comment (Markdown supported)"
+          />
           <Button type="submit" size="sm" variant="outline" disabled={busy || pending}>
             Comment
           </Button>

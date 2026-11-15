@@ -41,6 +41,15 @@ export const buildFieldViews = (
       type: field.type,
       options: field.type === "select" ? field.options : [],
       value: field.type === "group" ? null : (value ?? null),
+      ...(field.type === "number" && field.decimals !== undefined
+        ? { decimals: field.decimals }
+        : {}),
+      ...(field.type === "number" && field.unit !== undefined ? { unit: field.unit } : {}),
+      ...(field.type === "select" && field.tones !== undefined ? { tones: field.tones } : {}),
+      ...(field.type === "group" && field.layout !== undefined ? { layout: field.layout } : {}),
+      ...(field.type === "text" && field.isMarkdown !== undefined
+        ? { isMarkdown: field.isMarkdown }
+        : {}),
       ...(linkUrl === undefined ? {} : { linkUrl }),
       repeatable: field.type === "group" && field.repeatable,
       rowFields: field.type === "group" && field.repeatable ? field.fields : [],
