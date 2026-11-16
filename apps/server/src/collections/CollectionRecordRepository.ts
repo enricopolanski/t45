@@ -1,4 +1,4 @@
-import { CollectionRecord } from "@t45/contracts/models/Collection";
+import { CollectionRecord, type RecordFilters } from "@t45/contracts/models/Collection";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,15 +16,14 @@ const encodeRecord = Schema.encodeEffect(
   }),
 );
 
-/** Which records a search returns: all must hold. */
+/** Which records a search finds: all must hold. */
 export interface RecordSearch {
   readonly collectionId: string;
-  /** Text one of a record's text values contains, ignoring case. */
-  readonly text: string | null;
-  /** Values top-level fields hold exactly, by field id. */
-  readonly filters: Readonly<Record<string, string | number | boolean>>;
-  readonly offset: number;
-  readonly limit: number;
+  /** Words that each appear, ignoring case, in one of `fields`, or of the text values when null. */
+  readonly words: ReadonlyArray<string>;
+  readonly fields: ReadonlyArray<string> | null;
+  /** Values top-level fields hold exactly, or ranges they lie within, by field id. */
+  readonly filters: typeof RecordFilters.Type;
 }
 
 export class CollectionRecordRepository extends Context.Service<
@@ -32,8 +31,17 @@ export class CollectionRecordRepository extends Context.Service<
   {
     readonly get: (collectionId: string, key: string) => Effect.Effect<CollectionRecord | null>;
     readonly hasAny: (collectionId: string) => Effect.Effect<boolean>;
-    /** The matching records in key order, up to `limit`. */
-    readonly search: (search: RecordSearch) => Effect.Effect<ReadonlyArray<CollectionRecord>>;
+    /** The matching records in key order, `limit` of them from `offset`. */
+    readonly search: (
+      search: RecordSearch & { readonly offset: number; readonly limit: number },
+    ) => Effect.Effect<ReadonlyArray<CollectionRecord>>;
+    /** How many records match. */
+    readonly count: (search: RecordSearch) => Effect.Effect<number>;
+    /** The distinct values a top-level field holds, in order, up to 500. */
+    readonly listValues: (
+      collectionId: string,
+      fieldId: string,
+    ) => Effect.Effect<ReadonlyArray<string | number>>;
     /** Adds the record, or replaces the values of the one with its key, keeping its creation. */
     readonly save: (record: CollectionRecord) => Effect.Effect<CollectionRecord>;
     /** Commits a record's write together with the file ownership changes it makes. */
@@ -54,6 +62,28 @@ export const layer = Layer.effect(
         Effect.orDie,
       );
 
+    const valueOf = (fieldId: string) => sql`json_extract(field_values, ${`$."${fieldId}"`})`;
+    const contains = (value: Fragment, word: string) =>
+      sql`instr(lower(CAST(${value} AS TEXT)), lower(${word})) > 0`;
+    const matching = ({ collectionId, words, fields, filters }: RecordSearch) =>
+      sql.and([
+        sql`collection_id = ${collectionId}`,
+        ...Object.entries(filters).flatMap(([fieldId, filter]) =>
+          typeof filter === "object"
+            ? [
+                ...(filter.min === undefined ? [] : [sql`${valueOf(fieldId)} >= ${filter.min}`]),
+                ...(filter.max === undefined ? [] : [sql`${valueOf(fieldId)} <= ${filter.max}`]),
+              ]
+            : [sql`${valueOf(fieldId)} IS json_extract(${JSON.stringify(filter)}, '$')`],
+        ),
+        ...words.map((word) =>
+          fields === null
+            ? sql`EXISTS (SELECT 1 FROM json_each(field_values) AS value
+                WHERE value.type = 'text' AND ${contains(sql`value.value`, word)})`
+            : sql.or(fields.map((fieldId) => contains(valueOf(fieldId), word))),
+        ),
+      ]);
+
     return CollectionRecordRepository.of({
       transaction: (effect) =>
         sql.withTransaction(effect).pipe(Effect.catchTags({ SqlError: Effect.die })),
@@ -66,23 +96,22 @@ export const layer = Layer.effect(
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
         ),
-      search: ({ collectionId, text, filters, offset, limit }) =>
-        read(
-          sql.and([
-            sql`collection_id = ${collectionId}`,
-            ...Object.entries(filters).map(
-              ([fieldId, value]) =>
-                sql`json_extract(field_values, ${`$."${fieldId}"`}) IS json_extract(${JSON.stringify(value)}, '$')`,
-            ),
-            ...(text === null
-              ? []
-              : [
-                  sql`EXISTS (SELECT 1 FROM json_each(field_values) AS value
-                    WHERE value.type = 'text'
-                      AND instr(lower(value.value), lower(${text})) > 0)`,
-                ]),
-          ]),
-          sql`LIMIT ${limit} OFFSET ${offset}`,
+      search: ({ offset, limit, ...search }) =>
+        read(matching(search), sql`LIMIT ${limit} OFFSET ${offset}`),
+      count: (search) =>
+        sql<{ readonly count: number }>`SELECT count(*) AS count FROM collection_records
+          WHERE ${matching(search)}`.pipe(
+          Effect.map(([row]) => row?.count ?? 0),
+          Effect.orDie,
+        ),
+      listValues: (collectionId, fieldId) =>
+        sql<{ readonly value: string | number }>`SELECT DISTINCT
+            json_extract(field_values, ${`$."${fieldId}"`}) AS value
+          FROM collection_records
+          WHERE collection_id = ${collectionId} AND value IS NOT NULL
+          ORDER BY value LIMIT 500`.pipe(
+          Effect.map((rows) => rows.map((row) => row.value)),
+          Effect.orDie,
         ),
       save: (record) =>
         Effect.gen(function* () {

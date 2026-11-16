@@ -6,7 +6,16 @@
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { Field, FieldPathSegment, Fields, FieldValues, Layout, valuesProblem } from "./Field.ts";
+import {
+  Field,
+  FieldPathSegment,
+  Fields,
+  FieldValues,
+  Layout,
+  fieldValueProblem,
+  LayoutFieldId,
+  valuesProblem,
+} from "./Field.ts";
 import type { Role, State } from "./User.ts";
 import { StringId, Title, TrimmedNonEmptyString } from "./primitives.ts";
 
@@ -27,6 +36,137 @@ export const primaryKeyRefusal = (collection: {
     ? null
     : ("invalid_primary_key" as const);
 
+/**
+ * How a collection's records show: the table and form any set of fields has, and, as a collection's
+ * own, its records as cards in a grid and each on a page of its own.
+ */
+export const CollectionLayout = Schema.Struct({
+  ...Layout.fields,
+  display: Schema.optionalKey(
+    Schema.Struct({
+      image: Schema.optionalKey(
+        LayoutFieldId.annotate({
+          description:
+            "A file field, or a group holding one, whose images show on a record's card and in its page's gallery.",
+        }),
+      ),
+      title: Schema.optionalKey(
+        LayoutFieldId.annotate({
+          description:
+            "The field naming a record on its card and page; the primary key without it.",
+        }),
+      ),
+      subtitle: Schema.optionalKey(
+        LayoutFieldId.annotate({ description: "A field shown smaller under the title." }),
+      ),
+      highlight: Schema.optionalKey(
+        LayoutFieldId.annotate({
+          description: "A field shown large, such as a price, with its unit and decimals.",
+        }),
+      ),
+      badges: Schema.optionalKey(
+        Schema.Array(LayoutFieldId)
+          .annotate({ description: "Up to three select fields shown as badges." })
+          .check(Schema.isMaxLength(3)),
+      ),
+    }).annotate({
+      description:
+        "Which fields play which part on a record's card and page. Without it, the primary key titles a record and the first field holding files shows its images.",
+    }),
+  ),
+  cards: Schema.optionalKey(
+    Schema.Struct({
+      size: Schema.optionalKey(
+        Schema.Literals(["small", "medium", "large"]).annotate({
+          description: "How wide the cards are; medium without it.",
+        }),
+      ),
+      imageRatio: Schema.optionalKey(
+        Schema.Literals(["square", "portrait", "landscape"]).annotate({
+          description: "The shape of a card's image; square without it.",
+        }),
+      ),
+      imageFit: Schema.optionalKey(
+        Schema.Literals(["contain", "cover"]).annotate({
+          description: "contain shows the whole image, cover crops it to fill; contain without it.",
+        }),
+      ),
+      extra: Schema.optionalKey(
+        Schema.Array(LayoutFieldId)
+          .annotate({ description: "Up to three more fields, as small lines under the title." })
+          .check(Schema.isMaxLength(3)),
+      ),
+    }).annotate({ description: "The records as cards in a grid." }),
+  ),
+  page: Schema.optionalKey(
+    Schema.Struct({
+      template: Schema.Literals(["form", "showcase"]).annotate({
+        description:
+          "form: the record's editable form. showcase: its images as a gallery beside its title, highlight, badges and other values, long text below, editable on demand.",
+      }),
+    }).annotate({ description: "A record on a page of its own; its form without it." }),
+  ),
+  defaultView: Schema.optionalKey(
+    Schema.Literals(["table", "cards"]).annotate({
+      description: "How the collection's page first lists its records; a table without it.",
+    }),
+  ),
+  search: Schema.optionalKey(
+    Schema.Struct({
+      fields: Schema.optionalKey(
+        Schema.Array(LayoutFieldId).annotate({
+          description:
+            "The fields a search looks for its words in; every text value of a record without it.",
+        }),
+      ),
+      filters: Schema.optionalKey(
+        Schema.Array(Schema.Struct({ field: LayoutFieldId })).annotate({
+          description:
+            "The filters shown above the records, in order: a select, yes/no or text field picks one of its values, a number or date field a range.",
+        }),
+      ),
+    }).annotate({ description: "How people find the collection's records." }),
+  ),
+});
+export type CollectionLayout = typeof CollectionLayout.Type;
+
+/** Bounds a number or date field's value lies within, both included; either can be left open. */
+const RecordFilterRange = Schema.Struct({
+  min: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.String])),
+  max: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.String])),
+});
+
+/** What top-level fields' values must be, all of them: exactly a value, or within a range. */
+export const RecordFilters = Schema.Record(
+  FieldPathSegment,
+  Schema.Union([Schema.String, Schema.Finite, Schema.Boolean, RecordFilterRange]),
+);
+
+/** Why `filters` don't fit `fields`, or null when every one does. */
+export const filtersProblem = (
+  fields: ReadonlyArray<Field>,
+  filters: typeof RecordFilters.Type,
+) => {
+  for (const [fieldId, filter] of Object.entries(filters)) {
+    const field = fields.find(({ id }) => id === fieldId);
+    if (field === undefined || ["group", "file", "records"].includes(field.type))
+      return `${fieldId} isn't one.`;
+    if (typeof filter !== "object") {
+      const problem = fieldValueProblem(field, fieldId, filter);
+      if (problem !== null) return problem;
+      continue;
+    }
+    if (field.type !== "number" && field.type !== "date")
+      return `${fieldId} takes a value, not a range: only number and date fields take ranges.`;
+    for (const bound of [filter.min, filter.max]) {
+      if (bound === undefined) continue;
+      const problem = fieldValueProblem(field, fieldId, bound);
+      if (problem !== null) return problem;
+    }
+  }
+  return null;
+};
+
 export class Collection extends Schema.Opaque<Collection>()(
   Schema.Struct({
     id: StringId,
@@ -40,7 +180,7 @@ export class Collection extends Schema.Opaque<Collection>()(
      * `isDetailOnly`. It changes freely, records or not.
      */
     layout: Schema.optionalKey(
-      Layout.annotate({ description: "How the collection's records are shown." }),
+      CollectionLayout.annotate({ description: "How the collection's records are shown." }),
     ),
     /** The members, besides admins, who see and edit its records. */
     memberUserIds: Schema.UniqueArray(StringId),
@@ -137,7 +277,7 @@ const REFUSALS = {
   fields_locked: "This collection has records: you can only add new fields.",
   invalid_attachment: "That file can't be attached here.",
   invalid_filter:
-    "Filter on one of the collection's top-level text, URL, number, yes/no, date or select fields.",
+    "Filter on one of the collection's top-level text, URL, number, yes/no, date or select fields, with a range only on numbers and dates.",
 };
 
 export class Refused extends Schema.TaggedError<Refused>()("CollectionRefused", {

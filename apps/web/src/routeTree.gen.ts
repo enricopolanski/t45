@@ -43,6 +43,7 @@ import { Route as SettingsAgentsSkillsNewRouteImport } from './routes/settings_.
 import { Route as SettingsAgentsSkillsSkillIdRouteImport } from './routes/settings_.agents.skills.$skillId'
 import { Route as MyWorkStepIdRunsChatIdRouteImport } from './routes/my-work.$stepId_.runs.$chatId'
 import { Route as SettingsProjectsProjectIdEditIndexRouteImport } from './routes/settings_.projects.$projectId.edit.index'
+import { Route as SettingsCollectionsCollectionIdRecordsRecordKeyRouteImport } from './routes/settings_.collections.$collectionId_.records.$recordKey'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -223,6 +224,12 @@ const SettingsProjectsProjectIdEditIndexRoute =
     path: '/settings/projects/$projectId/edit/',
     getParentRoute: () => rootRouteImport,
   } as any)
+const SettingsCollectionsCollectionIdRecordsRecordKeyRoute =
+  SettingsCollectionsCollectionIdRecordsRecordKeyRouteImport.update({
+    id: '/settings_/collections/$collectionId_/records/$recordKey',
+    path: '/settings/collections/$collectionId/records/$recordKey',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByFullPath {
   '/settings/collections/$collectionId/edit': typeof SettingsCollectionsCollectionIdEditRoute
   '/settings/workflows/$workflowId/steps': typeof SettingsWorkflowsWorkflowIdStepsRoute
   '/settings/workflows/$workflowId/': typeof SettingsWorkflowsWorkflowIdIndexRoute
+  '/settings/collections/$collectionId/records/$recordKey': typeof SettingsCollectionsCollectionIdRecordsRecordKeyRoute
   '/settings/projects/$projectId/edit/': typeof SettingsProjectsProjectIdEditIndexRoute
 }
 export interface FileRoutesByTo {
@@ -294,6 +302,7 @@ export interface FileRoutesByTo {
   '/settings/collections/$collectionId/edit': typeof SettingsCollectionsCollectionIdEditRoute
   '/settings/workflows/$workflowId/steps': typeof SettingsWorkflowsWorkflowIdStepsRoute
   '/settings/workflows/$workflowId': typeof SettingsWorkflowsWorkflowIdIndexRoute
+  '/settings/collections/$collectionId/records/$recordKey': typeof SettingsCollectionsCollectionIdRecordsRecordKeyRoute
   '/settings/projects/$projectId/edit': typeof SettingsProjectsProjectIdEditIndexRoute
 }
 export interface FileRoutesById {
@@ -331,6 +340,7 @@ export interface FileRoutesById {
   '/settings_/collections/$collectionId_/edit': typeof SettingsCollectionsCollectionIdEditRoute
   '/settings_/workflows/$workflowId/steps': typeof SettingsWorkflowsWorkflowIdStepsRoute
   '/settings_/workflows/$workflowId/': typeof SettingsWorkflowsWorkflowIdIndexRoute
+  '/settings_/collections/$collectionId_/records/$recordKey': typeof SettingsCollectionsCollectionIdRecordsRecordKeyRoute
   '/settings_/projects/$projectId/edit/': typeof SettingsProjectsProjectIdEditIndexRoute
 }
 export interface FileRouteTypes {
@@ -369,6 +379,7 @@ export interface FileRouteTypes {
     | '/settings/collections/$collectionId/edit'
     | '/settings/workflows/$workflowId/steps'
     | '/settings/workflows/$workflowId/'
+    | '/settings/collections/$collectionId/records/$recordKey'
     | '/settings/projects/$projectId/edit/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -405,6 +416,7 @@ export interface FileRouteTypes {
     | '/settings/collections/$collectionId/edit'
     | '/settings/workflows/$workflowId/steps'
     | '/settings/workflows/$workflowId'
+    | '/settings/collections/$collectionId/records/$recordKey'
     | '/settings/projects/$projectId/edit'
   id:
     | '__root__'
@@ -441,6 +453,7 @@ export interface FileRouteTypes {
     | '/settings_/collections/$collectionId_/edit'
     | '/settings_/workflows/$workflowId/steps'
     | '/settings_/workflows/$workflowId/'
+    | '/settings_/collections/$collectionId_/records/$recordKey'
     | '/settings_/projects/$projectId/edit/'
   fileRoutesById: FileRoutesById
 }
@@ -473,6 +486,7 @@ export interface RootRouteChildren {
   SettingsCollectionsCollectionIdEditRoute: typeof SettingsCollectionsCollectionIdEditRoute
   SettingsWorkflowsWorkflowIdStepsRoute: typeof SettingsWorkflowsWorkflowIdStepsRoute
   SettingsWorkflowsWorkflowIdIndexRoute: typeof SettingsWorkflowsWorkflowIdIndexRoute
+  SettingsCollectionsCollectionIdRecordsRecordKeyRoute: typeof SettingsCollectionsCollectionIdRecordsRecordKeyRoute
   SettingsProjectsProjectIdEditIndexRoute: typeof SettingsProjectsProjectIdEditIndexRoute
 }
 
@@ -716,6 +730,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsProjectsProjectIdEditIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings_/collections/$collectionId_/records/$recordKey': {
+      id: '/settings_/collections/$collectionId_/records/$recordKey'
+      path: '/settings/collections/$collectionId/records/$recordKey'
+      fullPath: '/settings/collections/$collectionId/records/$recordKey'
+      preLoaderRoute: typeof SettingsCollectionsCollectionIdRecordsRecordKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -769,6 +790,8 @@ const rootRouteChildren: RootRouteChildren = {
     SettingsCollectionsCollectionIdEditRoute,
   SettingsWorkflowsWorkflowIdStepsRoute: SettingsWorkflowsWorkflowIdStepsRoute,
   SettingsWorkflowsWorkflowIdIndexRoute: SettingsWorkflowsWorkflowIdIndexRoute,
+  SettingsCollectionsCollectionIdRecordsRecordKeyRoute:
+    SettingsCollectionsCollectionIdRecordsRecordKeyRoute,
   SettingsProjectsProjectIdEditIndexRoute:
     SettingsProjectsProjectIdEditIndexRoute,
 }

@@ -62,13 +62,14 @@ test("collection URL fields take one address and use the field label for their l
   await destination.close();
   await expect(dialog).toHaveCount(0);
 
+  const record = ada.getByRole("form", { name: "Record" });
   await row.getByRole("cell").first().click();
-  await expect(dialog.getByLabel("Listing", { exact: true })).toHaveValue(
+  await expect(record.getByLabel("Listing", { exact: true })).toHaveValue(
     "https://example.com/listing",
   );
-  await dialog.getByLabel("Listing", { exact: true }).fill("https://example.com/updated");
-  await dialog.getByRole("button", { name: "Save record" }).click();
-  await expect(dialog).toHaveCount(0);
+  await record.getByLabel("Listing", { exact: true }).fill("https://example.com/updated");
+  await ada.getByRole("button", { name: "Save record" }).click();
+  await expect(record).toHaveCount(0);
   await ada.reload();
   await expect(row.getByRole("link", { name: "Listing", exact: true })).toHaveAttribute(
     "href",

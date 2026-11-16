@@ -9,6 +9,7 @@ import {
   Collection,
   CollectionColumnOrder,
   CollectionRecord,
+  RecordFilters,
   Refused,
 } from "../models/Collection.ts";
 import { FieldPathSegment, FieldValues } from "../models/Field.ts";
@@ -67,15 +68,12 @@ export const CollectionOperations = RpcGroup.make(
   Rpc.make("searchRecords", {
     payload: {
       collectionId: StringId,
-      /** Words any of a record's text values contain, ignoring case. */
+      /** Words that each appear in one of the searched fields, ignoring case. */
       text: Schema.optionalKey(Schema.String),
-      /** Values that top-level fields hold exactly, all of them. */
-      filters: Schema.optionalKey(
-        Schema.Record(
-          FieldPathSegment,
-          Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]),
-        ),
-      ),
+      /** The fields the words are looked for in; those the collection's layout searches without it. */
+      fields: Schema.optionalKey(Schema.Array(FieldPathSegment)),
+      /** What top-level fields' values must be, all of them: exactly a value, or within a range. */
+      filters: Schema.optionalKey(RecordFilters),
       offset: Schema.optionalKey(NonNegativeInt),
       limit: Schema.optionalKey(
         NonNegativeInt.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
@@ -85,7 +83,16 @@ export const CollectionOperations = RpcGroup.make(
       records: Schema.Array(CollectionRecordView),
       /** Whether more records match after these. */
       hasMore: Schema.Boolean,
+      /** How many records match, and how many the collection holds. */
+      matchCount: NonNegativeInt,
+      totalCount: NonNegativeInt,
     }),
+    error: CollectionErrors,
+  }),
+  Rpc.make("listFieldValues", {
+    payload: { collectionId: StringId, fieldId: FieldPathSegment },
+    /** The distinct values a top-level field holds across the records, in order, up to 500. */
+    success: Schema.Array(Schema.Union([Schema.String, Schema.Finite])),
     error: CollectionErrors,
   }),
   Rpc.make("saveRecord", {

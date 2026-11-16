@@ -5,17 +5,14 @@ import {
   type Collection,
   type CollectionRecord,
   fieldsChangeRefusal,
+  filtersProblem,
   primaryKeyRefusal,
   recordKeyOf,
   recordProblem,
   Refused,
 } from "@t45/contracts/models/Collection";
-import {
-  fieldValueProblem,
-  fileKeys,
-  type FieldValues,
-  holdsData,
-} from "@t45/contracts/models/Field";
+import { fileKeys, type FieldValues, holdsData } from "@t45/contracts/models/Field";
+import { resolveRecordSearch } from "@t45/contracts/models/Layout";
 import { AttachmentId } from "@t45/contracts/models/Attachment";
 import { COLLECTIONS_CAPABILITY_ID } from "@t45/contracts/resources/AgentTools";
 import type { Collections } from "@t45/contracts/resources/Collections";
@@ -195,28 +192,46 @@ const make = Effect.gen(function* () {
     searchRecords: Effect.fnUntraced(function* (caller: Caller, input: Payload<"searchRecords">) {
       const collection = yield* findReadable(caller, input.collectionId);
       const filters = input.filters ?? {};
-      for (const [fieldId, value] of Object.entries(filters)) {
-        const field = collection.fields.find(({ id }) => id === fieldId);
-        const problem =
-          field === undefined || field.type === "group" || field.type === "file"
-            ? `${fieldId} isn't one.`
-            : fieldValueProblem(field, fieldId, value);
-        if (problem !== null)
-          return yield* new Refused({ reason: "invalid_filter", detail: problem });
-      }
+      const problem = filtersProblem(collection.fields, filters);
+      if (problem !== null)
+        return yield* new Refused({ reason: "invalid_filter", detail: problem });
       const limit = input.limit ?? SEARCH_LIMIT;
-      const text = input.text?.trim() ?? "";
-      const found = yield* records.search({
+      // Fields named in the request replace the layout's, as the layout editor previews them.
+      const searched = resolveRecordSearch(
+        input.fields === undefined
+          ? collection
+          : { fields: collection.fields, layout: { search: { fields: input.fields } } },
+      ).fields;
+      const search = {
         collectionId: collection.id,
-        text: text === "" ? null : text,
+        words: (input.text ?? "").split(/\s+/u).filter((word) => word !== ""),
+        fields: searched?.map((field) => field.id) ?? null,
         filters,
-        offset: input.offset ?? 0,
-        limit: limit + 1,
-      });
+      };
+      const [found, matchCount, totalCount] = yield* Effect.all([
+        records.search({ ...search, offset: input.offset ?? 0, limit: limit + 1 }),
+        records.count(search),
+        records.count({ collectionId: collection.id, words: [], fields: null, filters: {} }),
+      ]);
       return {
         records: yield* Effect.forEach(found.slice(0, limit), viewOf),
         hasMore: found.length > limit,
+        matchCount,
+        totalCount,
       };
+    }),
+
+    listFieldValues: Effect.fnUntraced(function* (
+      caller: Caller,
+      input: Payload<"listFieldValues">,
+    ) {
+      const collection = yield* findReadable(caller, input.collectionId);
+      if (!collection.fields.some((field) => field.id === input.fieldId))
+        return yield* new Refused({
+          reason: "invalid_filter",
+          detail: `${input.fieldId} isn't one.`,
+        });
+      return yield* records.listValues(collection.id, input.fieldId);
     }),
 
     /** Adds the record or replaces the one with its key; agents with the capability always may. */

@@ -40,7 +40,7 @@ type RecordFiles = CollectionRecordView["files"];
 type RecordShape = Pick<Collection, "fields" | "primaryKeyFieldId" | "columnOrder" | "layout">;
 
 /** A record's value as text, so a displayed link never wraps another link. */
-function formatCellValue(
+export function formatRecordValue(
   field: Collection["fields"][number],
   value: FieldValues[string] | undefined,
   files: RecordFiles,
@@ -63,7 +63,7 @@ function formatCellValue(
 }
 
 /** What a record's cell shows, with a sibling URL when one is displayed on it. */
-function renderCell(
+export function renderRecordValue(
   field: Collection["fields"][number],
   value: FieldValues[string] | undefined,
   files: RecordFiles,
@@ -73,7 +73,7 @@ function renderCell(
   if (linkUrl !== undefined)
     return (
       <ExternalUrl href={linkUrl} onClick={(event) => event.stopPropagation()}>
-        {formatCellValue(field, value, files) || field.label}
+        {formatRecordValue(field, value, files) || field.label}
       </ExternalUrl>
     );
   switch (field.type) {
@@ -100,12 +100,12 @@ function renderCell(
           Link
         </a>
       ) : (
-        formatCellValue(field, value, files)
+        formatRecordValue(field, value, files)
       );
     case "select":
       return typeof value === "string" ? <OptionValue option={value} tones={field.tones} /> : "";
     default:
-      return formatCellValue(field, value, files);
+      return formatRecordValue(field, value, files);
   }
 }
 
@@ -303,7 +303,7 @@ export function RecordTable({
                     );
                   const { field } = column;
                   const value = record.values[field.id];
-                  const cell = renderCell(
+                  const cell = renderRecordValue(
                     field,
                     value,
                     record.files,
@@ -356,21 +356,18 @@ export function RecordTable({
   );
 }
 
-/** A record's fields, typed into and saved whole: a record with the same key is replaced. */
-export function RecordDialog({
-  collection,
-  record,
-  onClose,
-  onSaved,
-}: {
-  readonly collection: RecordShape & Pick<Collection, "id">;
-  readonly record: { readonly values: FieldValues; readonly files: RecordFiles };
-  readonly onClose: () => void;
-  readonly onSaved: (record: CollectionRecordView) => void;
-}) {
+/**
+ * A record's fields being typed into, laid out as the collection's form, and saved whole: a record
+ * with the same key is replaced.
+ */
+export function useRecordForm(
+  collection: RecordShape & Pick<Collection, "id">,
+  record: { readonly values: FieldValues; readonly files: RecordFiles },
+  onSaved: (record: CollectionRecordView) => void,
+) {
   const [values, setValues] = useState(record.values);
   const [files, setFiles] = useState(record.files);
-  const [busy, setBusy] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = (key: string, value: FieldValues[string]) =>
     setValues((current) => withFieldValue(collection.fields, current, key, value));
@@ -391,18 +388,39 @@ export function RecordDialog({
         (cause: unknown) => setError(describeFailure(cause)),
       ),
   };
-  const form = layOutForm(collection.fields, collection.layout, fields, "");
   const save = () => {
-    setBusy(true);
+    setIsBusy(true);
     setError(null);
     void api("collections.saveRecord", { collectionId: collection.id, values }).then(
       onSaved,
       (cause: unknown) => {
-        setBusy(false);
+        setIsBusy(false);
         setError(describeFailure(cause));
       },
     );
   };
+  return {
+    editor,
+    form: layOutForm(collection.fields, collection.layout, fields, ""),
+    isBusy,
+    error,
+    save,
+  };
+}
+
+/** A record's fields in a dialog, typed into and saved: a new record, or one a step links. */
+export function RecordDialog({
+  collection,
+  record,
+  onClose,
+  onSaved,
+}: {
+  readonly collection: RecordShape & Pick<Collection, "id">;
+  readonly record: { readonly values: FieldValues; readonly files: RecordFiles };
+  readonly onClose: () => void;
+  readonly onSaved: (record: CollectionRecordView) => void;
+}) {
+  const { editor, form, isBusy, error, save } = useRecordForm(collection, record, onSaved);
   return (
     <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : onClose())}>
       <DialogPopup
@@ -432,7 +450,7 @@ export function RecordDialog({
             </div>
           </DialogPanel>
           <DialogFooter>
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={isBusy}>
               Save record
             </Button>
           </DialogFooter>

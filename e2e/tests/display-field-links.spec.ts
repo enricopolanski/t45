@@ -85,14 +85,15 @@ test("a collection keeps its links and column order when linked from a step", as
   await expect(dialog).toHaveCount(0);
 
   // Both values still edit independently in the record's details.
+  const record = ada.getByRole("form", { name: "Record", exact: true });
   await row.getByRole("cell").first().click();
-  await expect(dialog.getByLabel("Product URL", { exact: true })).toHaveValue(
+  await expect(record.getByLabel("Product URL", { exact: true })).toHaveValue(
     "https://example.com/listing",
   );
-  await dialog.getByLabel("Product title", { exact: true }).fill("Blue masking tape");
-  await dialog.getByLabel("Product URL", { exact: true }).fill("https://example.com/blue");
-  await dialog.getByRole("button", { name: "Save record" }).click();
-  await expect(dialog).toHaveCount(0);
+  await record.getByLabel("Product title", { exact: true }).fill("Blue masking tape");
+  await record.getByLabel("Product URL", { exact: true }).fill("https://example.com/blue");
+  await ada.getByRole("button", { name: "Save record" }).click();
+  await expect(record).toHaveCount(0);
   await expect(row.getByRole("link", { name: "Blue masking tape", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/blue",

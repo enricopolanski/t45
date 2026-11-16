@@ -29,7 +29,11 @@ const DIRECTIONS = { asc: "Ascending", desc: "Descending" };
 const DIALOG_WIDTHS = { 768: "768 px", 1024: "1024 px", 1280: "1280 px" };
 
 /** `part` with `key` set to `value`, or without `key` when `value` is undefined. */
-const withKey = <A extends object, K extends keyof A>(part: A, key: K, value: A[K] | undefined) => {
+export const withKey = <A extends object, K extends keyof A>(
+  part: A,
+  key: K,
+  value: A[K] | undefined,
+) => {
   const { [key]: _, ...rest } = part;
   return (value === undefined ? rest : { ...rest, [key]: value }) as A;
 };
@@ -41,7 +45,7 @@ const canWrap = (field: Field) =>
   (field.type === "select" && Object.keys(field.tones ?? {}).length === 0);
 
 /** A select of `choices` by their key, named by `label`. */
-function Choice<V extends string>({
+export function Choice<V extends string>({
   label,
   value,
   choices,
@@ -76,7 +80,7 @@ function Choice<V extends string>({
 }
 
 /** Up and down for a row of a list; `what` names it. */
-function MoveButtons({
+export function MoveButtons({
   what,
   onMove,
   isFirst,
@@ -113,7 +117,7 @@ function MoveButtons({
   );
 }
 
-function PanelSection({
+export function PanelSection({
   title,
   hint,
   children,
@@ -390,24 +394,47 @@ function FormSettings({
 }
 
 /** `layout` with its `key` part replaced; an empty part, and an empty layout, are left out. */
-const withPart = <K extends keyof Layout>(
-  layout: Layout | undefined,
+export const withPart = <L extends Layout, K extends keyof L>(
+  layout: L | undefined,
   key: K,
-  part: NonNullable<Layout[K]>,
+  part: L[K] | undefined,
 ) => {
-  const next = withKey(layout ?? {}, key, Object.keys(part).length === 0 ? undefined : part);
+  const isEmpty = typeof part === "object" && part !== null && Object.keys(part).length === 0;
+  const next = withKey(layout ?? ({} as L), key, isEmpty ? undefined : part);
   return Object.keys(next).length === 0 ? undefined : next;
 };
+
+const NO_VIEWS: ReadonlyArray<never> = [];
+
+/**
+ * A further way the entries show, beside the table and the form: its `settings` edit the layout,
+ * and its `preview` shows the entries, one entry when `isPerEntry`; `onOpen` shows an entry in
+ * another view.
+ */
+export interface LayoutView<L> {
+  readonly value: string;
+  readonly label: string;
+  readonly isPerEntry: boolean;
+  readonly settings: (
+    layout: L | undefined,
+    onChange: (layout: L | undefined) => void,
+  ) => ReactNode;
+  readonly preview: (
+    layout: L | undefined,
+    entryId: string,
+    onOpen: (entryId: string, view: string) => void,
+  ) => ReactNode;
+}
 
 /**
  * Edits how a set of `fields` shows, in a dialog over the page: the table listing entries or
  * records and the form of one, beside a live preview of the real ones. The preview shows
  * `entries`, which `renderTable` lists and `renderForm` shows one of, as the working layout lays
  * them out; `previewNote`, while there is nothing to show, says why. `rowsHint` says what sorting
- * changes, and `saveNote` where a saved layout applies. Saving hands back the layout, undefined
- * for none.
+ * changes, and `saveNote` where a saved layout applies; `views` adds ways to show them. Saving
+ * hands back the layout, undefined for none.
  */
-export function LayoutEditor({
+export function LayoutEditor<L extends Layout>({
   trail,
   title,
   fields,
@@ -421,6 +448,7 @@ export function LayoutEditor({
   saveNote,
   renderTable,
   renderForm,
+  views = NO_VIEWS,
   isSaving,
   error,
   onSave,
@@ -429,7 +457,7 @@ export function LayoutEditor({
   readonly trail: string;
   readonly title: string;
   readonly fields: ReadonlyArray<Field>;
-  readonly layout: Layout | undefined;
+  readonly layout: L | undefined;
   readonly defaultColumns?: ReadonlyArray<Field>;
   readonly defaultDialogWidth: DialogWidth;
   /** Where the preview's entries come from, when there is a choice. */
@@ -438,14 +466,12 @@ export function LayoutEditor({
   readonly previewNote: string | null;
   readonly rowsHint: string;
   readonly saveNote?: string;
-  readonly renderTable: (
-    layout: Layout | undefined,
-    onOpen: (entryId: string) => void,
-  ) => ReactNode;
-  readonly renderForm: (layout: Layout | undefined, entryId: string) => ReactNode;
+  readonly renderTable: (layout: L | undefined, onOpen: (entryId: string) => void) => ReactNode;
+  readonly renderForm: (layout: L | undefined, entryId: string) => ReactNode;
+  readonly views?: ReadonlyArray<LayoutView<L>>;
   readonly isSaving: boolean;
   readonly error: string | null;
-  readonly onSave: (layout: Layout | undefined) => void;
+  readonly onSave: (layout: L | undefined) => void;
   readonly onClose: () => void;
 }) {
   const [layout, setLayout] = useState(saved);
@@ -455,6 +481,11 @@ export function LayoutEditor({
   const [entryId, setEntryId] = useState<string | null>(null);
   const entry = entries.find(({ id }) => id === entryId) ?? entries[0];
   const dialogWidth = resolveFormLayout(fields, layout).dialogWidth ?? defaultDialogWidth;
+  const view = views.find(({ value }) => value === tab);
+  const open = (id: string, next: string) => {
+    setEntryId(id);
+    setTab(next);
+  };
   return (
     <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : onClose())}>
       <DialogPopup className="h-full max-w-none">
@@ -470,6 +501,11 @@ export function LayoutEditor({
                 <TabsList aria-label="Layout of">
                   <TabsTab value="table">Table</TabsTab>
                   <TabsTab value="form">Form</TabsTab>
+                  {views.map(({ value, label }) => (
+                    <TabsTab key={value} value={value}>
+                      {label}
+                    </TabsTab>
+                  ))}
                 </TabsList>
               </div>
             </div>
@@ -498,18 +534,25 @@ export function LayoutEditor({
                       defaultDialogWidth={defaultDialogWidth}
                       onChange={(form) => setLayout(withPart(layout, "form", form))}
                     />
-                    {entries.length > 0 && entry !== undefined ? (
-                      <LabeledField label="Preview entry" size="xs" className={settingRow}>
-                        <Choice
-                          label="Preview entry"
-                          value={entry.id}
-                          choices={Object.fromEntries(entries.map(({ id, label }) => [id, label]))}
-                          onChange={setEntryId}
-                        />
-                      </LabeledField>
-                    ) : null}
                   </div>
                 </TabsPanel>
+                {views.map(({ value, settings }) => (
+                  <TabsPanel key={value} value={value}>
+                    <div className="flex flex-col gap-4">{settings(layout, setLayout)}</div>
+                  </TabsPanel>
+                ))}
+                {(tab === "form" || view?.isPerEntry === true) &&
+                entries.length > 0 &&
+                entry !== undefined ? (
+                  <LabeledField label="Preview entry" size="xs" className={settingRow}>
+                    <Choice
+                      label="Preview entry"
+                      value={entry.id}
+                      choices={Object.fromEntries(entries.map(({ id, label }) => [id, label]))}
+                      onChange={setEntryId}
+                    />
+                  </LabeledField>
+                ) : null}
                 <div className="border-t pt-3">
                   <Collapsible>
                     <CollapsibleTrigger className="group flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -552,10 +595,9 @@ export function LayoutEditor({
                     {previewNote ?? "Nothing to show."}
                   </p>
                 ) : tab === "table" ? (
-                  renderTable(layout, (id) => {
-                    setEntryId(id);
-                    setTab("form");
-                  })
+                  renderTable(layout, (id) => open(id, "form"))
+                ) : view !== undefined ? (
+                  view.preview(layout, entry.id, open)
                 ) : (
                   <div
                     role="group"

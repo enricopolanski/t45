@@ -83,7 +83,7 @@ serve({
     rpcTool(
       "search",
       "collections.searchRecords",
-      "Find records: text matches any of their text values, ignoring case; filters match top-level fields' values exactly, all of them. Records come in key order, up to limit (25 when left out); hasMore says whether more follow from offset + limit.",
+      "Find records: each word of text appears, ignoring case, in one of fields, or of the fields the collection's layout searches when left out; filters match top-level fields' values exactly, or a number or date field within a {min, max} range, all of them. Records come in key order, up to limit (25 when left out); hasMore says whether more follow from offset + limit; matchCount counts the matching records and totalCount all of them.",
     ),
     rpcTool(
       "save_record",

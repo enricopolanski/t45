@@ -5,7 +5,8 @@
  */
 import type * as Schema from "effect/Schema";
 
-import { type Field, holdsData, type Layout } from "./Field.ts";
+import type { Collection } from "./Collection.ts";
+import { type Field, type FieldValues, groupRows, holdsData, type Layout } from "./Field.ts";
 
 type TableLayout = NonNullable<Layout["table"]>;
 type FormLayout = NonNullable<Layout["form"]>;
@@ -80,6 +81,94 @@ export const resolveFormLayout = (fields: ReadonlyArray<Field>, layout: Layout |
     spacing: form?.spacing ?? ("normal" as const),
     dialogWidth: form?.dialogWidth,
   };
+};
+
+/** A field that can show a record's images: a file field, or a group holding one. */
+const canHoldImages = (field: Field) =>
+  field.type === "file" ||
+  (field.type === "group" && field.fields.some((inner) => inner.type === "file"));
+
+/** A field whose value reads on one line, as a card's or page's title, highlight or extra lines. */
+const isOneLine = (field: Field) =>
+  !["group", "file", "records"].includes(field.type) &&
+  (field.type !== "text" || field.isMarkdown !== true);
+
+/**
+ * How `collection`'s records show as cards and each on its own page: the fields playing each part,
+ * those of the wrong type or gone dropped, and the cards' and page's settings. Without a display,
+ * the first field that can hold images shows them; the primary key titles a record without a title.
+ */
+export const resolveRecordDisplay = ({
+  fields,
+  primaryKeyFieldId,
+  layout,
+}: Pick<Collection, "fields" | "primaryKeyFieldId" | "layout">) => {
+  const display = layout?.display;
+  const findField = (id: string | undefined, isFit: (field: Field) => boolean) =>
+    fields.find((field) => field.id === id && isFit(field));
+  const listFields = (ids: ReadonlyArray<string> | undefined, isFit: (field: Field) => boolean) =>
+    (ids ?? []).flatMap((id) => fields.filter((field) => field.id === id && isFit(field)));
+  return {
+    image:
+      display === undefined ? fields.find(canHoldImages) : findField(display.image, canHoldImages),
+    title: findField(display?.title, isOneLine) ?? findField(primaryKeyFieldId, isOneLine),
+    subtitle: findField(display?.subtitle, isOneLine),
+    highlight: findField(display?.highlight, isOneLine),
+    badges: listFields(display?.badges, (field) => field.type === "select"),
+    extra: listFields(layout?.cards?.extra, isOneLine),
+    size: layout?.cards?.size ?? ("medium" as const),
+    imageRatio: layout?.cards?.imageRatio ?? ("square" as const),
+    imageFit: layout?.cards?.imageFit ?? ("contain" as const),
+    template: layout?.page?.template ?? ("form" as const),
+    defaultView: layout?.defaultView ?? ("table" as const),
+  };
+};
+
+/** A field a search looks in: one whose value reads as text. */
+export const isSearchable = (field: Field) =>
+  ["text", "url", "select", "number", "date"].includes(field.type);
+
+/** A field a filter picks a value or a range of: Markdown text runs too long to pick. */
+export const isFilterable = (field: Field) =>
+  ["select", "boolean", "number", "date"].includes(field.type) ||
+  (field.type === "text" && field.isMarkdown !== true);
+
+/**
+ * How people find `collection`'s records: the fields a search looks in, null for every text value
+ * when its layout names none that are left, and the filters shown above them, in order.
+ */
+export const resolveRecordSearch = ({ fields, layout }: Pick<Collection, "fields" | "layout">) => {
+  const listFields = (ids: ReadonlyArray<string>, isFit: (field: Field) => boolean) =>
+    ids.flatMap((id) => fields.filter((field) => field.id === id && isFit(field)));
+  const searched = listFields(layout?.search?.fields ?? [], isSearchable);
+  return {
+    fields: searched.length === 0 ? null : searched,
+    filters: listFields(
+      (layout?.search?.filters ?? []).map(({ field }) => field),
+      isFilterable,
+    ),
+  };
+};
+
+/** The files `field` holds in `values`, a group's in the order of its rows. */
+export const listFieldFiles = (field: Field, values: FieldValues) => {
+  const file =
+    field.type === "file"
+      ? field
+      : field.type === "group"
+        ? field.fields.find((inner) => inner.type === "file")
+        : undefined;
+  if (file === undefined) return [];
+  const paths =
+    field === file
+      ? [field.id]
+      : groupRows(field, values[field.id]).map((row) =>
+          row === null ? `${field.id}.${file.id}` : `${field.id}.${row}.${file.id}`,
+        );
+  return paths.flatMap((path) => {
+    const value = values[path];
+    return typeof value === "string" ? [value] : [];
+  });
 };
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });

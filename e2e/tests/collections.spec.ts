@@ -55,12 +55,15 @@ test("admins define collections whose records people and agents look up and save
 
   // Saving a key the collection holds replaces that record.
   const records = ada.getByRole("table", { name: "Records" });
+  // A record opens on a page of its own, which its address opens again.
   const fileUrl = async (name: string) => {
     await records.getByRole("row", { name: "Record B0ABC" }).click();
-    const dialog = ada.getByRole("dialog", { name: "Record" });
-    const url = await dialog.getByRole("link", { name }).getAttribute("href");
-    await ada.keyboard.press("Escape");
-    await expect(dialog).toHaveCount(0);
+    await expect(ada).toHaveURL(`/settings/collections/${collectionId}/records/B0ABC`);
+    await ada.reload();
+    const record = ada.getByRole("form", { name: "Record" });
+    const url = await record.getByRole("link", { name }).getAttribute("href");
+    await ada.goBack();
+    await expect(record).toHaveCount(0);
     return url!;
   };
   await saveRecord(ada, "B0ABC", "4.5", "manual.pdf");
@@ -148,11 +151,11 @@ test("admins define collections whose records people and agents look up and save
   await ada.goto(`/settings/collections/${collectionId}`);
   await expect(records.getByRole("row", { name: "Record B0XYZ" })).toContainText("3");
   await records.getByRole("row", { name: "Record B0IMP" }).click();
-  const importedLink = ada.getByRole("dialog", { name: "Record" }).getByRole("link", {
+  const importedLink = ada.getByRole("form", { name: "Record" }).getByRole("link", {
     name: "imported.pdf",
   });
   expect((await ada.request.get((await importedLink.getAttribute("href"))!)).status()).toBe(200);
-  await ada.keyboard.press("Escape");
+  await ada.goBack();
 
   // In a chat, the agent writes, but reads with the access of the person chatting.
   await ben.goto("/chats");

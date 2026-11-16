@@ -129,7 +129,7 @@ const LayoutHeader = Schema.String.annotate({
     "Short header text shown in place of the field's label; its description stays the header's tooltip.",
 }).pipe(Schema.decodeTo(TrimmedNonEmptyString));
 
-const LayoutFieldId = FieldPathSegment.annotate({
+export const LayoutFieldId = FieldPathSegment.annotate({
   description: "Id of one of the fields; ids of fields that are gone are ignored.",
 });
 

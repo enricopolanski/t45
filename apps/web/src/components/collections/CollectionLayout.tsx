@@ -9,6 +9,7 @@ import { LayoutEditor } from "../fields/LayoutEditor";
 import { Button } from "../ui/button";
 import { layOutForm } from "../work/StepFields";
 import { ReadOnlyForm } from "../work/StepInputs";
+import { makeCollectionViews } from "./CollectionViews";
 import { listDefaultColumns, RecordTable } from "./Records";
 
 /** Edits how a collection's records show, previewed with its first 50; saving stores it. */
@@ -24,6 +25,16 @@ function CollectionLayoutDialog({
   const [records, setRecords] = useState<ReadonlyArray<CollectionRecordView> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const renderForm = (layout: Collection["layout"], key: string) => {
+    const record = records?.find((candidate) => candidate.key === key);
+    if (record === undefined) return null;
+    const views = buildFieldViews(
+      collection.fields,
+      record.values,
+      (id) => record.files.find((file) => file.id === id) ?? null,
+    );
+    return <ReadOnlyForm form={layOutForm(collection.fields, layout, views, "")} />;
+  };
   useEffect(() => {
     let current = true;
     void api("collections.searchRecords", { collectionId: collection.id, limit: 50 }).then(
@@ -59,16 +70,8 @@ function CollectionLayoutDialog({
           onOpen={(record) => onOpen(record.key)}
         />
       )}
-      renderForm={(layout, key) => {
-        const record = records?.find((candidate) => candidate.key === key);
-        if (record === undefined) return null;
-        const views = buildFieldViews(
-          collection.fields,
-          record.values,
-          (id) => record.files.find((file) => file.id === id) ?? null,
-        );
-        return <ReadOnlyForm form={layOutForm(collection.fields, layout, views, "")} />;
-      }}
+      renderForm={renderForm}
+      views={makeCollectionViews(collection, records ?? [], renderForm)}
       isSaving={isSaving}
       error={records === null ? null : error}
       onSave={(layout) => {
