@@ -17,16 +17,26 @@ import * as AssignmentsHandlers from "./workflows/Assignments.handlers.ts";
 import * as NotificationsHandlers from "./workflows/Notifications.handlers.ts";
 import * as WorkflowsHandlers from "./workflows/Workflows.handlers.ts";
 
+const options = { disableTracing: true, disableFatalDefects: true };
+
+/**
+ * Agents' tools call over HTTP. The browser calls over one WebSocket: as HTTP/1.1 its open
+ * watches would take the 6 connections a browser keeps per host, across tabs, and stall calls.
+ */
 export const layer = Layer.unwrap(
   Effect.gen(function* () {
-    const rpc = yield* RpcServer.toHttpEffect(RpcApi, {
-      disableTracing: true,
-      disableFatalDefects: true,
-    });
-    return HttpRouter.add("POST", "/api/rpc", rpc);
+    const rpc = yield* RpcServer.toHttpEffect(RpcApi, options).pipe(
+      Effect.provide(RpcSerialization.layerNdjson),
+    );
+    const socket = yield* RpcServer.toHttpEffectWebsocket(RpcApi, options).pipe(
+      Effect.provide(RpcSerialization.layerJson),
+    );
+    return Layer.mergeAll(
+      HttpRouter.add("POST", "/api/rpc", rpc),
+      HttpRouter.add("GET", "/api/rpc/socket", socket),
+    );
   }),
 ).pipe(
-  Layer.provide(RpcSerialization.layerNdjson),
   Layer.provide(
     Layer.mergeAll(
       SkillsHandlers.layer,

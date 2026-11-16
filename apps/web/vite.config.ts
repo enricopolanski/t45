@@ -143,7 +143,7 @@ export default defineConfig(() => {
       ...(devProxyTarget
         ? {
             proxy: {
-              "/api": { target: devProxyTarget, changeOrigin: true },
+              "/api": { target: devProxyTarget, changeOrigin: true, ws: true },
             },
           }
         : {}),
