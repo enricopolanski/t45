@@ -109,7 +109,7 @@ export async function startAgentApp() {
   const runtime = ManagedRuntime.make(
     HttpRouter.serve(routes, { disableLogger: true }).pipe(
       Layer.provide(handlers),
-      Layer.provide(RpcSerialization.layerNdjsonWith({ maxBufferSize: "unbounded" })),
+      Layer.provide(RpcSerialization.layerSchemaBinary({ maxFrameSize: "unbounded" })),
       Layer.provideMerge(
         NodeHttpServer.layer(() => NodeHttp.createServer(), { host: "127.0.0.1", port: 0 }),
       ),

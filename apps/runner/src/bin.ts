@@ -37,7 +37,8 @@ const routes = Layer.unwrap(
 );
 
 const layer = HttpRouter.serve(routes).pipe(
-  Layer.provide(RpcSerialization.layerNdjsonWith({ maxBufferSize: "unbounded" })),
+  // Binary, so a VM disk travels as bytes: JSON's base64 for one of a few hundred MB exhausts the heap.
+  Layer.provide(RpcSerialization.layerSchemaBinary({ maxFrameSize: "unbounded" })),
   Layer.provide(ExecutionOrchestrator.layer),
   Layer.provide(
     NodeHttpServer.layerConfig(() => NodeHttp.createServer(), {
