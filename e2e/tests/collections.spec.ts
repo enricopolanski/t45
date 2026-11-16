@@ -135,9 +135,24 @@ test("admins define collections whose records people and agents look up and save
   const lastPage = await search({ limit: 1, offset: 1 });
   expect(lastPage.records.map(({ key }) => key)).toEqual(["B0XYZ"]);
   expect(lastPage.hasMore).toBe(false);
+  // An import uploads the files its lines name from the working folder.
+  const manualId = listings!.fields.find((field) => field.label === "Manual")!.id;
+  await agentApp.writeFile("imported.pdf", "%PDF-1.4 imported");
+  await agentApp.writeFile(
+    "import.jsonl",
+    `${JSON.stringify({ [keyId]: "B0IMP", [priceId]: 7, [manualId]: "imported.pdf" })}\n`,
+  );
+  const imported = await callTool("import_records", { collectionId, path: "import.jsonl" });
+  expect(toolText(imported)).toBe("Saved 1 of 1 records.");
   run.finish();
   await ada.goto(`/settings/collections/${collectionId}`);
   await expect(records.getByRole("row", { name: "Record B0XYZ" })).toContainText("3");
+  await records.getByRole("row", { name: "Record B0IMP" }).click();
+  const importedLink = ada.getByRole("dialog", { name: "Record" }).getByRole("link", {
+    name: "imported.pdf",
+  });
+  expect((await ada.request.get((await importedLink.getAttribute("href"))!)).status()).toBe(200);
+  await ada.keyboard.press("Escape");
 
   // In a chat, the agent writes, but reads with the access of the person chatting.
   await ben.goto("/chats");

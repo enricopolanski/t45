@@ -2,7 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
-import { Collection } from "@t45/contracts/models/Collection";
+import type { Collection } from "@t45/contracts/models/Collection";
 import { FieldValues, fileKeys } from "@t45/contracts/models/Field";
 import { AttachmentUploadResult } from "@t45/contracts/resources/Attachments";
 import * as Result from "effect/Result";
@@ -23,7 +23,6 @@ const ImportInput = Schema.Struct({
 });
 const decodeImport = Schema.decodeUnknownSync(ImportInput);
 const decodeLine = Schema.decodeUnknownResult(Schema.fromJsonString(FieldValues));
-const decodeCollection = Schema.decodeUnknownSync(Collection);
 const importDocument = Schema.toJsonSchemaDocument(ImportInput);
 /** How many refused lines an import names; the rest are only counted. */
 const NAMED_REFUSALS = 10;
@@ -107,7 +106,8 @@ serve({
         const { collectionId, path } = decodeImport(input);
         const collection = await callOperation("collections.get", { collectionId });
         if (Result.isFailure(collection)) refuse(collection.failure);
-        const { fields } = decodeCollection(collection.success);
+        // The operation answers the collection already decoded.
+        const { fields } = collection.success as Collection;
         const lines = (await NodeFSP.readFile(await resolveInWorkingFolder(path), "utf8"))
           .split("\n")
           .map((line, index) => ({ line, number: index + 1 }))

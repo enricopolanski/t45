@@ -219,6 +219,9 @@ export async function startAgentApp() {
     report: (execution: Execution, message: string) =>
       callTool(execution, "report-tools.mjs", "report", { message }),
     callTool,
+    /** Writes a file into the working folder the tools run in, as an agent would. */
+    writeFile: (name: string, contents: string) =>
+      NodeFSP.writeFile(NodePath.join(directory, name), contents),
   };
 
   /**
