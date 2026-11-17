@@ -17,6 +17,13 @@ export function formatDay(date: string) {
  * A number field's value as shown: with `decimals`, exactly that many, else as stored; then its
  * unit, "%" against the number and any other a space after it.
  */
+/** Numbers are written with a decimal comma, whatever the browser's language. */
+const NUMBER_LOCALE = "de-DE";
+
+/**
+ * A number with a decimal comma: with the decimals a field sets, one more below 1 so that small
+ * amounts like 0,057 € still differ, and as stored otherwise.
+ */
 export const formatNumber = (
   value: number,
   {
@@ -24,7 +31,16 @@ export const formatNumber = (
     unit,
   }: { readonly decimals?: number | undefined; readonly unit?: string | undefined },
 ) => {
-  const shown = decimals === undefined ? String(value) : value.toFixed(decimals);
+  const places =
+    decimals === undefined
+      ? undefined
+      : decimals + (decimals > 0 && Math.abs(value) < 1 && value !== 0 ? 1 : 0);
+  const shown = new Intl.NumberFormat(NUMBER_LOCALE, {
+    useGrouping: false,
+    ...(places === undefined
+      ? { maximumFractionDigits: 20 }
+      : { minimumFractionDigits: places, maximumFractionDigits: places }),
+  }).format(value);
   return unit === undefined ? shown : `${shown}${unit === "%" ? "" : " "}${unit}`;
 };
 
@@ -98,6 +114,12 @@ type HistoryEntry = StepView["history"][number];
 const historyLabel = (entry: HistoryEntry, count: number) => {
   if (entry.command === "workflows.setStepField")
     return count === 1 ? "changed a field" : `changed ${count} fields`;
+  if (entry.command === "workflows.proposeStepField")
+    return count === 1 ? "proposed a value" : `proposed ${count} values`;
+  if (entry.command === "workflows.approveProposal")
+    return count === 1 ? "approved a proposal" : `approved ${count} proposals`;
+  if (entry.command === "workflows.discardProposal")
+    return count === 1 ? "discarded a proposal" : `discarded ${count} proposals`;
   if (entry.command === "workflows.attachStepFile")
     return count === 1 ? "attached a file" : `attached ${count} files`;
   if (entry.command === "workflows.removeStepFile")

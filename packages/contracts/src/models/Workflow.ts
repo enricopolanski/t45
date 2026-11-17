@@ -16,6 +16,7 @@ import {
   hasDistinctIds,
   holdsData,
   type Layout,
+  recordKeys,
 } from "./Field.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 
@@ -177,6 +178,24 @@ const StepStatus = Schema.Union([
   }),
 ]);
 
+/** A value proposed for a reviewed field of a step, kept until a member approves or discards it. */
+export const Proposal = Schema.Struct({
+  id: StringId,
+  fieldKey: TrimmedNonEmptyString,
+  /** The field's value; for a records field, the key of one more record to link. */
+  value: Schema.Json,
+  whyYes: TrimmedNonEmptyString,
+  whyNo: Schema.String,
+  /** How well it fits, from 0 to 100; the best are reviewed first. */
+  score: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 }))),
+  /** The agent, or person, who proposed it. */
+  author: StringId,
+  /** A discarded value is kept so that nobody proposes it again. */
+  isDiscarded: Schema.Boolean,
+  createdAt: Schema.DateTimeUtcFromString,
+});
+export type Proposal = typeof Proposal.Type;
+
 /** One step or sub-step of one ticket. */
 export class Step extends Schema.Opaque<Step>()(
   Schema.Struct({
@@ -188,8 +207,59 @@ export class Step extends Schema.Opaque<Step>()(
     assignee: Schema.NullOr(StringId),
     /** The values assigned to the fields of the step */
     values: FieldValues,
+    /** The values proposed for its reviewed fields, open or discarded. */
+    proposals: Schema.optionalKey(Schema.Array(Proposal)),
   }),
 ) {}
+
+/** Agents only propose a reviewed field's value; groups and files are never reviewed. */
+export const isReviewedField = (field: Field) =>
+  field.isReviewed === true && field.type !== "group" && field.type !== "file";
+
+const isSameValue = (one: Schema.Json, other: Schema.Json | undefined) =>
+  JSON.stringify(one) === JSON.stringify(other);
+
+/**
+ * Why `value` can't be proposed for `field` at `key` on `step`: it isn't reviewed, a records field
+ * takes one record's key, or the value is already proposed, discarded or held. Null when it can.
+ */
+export const proposalRefusal = (
+  step: Step,
+  field: Field,
+  key: string,
+  value: Schema.Json,
+): string | null => {
+  if (!isReviewedField(field)) return `${key} isn't reviewed: set its value instead.`;
+  if (field.type === "records" && typeof value !== "string")
+    return `${key} links records: propose one record's key at a time.`;
+  const same = step.proposals?.find(
+    (proposal) => proposal.fieldKey === key && isSameValue(proposal.value, value),
+  );
+  if (same !== undefined)
+    return same.isDiscarded
+      ? `A member discarded that value for ${key}.`
+      : `That value is already proposed for ${key}.`;
+  const current = step.values[key];
+  const isHeld =
+    field.type === "records"
+      ? recordKeys(current).includes(value as string)
+      : isSameValue(value, current);
+  return isHeld ? `${key} already holds that value.` : null;
+};
+
+/** The value a field takes when `proposal` is approved: a records field links one more record. */
+export const approvedValue = (
+  field: Field,
+  current: Schema.Json | undefined,
+  proposal: Proposal,
+) =>
+  field.type === "records" ? [...recordKeys(current), proposal.value as string] : proposal.value;
+
+/** The proposals a member still has to review, best first. */
+export const openProposals = <P extends Proposal>(proposals: ReadonlyArray<P> = []) =>
+  proposals
+    .filter((proposal) => !proposal.isDiscarded)
+    .toSorted((one, other) => (other.score ?? -1) - (one.score ?? -1));
 
 const TicketStatus = Schema.Union([
   Schema.Struct({
@@ -282,6 +352,9 @@ const REFUSALS = {
   step_incomplete: "Fill in every field and complete every sub-step first.",
   reason_required: "Give a reason.",
   invalid_field_value: "That value doesn't fit the field.",
+  field_reviewed:
+    "Agents only propose this field's value, saying why it fits and why not: use propose_value.",
+  invalid_proposal: "That value can't be proposed.",
   invalid_attachment: "That file can't be attached here.",
   invalid_automations:
     "An automation is archived, or its agent can't work on steps or is private to someone other than you and this workflow's creator. Choose another.",

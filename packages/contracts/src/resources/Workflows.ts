@@ -15,6 +15,7 @@ import { CollectionRecordView } from "./Collections.ts";
 
 import {
   Comment,
+  Proposal,
   Refused as WorkflowRefused,
   Slug,
   Step,
@@ -157,6 +158,8 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     layout: Schema.optionalKey(Layout),
     /** Whether the text is shown as Markdown; its value stays the original source. */
     isMarkdown: Schema.optionalKey(Schema.Boolean),
+    /** Whether agents only propose its value, for a member to approve. */
+    isReviewed: Schema.optionalKey(Schema.Boolean),
     /** A sibling URL displayed on this field; its value is still kept in that URL field. */
     linkUrl: Schema.optionalKey(Schema.String),
     repeatable: Schema.Boolean,
@@ -232,6 +235,13 @@ export const StepView = Schema.Struct({
   fields: Schema.Array(FieldView),
   subSteps: Schema.Array(Schema.Struct({ ...StepSummaryView.fields, name: TrimmedNonEmptyString })),
   comments: Schema.Array(Comment),
+  /**
+   * The values proposed for its reviewed fields, open or discarded; a records field's with the
+   * record it would link, null when it is gone.
+   */
+  proposals: Schema.Array(
+    Schema.Struct({ ...Proposal.fields, record: Schema.NullOr(CollectionRecordView) }),
+  ),
   files: Schema.Array(StepFileView),
   /** The automations the step's definition attaches, each with its latest run on this step. */
   automations: Schema.Array(
@@ -433,6 +443,29 @@ export const Workflows = RpcGroup.make(
   Rpc.make("getStep", { payload: step, success: StepView, error: WorkflowErrors }),
   Rpc.make("setStepField", {
     payload: { ...step, fieldKey: TrimmedNonEmptyString, value: FieldValue },
+    error: WorkflowErrors,
+  }),
+  /**
+   * Proposes a value for a reviewed field, for a member to approve or discard: a records field's
+   * proposal is one record's key. Refused when the value is already proposed, discarded or held.
+   */
+  Rpc.make("proposeStepField", {
+    payload: {
+      ...step,
+      fieldKey: TrimmedNonEmptyString,
+      value: FieldValue,
+      ...Struct.pick(Proposal.fields, ["whyYes", "whyNo", "score"]),
+    },
+    error: WorkflowErrors,
+  }),
+  /** A member sets the field to the proposed value, or links its record. */
+  Rpc.make("approveProposal", {
+    payload: { ...step, proposalId: StringId },
+    error: WorkflowErrors,
+  }),
+  /** A member turns the proposal down; nobody can propose its value again. */
+  Rpc.make("discardProposal", {
+    payload: { ...step, proposalId: StringId },
     error: WorkflowErrors,
   }),
   Rpc.make("markStepDone", { payload: step, error: WorkflowErrors }),

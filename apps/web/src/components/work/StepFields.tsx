@@ -286,7 +286,10 @@ const storedText = (field: FieldView) =>
     : field.type === "date"
       ? String(field.value).slice(0, 10)
       : field.type === "number" && typeof field.value === "number"
-        ? formatNumber(field.value, { decimals: field.decimals })
+        ? // A number input takes a decimal point; the browser shows it in the viewer's language.
+          field.decimals === undefined
+          ? String(field.value)
+          : field.value.toFixed(field.decimals)
         : String(field.value);
 
 /** What the field saves from what was typed into it: nothing, a number, or the text. */
@@ -1122,9 +1125,12 @@ export function StepFields({
   onSave,
   onUpload,
   onRecordSaved,
+  review,
 }: {
   readonly fields: ReadonlyArray<FieldView>;
   readonly editable: boolean;
+  /** Shown first: the review of the values proposed for the fields. */
+  readonly review?: ReactNode;
   /** Paths of the fields to flag as still empty. */
   readonly missing: ReadonlySet<string>;
   readonly onSave: (fieldKey: string, value: StepFieldValue) => void;
@@ -1134,6 +1140,7 @@ export function StepFields({
   if (fields.length === 0) return null;
   return (
     <CardFold title="Fields" held={missing.size > 0}>
+      {review}
       {editable ? (
         <FieldInputs
           fields={fields}

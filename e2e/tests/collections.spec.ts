@@ -67,7 +67,7 @@ test("admins define collections whose records people and agents look up and save
     return url!;
   };
   await saveRecord(ada, "B0ABC", "4.5", "manual.pdf");
-  await expect(records.getByRole("row", { name: "Record B0ABC" })).toContainText("4.50 €");
+  await expect(records.getByRole("row", { name: "Record B0ABC" })).toContainText("4,50 €");
   await expect(records.getByRole("columnheader", { name: "Price" })).toBeVisible();
   await expect(records.getByRole("columnheader", { name: "Manual" })).toHaveCount(0);
   const firstUrl = await fileUrl("manual.pdf");

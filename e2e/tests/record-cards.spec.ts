@@ -48,7 +48,7 @@ test("a collection's layout shows its records as cards and each on a showcase pa
   const previewCard = layout
     .getByRole("list", { name: "Records" })
     .getByRole("button", { name: "Record Desk lamp" });
-  await expect(previewCard).toContainText("12.00 €");
+  await expect(previewCard).toContainText("12,00 €");
   await previewCard.click();
   await chooseOption(ada, "Template", "Showcase");
   await expect(layout.getByRole("heading", { name: "Desk lamp" })).toBeVisible();
@@ -59,12 +59,12 @@ test("a collection's layout shows its records as cards and each on a showcase pa
   const card = ada
     .getByRole("list", { name: "Records" })
     .getByRole("button", { name: "Record Desk lamp" });
-  await expect(card).toContainText("12.00 €");
+  await expect(card).toContainText("12,00 €");
   await expect(card.locator("img")).toHaveJSProperty("naturalWidth", 1);
   await card.click();
   await expect(ada.getByRole("heading", { name: "Desk lamp", level: 2 })).toBeVisible();
   await expect(ada.getByRole("img", { name: "Desk lamp" })).toHaveJSProperty("naturalWidth", 1);
-  await expect(ada.getByText("12.00 €")).toBeVisible();
+  await expect(ada.getByText("12,00 €")).toBeVisible();
   await ada.getByRole("button", { name: "Edit record" }).click();
   await expect(ada.getByRole("form", { name: "Record" }).getByLabel("Price")).toHaveValue("12.00");
 });

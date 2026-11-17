@@ -62,7 +62,7 @@ test("a step lists the collection records it links, adds new ones to the collect
   // A new record goes to the collection and is linked here.
   await ada.getByRole("button", { name: "New record" }).click();
   await saveRecord(ada, "B0NEW", "9.5");
-  await expect(linked.getByRole("row", { name: "Record B0NEW" })).toContainText("9.5");
+  await expect(linked.getByRole("row", { name: "Record B0NEW" })).toContainText("9,5");
 
   // A linked record opens as on the collection's page, and saving it shows here.
   await linked.getByRole("row", { name: "Record B0OLD" }).click();

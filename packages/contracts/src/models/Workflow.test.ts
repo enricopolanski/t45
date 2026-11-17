@@ -12,6 +12,7 @@ import {
   type WorkflowEdit,
   type WorkflowVersion,
   applyWorkflowEdits,
+  approvedValue,
   canAttachAgent,
   canSeeStep,
   changedLayouts,
@@ -21,6 +22,8 @@ import {
   currentStep,
   hasValidInputs,
   occupiedStep,
+  openProposals,
+  proposalRefusal,
   putTicketStep,
   stepEntryRefusal,
   stepIds,
@@ -481,5 +484,69 @@ describe("explaining a field that doesn't fit", () => {
     assert.isNull(fieldValueProblem(fields[1]!, "f_duedate", "2026-12-01"));
     assert.isNotNull(fieldValueProblem(fields[1]!, "f_duedate", '"2026-12-01"'));
     assert.isNotNull(fieldValueProblem(fields[1]!, "f_duedate", "1/12/2026"));
+  });
+});
+
+describe("proposing a value", () => {
+  const listings: Field = {
+    id: "f_listings",
+    label: "Listings",
+    type: "records",
+    collectionId: "collection01",
+    isReviewed: true,
+  };
+  const brand: Field = { id: "f_brand", label: "Brand", type: "text", isReviewed: true };
+  const proposal = (id: string, fieldKey: string, value: string, extra = {}) => ({
+    id,
+    fieldKey,
+    value,
+    whyYes: "Same width and length.",
+    whyNo: "",
+    author: "agent001",
+    isDiscarded: false,
+    createdAt: at,
+    ...extra,
+  });
+  const reviewed: Step = {
+    ...step,
+    values: { f_listings: ["B0LINKED"], f_brand: "Tesa" },
+    proposals: [
+      proposal("proposal1", "f_listings", "B0OPEN", { score: 40 }),
+      proposal("proposal2", "f_listings", "B0GONE", { isDiscarded: true }),
+      proposal("proposal3", "f_brand", "Scotch", { score: 90 }),
+      proposal("proposal4", "f_brand", "3M"),
+    ],
+  };
+
+  it("takes one record's key at a time, never one proposed, discarded or already linked", () => {
+    assert.isNull(proposalRefusal(reviewed, listings, "f_listings", "B0NEW"));
+    assert.include(proposalRefusal(reviewed, listings, "f_listings", ["B0NEW"])!, "one record");
+    assert.include(
+      proposalRefusal(reviewed, listings, "f_listings", "B0OPEN")!,
+      "already proposed",
+    );
+    assert.include(proposalRefusal(reviewed, listings, "f_listings", "B0GONE")!, "discarded");
+    assert.include(proposalRefusal(reviewed, listings, "f_listings", "B0LINKED")!, "already holds");
+  });
+
+  it("is only for reviewed fields, and never the value a field holds", () => {
+    const { isReviewed: _, ...plain } = brand;
+    assert.include(proposalRefusal(reviewed, plain, "f_brand", "Pattex")!, "isn't reviewed");
+    assert.include(proposalRefusal(reviewed, brand, "f_brand", "Tesa")!, "already holds");
+    assert.isNull(proposalRefusal(reviewed, brand, "f_brand", "Pattex"));
+  });
+
+  it("links one more record when approved, and replaces any other value", () => {
+    const [linked, , named] = reviewed.proposals!;
+    assert.deepStrictEqual(approvedValue(listings, ["B0LINKED"], linked!), ["B0LINKED", "B0OPEN"]);
+    assert.deepStrictEqual(approvedValue(listings, undefined, linked!), ["B0OPEN"]);
+    assert.strictEqual(approvedValue(brand, "Tesa", named!), "Scotch");
+  });
+
+  it("reviews the open proposals best first, unscored last", () => {
+    assert.deepStrictEqual(
+      openProposals(reviewed.proposals).map(({ id }) => id),
+      ["proposal3", "proposal1", "proposal4"],
+    );
   });
 });

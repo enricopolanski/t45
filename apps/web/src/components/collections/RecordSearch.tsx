@@ -7,6 +7,8 @@ import { useCallback, useEffect, useState } from "react";
 import { describeFailure } from "../../lib/failures";
 import { api } from "../../rpc/api";
 import { Choice } from "../fields/LayoutEditor";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { plural } from "../work/workLogic";
@@ -16,11 +18,14 @@ type Range = Extract<Filters[string], object>;
 
 const ALL = "$all";
 
+/** How many records a page of a search shows. */
+const RECORDS_PER_PAGE = 25;
+
 /**
  * The records of a collection its search finds: their words, looked for in `fields` or the
- * layout's, and their filters, loaded a page at a time, with how many match of how many there are.
+ * layout's, and their filters, on `page` of their pages, with how many match of how many there are.
  */
-export function useRecordSearch(collectionId: string, fields?: ReadonlyArray<string>) {
+export function useRecordSearch(collectionId: string, fields?: ReadonlyArray<string>, page = 1) {
   const [text, setText] = useState("");
   const [filters, setFilters] = useState<Filters>({});
   const [found, setFound] = useState<{
@@ -31,19 +36,20 @@ export function useRecordSearch(collectionId: string, fields?: ReadonlyArray<str
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const search = useCallback(
-    (offset: number) =>
+    () =>
       api("collections.searchRecords", {
         collectionId,
         text,
         filters,
-        offset,
+        offset: (page - 1) * RECORDS_PER_PAGE,
+        limit: RECORDS_PER_PAGE,
         ...(fields === undefined ? {} : { fields }),
       }),
-    [collectionId, text, filters, fields],
+    [collectionId, text, filters, fields, page],
   );
   useEffect(() => {
     let current = true;
-    void search(0).then(
+    void search().then(
       (loaded) => current && setFound(loaded),
       (cause: unknown) => current && setError(describeFailure(cause)),
     );
@@ -58,18 +64,75 @@ export function useRecordSearch(collectionId: string, fields?: ReadonlyArray<str
     setFilters,
     found,
     error,
-    loadMore: () =>
-      void search(found?.records.length ?? 0).then(
-        (more) =>
-          setFound((shown) => ({
-            ...more,
-            records: [...(shown?.records ?? []), ...more.records],
-          })),
-        (cause: unknown) => setError(describeFailure(cause)),
-      ),
     refresh: () =>
-      void search(0).then(setFound, (cause: unknown) => setError(describeFailure(cause))),
+      void search().then(setFound, (cause: unknown) => setError(describeFailure(cause))),
   };
+}
+
+/** The pages to offer around `page` of `last`: the first, the last and its neighbours, gaps as null. */
+const pagesAround = (page: number, last: number) => {
+  const shown = [...new Set([1, page - 1, page, page + 1, last])]
+    .filter((each) => each >= 1 && each <= last)
+    .toSorted((one, other) => one - other);
+  return shown.flatMap((each, at) => (at > 0 && each - shown[at - 1]! > 1 ? [null, each] : [each]));
+};
+
+/** Which of `matchCount` records `page` shows, and the way to the other pages. */
+export function RecordPager({
+  page,
+  matchCount,
+  onPage,
+}: {
+  readonly page: number;
+  readonly matchCount: number;
+  readonly onPage: (page: number) => void;
+}) {
+  const last = Math.max(1, Math.ceil(matchCount / RECORDS_PER_PAGE));
+  if (last === 1) return null;
+  const first = (page - 1) * RECORDS_PER_PAGE + 1;
+  return (
+    <nav aria-label="Pages" className="flex flex-wrap items-center gap-1">
+      <span className="me-2 text-sm text-muted-foreground tabular-nums">
+        {first}–{Math.min(page * RECORDS_PER_PAGE, matchCount)} of {matchCount}
+      </span>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label="Previous page"
+        disabled={page === 1}
+        onClick={() => onPage(page - 1)}
+      >
+        <ChevronLeftIcon />
+      </Button>
+      {pagesAround(page, last).map((each, at) =>
+        each === null ? (
+          <span key={`gap-${at}`} className="px-1 text-sm text-muted-foreground">
+            …
+          </span>
+        ) : (
+          <Button
+            key={each}
+            size="sm"
+            variant={each === page ? "secondary" : "ghost"}
+            aria-label={`Page ${each}`}
+            aria-current={each === page ? "page" : undefined}
+            onClick={() => onPage(each)}
+          >
+            {each}
+          </Button>
+        ),
+      )}
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label="Next page"
+        disabled={page === last}
+        onClick={() => onPage(page + 1)}
+      >
+        <ChevronRightIcon />
+      </Button>
+    </nav>
+  );
 }
 
 /** One bound of a range as its input holds it: a number for a number field, else a date. */

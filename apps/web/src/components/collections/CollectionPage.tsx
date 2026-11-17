@@ -16,19 +16,38 @@ import { Switch } from "../ui/switch";
 import { Tabs, TabsList, TabsTab } from "../ui/tabs";
 import { WorkFrame } from "../work/WorkFrame";
 import { RecordCards } from "./RecordDisplay";
-import { RecordCount, RecordFilterBar, useRecordSearch } from "./RecordSearch";
+import { RecordCount, RecordFilterBar, RecordPager, useRecordSearch } from "./RecordSearch";
 import { RecordDialog, RecordTable } from "./Records";
 
 /**
- * A collection's records as a table or cards: found by their words and filters, counted, opened on
- * their own page, and added.
+ * A collection's records as a table or cards: found by their words and filters, counted, shown
+ * `page` by page, opened on their own page, and added. A new search starts on the first page.
  */
-export function CollectionPage({ collectionId }: { readonly collectionId: string }) {
+export function CollectionPage({
+  collectionId,
+  page,
+  onPage,
+}: {
+  readonly collectionId: string;
+  readonly page: number;
+  readonly onPage: (page: number) => void;
+}) {
   const isAdmin = useIsAdmin();
   const navigate = useNavigate();
   const [collection, setCollection] = useState<Collection | null>(null);
-  const { text, setText, filters, setFilters, found, loadMore, refresh, ...search } =
-    useRecordSearch(collectionId);
+  const { text, filters, found, refresh, ...search } = useRecordSearch(
+    collectionId,
+    undefined,
+    page,
+  );
+  const setText = (next: string) => {
+    search.setText(next);
+    onPage(1);
+  };
+  const setFilters = (next: typeof filters) => {
+    search.setFilters(next);
+    onPage(1);
+  };
   const [failure, setError] = useState<string | null>(null);
   const error = failure ?? search.error;
   const [isReordering, setIsReordering] = useState(false);
@@ -155,13 +174,9 @@ export function CollectionPage({ collectionId }: { readonly collectionId: string
           }
         />
       ) : null}
-      {found?.hasMore ? (
-        <div>
-          <Button size="sm" variant="outline" onClick={loadMore}>
-            Show more
-          </Button>
-        </div>
-      ) : null}
+      {found === null ? null : (
+        <RecordPager page={page} matchCount={found.matchCount} onPage={onPage} />
+      )}
       {isAdding ? (
         <RecordDialog
           collection={collection}

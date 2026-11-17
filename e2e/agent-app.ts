@@ -245,6 +245,8 @@ export async function startAgentApp() {
         T45_SERVER_URL: url,
         T45_TOOL_TOKEN: Redacted.value(execution.request.toolToken),
         T45_TOOL_INSTANCE: "",
+        // Bound by the runner from the execution's context, as for a step's automation.
+        T45_STEP_ID: execution.request.context.stepId ?? "",
       },
       stdio: ["pipe", "pipe", "pipe"],
     });

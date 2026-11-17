@@ -155,6 +155,7 @@ export function WorkflowStepEditor({
               depth={0}
               areColumns={false}
               collections={collections}
+              areReviewable
               groupLayout={(group, setGroup) => (
                 <GroupLayoutButton
                   workflowId={workflow.id}

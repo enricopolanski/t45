@@ -1,5 +1,5 @@
 import type { Collection } from "@t45/contracts/models/Collection";
-import { type Field, holdsData } from "@t45/contracts/models/Field";
+import { type Field, holdsData, isUrlFieldValue } from "@t45/contracts/models/Field";
 import {
   listFieldFiles,
   resolveRecordDisplay,
@@ -13,6 +13,8 @@ import { useState } from "react";
 
 import { attachmentUrl } from "../../lib/attachmentUrl";
 import { cn } from "../../lib/utils";
+import { webUrlHost } from "../../lib/webUrl";
+import { Favicon } from "../ExternalUrl";
 import { MarkdownText } from "../markdown/MarkdownText";
 import { Badge } from "../ui/badge";
 import { formatRecordValue, renderRecordValue } from "./Records";
@@ -41,23 +43,40 @@ const TONE_BADGES = {
   negative: "error",
 } as const;
 
-/** The record's options of `fields` as badges in their tones. */
+/** The site of the record's first web address, which its badges lead with. */
+const linkHost = (collection: RecordShape, record: CollectionRecordView) => {
+  for (const field of collection.fields) {
+    const value = record.values[field.id];
+    if (field.type === "url" && isUrlFieldValue(value)) return webUrlHost(value);
+  }
+  return null;
+};
+
+/** The icon of the site the record links to, then its options of `fields` as badges in their tones. */
 function RecordBadges({
+  collection,
   fields,
   record,
 }: {
+  readonly collection: RecordShape;
   readonly fields: ReadonlyArray<Field>;
   readonly record: CollectionRecordView;
 }) {
+  const host = linkHost(collection, record);
   const badges = fields.flatMap((field) => {
     const option = record.values[field.id];
     return field.type === "select" && typeof option === "string"
       ? [{ id: field.id, option, tone: field.tones?.[option] ?? "neutral" }]
       : [];
   });
-  if (badges.length === 0) return null;
+  if (badges.length === 0 && host === null) return null;
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap items-center gap-1">
+      {host === null ? null : (
+        <span className="leading-none">
+          <Favicon host={host} />
+        </span>
+      )}
       {badges.map(({ id, option, tone }) => (
         <Badge key={id} variant={TONE_BADGES[tone]}>
           {option}
@@ -128,7 +147,7 @@ export function RecordCards({
                 </div>
               )}
               <div className="flex flex-1 flex-col gap-1 p-3">
-                <RecordBadges fields={display.badges} record={record} />
+                <RecordBadges collection={collection} fields={display.badges} record={record} />
                 <span className="line-clamp-2 font-medium">{showValue(display.title, record)}</span>
                 {display.subtitle ? (
                   <span className="text-sm text-muted-foreground">
@@ -217,7 +236,7 @@ export function RecordShowcase({
         </div>
       ) : null}
       <div className="flex min-w-0 flex-col gap-3">
-        <RecordBadges fields={display.badges} record={record} />
+        <RecordBadges collection={collection} fields={display.badges} record={record} />
         <h2 className="text-2xl font-semibold text-balance">{title}</h2>
         {display.subtitle ? (
           <p className="text-muted-foreground">{showValue(display.subtitle, record)}</p>

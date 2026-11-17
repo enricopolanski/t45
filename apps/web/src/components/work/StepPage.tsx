@@ -40,6 +40,7 @@ import { CardFold } from "./CardFold";
 import { OtherStep } from "./ItemSteps";
 import { ItemDescription } from "./ItemDescription";
 import { StepComments, StepFiles } from "./StepConversation";
+import { ProposalReview } from "./ProposalReview";
 import { attachStepFile, StepFields } from "./StepFields";
 import { StepInputs } from "./StepInputs";
 import { StepStatus } from "./StepStatus";
@@ -163,6 +164,23 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         }
         onUpload={(fieldKey, file) => void act(() => attachStepFile(view.step.id, file, fieldKey))}
         onRecordSaved={() => void act(() => Promise.resolve())}
+        review={
+          actions.canEditFields ? (
+            <ProposalReview
+              view={view}
+              onReview={(proposal, isApproved) => {
+                const reviewed = { ...step, proposalId: proposal.id };
+                return act(
+                  () =>
+                    isApproved
+                      ? api("workflows.approveProposal", reviewed)
+                      : api("workflows.discardProposal", reviewed),
+                  true,
+                );
+              }}
+            />
+          ) : null
+        }
       />
       <StepSubSteps view={view} />
       <StepComments

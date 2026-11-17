@@ -56,7 +56,7 @@ test("a collection keeps its links and column order when linked from a step", as
   // Display settings remain editable after records exist, for every other field type.
   for (const [target, text] of [
     ["Key", "B0ABC"],
-    ["Price", "12.5"],
+    ["Price", "12,5"],
     ["Product title", "Masking tape"],
   ]) {
     await ada.getByRole("link", { name: "Edit collection" }).click();
@@ -143,7 +143,7 @@ test("a collection keeps its links and column order when linked from a step", as
   await ada.reload();
   await expect(records.getByRole("columnheader")).toHaveText(columnOrder);
   await expect(row.getByRole("cell").nth(2)).toHaveText("B0ABC");
-  await expect(row.getByRole("cell").nth(3)).toHaveText("12.5");
+  await expect(row.getByRole("cell").nth(3)).toHaveText("12,5");
   await expect(row.getByRole("link", { name: "Blue masking tape", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/blue",
@@ -152,6 +152,11 @@ test("a collection keeps its links and column order when linked from a step", as
   await ada.getByRole("link", { name: "Edit collection" }).click();
   await ada.getByRole("button", { name: "Save collection" }).click();
   await expect(records.getByRole("columnheader")).toHaveText(columnOrder);
+  // A card leads with the icon of the site its record links to.
+  await ada.getByRole("tab", { name: "Grid" }).click();
+  await expect(
+    ada.getByRole("button", { name: "Record B0ABC" }).locator("img[src*='/s2/favicons']"),
+  ).toHaveAttribute("src", "https://www.google.com/s2/favicons?domain=example.com&sz=32");
 
   const workflowId = await createWorkflow(ada, "Market check");
   await ada.getByRole("button", { name: "Add step" }).click();

@@ -30,6 +30,12 @@ const FieldBase = {
         "Shown only in an entry's or record's details, not as a column of the table listing them.",
     }),
   ),
+  isReviewed: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "On a step, agents only propose this field's value, saying why it fits and why not, and a member approves or discards each proposal. Not for groups or files.",
+    }),
+  ),
 };
 
 const DefaultValue = Schema.optionalKey(

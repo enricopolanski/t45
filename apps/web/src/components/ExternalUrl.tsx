@@ -12,7 +12,8 @@ import { GitHubIcon } from "./Icons";
 const FAVICON_CLASS_NAME = "inline-block size-3.5 [vertical-align:-0.125em]";
 const failedFaviconHosts = new Set<string>();
 
-function Favicon({ host }: { host: string }) {
+/** The icon of the site at `host`, a globe when it has none. */
+export function Favicon({ host }: { host: string }) {
   const [failedHost, setFailedHost] = useState<string | null>(null);
   const isGitHub = host === "github.com" || host.endsWith(".github.com");
   const faviconUrl = isGitHub ? null : getFaviconUrl(`https://${host}`);
