@@ -53,7 +53,7 @@ export function Choice<V extends string>({
 }: {
   readonly label: string;
   readonly value: V;
-  readonly choices: Readonly<Record<V, string>>;
+  readonly choices: Readonly<Record<V, ReactNode>>;
   readonly onChange: (value: V) => void;
 }) {
   const keys = Object.keys(choices).filter((key): key is V => key in choices);

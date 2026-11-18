@@ -2,7 +2,6 @@ import { openProposals } from "@t45/contracts/models/Workflow";
 import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
 import { useState } from "react";
 
-import { RecordShowcase } from "../collections/RecordDisplay";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -15,6 +14,7 @@ import {
 } from "../ui/dialog";
 import { ErrorText } from "../ui/error-text";
 import { FieldValue } from "./StepFields";
+import { RecordComparison } from "./RecordComparison";
 import { useWorkDirectory } from "./useWorkDirectory";
 import { actorName } from "./workLogic";
 
@@ -36,15 +36,23 @@ const findField = (fields: ReadonlyArray<FieldView>, key: string): FieldView | n
 function ProposedValue({
   field,
   proposal,
+  inputs,
 }: {
   readonly field: FieldView;
   readonly proposal: Proposal;
+  readonly inputs: ReadonlyArray<FieldView>;
 }) {
   if (field.type === "records") {
     return field.collection === null || proposal.record === null ? (
       <p className="text-sm text-muted-foreground">The record is gone.</p>
     ) : (
-      <RecordShowcase collection={field.collection} record={proposal.record} />
+      <RecordComparison
+        key={proposal.id}
+        inputs={inputs}
+        collection={field.collection}
+        record={proposal.record}
+        rationale={proposal.whyYes}
+      />
     );
   }
   const { linkUrl: _, ...unlinked } = field;
@@ -83,9 +91,11 @@ export function ProposalReview({
   const [isOpen, setIsOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [postponed, setPostponed] = useState<ReadonlyArray<string>>([]);
   const open = openProposals(view.proposals);
-  const proposal = open[0];
-  if (proposal === undefined && !isOpen) return null;
+  const remaining = open.filter((candidate) => !postponed.includes(candidate.id));
+  const proposal = remaining[0];
+  if (open.length === 0 && !isOpen) return null;
   const field = proposal === undefined ? null : findField(view.fields, proposal.fieldKey);
   const review = (isApproved: boolean) => {
     if (proposal === undefined) return;
@@ -94,23 +104,34 @@ export function ProposalReview({
     void onReview(proposal, isApproved).then((failure) => {
       setIsBusy(false);
       setError(failure);
-      if (failure === null && open.length === 1) setIsOpen(false);
+      if (failure === null && remaining.length === 1) setIsOpen(false);
     });
   };
   return (
     <>
       <div>
-        <Button type="button" size="sm" onClick={() => setIsOpen(true)}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            setPostponed([]);
+            setIsOpen(true);
+          }}
+        >
           Review ({open.length})
         </Button>
       </div>
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogPopup aria-label="Review" className="sm:max-w-3xl">
+        <DialogPopup
+          aria-label="Review"
+          className={field?.type === "records" ? "sm:max-w-7xl" : "sm:max-w-3xl"}
+        >
           <DialogHeader>
             <DialogTitle>
               Review {field?.label ?? ""}
               <span className="ms-2 text-sm font-normal text-muted-foreground tabular-nums">
-                {open.length} left
+                {remaining.length} left
+                {postponed.length > 0 ? ` · ${postponed.length} postponed` : ""}
               </span>
             </DialogTitle>
           </DialogHeader>
@@ -123,7 +144,7 @@ export function ProposalReview({
                   )}
                   Proposed by {actorName(directory, proposal.author)}
                 </p>
-                <ProposedValue field={field} proposal={proposal} />
+                <ProposedValue field={field} proposal={proposal} inputs={view.inputs} />
                 <div className="grid gap-3 rounded-lg bg-muted/50 p-3 text-sm sm:grid-cols-2">
                   <section aria-label="Why it fits" className="flex flex-col gap-1">
                     <h3 className="text-xs font-medium text-muted-foreground">Why it fits</h3>
@@ -138,10 +159,18 @@ export function ProposalReview({
               </div>
             </DialogPanel>
           )}
-          <DialogFooter>
+          <DialogFooter className="max-sm:flex-col">
             <Button
               type="button"
-              variant="outline"
+              disabled={isBusy || proposal === undefined}
+              variant="success"
+              onClick={() => review(true)}
+            >
+              Approve
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
               disabled={isBusy || proposal === undefined}
               onClick={() => review(false)}
             >
@@ -149,10 +178,15 @@ export function ProposalReview({
             </Button>
             <Button
               type="button"
+              variant="outline"
               disabled={isBusy || proposal === undefined}
-              onClick={() => review(true)}
+              onClick={() => {
+                if (proposal === undefined) return;
+                setPostponed((current) => [...current, proposal.id]);
+                if (remaining.length === 1) setIsOpen(false);
+              }}
             >
-              Approve
+              Maybe (postpone)
             </Button>
           </DialogFooter>
         </DialogPopup>

@@ -225,10 +225,19 @@ function SearchSettings({
   const resolved = resolveRecordSearch({ ...collection, layout: layout ?? {} });
   const filterIds = resolved.filters.map((field) => field.id);
   const setSearch = (next: Search) => onChange(withPart(layout, "search", next));
-  const setFilters = (ids: ReadonlyArray<string>) =>
+  const setFilters = (ids: ReadonlyArray<string>, iconLinks = resolved.iconLinks) =>
     setSearch(
-      withKey(search, "filters", ids.length === 0 ? undefined : ids.map((field) => ({ field }))),
+      withKey(
+        search,
+        "filters",
+        ids.length === 0
+          ? undefined
+          : ids.map((field) =>
+              iconLinks[field] === undefined ? { field } : { field, iconLink: iconLinks[field] },
+            ),
+      ),
     );
+  const urlFields = collection.fields.filter((field) => field.type === "url");
   const addable = collection.fields.filter(
     (field) => isFilterable(field) && !filterIds.includes(field.id),
   );
@@ -262,6 +271,22 @@ function SearchSettings({
                   isLast={at === filterIds.length - 1}
                 />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{field.label}</span>
+                {urlFields.length > 0 && field.type !== "number" && field.type !== "date" ? (
+                  <Choice
+                    label={`Site icons of the ${field.label} filter`}
+                    value={resolved.iconLinks[field.id] ?? NONE}
+                    choices={{
+                      [NONE]: "No site icons",
+                      ...Object.fromEntries(
+                        urlFields.map((url) => [url.id, `Site icons from ${url.label}`]),
+                      ),
+                    }}
+                    onChange={(id) => {
+                      const { [field.id]: _, ...rest } = resolved.iconLinks;
+                      setFilters(filterIds, id === NONE ? rest : { ...rest, [field.id]: id });
+                    }}
+                  />
+                ) : null}
                 <Button
                   type="button"
                   size="icon-xs"

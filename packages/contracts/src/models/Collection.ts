@@ -120,7 +120,17 @@ export const CollectionLayout = Schema.Struct({
         }),
       ),
       filters: Schema.optionalKey(
-        Schema.Array(Schema.Struct({ field: LayoutFieldId })).annotate({
+        Schema.Array(
+          Schema.Struct({
+            field: LayoutFieldId,
+            iconLink: Schema.optionalKey(
+              LayoutFieldId.annotate({
+                description:
+                  "A URL field: each value of the filter shows the icon of the site its records link to there.",
+              }),
+            ),
+          }),
+        ).annotate({
           description:
             "The filters shown above the records, in order: a select, yes/no or text field picks one of its values, a number or date field a range.",
         }),

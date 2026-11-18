@@ -90,9 +90,20 @@ export const CollectionOperations = RpcGroup.make(
     error: CollectionErrors,
   }),
   Rpc.make("listFieldValues", {
-    payload: { collectionId: StringId, fieldId: FieldPathSegment },
-    /** The distinct values a top-level field holds across the records, in order, up to 500. */
-    success: Schema.Array(Schema.Union([Schema.String, Schema.Finite])),
+    payload: {
+      collectionId: StringId,
+      fieldId: FieldPathSegment,
+      /** A URL field: each value then names a web address one of its records holds there. */
+      linkFieldId: Schema.optionalKey(FieldPathSegment),
+    },
+    /** The distinct values a top-level field holds, in order, up to 500, each with how many records hold it. */
+    success: Schema.Array(
+      Schema.Struct({
+        value: Schema.Union([Schema.String, Schema.Finite]),
+        count: Schema.Finite,
+        link: Schema.optionalKey(Schema.String),
+      }),
+    ),
     error: CollectionErrors,
   }),
   Rpc.make("saveRecord", {

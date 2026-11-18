@@ -35,6 +35,8 @@ test("agents only propose a reviewed field's values, which members approve or di
   await expect(ada.getByRole("heading", { name: "Listings", level: 1 })).toBeVisible();
   await saveListing(ada, "B0AAA", "Masking tape 50 m");
   await saveListing(ada, "B0BBB", "Crepe tape 50 m");
+  await saveListing(ada, "source-19", "Supplier tape 19 mm x 50 m");
+  await saveListing(ada, "source-38", "Supplier tape 38 mm x 50 m");
 
   await ada.goto("/settings/automations/runs");
   await ada.getByRole("button", { name: "New automation" }).click();
@@ -45,22 +47,60 @@ test("agents only propose a reviewed field's values, which members approve or di
 
   const workflowId = await createWorkflow(ada, "Benchmark");
   await ada.getByRole("button", { name: "Add step" }).click();
-  await ada.getByLabel("Step title").fill("Match");
+  await ada.getByLabel("Step title").fill("Collect");
   await ada.getByRole("button", { name: "Add field" }).click();
-  await ada.getByLabel("Label", { exact: true }).fill("Matches");
+  await ada.getByLabel("Label", { exact: true }).fill("Articles");
   await chooseOption(ada, "Type", "Collection records");
   await chooseOption(ada, "Collection", "Listings");
-  await ada.getByRole("switch", { name: "Agents propose, members approve" }).click();
-  await ada.getByRole("button", { name: "Add field" }).click();
-  await ada.getByLabel("Label", { exact: true }).nth(1).fill("Brand");
+  await ada.getByRole("button", { name: "Add step" }).click();
+  await ada.getByLabel("Step title").nth(1).fill("Match");
+  await ada.getByRole("button", { name: "Add field" }).nth(1).click();
+  await ada.getByLabel("Label", { exact: true }).nth(1).fill("Matches");
+  await chooseOption(ada, "Type", "Collection records", 1);
+  await chooseOption(ada, "Collection", "Listings", 1);
   await ada.getByRole("switch", { name: "Agents propose, members approve" }).nth(1).click();
-  await chooseOption(ada, "Add automation", "Match listings");
+  await ada.getByRole("button", { name: "Add field" }).nth(1).click();
+  await ada.getByLabel("Label", { exact: true }).nth(2).fill("Brand");
+  await ada.getByRole("switch", { name: "Agents propose, members approve" }).nth(2).click();
+  await chooseOption(ada, "Add input", "Collect › Articles", 1);
+  await chooseOption(ada, "Add automation", "Match listings", 1);
   await saveSteps(ada);
   const projectId = await createProject(ada, workflowId);
+  await addStepMembers(ada, "Collect", ["ada"]);
   await addStepMembers(ada, "Match", ["ada"]);
   await ada.getByRole("button", { name: "Adopt", exact: true }).click();
   await expect(ada.getByText("New tickets start on version 1")).toBeVisible();
   await startItem(ada, projectId, "Tape 50 m");
+  for (const key of ["source-19", "source-38"]) {
+    await ada.getByRole("button", { name: "Link record", exact: true }).click();
+    const picker = ada.getByRole("dialog", { name: "Link a record to Articles" });
+    await picker.getByRole("row", { name: `Record ${key}`, exact: true }).click();
+    await expect(picker).toHaveCount(0);
+  }
+  await ada.getByRole("button", { name: /^Status: To do/u }).click();
+  await ada.getByRole("menuitem", { name: "Mark done" }).click();
+  await ada.waitForURL(/\/my-work$/u);
+  await ada.goto(`/boards/${projectId}`);
+  await ada
+    .getByRole("region", { name: "Match", exact: true })
+    .getByText("Tape 50 m", { exact: true })
+    .click();
+
+  // The current step can inspect source articles and their details without editing or leaving it.
+  const matchUrl = ada.url();
+  await ada.getByRole("button", { name: "View previous step data", exact: true }).click();
+  const inputs = ada.getByRole("dialog", { name: "Previous step data", exact: true });
+  const articles = inputs.getByRole("table", { name: "Articles", exact: true });
+  await expect(articles.getByRole("row", { name: /^Record /u })).toHaveCount(2);
+  await articles.getByRole("row", { name: "Record source-19", exact: true }).click();
+  const source = ada.getByRole("dialog", { name: "Articles · source-19", exact: true });
+  await expect(source.getByText("Supplier tape 19 mm x 50 m", { exact: true })).toBeVisible();
+  await expect(source.getByRole("textbox")).toHaveCount(0);
+  await expect(source.getByRole("button", { name: /save|approve|discard/iu })).toHaveCount(0);
+  await source.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(articles).toBeVisible();
+  await inputs.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(ada).toHaveURL(matchUrl);
 
   const automations = ada.getByRole("complementary", { name: "Automations" });
   await automations.getByRole("button", { name: "Run Automation", exact: true }).click();
@@ -86,8 +126,8 @@ test("agents only propose a reviewed field's values, which members approve or di
       whyNo: "Another brand.",
     });
   for (const proposed of [
-    await propose("Matches", "B0AAA", 60, "Same length, paper backing."),
-    await propose("Matches", "B0BBB", 90, "Same width and length."),
+    await propose("Matches", "B0AAA", 60, "Matches source-19 (same length, paper backing)."),
+    await propose("Matches", "B0BBB", 90, "Matches source-38 (same width and length)."),
     await propose("Brand", "Tesa", 70, "The supplier's sheet names Tesa."),
   ])
     expect(proposed.isError).not.toBe(true);
@@ -98,8 +138,30 @@ test("agents only propose a reviewed field's values, which members approve or di
   await expect(review.getByRole("heading", { name: "B0BBB" })).toBeVisible();
   await expect(review.getByText("Fit 90%")).toBeVisible();
   await expect(
-    review.getByRole("region", { name: "Why it fits" }).getByText("Same width and length."),
+    review
+      .getByRole("region", { name: "Why it fits" })
+      .getByText("Matches source-38 (same width and length)."),
   ).toBeVisible();
+  const comparison = review.getByRole("table", { name: "Record comparison" });
+  const titles = comparison
+    .getByRole("row", { name: "Product title", exact: false })
+    .getByRole("cell");
+  await expect(titles).toHaveText(["Supplier tape 38 mm x 50 m", "Crepe tape 50 m"]);
+  await chooseOption(ada, "Compare with step input", "Articles · source-19");
+  await expect(titles).toHaveText(["Supplier tape 19 mm x 50 m", "Crepe tape 50 m"]);
+
+  // Postponing every proposal leaves all three undecided, including after reopening and reload.
+  await review.getByRole("button", { name: "Maybe (postpone)", exact: true }).click();
+  await expect(review.getByText("Tesa", { exact: true })).toBeVisible();
+  await review.getByRole("button", { name: "Maybe (postpone)", exact: true }).click();
+  await expect(review.getByRole("heading", { name: "B0AAA" })).toBeVisible();
+  await review.getByRole("button", { name: "Maybe (postpone)", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  await expect(ada.getByRole("button", { name: "Review (3)" })).toBeVisible();
+  await ada.reload();
+  await ada.getByRole("button", { name: "Review (3)" }).click();
+  await expect(review.getByRole("heading", { name: "B0BBB" })).toBeVisible();
+  await expect(titles).toHaveText(["Supplier tape 38 mm x 50 m", "Crepe tape 50 m"]);
   await review.getByRole("button", { name: "Approve" }).click();
   await expect(review.getByText("Tesa", { exact: true })).toBeVisible();
   await review.getByRole("button", { name: "Approve" }).click();

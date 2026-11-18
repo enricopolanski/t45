@@ -88,7 +88,7 @@ serve({
     rpcTool(
       "field_values",
       "collections.listFieldValues",
-      "List the distinct values the records hold in one top-level field, such as the categories already used, so a new record reuses the same words.",
+      "List the distinct values the records hold in one top-level field, each with how many records hold it, such as the categories already used, so a new record reuses the same words.",
     ),
     rpcTool(
       "save_record",

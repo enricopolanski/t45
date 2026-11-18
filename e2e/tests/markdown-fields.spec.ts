@@ -98,10 +98,14 @@ test("Markdown fields edit their source and keep formatting in entries, complete
   await page.waitForURL(/\/my-work$/u);
   await page.goto(`/boards/${projectId}`);
   await page.getByRole("region", { name: "Review", exact: true }).getByText("Tape").click();
-  await page.getByRole("button", { name: "Inputs", exact: true }).click();
+  await page.getByRole("button", { name: "View previous step data", exact: true }).click();
   await expect(page.locator(".chat-markdown strong", { hasText: "Sources" })).toBeVisible();
   await expect(page.locator("td .chat-markdown strong", { hasText: "Costs" })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Edit /u })).toHaveCount(0);
+  await page
+    .getByRole("dialog", { name: "Previous step data", exact: true })
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
   await page.getByRole("button", { name: /^Status: To do/u }).click();
   await page.getByRole("menuitem", { name: "Mark done" }).click();
   await page.waitForURL(/\/my-work$/u);

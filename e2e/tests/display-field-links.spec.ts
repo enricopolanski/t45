@@ -269,7 +269,7 @@ test("step table links use the URL from their own row and carry into the next st
   await ada.waitForURL(/\/my-work$/u);
   await ada.goto(`/boards/${projectId}`);
   await ada.getByRole("region", { name: "Review", exact: true }).getByText("Tape check").click();
-  await ada.getByRole("button", { name: "Inputs" }).click();
+  await ada.getByRole("button", { name: "View previous step data" }).click();
   const table = ada.getByRole("table", { name: "Listings", exact: true });
   await expect(table.getByRole("link", { name: / tape$/u })).toHaveText([
     "Yellow tape",

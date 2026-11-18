@@ -141,12 +141,17 @@ export const resolveRecordSearch = ({ fields, layout }: Pick<Collection, "fields
   const listFields = (ids: ReadonlyArray<string>, isFit: (field: Field) => boolean) =>
     ids.flatMap((id) => fields.filter((field) => field.id === id && isFit(field)));
   const searched = listFields(layout?.search?.fields ?? [], isSearchable);
+  const filters = layout?.search?.filters ?? [];
   return {
     fields: searched.length === 0 ? null : searched,
     filters: listFields(
-      (layout?.search?.filters ?? []).map(({ field }) => field),
+      filters.map(({ field }) => field),
       isFilterable,
     ),
+    /** The URL field whose site icon each filter's values show, by filter field. */
+    iconLinks: Object.fromEntries(
+      filters.flatMap(({ field, iconLink }) => (iconLink === undefined ? [] : [[field, iconLink]])),
+    ) as Readonly<Record<string, string>>,
   };
 };
 

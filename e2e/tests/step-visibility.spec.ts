@@ -89,8 +89,13 @@ test("an open item shows only to the members of the step it is in", async ({ sig
   await cy.goto(`/boards/${projectId}`);
   await cy.getByRole("region", { name: "Review" }).getByText("Order 7").click();
   await expectStep(cy, "Review");
-  const inputs = cy.getByRole("region", { name: "Inputs" });
+  await cy.getByRole("button", { name: "View previous step data", exact: true }).click();
+  const inputs = cy.getByRole("dialog", { name: "Previous step data", exact: true });
   await expect(inputs.getByLabel("Amount")).toHaveValue("120");
+  await expect(inputs.getByLabel("Amount")).toHaveAttribute("readonly", "");
+  await expect(inputs.getByLabel("Supplier")).toHaveCount(0);
+  await inputs.getByRole("button", { name: "Close", exact: true }).click();
+  await expectStep(cy, "Review");
   await expect(cy.getByText("Supplier")).toHaveCount(0);
   await expect(cy.getByText("Acme")).toHaveCount(0);
 });

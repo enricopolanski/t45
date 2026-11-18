@@ -145,6 +145,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         <MissingRecap missing={missing} unfinished={unfinished} />
       ) : null}
       <ItemDescription description={view.ticket.description} />
+      {view.inputs.length > 0 ? <StepInputs fields={view.inputs} /> : null}
       <StepFiles
         view={view}
         canWrite={writes}
@@ -154,7 +155,6 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
         }
       />
-      {view.inputs.length > 0 ? <StepInputs fields={view.inputs} /> : null}
       <StepFields
         fields={view.fields}
         editable={actions.canEditFields}

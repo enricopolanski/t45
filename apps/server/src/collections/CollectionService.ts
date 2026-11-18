@@ -231,7 +231,15 @@ const make = Effect.gen(function* () {
           reason: "invalid_filter",
           detail: `${input.fieldId} isn't one.`,
         });
-      return yield* records.listValues(collection.id, input.fieldId);
+      if (
+        input.linkFieldId !== undefined &&
+        !collection.fields.some((field) => field.id === input.linkFieldId && field.type === "url")
+      )
+        return yield* new Refused({
+          reason: "invalid_filter",
+          detail: `${input.linkFieldId} isn't a URL field.`,
+        });
+      return yield* records.listValues(collection.id, input.fieldId, input.linkFieldId);
     }),
 
     /** Adds the record or replaces the one with its key; agents with the capability always may. */

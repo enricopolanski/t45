@@ -5,7 +5,9 @@ import type { CollectionRecordView } from "@t45/contracts/resources/Collections"
 import { useCallback, useEffect, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
+import { webUrlHost } from "../../lib/webUrl";
 import { api } from "../../rpc/api";
+import { Favicon } from "../ExternalUrl";
 import { Choice } from "../fields/LayoutEditor";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
@@ -173,43 +175,63 @@ function RangeFilter({
   );
 }
 
-/** The values a filter on `field` picks from: its options, yes or no, or those its records hold. */
-function useFilterChoices(collectionId: string, field: Field) {
-  const [held, setHeld] = useState<ReadonlyArray<string>>([]);
-  const isHeld = field.type === "text";
+type HeldValue = { readonly count: number; readonly link?: string };
+
+/** The values a filter on `field` picks from, alphabetically, each with how many records hold it and, given `iconLink`, their site's icon: its options, yes or no, or those its records hold. */
+function useFilterChoices(collectionId: string, field: Field, iconLink: string | undefined) {
+  const [held, setHeld] = useState<ReadonlyMap<string, HeldValue>>(new Map());
   useEffect(() => {
-    if (!isHeld) return;
     let current = true;
-    void api("collections.listFieldValues", { collectionId, fieldId: field.id }).then(
-      (values) => current && setHeld(values.map(String)),
+    void api("collections.listFieldValues", {
+      collectionId,
+      fieldId: field.id,
+      ...(iconLink === undefined ? {} : { linkFieldId: iconLink }),
+    }).then(
+      (values) =>
+        current && setHeld(new Map(values.map(({ value, ...rest }) => [String(value), rest]))),
       () => undefined,
     );
     return () => {
       current = false;
     };
-  }, [collectionId, field.id, isHeld]);
-  if (field.type === "select") return field.options.map((option) => [option, option] as const);
-  if (field.type === "boolean")
+  }, [collectionId, field.id, iconLink]);
+  const values =
+    field.type === "boolean"
+      ? ([
+          ["true", "Yes"],
+          ["false", "No"],
+        ] as const)
+      : (field.type === "select" ? field.options : [...held.keys()])
+          .toSorted((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+          .map((value) => [value, value] as const);
+  return values.map(([value, label]) => {
+    const { count, link } = held.get(value) ?? { count: 0 };
+    const host = webUrlHost(link);
     return [
-      ["true", "Yes"],
-      ["false", "No"],
+      value,
+      <span key={value} className="inline-flex items-center">
+        {host === null ? null : <Favicon host={host} />}
+        {label} ({count})
+      </span>,
     ] as const;
-  return held.map((value) => [value, value] as const);
+  });
 }
 
 /** A filter picking one value of `field`, all of them without one. */
 function ValueFilter({
   collectionId,
   field,
+  iconLink,
   value,
   onChange,
 }: {
   readonly collectionId: string;
   readonly field: Field;
+  readonly iconLink: string | undefined;
   readonly value: Filters[string] | undefined;
   readonly onChange: (value: string | boolean | undefined) => void;
 }) {
-  const choices = useFilterChoices(collectionId, field);
+  const choices = useFilterChoices(collectionId, field, iconLink);
   return (
     <Choice
       label={field.label}
@@ -232,7 +254,7 @@ export function RecordFilterBar({
   readonly filters: Filters;
   readonly onChange: (filters: Filters) => void;
 }) {
-  const shown = resolveRecordSearch(collection).filters;
+  const { filters: shown, iconLinks } = resolveRecordSearch(collection);
   if (shown.length === 0) return null;
   const setFilter = (fieldId: string, value: Filters[string] | undefined) => {
     const { [fieldId]: _, ...rest } = filters;
@@ -255,6 +277,7 @@ export function RecordFilterBar({
             <ValueFilter
               collectionId={collection.id}
               field={field}
+              iconLink={iconLinks[field.id]}
               value={filters[field.id]}
               onChange={(value) => setFilter(field.id, value)}
             />

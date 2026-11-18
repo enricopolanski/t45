@@ -41,7 +41,14 @@ export class CollectionRecordRepository extends Context.Service<
     readonly listValues: (
       collectionId: string,
       fieldId: string,
-    ) => Effect.Effect<ReadonlyArray<string | number>>;
+      linkFieldId?: string,
+    ) => Effect.Effect<
+      ReadonlyArray<{
+        readonly value: string | number;
+        readonly count: number;
+        readonly link?: string;
+      }>
+    >;
     /** Adds the record, or replaces the values of the one with its key, keeping its creation. */
     readonly save: (record: CollectionRecord) => Effect.Effect<CollectionRecord>;
     /** Commits a record's write together with the file ownership changes it makes. */
@@ -104,13 +111,22 @@ export const layer = Layer.effect(
           Effect.map(([row]) => row?.count ?? 0),
           Effect.orDie,
         ),
-      listValues: (collectionId, fieldId) =>
-        sql<{ readonly value: string | number }>`SELECT DISTINCT
-            json_extract(field_values, ${`$."${fieldId}"`}) AS value
+      listValues: (collectionId, fieldId, linkFieldId) =>
+        sql<{
+          readonly value: string | number;
+          readonly count: number;
+          readonly link: string | null;
+        }>`SELECT
+            ${valueOf(fieldId)} AS value, count(*) AS count,
+            ${linkFieldId === undefined ? sql`NULL` : sql`min(${valueOf(linkFieldId)})`} AS link
           FROM collection_records
           WHERE collection_id = ${collectionId} AND value IS NOT NULL
-          ORDER BY value LIMIT 500`.pipe(
-          Effect.map((rows) => rows.map((row) => row.value)),
+          GROUP BY value ORDER BY value LIMIT 500`.pipe(
+          Effect.map((rows) =>
+            rows.map(({ value, count, link }) =>
+              link === null ? { value, count } : { value, count, link },
+            ),
+          ),
           Effect.orDie,
         ),
       save: (record) =>
