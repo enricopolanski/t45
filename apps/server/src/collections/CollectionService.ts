@@ -40,6 +40,21 @@ type Payload<Tag extends string> = Rpc.Payload<
 
 const SEARCH_LIMIT = 25;
 const isAttachmentId = Schema.is(AttachmentId);
+const requireFieldValueQuery = Effect.fnUntraced(function* (
+  collection: Collection,
+  { fieldId, linkFieldId }: Omit<Payload<"listFieldValues">, "collectionId">,
+) {
+  if (!collection.fields.some((field) => field.id === fieldId))
+    return yield* new Refused({ reason: "invalid_filter", detail: `${fieldId} isn't one.` });
+  if (
+    linkFieldId !== undefined &&
+    !collection.fields.some((field) => field.id === linkFieldId && field.type === "url")
+  )
+    return yield* new Refused({
+      reason: "invalid_filter",
+      detail: `${linkFieldId} isn't a URL field.`,
+    });
+});
 
 const make = Effect.gen(function* () {
   const collections = yield* CollectionRepository;
@@ -195,6 +210,8 @@ const make = Effect.gen(function* () {
       const problem = filtersProblem(collection.fields, filters);
       if (problem !== null)
         return yield* new Refused({ reason: "invalid_filter", detail: problem });
+      for (const field of input.filterChoices ?? [])
+        yield* requireFieldValueQuery(collection, field);
       const limit = input.limit ?? SEARCH_LIMIT;
       // Fields named in the request replace the layout's, as the layout editor previews them.
       const searched = resolveRecordSearch(
@@ -208,16 +225,21 @@ const make = Effect.gen(function* () {
         fields: searched?.map((field) => field.id) ?? null,
         filters,
       };
-      const [found, matchCount, totalCount] = yield* Effect.all([
-        records.search({ ...search, offset: input.offset ?? 0, limit: limit + 1 }),
-        records.count(search),
-        records.count({ collectionId: collection.id, words: [], fields: null, filters: {} }),
-      ]);
+      const {
+        records: found,
+        matchCount,
+        totalCount,
+        filterChoices,
+      } = yield* records.searchPage(
+        { ...search, offset: input.offset ?? 0, limit: limit + 1 },
+        input.filterChoices ?? [],
+      );
       return {
         records: yield* Effect.forEach(found.slice(0, limit), viewOf),
         hasMore: found.length > limit,
         matchCount,
         totalCount,
+        ...(input.filterChoices === undefined ? {} : { filterChoices }),
       };
     }),
 
@@ -226,20 +248,8 @@ const make = Effect.gen(function* () {
       input: Payload<"listFieldValues">,
     ) {
       const collection = yield* findReadable(caller, input.collectionId);
-      if (!collection.fields.some((field) => field.id === input.fieldId))
-        return yield* new Refused({
-          reason: "invalid_filter",
-          detail: `${input.fieldId} isn't one.`,
-        });
-      if (
-        input.linkFieldId !== undefined &&
-        !collection.fields.some((field) => field.id === input.linkFieldId && field.type === "url")
-      )
-        return yield* new Refused({
-          reason: "invalid_filter",
-          detail: `${input.linkFieldId} isn't a URL field.`,
-        });
-      return yield* records.listValues(collection.id, input.fieldId, input.linkFieldId);
+      yield* requireFieldValueQuery(collection, input);
+      return yield* records.listValues(collection.id, input);
     }),
 
     /** Adds the record or replaces the one with its key; agents with the capability always may. */

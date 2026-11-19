@@ -1,5 +1,5 @@
 import { isSameInput } from "@t45/contracts/models/Workflow";
-import type { DraftStep, inputSourcesFor } from "./workflowLogic";
+import type { DraftField, DraftStep, inputSourcesFor } from "./workflowLogic";
 import { XIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -20,7 +20,9 @@ import { Textarea } from "../ui/textarea";
 import { FoldChevron } from "../work/CardFold";
 import { StepAutomationsEditor } from "../work/StepAutomationsEditor";
 import { plural } from "../work/workLogic";
+import { ComparisonFieldsEditor } from "./ComparisonFieldsEditor";
 import { GroupLayoutButton } from "./GroupLayout";
+import { RecordReviewSettings } from "./RecordReviewSettings";
 import { blankStep, listEntries } from "./workflowLogic";
 
 /** What a step holds, shown beside its title, e.g. "5 fields · 1 sub-step". */
@@ -64,6 +66,12 @@ function SubStepRow({
 /** The collections whose records a step's fields can link: those the editor uses. */
 const linkableCollections = apiQuery("collections.list")(undefined);
 
+/** Collection IDs linked by an input field, including inside a group. */
+function listInputCollectionIds(field: DraftField): ReadonlyArray<string> {
+  if (field.type === "records") return [field.collectionId];
+  return field.type === "group" ? field.fields.flatMap(listInputCollectionIds) : [];
+}
+
 /**
  * One step or sub-step: its name, instructions, fields, and sub-steps.
  * Sub-steps show as their titles and open in an editor of their own. A step in the list
@@ -95,6 +103,15 @@ export function WorkflowStepEditor({
   const inputs = step.inputs ?? [];
   const inputKey = (input: (typeof inputs)[number]) => `${input.stepId}.${input.fieldId}`;
   const unboundSources = inputSources.filter(({ input }) => !inputs.some(isSameInput(input)));
+  const inputCollectionIds = new Set(
+    inputs.flatMap((input) => {
+      const source = inputSources.find((candidate) => isSameInput(input)(candidate.input));
+      return source === undefined ? [] : listInputCollectionIds(source.field);
+    }),
+  );
+  const inputCollections = [...inputCollectionIds].flatMap((id) =>
+    collections.filter((collection) => collection.id === id),
+  );
   const title = (
     <Field label={position === null ? "Sub-step title" : "Step title"} size="xs">
       <Input
@@ -156,15 +173,43 @@ export function WorkflowStepEditor({
               areColumns={false}
               collections={collections}
               areReviewable
+              comparisonFieldsEditor={(field, setField) => {
+                const collection = collections.find(({ id }) => id === field.collectionId);
+                if (collection === undefined) return null;
+                return (
+                  <ComparisonFieldsEditor
+                    collection={collection}
+                    inputCollections={inputCollections}
+                    fields={field.comparisonFields}
+                    onChange={(comparisonFields) => {
+                      const { comparisonFields: _, ...rest } = field;
+                      setField(
+                        comparisonFields === undefined ? rest : { ...rest, comparisonFields },
+                      );
+                    }}
+                    disabled={disabled}
+                  />
+                );
+              }}
               groupLayout={(group, setGroup) => (
-                <GroupLayoutButton
-                  workflowId={workflow.id}
-                  stepId={step.id}
-                  trail={`${workflow.name} · ${step.name}`}
-                  group={group}
-                  onChange={setGroup}
-                  disabled={disabled}
-                />
+                <div className="flex flex-wrap gap-2">
+                  {step.fields.some((field) => field.id === group.id) ? (
+                    <RecordReviewSettings
+                      group={group}
+                      fields={step.fields}
+                      onChange={setGroup}
+                      disabled={disabled}
+                    />
+                  ) : null}
+                  <GroupLayoutButton
+                    workflowId={workflow.id}
+                    stepId={step.id}
+                    trail={`${workflow.name} · ${step.name}`}
+                    group={group}
+                    onChange={setGroup}
+                    disabled={disabled}
+                  />
+                </div>
               )}
               onChange={(fields) => onChange({ ...step, fields })}
               disabled={disabled}

@@ -7,6 +7,7 @@ import { describeFailure } from "../../lib/failures";
 import { api } from "../../rpc/api";
 import { LayoutEditor } from "../fields/LayoutEditor";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { layOutForm } from "../work/StepFields";
 import { ReadOnlyForm } from "../work/StepInputs";
 import { makeCollectionViews } from "./CollectionViews";
@@ -62,6 +63,15 @@ function CollectionLayoutDialog({
             : null
       }
       rowsHint="Sorting changes only how records show, not the order kept, and sorts the records loaded so far."
+      tableSettings={(layout, onChange) => (
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={layout?.isUpdatedAtVisible !== false}
+            onCheckedChange={(isUpdatedAtVisible) => onChange({ ...layout, isUpdatedAtVisible })}
+          />
+          Show Last update
+        </label>
+      )}
       renderTable={(layout, onOpen) => (
         <RecordTable
           label="Records"

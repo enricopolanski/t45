@@ -53,6 +53,9 @@ export const buildFieldViews = (
         : {}),
       ...(linkUrl === undefined ? {} : { linkUrl }),
       ...(isReviewedField(field) ? { isReviewed: true } : {}),
+      ...(field.type === "records" && field.comparisonFields !== undefined
+        ? { comparisonFields: field.comparisonFields }
+        : {}),
       repeatable: field.type === "group" && field.repeatable,
       rowFields: field.type === "group" && field.repeatable ? field.fields : [],
       collection: null,

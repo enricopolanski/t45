@@ -13,33 +13,43 @@ export function formatDay(date: string) {
   });
 }
 
-/**
- * A number field's value as shown: with `decimals`, exactly that many, else as stored; then its
- * unit, "%" against the number and any other a space after it.
- */
 /** Numbers are written with a decimal comma, whatever the browser's language. */
 const NUMBER_LOCALE = "de-DE";
 
+export const currencyFractionLimit = (unit: string | undefined) =>
+  /\p{Sc}/u.test(unit ?? "") ? 3 : undefined;
+
 /**
- * A number with a decimal comma: with the decimals a field sets, one more below 1 so that small
- * amounts like 0,057 € still differ, and as stored otherwise.
+ * An explicit maximum rounds without padding. Field precision allows an extra place below 1.
+ * Prices show at most three decimal places and pad to at most two.
  */
 export const formatNumber = (
   value: number,
   {
     decimals,
+    maximumFractionDigits,
     unit,
-  }: { readonly decimals?: number | undefined; readonly unit?: string | undefined },
+  }: {
+    readonly decimals?: number | undefined;
+    readonly maximumFractionDigits?: number | undefined;
+    readonly unit?: string | undefined;
+  },
 ) => {
   const places =
     decimals === undefined
       ? undefined
       : decimals + (decimals > 0 && Math.abs(value) < 1 && value !== 0 ? 1 : 0);
+  const currencyLimit = currencyFractionLimit(unit);
+  const minimumFractionDigits =
+    maximumFractionDigits !== undefined
+      ? 0
+      : currencyLimit === undefined
+        ? places
+        : Math.min(decimals ?? 2, 2);
   const shown = new Intl.NumberFormat(NUMBER_LOCALE, {
     useGrouping: false,
-    ...(places === undefined
-      ? { maximumFractionDigits: 20 }
-      : { minimumFractionDigits: places, maximumFractionDigits: places }),
+    minimumFractionDigits,
+    maximumFractionDigits: maximumFractionDigits ?? Math.min(places ?? 20, currencyLimit ?? 20),
   }).format(value);
   return unit === undefined ? shown : `${shown}${unit === "%" ? "" : " "}${unit}`;
 };
@@ -104,6 +114,7 @@ const HISTORY_LABELS: Record<string, string> = {
   "workflows.blockStep": "blocked the step",
   "workflows.unblockStep": "unblocked the step",
   "workflows.commentOnStep": "commented",
+  "workflows.confirmRecordEntry": "confirmed a record review",
   "workflows.runStepAutomation": "ran an automation",
   "workflows.stopStepAutomation": "stopped an automation",
   "workflows.cancelTicket": "cancelled the item",

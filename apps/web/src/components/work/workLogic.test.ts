@@ -24,6 +24,12 @@ describe("formatNumber", () => {
     expect(formatNumber(0, { decimals: 2 })).toBe("0,00");
   });
 
+  it("limits prices to three decimals without padding past cents", () => {
+    expect(formatNumber(1.22, { decimals: 4, unit: "€" })).toBe("1,22 €");
+    expect(formatNumber(0.63, { decimals: 4, unit: "€" })).toBe("0,63 €");
+    expect(formatNumber(1.2567, { decimals: 4, unit: "€" })).toBe("1,257 €");
+  });
+
   it("sets a percent sign against the number and other units a space after it", () => {
     expect(formatNumber(43, { decimals: 1, unit: "%" })).toBe("43,0%");
     expect(formatNumber(47.6, { decimals: 2, unit: "€" })).toBe("47,60 €");

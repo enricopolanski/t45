@@ -31,6 +31,7 @@ import { RecordCount, RecordFilterBar, useRecordSearch } from "./RecordSearch";
 type Display = NonNullable<CollectionLayout["display"]>;
 type Cards = NonNullable<CollectionLayout["cards"]>;
 type Search = NonNullable<CollectionLayout["search"]>;
+type PageLayout = NonNullable<CollectionLayout["page"]>;
 type Role = "image" | "title" | "subtitle" | "highlight";
 
 const NONE = "$none";
@@ -324,14 +325,9 @@ function SearchPreview({
   readonly collection: Collection;
   readonly layout: CollectionLayout | undefined;
 }) {
-  // The editor's unsaved fields, none for every text value, replace the saved layout's.
-  const searched = layout?.search?.fields;
-  const fields = useMemo(() => searched ?? [], [searched]);
-  const { text, setText, filters, setFilters, found, error } = useRecordSearch(
-    collection.id,
-    fields,
-  );
-  const shown = { ...collection, layout: layout ?? {} };
+  const shown = useMemo(() => ({ ...collection, layout: layout ?? {} }), [collection, layout]);
+  const { text, setText, filters, setFilters, filterChoices, found, error } =
+    useRecordSearch(shown);
   return (
     <div className="flex flex-col gap-3">
       <Input
@@ -341,7 +337,12 @@ function SearchPreview({
         value={text}
         onChange={(event) => setText(event.target.value)}
       />
-      <RecordFilterBar collection={shown} filters={filters} onChange={setFilters} />
+      <RecordFilterBar
+        collection={shown}
+        filters={filters}
+        filterChoices={filterChoices}
+        onChange={setFilters}
+      />
       {error && <ErrorText text={error} />}
       {found === null ? null : (
         <>
@@ -350,6 +351,73 @@ function SearchPreview({
         </>
       )}
     </div>
+  );
+}
+
+function PageSettings({
+  collection,
+  layout,
+  onChange,
+}: {
+  readonly collection: Collection;
+  readonly layout: CollectionLayout | undefined;
+  readonly onChange: (layout: CollectionLayout | undefined) => void;
+}) {
+  const page: PageLayout = layout?.page ?? { template: "form" };
+  const textFields = collection.fields.filter((field) => field.type === "text");
+  const setPage = (next: PageLayout) =>
+    onChange(
+      withPart(
+        layout,
+        "page",
+        next.template === "form" &&
+          next.description === undefined &&
+          next.hiddenFields === undefined
+          ? undefined
+          : next,
+      ),
+    );
+  return (
+    <PanelSection
+      title="Record page"
+      hint="Showcase shows a record's images beside its parts and values, its long text below, and edits it on demand."
+    >
+      <LabeledField label="Template" size="xs" className="flex-row items-center justify-between">
+        <Choice
+          label="Template"
+          value={page.template}
+          choices={TEMPLATES}
+          onChange={(template) => setPage({ ...page, template })}
+        />
+      </LabeledField>
+      {page.template === "showcase" ? (
+        <>
+          <LabeledField
+            label="Description"
+            size="xs"
+            className="flex-row items-center justify-between"
+          >
+            <Choice
+              label="Description"
+              value={textFields.find((field) => field.id === page.description)?.id ?? NONE}
+              choices={{
+                [NONE]: "None",
+                ...Object.fromEntries(textFields.map((field) => [field.id, field.label])),
+              }}
+              onChange={(id) => setPage(withKey(page, "description", id === NONE ? undefined : id))}
+            />
+          </LabeledField>
+          <PickFields
+            label="Hide fields in showcase"
+            fields={collection.fields}
+            picked={page.hiddenFields ?? []}
+            onChange={(fields) =>
+              setPage(withKey(page, "hiddenFields", fields.length === 0 ? undefined : fields))
+            }
+          />
+        </>
+      ) : null}
+    </PanelSection>
   );
 }
 
@@ -392,21 +460,7 @@ export const makeCollectionViews = (
     label: "Page",
     isPerEntry: true,
     settings: (layout, onChange) => (
-      <PanelSection
-        title="Record page"
-        hint="Showcase shows a record's images beside its parts and values, its long text below, and edits it on demand."
-      >
-        <LabeledField label="Template" size="xs" className="flex-row items-center justify-between">
-          <Choice
-            label="Template"
-            value={layout?.page?.template ?? "form"}
-            choices={TEMPLATES}
-            onChange={(template) =>
-              onChange(withPart(layout, "page", template === "form" ? undefined : { template }))
-            }
-          />
-        </LabeledField>
-      </PanelSection>
+      <PageSettings collection={collection} layout={layout} onChange={onChange} />
     ),
     preview: (layout, key) => {
       const record = records.find((candidate) => candidate.key === key);

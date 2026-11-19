@@ -446,6 +446,7 @@ export function LayoutEditor<L extends Layout>({
   previewNote,
   rowsHint,
   saveNote,
+  tableSettings,
   renderTable,
   renderForm,
   views = NO_VIEWS,
@@ -466,6 +467,10 @@ export function LayoutEditor<L extends Layout>({
   readonly previewNote: string | null;
   readonly rowsHint: string;
   readonly saveNote?: string;
+  readonly tableSettings?: (
+    layout: L | undefined,
+    onChange: (layout: L | undefined) => void,
+  ) => ReactNode;
   readonly renderTable: (layout: L | undefined, onOpen: (entryId: string) => void) => ReactNode;
   readonly renderForm: (layout: L | undefined, entryId: string) => ReactNode;
   readonly views?: ReadonlyArray<LayoutView<L>>;
@@ -516,6 +521,7 @@ export function LayoutEditor<L extends Layout>({
               >
                 <TabsPanel value="table" keepMounted>
                   <div className="flex flex-col gap-4">
+                    {tableSettings?.(layout, setLayout)}
                     <TableSettings
                       key={resetCount}
                       fields={fields}

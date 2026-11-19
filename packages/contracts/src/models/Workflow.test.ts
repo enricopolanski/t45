@@ -24,6 +24,10 @@ import {
   occupiedStep,
   openProposals,
   proposalRefusal,
+  confirmRecordEntry,
+  recordReviewsOf,
+  reviewEntryValues,
+  withEditedStepValues,
   putTicketStep,
   stepEntryRefusal,
   stepIds,
@@ -485,6 +489,53 @@ describe("explaining a field that doesn't fit", () => {
     assert.isNotNull(fieldValueProblem(fields[1]!, "f_duedate", '"2026-12-01"'));
     assert.isNotNull(fieldValueProblem(fields[1]!, "f_duedate", "1/12/2026"));
   });
+});
+
+it("an edit releases only its record's confirmation and prevents a stale review from saving", () => {
+  const fields = [
+    { type: "records", id: "articles", label: "Articles", collectionId: "products" },
+    {
+      type: "group",
+      id: "properties",
+      label: "Properties",
+      repeatable: true,
+      recordReview: { recordsFieldId: "articles", recordKeyFieldId: "articleKey" },
+      fields: [
+        { type: "text", id: "articleKey", label: "Article key" },
+        { type: "text", id: "temperature", label: "Temperature" },
+      ],
+    },
+  ] satisfies ReadonlyArray<Field>;
+  const confirmed: Step = {
+    ...step,
+    confirmedReviewRows: ["properties.rowCoral", "properties.rowBlue"],
+    values: {
+      articles: ["coral-tape", "blue-tape"],
+      properties: ["rowCoral", "rowBlue"],
+      "properties.rowCoral.articleKey": "coral-tape",
+      "properties.rowCoral.temperature": "100 °C",
+      "properties.rowBlue.articleKey": "blue-tape",
+      "properties.rowBlue.temperature": "110 °C",
+    },
+  };
+  const edited = withEditedStepValues(fields, confirmed, {
+    ...confirmed.values,
+    "properties.rowCoral.temperature": "100 °C for 30 minutes",
+  });
+  assert.deepEqual(
+    recordReviewsOf(fields, edited)[0]?.entries.map(({ isConfirmed }) => isConfirmed),
+    [false, true],
+  );
+  assert.include(
+    confirmRecordEntry(fields, edited, {
+      groupFieldId: "properties",
+      recordKey: "coral-tape",
+      rowId: "rowCoral",
+      previousValues: reviewEntryValues(confirmed.values, "properties.rowCoral"),
+      values: { temperature: "100 °C" },
+    }),
+    "changed while you were reviewing",
+  );
 });
 
 describe("proposing a value", () => {

@@ -35,9 +35,8 @@ export function CollectionPage({
   const isAdmin = useIsAdmin();
   const navigate = useNavigate();
   const [collection, setCollection] = useState<Collection | null>(null);
-  const { text, filters, found, refresh, ...search } = useRecordSearch(
-    collectionId,
-    undefined,
+  const { text, filters, found, filterChoices, refresh, ...search } = useRecordSearch(
+    collection,
     page,
   );
   const setText = (next: string) => {
@@ -144,7 +143,12 @@ export function CollectionPage({
           </label>
         ) : null}
       </div>
-      <RecordFilterBar collection={collection} filters={filters} onChange={setFilters} />
+      <RecordFilterBar
+        collection={collection}
+        filters={filters}
+        filterChoices={filterChoices}
+        onChange={setFilters}
+      />
       {error && <ErrorText text={error} />}
       {found === null ? null : found.totalCount === 0 ? (
         <p className="text-sm text-muted-foreground">No records yet.</p>

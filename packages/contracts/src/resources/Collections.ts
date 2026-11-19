@@ -25,6 +25,20 @@ export const CollectionRecordView = Schema.Struct({
 });
 export type CollectionRecordView = typeof CollectionRecordView.Type;
 
+const FieldValueQuery = Schema.Struct({
+  fieldId: FieldPathSegment,
+  /** A URL field: each value then names a web address one of its records holds there. */
+  linkFieldId: Schema.optionalKey(FieldPathSegment),
+});
+
+const FieldValuesWithCounts = Schema.Array(
+  Schema.Struct({
+    value: Schema.Union([Schema.String, Schema.Finite]),
+    count: Schema.Finite,
+    link: Schema.optionalKey(Schema.String),
+  }),
+);
+
 /** What an admin sets of a collection. */
 const CollectionDraft = Schema.Struct(
   Struct.pick(Collection.fields, [
@@ -74,6 +88,8 @@ export const CollectionOperations = RpcGroup.make(
       fields: Schema.optionalKey(Schema.Array(FieldPathSegment)),
       /** What top-level fields' values must be, all of them: exactly a value, or within a range. */
       filters: Schema.optionalKey(RecordFilters),
+      /** Which filter menus need their available values and counts with this search. */
+      filterChoices: Schema.optionalKey(Schema.Array(FieldValueQuery)),
       offset: Schema.optionalKey(NonNegativeInt),
       limit: Schema.optionalKey(
         NonNegativeInt.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
@@ -86,24 +102,18 @@ export const CollectionOperations = RpcGroup.make(
       /** How many records match, and how many the collection holds. */
       matchCount: NonNegativeInt,
       totalCount: NonNegativeInt,
+      /** The values that match the search and all other filters, by filter field. */
+      filterChoices: Schema.optionalKey(Schema.Record(FieldPathSegment, FieldValuesWithCounts)),
     }),
     error: CollectionErrors,
   }),
   Rpc.make("listFieldValues", {
     payload: {
       collectionId: StringId,
-      fieldId: FieldPathSegment,
-      /** A URL field: each value then names a web address one of its records holds there. */
-      linkFieldId: Schema.optionalKey(FieldPathSegment),
+      ...FieldValueQuery.fields,
     },
     /** The distinct values a top-level field holds, in order, up to 500, each with how many records hold it. */
-    success: Schema.Array(
-      Schema.Struct({
-        value: Schema.Union([Schema.String, Schema.Finite]),
-        count: Schema.Finite,
-        link: Schema.optionalKey(Schema.String),
-      }),
-    ),
+    success: FieldValuesWithCounts,
     error: CollectionErrors,
   }),
   Rpc.make("saveRecord", {

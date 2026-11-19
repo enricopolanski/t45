@@ -12,11 +12,17 @@ import { agents } from "../src/agents.ts";
 import { webBrowser } from "../src/browser.ts";
 import { progressReporting } from "../src/reporting.ts";
 import { collections } from "../src/collections.ts";
+import { documentExtraction } from "../src/document-extraction.ts";
 
 const programs = [
   { name: "report-tools", definition: progressReporting },
   { name: "workflow-tools", definition: workflowDrafting },
   { name: "step-tools", definition: stepOperations },
+  {
+    name: "extraction-tools",
+    definition: documentExtraction,
+    plugin: "document-extraction/server.js",
+  },
   { name: "project-tools", definition: projectOperations },
   { name: "collection-tools", definition: collections },
   { name: "browser-open", definition: webBrowser },
@@ -41,10 +47,18 @@ for (const [index, { name }] of programs.entries()) {
 }
 
 const capabilities = await Promise.all(
-  programs.map(async ({ name, definition }) =>
+  programs.map(async ({ name, definition, plugin }) =>
     Capability.make({
       ...definition,
-      files: { [`${name}.mjs`]: await NodeFSP.readFile(`dist/runtime/${name}.mjs`, "utf8") },
+      files: {
+        [`${name}.mjs`]: await NodeFSP.readFile(`dist/runtime/${name}.mjs`, "utf8"),
+        ...(plugin === undefined
+          ? {}
+          : {
+              [plugin]: await NodeFSP.readFile(`src/${plugin}`, "utf8"),
+              "document-extraction/package.json": '{"type":"module"}',
+            }),
+      },
     }),
   ),
 );

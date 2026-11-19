@@ -122,6 +122,7 @@ export function StepStatus({
         title={reason.title}
         placeholder={reason.placeholder}
         confirmLabel={reason.confirmLabel}
+        isReasonOptional={asking.reason === "cancel"}
         onConfirm={(text) => act(() => reason.send(view, text), true)}
       />
     </div>

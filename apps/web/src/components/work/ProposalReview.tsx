@@ -2,6 +2,7 @@ import { openProposals } from "@t45/contracts/models/Workflow";
 import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
 import { useState } from "react";
 
+import { MarkdownText } from "../markdown/MarkdownText";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -52,6 +53,7 @@ function ProposedValue({
         collection={field.collection}
         record={proposal.record}
         rationale={proposal.whyYes}
+        comparisonFields={field.comparisonFields}
       />
     );
   }
@@ -61,6 +63,22 @@ function ProposedValue({
       <ValueBox term="Now" field={field} />
       <ValueBox term="Proposed" field={{ ...unlinked, value: proposal.value }} />
     </dl>
+  );
+}
+
+function ProposalComment({ proposal }: { readonly proposal: Proposal }) {
+  return (
+    <section aria-label="Comment" className="flex flex-col gap-3 rounded-lg border p-3 text-sm">
+      <h3 className="font-semibold">Comment</h3>
+      <section aria-label="Why it fits" className="flex min-w-0 flex-col gap-1">
+        <h4 className="font-medium">Why it fits</h4>
+        <MarkdownText text={proposal.whyYes} className="wrap-anywhere" />
+      </section>
+      <section aria-label="Why it may not" className="flex min-w-0 flex-col gap-1">
+        <h4 className="font-medium">Why it may not</h4>
+        <MarkdownText text={proposal.whyNo || "Nothing against it."} className="wrap-anywhere" />
+      </section>
+    </section>
   );
 }
 
@@ -145,16 +163,7 @@ export function ProposalReview({
                   Proposed by {actorName(directory, proposal.author)}
                 </p>
                 <ProposedValue field={field} proposal={proposal} inputs={view.inputs} />
-                <div className="grid gap-3 rounded-lg bg-muted/50 p-3 text-sm sm:grid-cols-2">
-                  <section aria-label="Why it fits" className="flex flex-col gap-1">
-                    <h3 className="text-xs font-medium text-muted-foreground">Why it fits</h3>
-                    <p className="whitespace-pre-wrap">{proposal.whyYes}</p>
-                  </section>
-                  <section aria-label="Why it may not" className="flex flex-col gap-1">
-                    <h3 className="text-xs font-medium text-muted-foreground">Why it may not</h3>
-                    <p className="whitespace-pre-wrap">{proposal.whyNo || "Nothing against it."}</p>
-                  </section>
-                </div>
+                <ProposalComment key={proposal.id} proposal={proposal} />
                 {error && <ErrorText text={error} />}
               </div>
             </DialogPanel>

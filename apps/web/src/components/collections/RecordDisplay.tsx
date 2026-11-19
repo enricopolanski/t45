@@ -25,7 +25,7 @@ type RecordDisplay = ReturnType<typeof resolveRecordDisplay>;
 const IMAGE_NAME = /\.(avif|gif|jpe?g|png|svg|webp)$/iu;
 
 /** The addresses of the images a record's image field holds; its other files don't show. */
-const listImageUrls = (display: RecordDisplay, record: CollectionRecordView) =>
+export const listImageUrls = (display: RecordDisplay, record: CollectionRecordView) =>
   display.image === undefined
     ? []
     : listFieldFiles(display.image, record.values).flatMap((id) => {
@@ -186,7 +186,12 @@ export function RecordShowcase({
   readonly collection: RecordShape;
   readonly record: CollectionRecordView;
 }) {
-  const display = resolveRecordDisplay(collection);
+  const hidden = new Set(collection.layout?.page?.hiddenFields);
+  const visible = {
+    ...collection,
+    fields: collection.fields.filter((field) => !hidden.has(field.id)),
+  };
+  const display = resolveRecordDisplay(visible);
   const images = listImageUrls(display, record);
   const [shownImage, setShownImage] = useState(0);
   const featured = new Set([
@@ -196,13 +201,17 @@ export function RecordShowcase({
     display.highlight,
     ...display.badges,
   ]);
-  const shown = collection.fields.filter(
+  const shown = visible.fields.filter(
     (field) =>
       !featured.has(field) &&
       field.type !== "group" &&
       (field.type !== "url" || field.displayLinkOn === undefined) &&
       holdsData(record.values[field.id]),
   );
+  const description = shown.find(
+    (field) => field.type === "text" && field.id === collection.layout?.page?.description,
+  );
+  const properties = shown.filter((field) => field !== description && !isLongText(field));
   const title = showValue(display.title, record);
   return (
     <div
@@ -236,8 +245,8 @@ export function RecordShowcase({
         </div>
       ) : null}
       <div className="flex min-w-0 flex-col gap-3">
-        <RecordBadges collection={collection} fields={display.badges} record={record} />
-        <h2 className="text-2xl font-semibold text-balance">{title}</h2>
+        <RecordBadges collection={visible} fields={display.badges} record={record} />
+        {title === "" ? null : <h2 className="text-2xl font-semibold text-balance">{title}</h2>}
         {display.subtitle ? (
           <p className="text-muted-foreground">{showValue(display.subtitle, record)}</p>
         ) : null}
@@ -246,10 +255,15 @@ export function RecordShowcase({
             {showValue(display.highlight, record)}
           </p>
         ) : null}
-        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 border-t pt-3 text-sm">
-          {shown
-            .filter((field) => !isLongText(field))
-            .map((field) => (
+        {description === undefined ? null : (
+          <section className="flex flex-col gap-2">
+            <h3 className="font-semibold">{description.label}</h3>
+            <MarkdownText text={String(record.values[description.id])} />
+          </section>
+        )}
+        {properties.length === 0 ? null : (
+          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 border-t pt-3 text-sm">
+            {properties.map((field) => (
               <div key={field.id} className="contents">
                 <dt className="text-muted-foreground">{field.label}</dt>
                 <dd className="break-words tabular-nums">
@@ -257,20 +271,23 @@ export function RecordShowcase({
                     field,
                     record.values[field.id],
                     record.files,
-                    getFieldLink(field.id, collection.fields, record.values),
+                    getFieldLink(field.id, visible.fields, record.values),
                     true,
                   )}
                 </dd>
               </div>
             ))}
-        </dl>
+          </dl>
+        )}
       </div>
-      {shown.filter(isLongText).map((field) => (
-        <section key={field.id} className="flex flex-col gap-2 border-t pt-4 md:col-span-2">
-          <h3 className="font-semibold">{field.label}</h3>
-          <MarkdownText text={String(record.values[field.id])} />
-        </section>
-      ))}
+      {shown
+        .filter((field) => field !== description && isLongText(field))
+        .map((field) => (
+          <section key={field.id} className="flex flex-col gap-2 border-t pt-4 md:col-span-2">
+            <h3 className="font-semibold">{field.label}</h3>
+            <MarkdownText text={String(record.values[field.id])} />
+          </section>
+        ))}
     </div>
   );
 }

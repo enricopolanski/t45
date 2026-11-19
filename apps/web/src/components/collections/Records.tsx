@@ -8,8 +8,8 @@ import {
 import { isTableColumn, resolveTableLayout, sortRows } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
 import { buildFieldViews, getFieldLink } from "@t45/core/fieldViews";
-import { ArrowLeftIcon, ArrowRightIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowLeftIcon, ArrowRightIcon, EyeIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
 import { cn } from "../../lib/utils";
@@ -177,13 +177,19 @@ export function RecordTable({
   collection,
   records,
   onOpen,
+  onView,
+  onEdit,
+  renderStatus,
   remove,
   reorder,
 }: {
   readonly label: string;
   readonly collection: RecordShape;
   readonly records: ReadonlyArray<CollectionRecordView>;
-  readonly onOpen?: (record: CollectionRecordView) => void;
+  readonly onOpen?: ((record: CollectionRecordView) => void) | undefined;
+  readonly onView?: ((record: CollectionRecordView) => void) | undefined;
+  readonly onEdit?: (record: CollectionRecordView) => void;
+  readonly renderStatus?: ((record: CollectionRecordView) => ReactNode) | undefined;
   readonly remove?: (record: CollectionRecordView) => {
     readonly label: string;
     readonly onRemove: () => void;
@@ -204,12 +210,15 @@ export function RecordTable({
   const hasLayoutColumns = collection.layout?.table?.columns !== undefined;
   const shown = [
     ...table.columns.map((column) => ({ id: column.field.id, label: column.header, column })),
-    { id: UPDATED_AT_COLUMN, label: "Last update", column: null },
+    ...(collection.layout?.isUpdatedAtVisible === false
+      ? []
+      : [{ id: UPDATED_AT_COLUMN, label: "Last update", column: null }]),
   ];
   const columns = hasLayoutColumns
     ? shown
     : order.flatMap((id) => shown.filter((column) => column.id === id));
   const sorted = sortRows(records, table.sortBy, (record, fieldId) => record.values[fieldId]);
+  const hasActions = onView !== undefined || onEdit !== undefined || remove !== undefined;
   const move = (from: string, to: string) => {
     const next = [...order];
     const fromIndex = next.indexOf(from);
@@ -229,6 +238,11 @@ export function RecordTable({
       >
         <thead>
           <tr>
+            {renderStatus === undefined ? null : (
+              <th scope="col" className={headerCell}>
+                Status
+              </th>
+            )}
             {columns.map((column, index) => (
               <th
                 key={column.id}
@@ -265,11 +279,11 @@ export function RecordTable({
                 {column.label}
               </th>
             ))}
-            {remove === undefined ? null : (
-              <th scope="col" className={headerCell}>
-                <span className="sr-only">Remove</span>
+            {hasActions ? (
+              <th scope="col" className={cn(headerCell, "text-center")}>
+                Actions
               </th>
-            )}
+            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -294,6 +308,11 @@ export function RecordTable({
                     onOpen?.(record);
                 }}
               >
+                {renderStatus === undefined ? null : (
+                  <td className="w-px whitespace-nowrap border-t px-3 py-2">
+                    {renderStatus(record)}
+                  </td>
+                )}
                 {columns.map(({ id, column }) => {
                   if (column === null)
                     return (
@@ -331,22 +350,48 @@ export function RecordTable({
                     </td>
                   );
                 })}
-                {removal === undefined ? null : (
-                  <td className="w-8 border-t text-center">
-                    <Button
-                      type="button"
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label={removal.label}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        removal.onRemove();
-                      }}
-                    >
-                      <XIcon className="size-3" />
-                    </Button>
+                {hasActions ? (
+                  <td className="w-px border-t px-2 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      {onView === undefined ? null : (
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
+                          aria-label={`View record ${record.key}`}
+                          title="View record"
+                          onClick={() => onView(record)}
+                        >
+                          <EyeIcon />
+                        </Button>
+                      )}
+                      {onEdit === undefined ? null : (
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
+                          aria-label={`Edit record ${record.key}`}
+                          title="Edit record"
+                          onClick={() => onEdit(record)}
+                        >
+                          <PencilIcon />
+                        </Button>
+                      )}
+                      {removal === undefined ? null : (
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
+                          aria-label={removal.label}
+                          title={removal.label}
+                          onClick={removal.onRemove}
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      )}
+                    </div>
                   </td>
-                )}
+                ) : null}
               </tr>
             );
           })}

@@ -57,6 +57,9 @@ import {
   approvedValue,
   isReviewedField,
   proposalRefusal,
+  recordReviewsOf,
+  withEditedStepValues,
+  confirmRecordEntry as withConfirmedRecordEntry,
   Step,
   StepDefinition,
   type Ticket,
@@ -1045,11 +1048,11 @@ const make = Effect.gen(function* () {
     if (!isProjectAdmin(yield* actorOf(actorId), work.project))
       return yield* refuse("not_project_admin");
     yield* requireOpen(work);
-    const reason = yield* requireReason(input.reason);
+    const reason = input.reason?.trim();
     for (const step of work.ticket.steps) yield* stopStepRuns(work, step);
     work.ticket = {
       ...work.ticket,
-      status: { type: "cancelled", reason },
+      status: reason ? { type: "cancelled", reason } : { type: "cancelled" },
     };
     yield* save(work);
     // Recorded on the step the ticket stopped in, whose history then ends with it.
@@ -1126,6 +1129,7 @@ const make = Effect.gen(function* () {
       definition: definitionOf(work, step),
       parents: parents.map((parent) => ({ id: parent.id, name: nameOf(work, parent) })),
       fields: yield* buildStepFieldViews(work, step),
+      recordReviews: recordReviewsOf(definitionOf(work, step).fields, step),
       subSteps: childSteps(work.ticket, work.version.steps, step).map((child) => ({
         ...child,
         name: nameOf(work, child),
@@ -1225,7 +1229,14 @@ const make = Effect.gen(function* () {
       };
     }
     const others = Object.fromEntries(Object.entries(values).filter(([key]) => key !== fieldKey));
-    putStep(work, { ...step, values: value === null ? others : { ...others, [fieldKey]: value } });
+    putStep(
+      work,
+      withEditedStepValues(
+        definitionOf(work, step).fields,
+        step,
+        value === null ? others : { ...others, [fieldKey]: value },
+      ),
+    );
   });
 
   const setStepField = Effect.fnUntraced(function* (
@@ -1322,6 +1333,22 @@ const make = Effect.gen(function* () {
     yield* save(work);
     yield* record("workflows.discardProposal", actorId, targetOf(work, step), {
       fieldKey: proposal.fieldKey,
+    });
+  }, transaction);
+
+  const confirmRecordEntry = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"confirmRecordEntry">,
+  ) {
+    const { work, step } = yield* loadForCommand(actorId, input.stepId);
+    yield* requireActionable(step);
+    const reviewed = withConfirmedRecordEntry(definitionOf(work, step).fields, step, input);
+    if (typeof reviewed === "string")
+      return yield* new WorkflowRefused({ reason: "invalid_record_review", detail: reviewed });
+    putStep(work, reviewed);
+    yield* save(work);
+    yield* record("workflows.confirmRecordEntry", actorId, targetOf(work, step), {
+      fieldKey: `${input.groupFieldId}.${input.rowId}`,
     });
   }, transaction);
 
@@ -1720,6 +1747,7 @@ const make = Effect.gen(function* () {
     setStepField,
     proposeStepField,
     approveProposal,
+    confirmRecordEntry,
     discardProposal,
     markStepDone,
     setStepAssignee,

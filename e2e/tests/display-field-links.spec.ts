@@ -178,7 +178,7 @@ test("a collection keeps its links and column order when linked from a step", as
     .getByRole("cell", { name: "B0ABC", exact: true })
     .click();
   const table = ada.getByRole("table", { name: "Competitors" });
-  await expect(table.getByRole("columnheader")).toHaveText([...columnOrder, "Remove"]);
+  await expect(table.getByRole("columnheader")).toHaveText([...columnOrder, "Actions"]);
   await expect(table.getByRole("link", { name: "Blue masking tape", exact: true })).toHaveAttribute(
     "href",
     "https://example.com/blue",

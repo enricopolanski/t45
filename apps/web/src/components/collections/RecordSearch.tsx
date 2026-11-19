@@ -1,12 +1,11 @@
 import type { Collection, RecordFilters } from "@t45/contracts/models/Collection";
 import type { Field } from "@t45/contracts/models/Field";
 import { resolveRecordSearch } from "@t45/contracts/models/Layout";
-import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
 import { webUrlHost } from "../../lib/webUrl";
-import { api } from "../../rpc/api";
+import { api, type ApiInput, type ApiSuccess } from "../../rpc/api";
 import { Favicon } from "../ExternalUrl";
 import { Choice } from "../fields/LayoutEditor";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
@@ -17,6 +16,9 @@ import { plural } from "../work/workLogic";
 
 type Filters = typeof RecordFilters.Type;
 type Range = Extract<Filters[string], object>;
+type SearchInput = ApiInput<"collections.searchRecords">;
+type SearchResult = ApiSuccess<"collections.searchRecords">;
+type FilterChoices = NonNullable<SearchResult["filterChoices"]>;
 
 const ALL = "$all";
 
@@ -24,50 +26,67 @@ const ALL = "$all";
 const RECORDS_PER_PAGE = 25;
 
 /**
- * The records of a collection its search finds: their words, looked for in `fields` or the
- * layout's, and their filters, on `page` of their pages, with how many match of how many there are.
+ * The records a collection's search finds on `page`, with counts and choices for its filter menus.
  */
-export function useRecordSearch(collectionId: string, fields?: ReadonlyArray<string>, page = 1) {
+export function useRecordSearch(collection: Collection | null, page = 1) {
   const [text, setText] = useState("");
   const [filters, setFilters] = useState<Filters>({});
-  const [found, setFound] = useState<{
-    readonly records: ReadonlyArray<CollectionRecordView>;
-    readonly hasMore: boolean;
-    readonly matchCount: number;
-    readonly totalCount: number;
+  const [loaded, setLoaded] = useState<{
+    readonly criteria: SearchInput;
+    readonly revision: number;
+    readonly result: SearchResult;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const search = useCallback(
-    () =>
-      api("collections.searchRecords", {
-        collectionId,
-        text,
-        filters,
-        offset: (page - 1) * RECORDS_PER_PAGE,
-        limit: RECORDS_PER_PAGE,
-        ...(fields === undefined ? {} : { fields }),
-      }),
-    [collectionId, text, filters, fields, page],
-  );
+  const [revision, refresh] = useReducer((count: number) => count + 1, 0);
+  const criteria = useMemo<SearchInput | null>(() => {
+    if (collection === null) return null;
+    const shown = resolveRecordSearch(collection);
+    return {
+      collectionId: collection.id,
+      text,
+      filters,
+      fields: shown.fields?.map((field) => field.id) ?? [],
+      filterChoices: shown.filters
+        .filter((field) => field.type !== "number" && field.type !== "date")
+        .map(({ id: fieldId }) => {
+          const linkFieldId = collection.fields.find(
+            (field) => field.id === shown.iconLinks[fieldId] && field.type === "url",
+          )?.id;
+          return { fieldId, ...(linkFieldId === undefined ? {} : { linkFieldId }) };
+        }),
+    };
+  }, [collection, text, filters]);
   useEffect(() => {
+    if (criteria === null) return;
     let current = true;
-    void search().then(
-      (loaded) => current && setFound(loaded),
+    void api("collections.searchRecords", {
+      ...criteria,
+      offset: (page - 1) * RECORDS_PER_PAGE,
+      limit: RECORDS_PER_PAGE,
+    }).then(
+      (result) => {
+        if (!current) return;
+        setLoaded({ criteria, revision, result });
+        setError(null);
+      },
       (cause: unknown) => current && setError(describeFailure(cause)),
     );
     return () => {
       current = false;
     };
-  }, [search]);
+  }, [criteria, page, revision]);
   return {
     text,
     setText,
     filters,
     setFilters,
-    found,
+    found: loaded?.result ?? null,
+    filterChoices:
+      loaded?.criteria === criteria && loaded.revision === revision
+        ? loaded.result.filterChoices
+        : undefined,
     error,
-    refresh: () =>
-      void search().then(setFound, (cause: unknown) => setError(describeFailure(cause))),
+    refresh,
   };
 }
 
@@ -175,67 +194,47 @@ function RangeFilter({
   );
 }
 
-type HeldValue = { readonly count: number; readonly link?: string };
-
-/** The values a filter on `field` picks from, alphabetically, each with how many records hold it and, given `iconLink`, their site's icon: its options, yes or no, or those its records hold. */
-function useFilterChoices(collectionId: string, field: Field, iconLink: string | undefined) {
-  const [held, setHeld] = useState<ReadonlyMap<string, HeldValue>>(new Map());
-  useEffect(() => {
-    let current = true;
-    void api("collections.listFieldValues", {
-      collectionId,
-      fieldId: field.id,
-      ...(iconLink === undefined ? {} : { linkFieldId: iconLink }),
-    }).then(
-      (values) =>
-        current && setHeld(new Map(values.map(({ value, ...rest }) => [String(value), rest]))),
-      () => undefined,
-    );
-    return () => {
-      current = false;
-    };
-  }, [collectionId, field.id, iconLink]);
-  const values =
+/** A filter picking one value of `field`, all of them without one. */
+function ValueFilter({
+  field,
+  value,
+  available,
+  onChange,
+}: {
+  readonly field: Field;
+  readonly value: Filters[string] | undefined;
+  readonly available: FilterChoices[string] | undefined;
+  readonly onChange: (value: string | boolean | undefined) => void;
+}) {
+  const held = new Map(
+    available?.map(({ value, ...rest }) => [
+      field.type === "boolean" ? String(value === 1) : String(value),
+      rest,
+    ]),
+  );
+  const selected = value === undefined ? ALL : String(value);
+  // Keep a selected value visible even when another filter rules it out.
+  const keys = new Set(held.keys());
+  if (selected !== ALL) keys.add(selected);
+  const ordered =
     field.type === "boolean"
-      ? ([
-          ["true", "Yes"],
-          ["false", "No"],
-        ] as const)
-      : (field.type === "select" ? field.options : [...held.keys()])
-          .toSorted((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-          .map((value) => [value, value] as const);
-  return values.map(([value, label]) => {
-    const { count, link } = held.get(value) ?? { count: 0 };
-    const host = webUrlHost(link);
+      ? ["true", "false"].filter((key) => keys.has(key))
+      : [...keys].toSorted((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const choices = ordered.map((key) => {
+    const host = webUrlHost(held.get(key)?.link);
+    const label = field.type === "boolean" ? (key === "true" ? "Yes" : "No") : key;
     return [
-      value,
-      <span key={value} className="inline-flex items-center">
+      key,
+      <span key={key} className="inline-flex items-center">
         {host === null ? null : <Favicon host={host} />}
-        {label} ({count})
+        {available === undefined ? label : `${label} (${held.get(key)?.count ?? 0})`}
       </span>,
     ] as const;
   });
-}
-
-/** A filter picking one value of `field`, all of them without one. */
-function ValueFilter({
-  collectionId,
-  field,
-  iconLink,
-  value,
-  onChange,
-}: {
-  readonly collectionId: string;
-  readonly field: Field;
-  readonly iconLink: string | undefined;
-  readonly value: Filters[string] | undefined;
-  readonly onChange: (value: string | boolean | undefined) => void;
-}) {
-  const choices = useFilterChoices(collectionId, field, iconLink);
   return (
     <Choice
       label={field.label}
-      value={value === undefined ? ALL : String(value)}
+      value={selected}
       choices={{ [ALL]: "All", ...Object.fromEntries(choices) }}
       onChange={(choice) =>
         onChange(choice === ALL ? undefined : field.type === "boolean" ? choice === "true" : choice)
@@ -248,13 +247,15 @@ function ValueFilter({
 export function RecordFilterBar({
   collection,
   filters,
+  filterChoices,
   onChange,
 }: {
-  readonly collection: Pick<Collection, "id" | "fields" | "layout">;
+  readonly collection: Pick<Collection, "fields" | "layout">;
   readonly filters: Filters;
+  readonly filterChoices: FilterChoices | undefined;
   readonly onChange: (filters: Filters) => void;
 }) {
-  const { filters: shown, iconLinks } = resolveRecordSearch(collection);
+  const { filters: shown } = resolveRecordSearch(collection);
   if (shown.length === 0) return null;
   const setFilter = (fieldId: string, value: Filters[string] | undefined) => {
     const { [fieldId]: _, ...rest } = filters;
@@ -275,10 +276,9 @@ export function RecordFilterBar({
             />
           ) : (
             <ValueFilter
-              collectionId={collection.id}
               field={field}
-              iconLink={iconLinks[field.id]}
               value={filters[field.id]}
+              available={filterChoices?.[field.id]}
               onChange={(value) => setFilter(field.id, value)}
             />
           )}

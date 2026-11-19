@@ -346,6 +346,7 @@ export function ProjectTickets({ detail, run }: Editing) {
         title="Cancel this item"
         placeholder="Why it stops here"
         confirmLabel="Cancel item"
+        isReasonOptional
         onConfirm={async (reason) => {
           try {
             await api("workflows.cancelTicket", { ticketId: cancelling ?? "", reason });

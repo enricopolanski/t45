@@ -192,6 +192,13 @@ test("admins define collections whose records people and agents look up and save
   const layout = ada.getByRole("dialog", { name: "Layout — Listings" });
   const preview = layout.getByRole("table", { name: "Records" });
   await expect(preview.getByRole("columnheader", { name: "Price" })).toBeVisible();
+  await expect(
+    preview.getByRole("columnheader", { name: "Last update", exact: true }),
+  ).toBeVisible();
+  await layout.getByRole("checkbox", { name: "Show Last update", exact: true }).click();
+  await expect(preview.getByRole("columnheader", { name: "Last update", exact: true })).toHaveCount(
+    0,
+  );
   await layout.getByRole("checkbox", { name: "Price" }).click();
   await expect(preview.getByRole("columnheader", { name: "Price" })).toHaveCount(0);
   await layout.getByRole("button", { name: "Save layout" }).click();
@@ -199,4 +206,7 @@ test("admins define collections whose records people and agents look up and save
   await ada.goto(`/settings/collections/${collectionId}`);
   await expect(records.getByRole("row", { name: "Record B0ABC" })).toBeVisible();
   await expect(records.getByRole("columnheader", { name: "Price" })).toHaveCount(0);
+  await expect(records.getByRole("columnheader", { name: "Last update", exact: true })).toHaveCount(
+    0,
+  );
 });

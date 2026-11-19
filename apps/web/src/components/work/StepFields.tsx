@@ -21,6 +21,7 @@ import { type ComponentProps, type ReactNode, useId, useRef, useState } from "re
 import { attachmentUploadUrl, attachmentUrl, decodeUploadResult } from "../../lib/attachmentUrl";
 import { api } from "../../rpc/api";
 import { cn } from "../../lib/utils";
+import { RecordShowcase } from "../collections/RecordDisplay";
 import { RecordDialog, RecordPicker, RecordTable } from "../collections/Records";
 import { SavedInput, saveTyped } from "../SavedInput";
 import { ExternalUrl } from "../ExternalUrl";
@@ -36,7 +37,14 @@ import { MarkdownText } from "../markdown/MarkdownText";
 import { OptionValue } from "../fields/OptionValue";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
+import {
+  Dialog,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
 import { ErrorText } from "../ui/error-text";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -210,6 +218,10 @@ type EditorProps = {
   readonly onUpload: (fieldKey: string, file: File) => void;
   /** Shows a linked record as it was just saved. */
   readonly onRecordSaved?: () => void;
+  readonly wrapEntryText?: boolean;
+  readonly recordStatus?:
+    | ((field: FieldView) => ((record: FieldView["records"][number]) => ReactNode) | undefined)
+    | undefined;
 };
 
 /** A repeatable group's entries: rows with an id. */
@@ -562,13 +574,19 @@ function GroupEditor({ field, ...props }: EditorProps) {
  * A records field: the collection's records it links, listed as the collection lists them. A
  * record opens to edit it; others are linked from the collection, or added to it and linked.
  */
-function LinkedRecords({ field, missing, onSave, onRecordSaved }: EditorProps) {
+function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: EditorProps) {
   const [opened, setOpened] = useState<{
     readonly values: FieldValues;
     readonly files: FieldView["records"][number]["files"];
   } | null>(null);
+  const [viewedKey, setViewedKey] = useState<string | null>(null);
+  const showcasePopup = useRef<HTMLDivElement>(null);
   const [isPicking, setIsPicking] = useState(false);
   const { collection } = field;
+  const hasShowcase = collection?.layout?.page?.template === "showcase";
+  const viewed = field.records.find((record) => record.key === viewedKey);
+  const renderStatus = recordStatus?.(field);
+  const canPickRecord = renderStatus === undefined;
   const keys = recordKeys(field.value);
   const link = (key: string) => onSave(field.key, [...keys, key]);
   return (
@@ -578,7 +596,9 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved }: EditorProps) {
           {plural(field.records.length, "record", "records")}
         </span>
       </GroupHeading>
-      {missing.has(field.key) && <ErrorText text="Link at least one record" />}
+      {missing.has(field.key) && (
+        <ErrorText text={canPickRecord ? "Link at least one record" : "Add at least one record"} />
+      )}
       {collection === null ? (
         <p className="text-sm text-muted-foreground">Its collection is gone.</p>
       ) : (
@@ -588,7 +608,10 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved }: EditorProps) {
               label={field.label}
               collection={collection}
               records={field.records}
-              onOpen={setOpened}
+              onOpen={hasShowcase ? undefined : setOpened}
+              onView={hasShowcase ? (record) => setViewedKey(record.key) : undefined}
+              onEdit={setOpened}
+              renderStatus={renderStatus}
               remove={(record) => ({
                 label: `Unlink record ${record.key}`,
                 onRemove: () =>
@@ -600,10 +623,12 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved }: EditorProps) {
             />
           ) : null}
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => setIsPicking(true)}>
-              <LinkIcon />
-              Link record
-            </Button>
+            {canPickRecord ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => setIsPicking(true)}>
+                <LinkIcon />
+                Link record
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"
@@ -614,6 +639,38 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved }: EditorProps) {
               New record
             </Button>
           </div>
+          {viewed === undefined ? null : (
+            <Dialog
+              open
+              onOpenChange={(open) => {
+                if (!open) setViewedKey(null);
+              }}
+            >
+              <DialogPopup
+                ref={showcasePopup}
+                initialFocus={showcasePopup}
+                className="sm:max-w-5xl"
+              >
+                <DialogHeader>
+                  <DialogTitle>Record details</DialogTitle>
+                </DialogHeader>
+                <DialogPanel>
+                  <RecordShowcase collection={collection} record={viewed} />
+                </DialogPanel>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setViewedKey(null);
+                      setOpened(viewed);
+                    }}
+                  >
+                    Edit record
+                  </Button>
+                </DialogFooter>
+              </DialogPopup>
+            </Dialog>
+          )}
           {opened === null ? null : (
             <RecordDialog
               collection={collection}
@@ -626,7 +683,7 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved }: EditorProps) {
               }}
             />
           )}
-          {isPicking ? (
+          {canPickRecord && isPicking ? (
             <RecordPicker
               label={field.label}
               collection={collection}
@@ -819,7 +876,11 @@ function EntryTable({ entries, remove, ...props }: EntriesProps) {
                       <CellControl
                         field={child}
                         label={`${child.label}, entry ${at + 1}`}
-                        isWrapped={column.isWrapped}
+                        isWrapped={
+                          column.isWrapped ||
+                          (props.wrapEntryText === true &&
+                            (child.type === "text" || child.type === "url"))
+                        }
                         isMissing={missing.has(child.key)}
                         onSave={onSave}
                         onUpload={onUpload}
@@ -1125,6 +1186,8 @@ export function StepFields({
   onSave,
   onUpload,
   onRecordSaved,
+  recordStatus,
+  holdOpen = false,
   review,
 }: {
   readonly fields: ReadonlyArray<FieldView>;
@@ -1136,10 +1199,12 @@ export function StepFields({
   readonly onSave: (fieldKey: string, value: StepFieldValue) => void;
   readonly onUpload: (fieldKey: string, file: File) => void;
   readonly onRecordSaved: () => void;
+  readonly recordStatus?: EditorProps["recordStatus"];
+  readonly holdOpen?: boolean;
 }) {
   if (fields.length === 0) return null;
   return (
-    <CardFold title="Fields" held={missing.size > 0}>
+    <CardFold title="Fields" held={holdOpen || missing.size > 0}>
       {review}
       {editable ? (
         <FieldInputs
@@ -1148,6 +1213,7 @@ export function StepFields({
           onSave={onSave}
           onUpload={onUpload}
           onRecordSaved={onRecordSaved}
+          recordStatus={recordStatus}
         />
       ) : (
         <ReadOnlyFields fields={fields} />

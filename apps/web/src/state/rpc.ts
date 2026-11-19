@@ -11,6 +11,7 @@ import {
   type ApiFailure,
   type ApiInput,
   type ApiItem,
+  type ApiSuccess,
   type StreamTag,
   type UnaryTag,
   atomRuntime,
@@ -28,7 +29,10 @@ type ApiAtomRuntime = Atom.AtomRuntime<ApiClient>;
  * an answer, or when the tab is shown again. A result is fresh for 30 s, and the atom lives
  * 5 minutes past its last reader.
  */
-export function apiQuery<T extends UnaryTag>(tag: T, runtime: ApiAtomRuntime = atomRuntime) {
+export function apiQuery<T extends UnaryTag>(
+  tag: T,
+  runtime: ApiAtomRuntime = atomRuntime,
+): (input: ApiInput<T>) => Atom.Atom<AsyncResult.AsyncResult<ApiSuccess<T>, ApiFailure<T>>> {
   return Atom.family((input: ApiInput<T>) =>
     runtime
       .atom((get) =>

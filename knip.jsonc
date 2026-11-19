@@ -32,6 +32,11 @@
       // The tsconfig plugin name is read by the Effect diagnostics that `effect-tsgo patch` adds to tsgo.
       "ignoreDependencies": ["@effect/language-service"],
     },
+    "packages/capabilities": {
+      "includeEntryExports": true,
+      // scripts/build.ts ships it by path as the document-extraction OpenCode plugin, which OpenCode imports.
+      "ignore": ["src/document-extraction/server.js"],
+    },
     "packages/*": {
       // These workspace packages are private to this monorepo.
       "includeEntryExports": true,

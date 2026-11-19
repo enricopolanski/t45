@@ -17,6 +17,8 @@ import {
   holdsData,
   type Layout,
   recordKeys,
+  rowIds,
+  valuesProblem,
 } from "./Field.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 
@@ -70,6 +72,34 @@ const stepNodes = (
 ): ReadonlyArray<{ readonly step: StepDefinition; readonly parentId: string | null }> =>
   steps.flatMap((step) => [{ step, parentId }, ...stepNodes(step.subSteps, step.id)]);
 
+export const canReviewEntryField = (field: Field): boolean =>
+  field.type === "group"
+    ? field.recordReview === undefined && field.fields.every(canReviewEntryField)
+    : field.type !== "file" && field.type !== "records" && field.isReviewed !== true;
+
+const hasValidRecordReviews = (fields: ReadonlyArray<Field>) =>
+  fields.every((field) => {
+    if (field.type !== "group") return true;
+    const { recordReview } = field;
+    if (recordReview === undefined)
+      return field.fields.every((child) => child.type !== "group" || !hasNestedReview(child));
+    return (
+      field.repeatable &&
+      fields.some(
+        (other) => other.id === recordReview.recordsFieldId && other.type === "records",
+      ) &&
+      field.fields.length > 1 &&
+      field.fields.some(
+        (child) => child.id === recordReview.recordKeyFieldId && child.type === "text",
+      ) &&
+      field.fields.every(canReviewEntryField)
+    );
+  });
+
+const hasNestedReview = (field: Extract<Field, { type: "group" }>): boolean =>
+  field.recordReview !== undefined ||
+  field.fields.some((child) => child.type === "group" && hasNestedReview(child));
+
 export const findStep = (steps: ReadonlyArray<StepDefinition>, id: string) =>
   stepNodes(steps).find((node) => node.step.id === id) ?? null;
 
@@ -114,6 +144,12 @@ const Steps = Schema.Array(StepDefinition).check(
   Schema.makeFilter((steps) => hasDistinctIds(stepIds(steps)), {
     expected: "distinct step ids, sub-steps included",
   }),
+  Schema.makeFilter(
+    (steps) => stepNodes(steps).every(({ step }) => hasValidRecordReviews(step.fields)),
+    {
+      expected: "top-level repeatable record reviews with a linked records field and a text key",
+    },
+  ),
 );
 
 /**
@@ -209,6 +245,8 @@ export class Step extends Schema.Opaque<Step>()(
     values: FieldValues,
     /** The values proposed for its reviewed fields, open or discarded. */
     proposals: Schema.optionalKey(Schema.Array(Proposal)),
+    /** Confirmed group entries, by group field and row id. */
+    confirmedReviewRows: Schema.optionalKey(Schema.UniqueArray(TrimmedNonEmptyString)),
   }),
 ) {}
 
@@ -267,7 +305,7 @@ const TicketStatus = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("cancelled"),
-    reason: TrimmedNonEmptyString,
+    reason: Schema.optionalKey(TrimmedNonEmptyString),
   }),
 ]);
 
@@ -350,6 +388,9 @@ const REFUSALS = {
   ticket_not_open: "This ticket is no longer open.",
   step_not_actionable: "This step can't do that right now.",
   step_incomplete: "Fill in every field and complete every sub-step first.",
+  record_review_pending:
+    "Confirm each linked record's review in Fields before marking this step done.",
+  invalid_record_review: "This record's review could not be confirmed.",
   reason_required: "Give a reason.",
   invalid_field_value: "That value doesn't fit the field.",
   field_reviewed:
@@ -386,6 +427,111 @@ const fieldsComplete = (fields: ReadonlyArray<Field>, values: Values, prefix = "
       )
     );
   });
+
+/** The values of one entry, with paths relative to the entry. */
+export const reviewEntryValues = (values: Values, entryPath: string): Values =>
+  Object.fromEntries(
+    Object.entries(values).flatMap(([key, value]) =>
+      key.startsWith(`${entryPath}.`) ? [[key.slice(entryPath.length + 1), value]] : [],
+    ),
+  );
+
+const sameValues = (left: Values, right: Values) =>
+  Object.keys(left).length === Object.keys(right).length &&
+  Object.entries(left).every(([key, value]) => isSameValue(value, right[key]));
+
+/** Each linked record's entry and whether a member confirmed it. */
+export const recordReviewsOf = (fields: ReadonlyArray<Field>, step: Step) =>
+  fields.flatMap((group) => {
+    if (group.type !== "group" || group.recordReview === undefined) return [];
+    const { recordsFieldId, recordKeyFieldId } = group.recordReview;
+    const rows = rowIds(step.values[group.id]);
+    return [
+      {
+        groupFieldId: group.id,
+        ...group.recordReview,
+        entries: recordKeys(step.values[recordsFieldId]).map((recordKey) => {
+          const matches = rows.filter(
+            (row) => step.values[`${group.id}.${row}.${recordKeyFieldId}`] === recordKey,
+          );
+          const rowId = matches.length === 1 ? matches[0]! : null;
+          return {
+            recordKey,
+            rowId,
+            hasDuplicateEntries: matches.length > 1,
+            isConfirmed:
+              rowId !== null && (step.confirmedReviewRows ?? []).includes(`${group.id}.${rowId}`),
+          };
+        }),
+      },
+    ];
+  });
+
+/** An edit releases a confirmation when its entry or the record it belongs to changes. */
+export const withEditedStepValues = (
+  fields: ReadonlyArray<Field>,
+  step: Step,
+  values: Values,
+): Step => {
+  const edited = { ...step, values };
+  if (step.confirmedReviewRows === undefined) return edited;
+  const confirmedReviewRows = recordReviewsOf(fields, edited).flatMap(({ groupFieldId, entries }) =>
+    entries.flatMap(({ rowId, isConfirmed }) => {
+      const path = `${groupFieldId}.${rowId}`;
+      return isConfirmed &&
+        sameValues(reviewEntryValues(step.values, path), reviewEntryValues(values, path))
+        ? [path]
+        : [];
+    }),
+  );
+  return { ...edited, confirmedReviewRows };
+};
+
+/** Saves the reviewed values and their confirmation together after checking what the reviewer saw. */
+export const confirmRecordEntry = (
+  fields: ReadonlyArray<Field>,
+  step: Step,
+  input: {
+    readonly groupFieldId: string;
+    readonly recordKey: string;
+    readonly rowId: string;
+    readonly previousValues: Values | null;
+    readonly values: Values;
+  },
+): Step | string => {
+  const group = fields.find((field) => field.id === input.groupFieldId);
+  if (group?.type !== "group" || group.recordReview === undefined)
+    return "This group has no record review.";
+  const { recordKeyFieldId } = group.recordReview;
+  const review = recordReviewsOf([group], step)[0]!;
+  const entry = review.entries.find(({ recordKey }) => recordKey === input.recordKey);
+  if (entry === undefined) return "The record is no longer linked.";
+  if (entry.hasDuplicateEntries) return "Keep one entry for this record before confirming it.";
+  const rows = rowIds(step.values[group.id]);
+  const path = `${group.id}.${input.rowId}`;
+  if (
+    input.previousValues === null
+      ? entry.rowId !== null || rows.includes(input.rowId)
+      : entry.rowId !== input.rowId ||
+        !sameValues(reviewEntryValues(step.values, path), input.previousValues)
+  )
+    return "These values changed while you were reviewing them. Reopen the review for the latest values.";
+  const rowValues = { ...input.values, [recordKeyFieldId]: input.recordKey };
+  const problem = valuesProblem(group.fields, rowValues);
+  if (problem !== null) return problem;
+  if (!fieldsComplete(group.fields, rowValues)) return "Fill in all values before confirming.";
+  const values = {
+    ...Object.fromEntries(
+      Object.entries(step.values).filter(([key]) => !key.startsWith(`${path}.`)),
+    ),
+    [group.id]: entry.rowId === null ? [...rows, input.rowId] : rows,
+    ...Object.fromEntries(
+      Object.entries(rowValues).map(([key, value]) => [`${path}.${key}`, value]),
+    ),
+  };
+  const confirmedReviewRows = [...new Set([...(step.confirmedReviewRows ?? []), path])];
+  return { ...step, values, confirmedReviewRows };
+};
 
 /**
  * The fields a step reads of earlier steps, each with the ticket's step that filled it; an input
@@ -472,11 +618,19 @@ export const stepCompletionRefusal = (
   definition: StepDefinition | null,
   ticket: Ticket,
   step: Step,
-) =>
-  !fieldsComplete(definition?.fields ?? [], step.values) ||
-  ticket.steps.some((child) => child.parentStepId === step.id && child.status.type !== "completed")
+) => {
+  const fields = definition?.fields ?? [];
+  if (
+    recordReviewsOf(fields, step).some(({ entries }) => entries.some((entry) => !entry.isConfirmed))
+  )
+    return "record_review_pending" as const;
+  return !fieldsComplete(fields, step.values) ||
+    ticket.steps.some(
+      (child) => child.parentStepId === step.id && child.status.type !== "completed",
+    )
     ? ("step_incomplete" as const)
     : null;
+};
 
 export const stepInTicket = (ticket: Ticket, stepId: string | null) =>
   ticket.steps.find((step) => step.id === stepId) ?? null;

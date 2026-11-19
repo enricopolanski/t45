@@ -338,6 +338,11 @@ function ToneSelect({
 /** A collection a records field can link. */
 export type LinkableCollection = { readonly id: string; readonly title: string };
 
+type ComparisonFieldsControl = (
+  field: Extract<DraftField, { type: "records" }>,
+  onChange: (field: DraftField) => void,
+) => ReactNode;
+
 /** A way to edit a repeatable group's layout, shown with its fields. */
 type GroupLayoutControl = (
   group: Extract<DraftField, { type: "group" }>,
@@ -359,6 +364,7 @@ export function FieldsEditor({
   keyFieldId,
   collections,
   groupLayout,
+  comparisonFieldsEditor,
   areReviewable = false,
   onChange,
   disabled,
@@ -370,6 +376,7 @@ export function FieldsEditor({
   readonly keyFieldId?: string;
   readonly collections?: ReadonlyArray<LinkableCollection>;
   readonly groupLayout?: GroupLayoutControl | undefined;
+  readonly comparisonFieldsEditor?: ComparisonFieldsControl | undefined;
   readonly areReviewable?: boolean;
   readonly onChange: (fields: ReadonlyArray<DraftField>) => void;
   readonly disabled: boolean;
@@ -385,6 +392,7 @@ export function FieldsEditor({
           isColumn={areColumns && place.entry.id !== keyFieldId}
           collections={collections}
           groupLayout={groupLayout}
+          comparisonFieldsEditor={comparisonFieldsEditor}
           isReviewable={areReviewable}
           disabled={disabled}
         />
@@ -501,6 +509,7 @@ function FieldCard({
   isColumn,
   collections,
   groupLayout,
+  comparisonFieldsEditor,
   isReviewable,
   disabled,
 }: {
@@ -510,6 +519,7 @@ function FieldCard({
   readonly isColumn: boolean;
   readonly collections: ReadonlyArray<LinkableCollection> | undefined;
   readonly groupLayout: GroupLayoutControl | undefined;
+  readonly comparisonFieldsEditor: ComparisonFieldsControl | undefined;
   readonly isReviewable: boolean;
   readonly disabled: boolean;
 }) {
@@ -660,7 +670,12 @@ function FieldCard({
                     aria-describedby={`${id}-repeatable-hint`}
                     size="sm"
                     checked={field.repeatable === true}
-                    onCheckedChange={(checked) => setField({ ...field, repeatable: checked })}
+                    onCheckedChange={(checked) => {
+                      const { recordReview: _, ...rest } = field;
+                      setField(
+                        checked ? { ...field, repeatable: true } : { ...rest, repeatable: false },
+                      );
+                    }}
                     disabled={disabled}
                   />
                   <div className="flex flex-col gap-0.5">
@@ -685,6 +700,7 @@ function FieldCard({
                   }
                   // Only a step's own repeatable groups preview a ticket's entries.
                   groupLayout={field.repeatable ? undefined : groupLayout}
+                  comparisonFieldsEditor={comparisonFieldsEditor}
                   areReviewable={isReviewable}
                   onChange={(fields) => setField({ ...field, fields })}
                   disabled={disabled}
@@ -709,6 +725,9 @@ function FieldCard({
             {isReviewable ? (
               <ReviewSwitch field={field} onChange={setField} disabled={disabled} />
             ) : null}
+            {isReviewable && field.type === "records" && field.isReviewed
+              ? comparisonFieldsEditor?.(field, setField)
+              : null}
             {field.type === "number" ? (
               <div className="flex flex-wrap items-end gap-2">
                 <DecimalsSelect field={field} onChange={setField} disabled={disabled} />

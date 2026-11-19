@@ -42,6 +42,11 @@ export const primaryKeyRefusal = (collection: {
  */
 export const CollectionLayout = Schema.Struct({
   ...Layout.fields,
+  isUpdatedAtVisible: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description: "Show the Last update column in tables. Shown by default.",
+    }),
+  ),
   display: Schema.optionalKey(
     Schema.Struct({
       image: Schema.optionalKey(
@@ -104,6 +109,17 @@ export const CollectionLayout = Schema.Struct({
         description:
           "form: the record's editable form. showcase: its images as a gallery beside its title, highlight, badges and other values, long text below, editable on demand.",
       }),
+      description: Schema.optionalKey(
+        LayoutFieldId.annotate({
+          description:
+            "A text field shown as Markdown after the highlight and before other values.",
+        }),
+      ),
+      hiddenFields: Schema.optionalKey(
+        Schema.UniqueArray(LayoutFieldId).annotate({
+          description: "Fields omitted from the showcase. They stay available in the form.",
+        }),
+      ),
     }).annotate({ description: "A record on a page of its own; its form without it." }),
   ),
   defaultView: Schema.optionalKey(
