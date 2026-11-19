@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { ArrowUpIcon, ChevronLeftIcon, ListPlusIcon, SquareIcon } from "lucide-react";
 import { keepComposerFocus } from "~/components/chat/composerLayout";
 import { cn } from "~/lib/utils";
@@ -22,6 +23,7 @@ function StopButton(props: {
   preserveComposerFocus: boolean;
   onInterrupt: () => void;
 }) {
+  const t = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger
@@ -34,13 +36,13 @@ function StopButton(props: {
             )}
             {...pointerFocusProps(props.preserveComposerFocus)}
             onClick={props.onInterrupt}
-            aria-label="Stop generation"
+            aria-label={t("Stop generation")}
           />
         }
       >
         <SquareIcon className="size-2.5 fill-current" aria-hidden="true" />
       </TooltipTrigger>
-      <TooltipPopup>Interrupt</TooltipPopup>
+      <TooltipPopup>{t("Interrupt")}</TooltipPopup>
     </Tooltip>
   );
 }
@@ -52,6 +54,7 @@ export function ComposerQuestionActions(props: {
   /** Offered while the run can be stopped. */
   onInterrupt?: (() => void) | undefined;
 }) {
+  const t = useTranslation();
   const { action } = props;
   return (
     <div className="flex items-center justify-end gap-1.5">
@@ -69,7 +72,7 @@ export function ComposerQuestionActions(props: {
           {...pointerFocusProps(props.preserveComposerFocus)}
           onClick={action.onPreviousField}
           disabled={action.isResponding}
-          aria-label="Previous question"
+          aria-label={t("Previous question")}
         >
           <ChevronLeftIcon className="size-3.5" />
         </Button>
@@ -83,7 +86,7 @@ export function ComposerQuestionActions(props: {
             {...pointerFocusProps(props.preserveComposerFocus)}
             disabled={action.isResponding || action.blockedReason !== null}
           >
-            {action.isResponding ? "Submitting…" : action.isLastField ? "Submit" : "Next"}
+            {action.isResponding ? t("Submitting…") : action.isLastField ? t("Submit") : t("Next")}
           </button>
         </TooltipTrigger>
         {action.blockedReason ? <TooltipPopup>{action.blockedReason}</TooltipPopup> : null}
@@ -102,6 +105,7 @@ export function ComposerSendActions(props: {
   /** Offered while the agent is running or waiting on a question. */
   onInterrupt?: (() => void) | undefined;
 }) {
+  const t = useTranslation();
   if (props.onInterrupt && !props.hasSendableContent) {
     return (
       <StopButton
@@ -112,8 +116,9 @@ export function ComposerSendActions(props: {
     );
   }
 
-  const submitLabel = props.isRunning ? "Queue message" : "Submit message";
-  const submitStatus = props.sendDisabledReason ?? (props.isSendBusy ? "Submitting message" : null);
+  const submitLabel = props.isRunning ? t("Queue message") : t("Submit message");
+  const submitStatus =
+    props.sendDisabledReason ?? (props.isSendBusy ? t("Submitting message") : null);
 
   return (
     <Tooltip>

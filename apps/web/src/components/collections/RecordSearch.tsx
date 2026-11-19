@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { Collection, RecordFilters } from "@t45/contracts/models/Collection";
 import type { Field } from "@t45/contracts/models/Field";
 import { resolveRecordSearch } from "@t45/contracts/models/Layout";
@@ -12,7 +13,6 @@ import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { plural } from "../work/workLogic";
 
 type Filters = typeof RecordFilters.Type;
 type Range = Extract<Filters[string], object>;
@@ -108,26 +108,28 @@ export function RecordPager({
   readonly matchCount: number;
   readonly onPage: (page: number) => void;
 }) {
+  const t = useTranslation();
   const last = Math.max(1, Math.ceil(matchCount / RECORDS_PER_PAGE));
   if (last === 1) return null;
   const first = (page - 1) * RECORDS_PER_PAGE + 1;
+  const pages = pagesAround(page, last);
   return (
-    <nav aria-label="Pages" className="flex flex-wrap items-center gap-1">
+    <nav aria-label={t("Pages")} className="flex flex-wrap items-center gap-1">
       <span className="me-2 text-sm text-muted-foreground tabular-nums">
-        {first}–{Math.min(page * RECORDS_PER_PAGE, matchCount)} of {matchCount}
+        {first}–{Math.min(page * RECORDS_PER_PAGE, matchCount)} {t("of")} {matchCount}
       </span>
       <Button
         size="icon-sm"
         variant="ghost"
-        aria-label="Previous page"
+        aria-label={t("Previous page")}
         disabled={page === 1}
         onClick={() => onPage(page - 1)}
       >
         <ChevronLeftIcon />
       </Button>
-      {pagesAround(page, last).map((each, at) =>
+      {pages.map((each, at) =>
         each === null ? (
-          <span key={`gap-${at}`} className="px-1 text-sm text-muted-foreground">
+          <span key={`gap-after-${pages[at - 1]}`} className="px-1 text-sm text-muted-foreground">
             …
           </span>
         ) : (
@@ -135,7 +137,7 @@ export function RecordPager({
             key={each}
             size="sm"
             variant={each === page ? "secondary" : "ghost"}
-            aria-label={`Page ${each}`}
+            aria-label={t("Page {0}", each)}
             aria-current={each === page ? "page" : undefined}
             onClick={() => onPage(each)}
           >
@@ -146,7 +148,7 @@ export function RecordPager({
       <Button
         size="icon-sm"
         variant="ghost"
-        aria-label="Next page"
+        aria-label={t("Next page")}
         disabled={page === last}
         onClick={() => onPage(page + 1)}
       >
@@ -170,6 +172,7 @@ function RangeFilter({
   readonly range: Range | undefined;
   readonly onChange: (range: Range | undefined) => void;
 }) {
+  const t = useTranslation();
   const setBound = (bound: "min" | "max", input: string) => {
     const { [bound]: _, ...rest } = range ?? {};
     const value = parseBound(field, input);
@@ -184,7 +187,7 @@ function RangeFilter({
             size="sm"
             type={field.type === "number" ? "number" : "date"}
             aria-label={`${field.label} ${bound === "min" ? "from" : "to"}`}
-            placeholder={bound === "min" ? "From" : "To"}
+            placeholder={bound === "min" ? t("From") : t("To")}
             value={String(range?.[bound] ?? "")}
             onChange={(event) => setBound(bound, event.target.value)}
           />
@@ -206,6 +209,7 @@ function ValueFilter({
   readonly available: FilterChoices[string] | undefined;
   readonly onChange: (value: string | boolean | undefined) => void;
 }) {
+  const t = useTranslation();
   const held = new Map(
     available?.map(({ value, ...rest }) => [
       field.type === "boolean" ? String(value === 1) : String(value),
@@ -222,7 +226,7 @@ function ValueFilter({
       : [...keys].toSorted((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   const choices = ordered.map((key) => {
     const host = webUrlHost(held.get(key)?.link);
-    const label = field.type === "boolean" ? (key === "true" ? "Yes" : "No") : key;
+    const label = field.type === "boolean" ? t(key === "true" ? "Yes" : "No") : key;
     return [
       key,
       <span key={key} className="inline-flex items-center">
@@ -235,7 +239,7 @@ function ValueFilter({
     <Choice
       label={field.label}
       value={selected}
-      choices={{ [ALL]: "All", ...Object.fromEntries(choices) }}
+      choices={{ [ALL]: t("All"), ...Object.fromEntries(choices) }}
       onChange={(choice) =>
         onChange(choice === ALL ? undefined : field.type === "boolean" ? choice === "true" : choice)
       }
@@ -255,6 +259,7 @@ export function RecordFilterBar({
   readonly filterChoices: FilterChoices | undefined;
   readonly onChange: (filters: Filters) => void;
 }) {
+  const t = useTranslation();
   const { filters: shown } = resolveRecordSearch(collection);
   if (shown.length === 0) return null;
   const setFilter = (fieldId: string, value: Filters[string] | undefined) => {
@@ -262,7 +267,11 @@ export function RecordFilterBar({
     onChange(value === undefined ? rest : { ...rest, [fieldId]: value });
   };
   return (
-    <div role="group" aria-label="Filters" className="flex flex-wrap items-center gap-x-4 gap-y-2">
+    <div
+      role="group"
+      aria-label={t("Filters")}
+      className="flex flex-wrap items-center gap-x-4 gap-y-2"
+    >
       {shown.map((field) => (
         <div key={field.id} className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground">{field.label}</span>
@@ -286,7 +295,7 @@ export function RecordFilterBar({
       ))}
       {Object.keys(filters).length > 0 ? (
         <Button size="xs" variant="ghost" onClick={() => onChange({})}>
-          Clear filters
+          {t("Clear filters")}
         </Button>
       ) : null}
     </div>
@@ -301,11 +310,16 @@ export function RecordCount({
   readonly matchCount: number;
   readonly totalCount: number;
 }) {
+  const t = useTranslation();
   return (
     <p className="text-sm text-muted-foreground tabular-nums">
       {matchCount === totalCount
-        ? plural(totalCount, "record", "records")
-        : `${matchCount} of ${plural(totalCount, "record", "records")}`}
+        ? t(totalCount === 1 ? "{0} record" : "{0} records", totalCount)
+        : t(
+            "{0} of {1}",
+            matchCount,
+            t(totalCount === 1 ? "{0} record" : "{0} records", totalCount),
+          )}
     </p>
   );
 }

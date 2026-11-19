@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { type ChatId } from "@t45/contracts/models/Chat";
 import type { ChatAttachment } from "@t45/contracts/models/Attachment";
 import type { ChatMessage, ChatSession, PendingInput } from "@t45/contracts/resources/Chats";
@@ -127,6 +128,7 @@ export const ChatTimeline = memo(function ChatTimeline(props: {
   readonly emptyPlaceholder: "prompt" | "blank";
   readonly topFadeEnabled: boolean;
 }) {
+  const t = useTranslation();
   const { listRef, history, onIsAtEndChange, onContentOverflowChange, composerInset } = props;
   const view = useChatSessionView(props.sessionKey);
   const sessionMessages = view.status === "ready" ? view.messages : NO_MESSAGES;
@@ -233,7 +235,7 @@ export const ChatTimeline = memo(function ChatTimeline(props: {
     ) : (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
+          {t("Send a message to start the conversation.")}
         </p>
       </div>
     );
@@ -268,6 +270,7 @@ export const ChatTimeline = memo(function ChatTimeline(props: {
 });
 
 function TimelineHistoryControl(props: ChatTimelineHistory) {
+  const t = useTranslation();
   return (
     <div className="chat-content-lane flex flex-col items-center gap-1.5 pb-2">
       {props.hasEarlier ? (
@@ -277,7 +280,7 @@ function TimelineHistoryControl(props: ChatTimelineHistory) {
           disabled={props.loading}
           onClick={props.onLoadEarlier}
         >
-          {props.loading ? "Loading earlier messages…" : "Load earlier messages"}
+          {props.loading ? t("Loading earlier messages…") : t("Load earlier messages")}
         </Button>
       ) : null}
       {props.error && <ErrorText text={props.error} />}
@@ -286,10 +289,11 @@ function TimelineHistoryControl(props: ChatTimelineHistory) {
 }
 
 function WorkingRow() {
+  const t = useTranslation();
   return (
     <div className="chat-content-lane">
       <div role="status" className="flex h-6 items-center px-1 pb-2 text-sm text-muted-foreground">
-        Working…
+        {t("Working…")}
       </div>
     </div>
   );
@@ -341,6 +345,7 @@ const ChatMessageRow = memo(function ChatMessageRow({ message }: { message: Chat
 });
 
 function MessageBody({ message }: { message: ChatMessage }) {
+  const t = useTranslation();
   const native = message.message;
   switch (native.type) {
     case "user":
@@ -352,31 +357,36 @@ function MessageBody({ message }: { message: ChatMessage }) {
     case "compaction":
       if (native.status === "failed")
         return (
-          <ErrorText className="mx-1 my-0.5" text={`Compacting failed: ${native.error.message}`} />
+          <ErrorText
+            className="mx-1 my-0.5"
+            text={t("Compacting failed: {0}", native.error.message)}
+          />
         );
       return (
         <TimelineDivider
           icon={Minimize2Icon}
           label={
-            native.status === "running" ? "Compacting the conversation…" : "Conversation compacted"
+            native.status === "running"
+              ? t("Compacting the conversation…")
+              : t("Conversation compacted")
           }
         />
       );
     case "idle":
       return native.outcome === "failed" ? (
-        <ErrorText className="mx-1 my-0.5" text="The agent stopped on an error" />
+        <ErrorText className="mx-1 my-0.5" text={t("The agent stopped on an error")} />
       ) : (
-        <TimelineDivider icon={CircleStopIcon} label="Interrupted" />
+        <TimelineDivider icon={CircleStopIcon} label={t("Interrupted")} />
       );
     case "synthetic":
     case "system":
       return <NoteRow text={native.description ?? native.text} />;
     case "skill":
-      return <NoteRow text={`Loaded the ${native.name} skill`} />;
+      return <NoteRow text={t("Loaded the {0} skill", native.name)} />;
     case "agent-switched":
-      return <NoteRow text={`Switched to the ${native.agent} agent`} />;
+      return <NoteRow text={t("Switched to the {0} agent", native.agent)} />;
     case "model-switched":
-      return <NoteRow text={`Switched to ${native.model.id}`} />;
+      return <NoteRow text={t("Switched to {0}", native.model.id)} />;
     case "location-switched":
       return null;
   }
@@ -436,6 +446,7 @@ function ToolOutput({
   output: string;
   whole: WholeMessage;
 }) {
+  const t = useTranslation();
   const [full, setFull] = useState(false);
   const preview = full ? { text: output, cut: false } : boundText(output);
   return (
@@ -445,11 +456,11 @@ function ToolOutput({
           <ShellCommandBlock command={command} />
         </div>
       ) : null}
-      <pre className={toolOutputClassName}>{preview.text || "No output"}</pre>
+      <pre className={toolOutputClassName}>{preview.text || t("No output")}</pre>
       {preview.cut || whole.cut ? (
         <LoadWholeButton
           whole={whole}
-          label={full && whole.waiting ? "Loading the full output…" : "Show the full output"}
+          label={full && whole.waiting ? t("Loading the full output…") : t("Show the full output")}
           onClick={() => {
             setFull(true);
             whole.loadWhole();
@@ -540,6 +551,7 @@ function UserBubble({
   at: DateTime.Utc;
   onExpand?: () => void;
 }) {
+  const t = useTranslation();
   const { onImageExpand } = use(TimelineCtx);
   const images = content.attachments.flatMap((attachment) =>
     attachment.type === "image" ? [attachment] : [],
@@ -578,7 +590,7 @@ function UserBubble({
       );
     }
     return (
-      <UnresolvedChip label={reference.label} tooltip="This context is no longer available." />
+      <UnresolvedChip label={reference.label} tooltip={t("This context is no longer available.")} />
     );
   };
   // A file with a chip in the prose needs no row of its own; pictures always show.
@@ -590,14 +602,14 @@ function UserBubble({
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
-        <MessageAuthorHeading>You</MessageAuthorHeading>
+        <MessageAuthorHeading>{t("You")}</MessageAuthorHeading>
         {images.length > 0 ? (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
             {images.map((image, index) => (
               <button
                 key={image.id}
                 type="button"
-                aria-label={`Open ${image.name}`}
+                aria-label={t("Open {0}", image.name)}
                 onClick={() => openImage(index)}
                 className="aspect-4/3 cursor-zoom-in overflow-hidden rounded-lg border border-border/80 bg-background/70"
               >
@@ -617,7 +629,7 @@ function UserBubble({
                 key={file.id}
                 href={attachmentUrl(file)}
                 download={file.name}
-                aria-label={`Download ${file.name}`}
+                aria-label={t("Download {0}", file.name)}
                 className="focus-visible:ring-ring/70 flex min-w-0 items-center gap-2 rounded-md py-1 text-left text-sm hover:underline focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
               >
                 <FileIcon className="size-4 shrink-0 text-icon-muted" />
@@ -638,7 +650,7 @@ function UserBubble({
         {content.text ? (
           <CopyButton
             text={replaceComposerContextReferences(content.text, (reference) => reference.label)}
-            label="Copy message"
+            label={t("Copy message")}
           />
         ) : null}
       </div>
@@ -647,6 +659,7 @@ function UserBubble({
 }
 
 function AssistantMessageRow({ message }: { message: ChatMessage }) {
+  const t = useTranslation();
   const ctx = use(TimelineCtx);
   const whole = useWholeMessage(message);
   const native = whole.message.message;
@@ -659,7 +672,7 @@ function AssistantMessageRow({ message }: { message: ChatMessage }) {
       {native.content.length === 0 && live ? (
         <WorkLogRow
           icon={<BrainIcon className="size-3.5 text-icon-muted" aria-hidden />}
-          label="Thinking…"
+          label={t("Thinking…")}
         />
       ) : null}
       {native.content.map((part, index) =>
@@ -686,29 +699,30 @@ function AssistantMessageRow({ message }: { message: ChatMessage }) {
   );
   return (
     <div className="relative min-w-0 px-1 py-0.5">
-      <MessageAuthorHeading>Agent</MessageAuthorHeading>
+      <MessageAuthorHeading>{t("Agent")}</MessageAuthorHeading>
       {parts}
       {native.error && <ErrorText className="mt-1" text={native.error.message} />}
       {!live ? (
         <div className="message-actions mt-1.5">
-          {copyText ? <CopyButton text={copyText} label="Copy message" /> : null}
+          {copyText ? <CopyButton text={copyText} label={t("Copy message")} /> : null}
           <MessageTime at={native.time.created} />
         </div>
       ) : null}
       {whole.cut && native.content.some((part) => part.type === "text") ? (
-        <LoadWholeButton whole={whole} label="Show the whole message" />
+        <LoadWholeButton whole={whole} label={t("Show the whole message")} />
       ) : null}
     </div>
   );
 }
 
 function ReasoningPart({ text }: { text: string }) {
+  const t = useTranslation();
   const ctx = use(TimelineCtx);
   if (text.trim().length === 0) return null;
   return (
     <WorkLogRow
       icon={<BrainIcon className="size-3.5 text-icon-muted" aria-hidden />}
-      label="Thinking"
+      label={t("Thinking")}
       details={
         <Markdown text={text} className="text-muted-foreground" onImageExpand={ctx.onImageExpand} />
       }
@@ -723,6 +737,7 @@ interface ToolPartProps {
 }
 
 function ToolRow({ part, message, whole }: ToolPartProps) {
+  const t = useTranslation();
   const ctx = use(TimelineCtx);
   const label = toolLabel(part);
   const status = part.state.status;
@@ -755,12 +770,12 @@ function ToolRow({ part, message, whole }: ToolPartProps) {
         <span className="flex shrink-0 items-center gap-1">
           {failed ? (
             <Badge variant="error" size="sm">
-              Failed
+              {t("Failed")}
             </Badge>
           ) : null}
           {childSession && child ? (
             <Button size="xs" variant="ghost-muted" onClick={() => ctx.onOpenSession(child.id)}>
-              Open
+              {t("Open")}
             </Button>
           ) : null}
         </span>
@@ -781,6 +796,7 @@ function ToolRow({ part, message, whole }: ToolPartProps) {
  * which would cut the workflow's instructions short. An unreadable draft explains why no card shows.
  */
 function WorkflowDraftPart({ part, message, whole }: ToolPartProps) {
+  const t = useTranslation();
   const ctx = use(TimelineCtx);
   const { cut, waiting, loadWhole } = whole;
   useEffect(() => {
@@ -791,7 +807,7 @@ function WorkflowDraftPart({ part, message, whole }: ToolPartProps) {
     return (
       <WorkLogRow
         icon={<WrenchIcon className="size-3.5 text-icon-muted" aria-hidden />}
-        label="Loading the workflow draft…"
+        label={t("Loading the workflow draft…")}
       />
     );
   }
@@ -802,7 +818,9 @@ function WorkflowDraftPart({ part, message, whole }: ToolPartProps) {
       : undefined;
   const draft = workflowDraftOf(drafted?.type === "tool" ? drafted : part);
   if (draft === null) {
-    return <ErrorText text="T45 can't read this workflow draft, so it can't show or save it." />;
+    return (
+      <ErrorText text={t("T45 can't read this workflow draft, so it can't show or save it.")} />
+    );
   }
   return (
     <WorkflowDraftCard itemId={`${ctx.chatId}:${message.sessionId}:${part.id}`} draft={draft} />
@@ -825,6 +843,7 @@ function CollapsibleUserMessageBody(props: {
   renderContextReference: (reference: MarkdownContextReference) => ReactNode;
   onExpand: (() => void) | undefined;
 }) {
+  const t = useTranslation();
   const ctx = use(TimelineCtx);
   const [expanded, setExpanded] = useState(false);
   if (props.text.trim().length === 0) return null;
@@ -860,7 +879,7 @@ function CollapsibleUserMessageBody(props: {
               if (!expanded) props.onExpand?.();
             }}
           >
-            {expanded ? "Show less" : "Show full message"}
+            {expanded ? t("Show less") : t("Show full message")}
           </Button>
         </div>
       ) : null}

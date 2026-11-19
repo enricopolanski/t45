@@ -1,3 +1,4 @@
+import { type Message, type Translate, translate } from "~/i18n/locale";
 import { type Agent } from "@t45/contracts/models/Agent";
 import type { User } from "@t45/contracts/models/User";
 import type { Step, Ticket } from "@t45/contracts/models/Workflow";
@@ -54,10 +55,6 @@ export const formatNumber = (
   return unit === undefined ? shown : `${shown}${unit === "%" ? "" : " "}${unit}`;
 };
 
-/** "1 field", "3 fields". */
-export const plural = (count: number, one: string, many: string) =>
-  `${count} ${count === 1 ? one : many}`;
-
 /**
  * What the viewer, who sees the step as one of its members, may do on it now, mirroring the
  * commands' checks. Cancelling the ticket is for the project's admins: `canCancelTicket`.
@@ -96,7 +93,10 @@ export const missingFields = (
     }
     if (field.rows.length === 0) return [{ key: field.key, name }];
     return field.rows.flatMap((row, at) =>
-      missingFields(row.fields, field.repeatable ? `${name} › Entry ${at + 1} › ` : `${name} › `),
+      missingFields(
+        row.fields,
+        field.repeatable ? translate("{0} › Entry {1} › ", name, at + 1) : `${name} › `,
+      ),
     );
   });
 
@@ -107,7 +107,7 @@ export const missingFields = (
 export type StepAct = (run: () => Promise<unknown>, quiet?: boolean) => Promise<string | null>;
 
 /** What a command did, as a step's history says it after the name of who ran it. */
-const HISTORY_LABELS: Record<string, string> = {
+const HISTORY_LABELS: Record<string, Message> = {
   "workflows.startTicket": "started the item",
   "workflows.markStepDone": "marked the step done",
   "workflows.setStepAssignee": "changed the assignee",
@@ -122,30 +122,36 @@ const HISTORY_LABELS: Record<string, string> = {
 
 type HistoryEntry = StepView["history"][number];
 
-const historyLabel = (entry: HistoryEntry, count: number) => {
+const historyLabel = (entry: HistoryEntry, count: number, t: Translate) => {
   if (entry.command === "workflows.setStepField")
-    return count === 1 ? "changed a field" : `changed ${count} fields`;
+    return t(count === 1 ? "changed a field" : "changed {0} fields", count);
   if (entry.command === "workflows.proposeStepField")
-    return count === 1 ? "proposed a value" : `proposed ${count} values`;
+    return t(count === 1 ? "proposed a value" : "proposed {0} values", count);
   if (entry.command === "workflows.approveProposal")
-    return count === 1 ? "approved a proposal" : `approved ${count} proposals`;
+    return t(count === 1 ? "approved a proposal" : "approved {0} proposals", count);
   if (entry.command === "workflows.discardProposal")
-    return count === 1 ? "discarded a proposal" : `discarded ${count} proposals`;
+    return t(count === 1 ? "discarded a proposal" : "discarded {0} proposals", count);
   if (entry.command === "workflows.attachStepFile")
-    return count === 1 ? "attached a file" : `attached ${count} files`;
+    return t(count === 1 ? "attached a file" : "attached {0} files", count);
   if (entry.command === "workflows.removeStepFile")
-    return count === 1 ? "removed a file" : `removed ${count} files`;
+    return t(count === 1 ? "removed a file" : "removed {0} files", count);
+  const message = HISTORY_LABELS[entry.command];
   const label =
     entry.automation !== null &&
     (entry.command === "workflows.runStepAutomation" ||
       entry.command === "workflows.stopStepAutomation")
-      ? `${entry.command === "workflows.runStepAutomation" ? "ran" : "stopped"} “${entry.automation.title}”`
-      : (HISTORY_LABELS[entry.command] ?? entry.command);
-  return count === 1 ? label : `${label} ${count} times`;
+      ? t(
+          entry.command === "workflows.runStepAutomation" ? "ran “{0}”" : "stopped “{0}”",
+          entry.automation.title,
+        )
+      : message === undefined
+        ? entry.command
+        : t(message);
+  return count === 1 ? label : t("{0} {1} times", label, count);
 };
 
 /** Consecutive actions by the same actor share a row, dated by their latest action. */
-export const summarizeHistory = (history: StepView["history"]) => {
+export const summarizeHistory = (history: StepView["history"], t: Translate = translate) => {
   const groups: Array<Array<HistoryEntry>> = [];
   for (const entry of history) {
     const group = groups.at(-1);
@@ -168,15 +174,15 @@ export const summarizeHistory = (history: StepView["history"]) => {
       entry.command === "workflows.setStepField"
         ? new Set(entries.map(({ fieldKey }) => fieldKey)).size
         : entries.length;
-    return { ...entry, label: historyLabel(entry, count) };
+    return { ...entry, label: historyLabel(entry, count, t) };
   });
 };
 
-export const STEP_STATE_LABELS: Record<Step["status"]["type"], string> = {
+export const STEP_STATE_LABELS = {
   working: "To do",
   blocked: "Blocked",
   completed: "Done",
-};
+} as const satisfies Record<Step["status"]["type"], Message>;
 
 export const stepStatus = (step: Pick<Step, "status">) =>
   ({
@@ -192,11 +198,11 @@ export interface WorkDirectory {
 
 /** A display name for a person or agent. */
 export function actorName(directory: WorkDirectory, id: string | null) {
-  if (id === null) return "Nobody";
+  if (id === null) return translate("Nobody");
   return (
     directory.people.find((person) => person.id === id)?.displayName ??
     directory.agents.find((agent) => agent.id === id)?.name ??
-    "Someone"
+    translate("Someone")
   );
 }
 

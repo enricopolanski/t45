@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { defaultValues, type FieldValues, withFieldValue } from "@t45/contracts/models/Field";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import { reviewEntryValues } from "@t45/contracts/models/Workflow";
@@ -46,6 +47,7 @@ export function RecordEntryReview({
   readonly item: ReviewItem;
   readonly act: StepAct;
 }) {
+  const t = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   return (
@@ -57,7 +59,7 @@ export function RecordEntryReview({
     >
       <DialogTrigger render={<Button type="button" size="xs" variant="outline" />}>
         <ClipboardCheckIcon />
-        Review
+        {t("Review")}
       </DialogTrigger>
       {isOpen ? (
         <ReviewPanel
@@ -88,6 +90,7 @@ function ReviewPanel({
   readonly setIsSaving: (isSaving: boolean) => void;
   readonly onClose: () => void;
 }) {
+  const t = useTranslation();
   const { review, entry, group, collection, record } = item;
   const [rowId] = useState(() => entry.rowId ?? newKey("row"));
   const [previousValues] = useState(() =>
@@ -150,9 +153,13 @@ function ReviewPanel({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Review {heading.toLocaleLowerCase()}</DialogTitle>
+          <DialogTitle>
+            {t("Review")} {heading.toLocaleLowerCase()}
+          </DialogTitle>
           {review.message === undefined ? (
-            <DialogDescription>Check and correct the values before confirming.</DialogDescription>
+            <DialogDescription>
+              {t("Check and correct the values before confirming.")}
+            </DialogDescription>
           ) : (
             <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2.5">
               <TriangleAlertIcon
@@ -180,7 +187,9 @@ function ReviewPanel({
               <p className="min-w-0 text-sm font-semibold wrap-anywhere">{title}</p>
             </div>
             {entry.hasDuplicateEntries ? (
-              <ErrorText text="This record has multiple entries. Keep one in Fields before confirming." />
+              <ErrorText
+                text={t("This record has multiple entries. Keep one in Fields before confirming.")}
+              />
             ) : (
               <fieldset disabled={isSaving} className="min-w-0">
                 <FormGrid
@@ -201,11 +210,11 @@ function ReviewPanel({
         </DialogPanel>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={isSaving}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button type="submit" variant="success" disabled={isSaving || entry.hasDuplicateEntries}>
             <CheckIcon />
-            {isSaving ? "Confirming…" : "Confirm"}
+            {isSaving ? t("Confirming…") : t("Confirm")}
           </Button>
         </DialogFooter>
       </form>

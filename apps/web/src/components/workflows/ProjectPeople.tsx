@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { StepDefinition } from "@t45/contracts/models/Workflow";
 import { StringId } from "@t45/contracts/models/primitives";
 
@@ -38,6 +39,7 @@ type Editing = {
 
 /** Who manages the project, applying at once. Only those who manage it reach the editor. */
 export function ProjectPeople({ detail, busy, run }: Editing) {
+  const t = useTranslation();
   const navigate = useNavigate();
   const directory = useWorkDirectory();
   const viewerUserId = useSession()?.userId;
@@ -68,12 +70,13 @@ export function ProjectPeople({ detail, busy, run }: Editing) {
     );
   };
   return (
-    <section aria-label="Admins" className="flex flex-col gap-2.5">
-      <h2 className="text-sm font-semibold">Admins</h2>
+    <section aria-label={t("Admins")} className="flex flex-col gap-2.5">
+      <h2 className="text-sm font-semibold">{t("Admins")}</h2>
       <div className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-4">
         <p className="text-xs text-muted-foreground">
-          Admins choose the project's people and version, and cancel tickets. They see a step's work
-          only as its members.
+          {t(
+            "Admins choose the project's people and version, and cancel tickets. They see a step's work only as its members.",
+          )}
         </p>
         <ul className="flex flex-col gap-1">
           {project.adminUserIds.map((userId) => {
@@ -83,12 +86,12 @@ export function ProjectPeople({ detail, busy, run }: Editing) {
             return (
               <li key={userId} className="flex items-center gap-2 text-sm">
                 {name}
-                {left(userId) ? <Badge variant="secondary">Left</Badge> : null}
+                {left(userId) ? <Badge variant="secondary">{t("Left")}</Badge> : null}
                 <Button
                   size="icon-xs"
                   variant="ghost"
-                  aria-label={`Remove admin ${name}`}
-                  title={canRemove ? undefined : "A project needs at least one admin."}
+                  aria-label={t("Remove admin {0}", name)}
+                  title={canRemove ? undefined : t("A project needs at least one admin.")}
                   disabled={busy || leaving || !canRemove}
                   onClick={() => removeAdmin(userId)}
                 >
@@ -100,7 +103,7 @@ export function ProjectPeople({ detail, busy, run }: Editing) {
         </ul>
         {leaveError && <ErrorText text={leaveError} />}
         <PersonPicker
-          aria-label="New admin"
+          aria-label={t("New admin")}
           value={null}
           onChange={(admin) =>
             void run(() =>
@@ -110,7 +113,7 @@ export function ProjectPeople({ detail, busy, run }: Editing) {
               }),
             )
           }
-          placeholder="Add an admin"
+          placeholder={t("Add an admin")}
           disabled={busy}
         />
       </div>
@@ -133,6 +136,7 @@ const UNASSIGNED = "unassigned";
  * adopt, and those of the adopted one that it drops.
  */
 export function ProjectStepPeople({ detail, busy, run }: Editing) {
+  const t = useTranslation();
   const { project, adopted, latest, members } = detail;
   const directory = useWorkDirectory();
   const [blocked, setBlocked] = useState<Blocked | null>(null);
@@ -172,14 +176,14 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
   };
   const renderDefault = (step: StepDefinition, stepPath: string, inherited: string) => (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-muted-foreground">Assignee on entry</span>
+      <span className="text-xs font-medium text-muted-foreground">{t("Assignee on entry")}</span>
       <PersonPicker
-        aria-label={`${stepPath} assignee`}
+        aria-label={t("{0} assignee", stepPath)}
         value={project.defaultAssignees[step.id] ?? null}
         onChange={(assignee) => void saveDefault(step.id, assignee)}
         noneLabel={inherited}
         onClear={() => void saveDefault(step.id, null)}
-        placeholder="Choose an assignee"
+        placeholder={t("Choose an assignee")}
         disabled={busy}
       />
     </div>
@@ -195,7 +199,7 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
           return (
             <div key={step.id} className="flex flex-col gap-3">
               <span className="text-sm font-medium">{step.name}</span>
-              {renderDefault(step, stepPath, `Whoever has ${parentPath}`)}
+              {renderDefault(step, stepPath, t("Whoever has {0}", parentPath))}
               {renderSubSteps(step.subSteps, stepPath)}
             </div>
           );
@@ -203,12 +207,12 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
       </div>
     );
   return (
-    <section aria-label="Who does each step" className="flex flex-col gap-2.5">
-      <h2 className="text-sm font-semibold">Who does each step</h2>
+    <section aria-label={t("Who does each step")} className="flex flex-col gap-2.5">
+      <h2 className="text-sm font-semibold">{t("Who does each step")}</h2>
       <p className="text-xs text-muted-foreground">
-        Every step needs a member before the project adopts a version.
+        {t("Every step needs a member before the project adopts a version.")}
       </p>
-      {steps.length === 0 && <p className="text-sm text-muted-foreground">No steps yet.</p>}
+      {steps.length === 0 && <p className="text-sm text-muted-foreground">{t("No steps yet.")}</p>}
       {steps.map((step, at) => {
         const previousSteps = new Map(
           [adopted, latest].flatMap((version) => {
@@ -229,13 +233,17 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
               <span className="font-medium">{step.name}</span>
               <span className="mt-1 block text-xs text-muted-foreground">
                 {memberIds.length === 0
-                  ? "No members"
+                  ? t("No members")
                   : memberIds.map((userId) => actorName(directory, userId)).join(", ")}
               </span>
             </summary>
             <div className="mt-4 flex flex-col gap-3">
-              <div role="group" aria-label={`${step.name} members`} className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-muted-foreground">Members</span>
+              <div
+                role="group"
+                aria-label={t("{0} members", step.name)}
+                className="flex flex-col gap-1"
+              >
+                <span className="text-xs font-medium text-muted-foreground">{t("Members")}</span>
                 <ul className="flex flex-col gap-1">
                   {memberIds.map((userId) => {
                     const name = actorName(directory, userId);
@@ -245,7 +253,7 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
                         <Button
                           size="icon-xs"
                           variant="ghost"
-                          aria-label={`Remove ${name} from ${step.name}`}
+                          aria-label={t("Remove {0} from {1}", name, step.name)}
                           disabled={busy}
                           onClick={() => void removeMember(step.id, userId)}
                         >
@@ -257,7 +265,10 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
                 </ul>
                 {blocking !== null && blocking.assignments.length > 0 ? (
                   <ul
-                    aria-label={`Open tickets assigned to ${actorName(directory, blocking.userId)}`}
+                    aria-label={t(
+                      "Open tickets assigned to {0}",
+                      actorName(directory, blocking.userId),
+                    )}
                     className="flex flex-col gap-1.5 rounded-lg border border-border p-2"
                   >
                     {blocking.assignments.map((assignment) => (
@@ -281,12 +292,12 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
                         >
                           <SelectTrigger
                             size="sm"
-                            aria-label={`Reassign ${assignment.ticketTitle}`}
+                            aria-label={t("Reassign {0}", assignment.ticketTitle)}
                           >
-                            <SelectValue placeholder="Reassign" />
+                            <SelectValue placeholder={t("Reassign")} />
                           </SelectTrigger>
                           <SelectPopup>
-                            <SelectItem value={UNASSIGNED}>Nobody</SelectItem>
+                            <SelectItem value={UNASSIGNED}>{t("Nobody")}</SelectItem>
                             {memberIds
                               .filter((userId) => userId !== blocking.userId)
                               .map((userId) => (
@@ -301,24 +312,24 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
                   </ul>
                 ) : null}
                 <PersonPicker
-                  aria-label={`New member of ${step.name}`}
+                  aria-label={t("New member of {0}", step.name)}
                   value={null}
                   onChange={(userId) =>
                     void run(() => api("workflows.addStepMember", membership(step.id, userId)))
                   }
-                  placeholder="Add a member"
+                  placeholder={t("Add a member")}
                   disabled={busy}
                 />
               </div>
               {renderDefault(
                 step,
                 step.name,
-                at === 0 ? "Unassigned" : "Whoever did the step before",
+                at === 0 ? t("Unassigned") : t("Whoever did the step before"),
               )}
               {previousSteps.size > 0 ? (
                 <fieldset className="flex flex-col gap-2">
                   <legend className="mb-1 text-xs font-medium text-muted-foreground">
-                    Read completed steps
+                    {t("Read completed steps")}
                   </legend>
                   {[...previousSteps.values()].map((previous) => (
                     <label key={previous.id} className="flex w-fit items-center gap-2 text-sm">
@@ -351,12 +362,13 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
  * is in a ticket shows only to its step's members.
  */
 export function ProjectTickets({ detail, run }: Editing) {
+  const t = useTranslation();
   const [cancelling, setCancelling] = useState<string | null>(null);
   const { openTickets, canCancelTickets } = detail;
   if (openTickets.length === 0) return null;
   return (
-    <section aria-label="Open tickets" className="flex flex-col gap-2.5">
-      <h2 className="text-sm font-semibold">Open tickets</h2>
+    <section aria-label={t("Open tickets")} className="flex flex-col gap-2.5">
+      <h2 className="text-sm font-semibold">{t("Open tickets")}</h2>
       <ul className="divide-y divide-border rounded-xl border border-border bg-card">
         {openTickets.map((ticket) => (
           <li key={ticket.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
@@ -367,23 +379,25 @@ export function ProjectTickets({ detail, run }: Editing) {
                 variant="destructive-outline"
                 onClick={() => setCancelling(ticket.id)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
             ) : null}
           </li>
         ))}
       </ul>
       {canCancelTickets ? null : (
-        <p className="text-xs text-muted-foreground">Only the project's admins cancel tickets.</p>
+        <p className="text-xs text-muted-foreground">
+          {t("Only the project's admins cancel tickets.")}
+        </p>
       )}
       <ReasonDialog
         open={cancelling !== null}
         onOpenChange={(open) => {
           if (!open) setCancelling(null);
         }}
-        title="Cancel this item"
-        placeholder="Why it stops here"
-        confirmLabel="Cancel item"
+        title={t("Cancel this item")}
+        placeholder={t("Why it stops here")}
+        confirmLabel={t("Cancel item")}
         isReasonOptional
         onConfirm={async (reason) => {
           try {
@@ -402,18 +416,21 @@ export function ProjectTickets({ detail, run }: Editing) {
 
 /** Archiving the project, last on the page: for good, so it asks first. */
 export function ProjectArchive({ detail, busy, run }: Editing) {
+  const t = useTranslation();
   const [confirming, setConfirming] = useState(false);
   const { project } = detail;
   return (
-    <section aria-label="Archive" className="flex flex-col gap-2.5">
-      <h2 className="text-sm font-semibold">Archive</h2>
+    <section aria-label={t("Archive")} className="flex flex-col gap-2.5">
+      <h2 className="text-sm font-semibold">{t("Archive")}</h2>
       <div className="rounded-xl border border-destructive/32 bg-card">
         <ActionRow
-          title={project.isArchived ? "This project is archived" : "Archive this project"}
-          description="An archived project starts no new item and adopts no version. Its open tickets must be finished or cancelled first. There's no going back."
+          title={project.isArchived ? t("This project is archived") : t("Archive this project")}
+          description={t(
+            "An archived project starts no new item and adopts no version. Its open tickets must be finished or cancelled first. There's no going back.",
+          )}
           action={
             project.isArchived ? (
-              <Badge variant="secondary">Archived</Badge>
+              <Badge variant="secondary">{t("Archived")}</Badge>
             ) : (
               <Button
                 size="sm"
@@ -421,7 +438,7 @@ export function ProjectArchive({ detail, busy, run }: Editing) {
                 disabled={busy || detail.openTickets.length > 0}
                 onClick={() => setConfirming(true)}
               >
-                Archive
+                {t("Archive")}
               </Button>
             )
           }
@@ -430,11 +447,11 @@ export function ProjectArchive({ detail, busy, run }: Editing) {
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <DialogPopup closeButton={false}>
           <DialogHeader>
-            <DialogTitle>{`Archive "${project.name}"?`}</DialogTitle>
-            <DialogDescription>There's no going back.</DialogDescription>
+            <DialogTitle>{t('Archive "{0}"?', project.name)}</DialogTitle>
+            <DialogDescription>{t("There's no going back.")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <DialogClose render={<Button variant="outline" />}>{t("Cancel")}</DialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -442,7 +459,7 @@ export function ProjectArchive({ detail, busy, run }: Editing) {
                 void run(() => api("workflows.archiveProject", { projectId: project.id }));
               }}
             >
-              Archive
+              {t("Archive")}
             </Button>
           </DialogFooter>
         </DialogPopup>

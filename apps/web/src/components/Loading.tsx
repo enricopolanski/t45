@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { CatchBoundary, type ErrorComponentProps } from "@tanstack/react-router";
 import { type ReactNode, Suspense } from "react";
 
@@ -5,15 +6,17 @@ import { LoadFailed } from "../state/query";
 import { Button } from "./ui/button";
 import { ErrorText } from "./ui/error-text";
 
-export function LoadPending({ label = "Loading…" }: { readonly label?: string }) {
+export function LoadPending({ label }: { readonly label?: string }) {
+  const t = useTranslation();
   return (
     <p role="status" className="text-sm text-muted-foreground">
-      {label}
+      {label ?? t("Loading…")}
     </p>
   );
 }
 
 function LoadError({ error, reset }: ErrorComponentProps) {
+  const t = useTranslation();
   if (!(error instanceof LoadFailed)) throw error;
   return (
     <div className="flex flex-col items-start gap-3">
@@ -26,7 +29,7 @@ function LoadError({ error, reset }: ErrorComponentProps) {
           reset();
         }}
       >
-        Try again
+        {t("Try again")}
       </Button>
     </div>
   );

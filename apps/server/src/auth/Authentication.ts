@@ -1,6 +1,6 @@
 import { StringId } from "@t45/contracts/models/primitives";
 import { AuthSessionId } from "@t45/contracts/resources/Session";
-import { Role, State } from "@t45/contracts/models/User";
+import { Locale, Role, State } from "@t45/contracts/models/User";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -157,6 +157,7 @@ const SessionRow = Schema.Struct({
   userId: StringId,
   role: Role,
   state: State,
+  locale: Schema.NullOr(Locale),
   expiresAt: Schema.DateTimeUtcFromString,
 });
 
@@ -206,7 +207,7 @@ const makeSessions = Effect.gen(function* () {
     const tokenHash = yield* sha256(token).pipe(Effect.orDie);
     const now = DateTime.formatIso(yield* DateTime.now);
     const [session] = yield* sql`
-      SELECT s.session_id AS "sessionId", s.user_id AS "userId", u.role, u.state,
+      SELECT s.session_id AS "sessionId", s.user_id AS "userId", u.role, u.state, u.locale,
         s.expires_at AS "expiresAt"
       FROM auth_sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ${tokenHash} AND s.expires_at > ${now}

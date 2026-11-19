@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { BotIcon } from "lucide-react";
 
 import { UserAvatar } from "../people/UserAvatar";
@@ -6,11 +7,12 @@ import { actorName } from "./workLogic";
 
 /** A small round avatar for whoever has work: a person's initials, a robot for an agent. */
 export function ActorAvatar({ actor }: { readonly actor: string | null }) {
+  const t = useTranslation();
   const directory = useWorkDirectory();
   if (directory.agents.some((agent) => agent.id === actor)) {
     return (
       <span
-        aria-label={`${actorName(directory, actor)}, an agent`}
+        aria-label={t("{0}, an agent", actorName(directory, actor))}
         className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-info/12 text-info"
       >
         <BotIcon className="size-3.5" />

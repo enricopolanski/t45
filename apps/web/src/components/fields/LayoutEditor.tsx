@@ -1,3 +1,4 @@
+import { translateChoices, useTranslation } from "~/i18n/locale";
 import type { Field, Layout } from "@t45/contracts/models/Field";
 import { resolveFormLayout, resolveTableLayout } from "@t45/contracts/models/Layout";
 import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react";
@@ -22,10 +23,10 @@ type DialogWidth = NonNullable<FormLayout["dialogWidth"]>;
 type Column = NonNullable<TableLayout["columns"]>[number];
 type ColumnRow = { readonly field: Field; readonly column: Column; readonly isShown: boolean };
 
-const WIDTHS = { auto: "Auto width", narrow: "Narrow", medium: "Medium", wide: "Wide" };
-const SPANS = { third: "⅓ row", half: "½ row", "two-thirds": "⅔ row", full: "Full row" };
-const DENSITIES = { compact: "Compact", normal: "Normal", relaxed: "Relaxed" };
-const DIRECTIONS = { asc: "Ascending", desc: "Descending" };
+const WIDTHS = { auto: "Auto width", narrow: "Narrow", medium: "Medium", wide: "Wide" } as const;
+const SPANS = { third: "⅓ row", half: "½ row", "two-thirds": "⅔ row", full: "Full row" } as const;
+const DENSITIES = { compact: "Compact", normal: "Normal", relaxed: "Relaxed" } as const;
+const DIRECTIONS = { asc: "Ascending", desc: "Descending" } as const;
 const DIALOG_WIDTHS = { 768: "768 px", 1024: "1024 px", 1280: "1280 px" };
 
 /** `part` with `key` set to `value`, or without `key` when `value` is undefined. */
@@ -91,13 +92,14 @@ export function MoveButtons({
   readonly isFirst: boolean;
   readonly isLast: boolean;
 }) {
+  const t = useTranslation();
   return (
     <span className="flex shrink-0">
       <Button
         type="button"
         size="icon-xs"
         variant="ghost"
-        aria-label={`Move ${what} up`}
+        aria-label={t("Move {0} up", what)}
         onClick={() => onMove(-1)}
         disabled={isFirst}
       >
@@ -107,7 +109,7 @@ export function MoveButtons({
         type="button"
         size="icon-xs"
         variant="ghost"
-        aria-label={`Move ${what} down`}
+        aria-label={t("Move {0} down", what)}
         onClick={() => onMove(1)}
         disabled={isLast}
       >
@@ -154,6 +156,7 @@ function TableSettings({
   readonly rowsHint: string;
   readonly onChange: (table: TableLayout) => void;
 }) {
+  const t = useTranslation();
   const resolved = resolveTableLayout(fields, { table }, defaultColumns);
   // Shown columns in their order, then the other fields.
   const [rows, setLocalRows] = useState<ReadonlyArray<ColumnRow>>(() => [
@@ -184,8 +187,10 @@ function TableSettings({
   return (
     <>
       <PanelSection
-        title="Columns"
-        hint="Order, header, width and wrapping of each column. Hidden fields stay in the details."
+        title={t("Columns")}
+        hint={t(
+          "Order, header, width and wrapping of each column. Hidden fields stay in the details.",
+        )}
       >
         <ol className="flex flex-col divide-y rounded-lg border">
           {rows.map((row, at) => {
@@ -207,14 +212,14 @@ function TableSettings({
                     <span className="truncate">{field.label}</span>
                   </label>
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {FIELD_TYPES[field.type]}
+                    {t(FIELD_TYPES[field.type])}
                   </span>
                 </div>
                 {row.isShown ? (
                   <div className="flex flex-wrap items-center gap-1.5 pl-13">
                     <Input
                       size="sm"
-                      aria-label={`Header of ${field.label}`}
+                      aria-label={t("Header of {0}", field.label)}
                       placeholder={field.label}
                       value={column.header ?? ""}
                       onChange={(event) =>
@@ -230,9 +235,9 @@ function TableSettings({
                       className="min-w-24 flex-1"
                     />
                     <Choice
-                      label={`Width of ${field.label}`}
+                      label={t("Width of {0}", field.label)}
                       value={column.width ?? "auto"}
-                      choices={WIDTHS}
+                      choices={translateChoices(t, WIDTHS)}
                       onChange={(width) =>
                         setRow(at, {
                           ...row,
@@ -251,7 +256,7 @@ function TableSettings({
                             })
                           }
                         />
-                        Wrap
+                        {t("Wrap")}
                       </label>
                     ) : null}
                   </div>
@@ -261,14 +266,14 @@ function TableSettings({
           })}
         </ol>
       </PanelSection>
-      <PanelSection title="Rows" hint={rowsHint}>
+      <PanelSection title={t("Rows")} hint={rowsHint}>
         {resolved.sortBy.map((sort, at) => (
           <div key={sort.field} className="flex flex-wrap items-center gap-1.5">
             <span className="w-14 text-xs text-muted-foreground">
-              {at === 0 ? "Sort by" : "Then by"}
+              {at === 0 ? t("Sort by") : t("Then by")}
             </span>
             <Choice
-              label={`Sort ${at + 1} field`}
+              label={t("Sort {0} field", at + 1)}
               value={sort.field}
               // A field sorts once: the others' fields aren't offered.
               choices={Object.fromEntries(
@@ -280,16 +285,16 @@ function TableSettings({
               onChange={(field) => setSorts(resolved.sortBy.with(at, { ...sort, field }))}
             />
             <Choice
-              label={`Sort ${at + 1} direction`}
+              label={t("Sort {0} direction", at + 1)}
               value={sort.direction}
-              choices={DIRECTIONS}
+              choices={translateChoices(t, DIRECTIONS)}
               onChange={(direction) => setSorts(resolved.sortBy.with(at, { ...sort, direction }))}
             />
             <Button
               type="button"
               size="icon-xs"
               variant="ghost"
-              aria-label={`Remove sort ${at + 1}`}
+              aria-label={t("Remove sort {0}", at + 1)}
               onClick={() => setSorts(resolved.sortBy.filter((_, other) => other !== at))}
             >
               <XIcon />
@@ -298,7 +303,7 @@ function TableSettings({
         ))}
         {resolved.sortBy.length < 3 ? (
           <AddButton
-            label={resolved.sortBy.length === 0 ? "Sort rows" : "Then sort by"}
+            label={resolved.sortBy.length === 0 ? t("Sort rows") : t("Then sort by")}
             onClick={() => {
               const field = Object.keys(sortable).find(
                 (id) => !resolved.sortBy.some((sort) => sort.field === id),
@@ -308,11 +313,11 @@ function TableSettings({
             disabled={Object.keys(sortable).length <= resolved.sortBy.length}
           />
         ) : null}
-        <LabeledField label="Density" size="xs" className={settingRow}>
+        <LabeledField label={t("Density")} size="xs" className={settingRow}>
           <Choice
-            label="Density"
+            label={t("Density")}
             value={resolved.density}
-            choices={DENSITIES}
+            choices={translateChoices(t, DENSITIES)}
             onChange={(density) =>
               onChange(withKey(table, "density", density === "normal" ? undefined : density))
             }
@@ -335,14 +340,17 @@ function FormSettings({
   readonly defaultDialogWidth: DialogWidth;
   readonly onChange: (form: FormLayout) => void;
 }) {
+  const t = useTranslation();
   const resolved = resolveFormLayout(fields, { form });
   const setRows = (rows: ReadonlyArray<(typeof resolved.fields)[number]>) =>
     onChange({ ...form, fields: rows.map(({ field, span }) => ({ field: field.id, span })) });
   return (
     <>
       <PanelSection
-        title="Fields"
-        hint="Order and width of each field in the form and the details. Independent of the table."
+        title={t("Fields")}
+        hint={t(
+          "Order and width of each field in the form and the details. Independent of the table.",
+        )}
       >
         <ol className="flex flex-col divide-y rounded-lg border">
           {resolved.fields.map((row, at) => (
@@ -355,29 +363,29 @@ function FormSettings({
               />
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.field.label}</span>
               <Choice
-                label={`Width of ${row.field.label} in the form`}
+                label={t("Width of {0} in the form", row.field.label)}
                 value={row.span}
-                choices={SPANS}
+                choices={translateChoices(t, SPANS)}
                 onChange={(span) => setRows(resolved.fields.with(at, { ...row, span }))}
               />
             </li>
           ))}
         </ol>
       </PanelSection>
-      <PanelSection title="Spacing and size">
-        <LabeledField label="Spacing" size="xs" className={settingRow}>
+      <PanelSection title={t("Spacing and size")}>
+        <LabeledField label={t("Spacing")} size="xs" className={settingRow}>
           <Choice
-            label="Spacing"
+            label={t("Spacing")}
             value={resolved.spacing}
-            choices={DENSITIES}
+            choices={translateChoices(t, DENSITIES)}
             onChange={(spacing) =>
               onChange(withKey(form, "spacing", spacing === "normal" ? undefined : spacing))
             }
           />
         </LabeledField>
-        <LabeledField label="Dialog width" size="xs" className={settingRow}>
+        <LabeledField label={t("Dialog width")} size="xs" className={settingRow}>
           <Choice
-            label="Dialog width"
+            label={t("Dialog width")}
             value={String(resolved.dialogWidth ?? defaultDialogWidth)}
             choices={DIALOG_WIDTHS}
             onChange={(choice) => {
@@ -479,6 +487,7 @@ export function LayoutEditor<L extends Layout>({
   readonly onSave: (layout: L | undefined) => void;
   readonly onClose: () => void;
 }) {
+  const t = useTranslation();
   const [layout, setLayout] = useState(saved);
   const [tab, setTab] = useState("table");
   // Reset starts the table's settings over, hidden columns included.
@@ -499,13 +508,13 @@ export function LayoutEditor<L extends Layout>({
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b py-3 pr-14 pl-6">
               <div className="flex min-w-0 flex-col gap-1">
                 <span className="text-xs text-muted-foreground">{trail}</span>
-                <DialogTitle>{`Layout — ${title}`}</DialogTitle>
+                <DialogTitle>{t("Layout — {0}", title)}</DialogTitle>
               </div>
               <div className="ml-auto flex items-center gap-4">
                 {sourcePicker}
-                <TabsList aria-label="Layout of">
-                  <TabsTab value="table">Table</TabsTab>
-                  <TabsTab value="form">Form</TabsTab>
+                <TabsList aria-label={t("Layout of")}>
+                  <TabsTab value="table">{t("Table")}</TabsTab>
+                  <TabsTab value="form">{t("Form")}</TabsTab>
                   {views.map(({ value, label }) => (
                     <TabsTab key={value} value={value}>
                       {label}
@@ -516,7 +525,7 @@ export function LayoutEditor<L extends Layout>({
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
               <aside
-                aria-label="Layout settings"
+                aria-label={t("Layout settings")}
                 className="flex flex-col gap-4 border-b p-4 lg:w-100 lg:shrink-0 lg:overflow-y-auto lg:border-r lg:border-b-0"
               >
                 <TabsPanel value="table" keepMounted>
@@ -550,9 +559,9 @@ export function LayoutEditor<L extends Layout>({
                 {(tab === "form" || view?.isPerEntry === true) &&
                 entries.length > 0 &&
                 entry !== undefined ? (
-                  <LabeledField label="Preview entry" size="xs" className={settingRow}>
+                  <LabeledField label={t("Preview entry")} size="xs" className={settingRow}>
                     <Choice
-                      label="Preview entry"
+                      label={t("Preview entry")}
                       value={entry.id}
                       choices={Object.fromEntries(entries.map(({ id, label }) => [id, label]))}
                       onChange={setEntryId}
@@ -563,12 +572,12 @@ export function LayoutEditor<L extends Layout>({
                   <Collapsible>
                     <CollapsibleTrigger className="group flex items-center gap-1.5 text-xs text-muted-foreground">
                       <FoldChevron />
-                      Stored as the layout
+                      {t("Stored as the layout")}
                     </CollapsibleTrigger>
                     <CollapsiblePanel>
                       <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-muted p-2.5 text-xs whitespace-pre-wrap">
                         {layout === undefined
-                          ? "No layout: the defaults."
+                          ? t("No layout: the defaults.")
                           : JSON.stringify(layout, null, 2)}
                       </pre>
                     </CollapsiblePanel>
@@ -585,20 +594,20 @@ export function LayoutEditor<L extends Layout>({
                       setResetCount((count) => count + 1);
                     }}
                   >
-                    Reset
+                    {t("Reset")}
                   </Button>
                   <Button type="button" onClick={() => onSave(layout)} disabled={isSaving}>
-                    Save layout
+                    {t("Save layout")}
                   </Button>
                 </div>
               </aside>
               <section
-                aria-label="Preview"
+                aria-label={t("Preview")}
                 className="flex min-w-0 flex-1 flex-col gap-3 p-4 lg:overflow-y-auto"
               >
                 {previewNote !== null || entry === undefined ? (
                   <p className="text-sm text-muted-foreground">
-                    {previewNote ?? "Nothing to show."}
+                    {previewNote ?? t("Nothing to show.")}
                   </p>
                 ) : tab === "table" ? (
                   renderTable(layout, (id) => open(id, "form"))
@@ -613,7 +622,7 @@ export function LayoutEditor<L extends Layout>({
                   >
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="text-lg font-semibold">{`${title} — ${entry.label}`}</h3>
-                      <span className="text-xs text-muted-foreground">Preview</span>
+                      <span className="text-xs text-muted-foreground">{t("Preview")}</span>
                     </div>
                     {renderForm(layout, entry.id)}
                   </div>

@@ -11,7 +11,12 @@ export interface DraftState {
 
 export const EMPTY_DRAFT: DraftState = { title: "", prompt: "", agentId: null };
 
-type Problem = { readonly problem: { readonly title: string; readonly description: string } };
+type Problem = {
+  readonly problem: {
+    readonly title: "Automation is incomplete";
+    readonly description: "Add a title, prompt, and agent.";
+  };
+};
 
 export function settingsFromDraft(
   draft: DraftState,

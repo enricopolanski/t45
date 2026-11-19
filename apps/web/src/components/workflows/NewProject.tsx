@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { Workflow } from "@t45/contracts/models/Workflow";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
@@ -17,6 +18,7 @@ export function NewProject({
 }: {
   readonly workflowId?: string | undefined;
 }) {
+  const t = useTranslation();
   const id = useId();
   const navigate = useNavigate();
   const [workflows, setWorkflows] = useState<ReadonlyArray<Workflow> | null>(null);
@@ -62,12 +64,14 @@ export function NewProject({
   };
 
   return (
-    <WorkFrame title="New project">
+    <WorkFrame title={t("New project")}>
       <p className="text-sm text-muted-foreground">
-        Choose a shared workflow, then choose this project's people and adopt a version of it.
+        {t(
+          "Choose a shared workflow, then choose this project's people and adopt a version of it.",
+        )}
       </p>
       <form
-        aria-label="New project"
+        aria-label={t("New project")}
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"
         onSubmit={(event) => {
           event.preventDefault();
@@ -75,7 +79,7 @@ export function NewProject({
         }}
       >
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-workflow`}>Workflow</Label>
+          <Label htmlFor={`${id}-workflow`}>{t("Workflow")}</Label>
           <Select
             value={workflowId || null}
             disabled={busy || workflows === null}
@@ -87,12 +91,12 @@ export function NewProject({
               if (!name.trim() || name === previous?.name) setName(selected.name);
             }}
           >
-            <SelectTrigger id={`${id}-workflow`} aria-label="Workflow">
+            <SelectTrigger id={`${id}-workflow`} aria-label={t("Workflow")}>
               <SelectValue
-                placeholder={workflows === null ? "Loading workflows…" : "Choose a workflow"}
+                placeholder={workflows === null ? t("Loading workflows…") : t("Choose a workflow")}
               >
                 {(key: string) =>
-                  workflows?.find((workflow) => workflow.id === key)?.name ?? "Choose a workflow"
+                  workflows?.find((workflow) => workflow.id === key)?.name ?? t("Choose a workflow")
                 }
               </SelectValue>
             </SelectTrigger>
@@ -106,22 +110,22 @@ export function NewProject({
           </Select>
           {workflows?.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Create a workflow before configuring a project.
+              {t("Create a workflow before configuring a project.")}
             </p>
           ) : null}
           <Link to="/settings/workflows/new" className="text-xs text-primary underline">
-            Create a new workflow
+            {t("Create a new workflow")}
           </Link>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-name`}>Project name</Label>
+          <Label htmlFor={`${id}-name`}>{t("Project name")}</Label>
           <p className="text-xs text-muted-foreground">
-            Name this configuration for your team, for example Engineering hiring.
+            {t("Name this configuration for your team, for example Engineering hiring.")}
           </p>
           <Input
             id={`${id}-name`}
             value={name}
-            placeholder="Hiring"
+            placeholder={t("Hiring")}
             onChange={(event) => setName(event.target.value)}
             disabled={busy}
           />
@@ -129,7 +133,7 @@ export function NewProject({
         {error && <ErrorText text={error} />}
         <div>
           <Button type="submit" disabled={busy || !name.trim() || !workflowId}>
-            Create project
+            {t("Create project")}
           </Button>
         </div>
       </form>

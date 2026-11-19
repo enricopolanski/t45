@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { ComparisonFields, DerivedComparisonField, Field } from "@t45/contracts/models/Field";
 import {
   comparisonFieldReference,
@@ -156,17 +157,18 @@ function ComparisonValue({
   readonly record: CollectionRecordView;
   readonly isProposed?: boolean;
 }) {
+  const t = useTranslation();
   if (field !== undefined && "template" in field) {
     return (
       formatDerivedComparisonValue(
         (isProposed ? field.proposedTemplate : undefined) ?? field.template,
         collection,
         record,
-      ) ?? <span className="text-muted-foreground">Not provided</span>
+      ) ?? <span className="text-muted-foreground">{t("Not provided")}</span>
     );
   }
   return field === undefined || !holdsData(record.values[field.id]) ? (
-    <span className="text-muted-foreground">Not provided</span>
+    <span className="text-muted-foreground">{t("Not provided")}</span>
   ) : (
     renderRecordValue(
       field,
@@ -174,6 +176,7 @@ function ComparisonValue({
       record.files,
       getFieldLink(field.id, collection.fields, record.values),
       true,
+      t,
     )
   );
 }
@@ -197,6 +200,7 @@ function ComparisonPropertyRow({
   readonly collection: RecordCollection;
   readonly record: CollectionRecordView;
 }) {
+  const t = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const cellId = useId();
   const left =
@@ -228,7 +232,7 @@ function ComparisonPropertyRow({
       <td id={`${cellId}-source`} className="border-l p-3 wrap-anywhere whitespace-pre-wrap">
         {showsValues &&
           (source === undefined ? (
-            <span className="text-muted-foreground">Choose a source record</span>
+            <span className="text-muted-foreground">{t("Choose a source record")}</span>
           ) : (
             <ComparisonValue field={left} collection={source.collection} record={source.record} />
           ))}
@@ -256,6 +260,7 @@ export function RecordComparison({
   readonly rationale: string;
   readonly comparisonFields: ComparisonFields | undefined;
 }) {
+  const t = useTranslation();
   const sources = listSources(inputs);
   const [selected, setSelected] = useState(() => {
     // Existing proposals name source keys in their rationale rather than a structured link.
@@ -315,10 +320,16 @@ export function RecordComparison({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-col gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Compare with step input</span>
+        <span className="text-xs font-medium text-muted-foreground">
+          {t("Compare with step input")}
+        </span>
         <Select value={selected} onValueChange={setSelected}>
-          <SelectTrigger aria-label="Compare with step input" className="w-full min-w-0" isWrapped>
-            <SelectValue placeholder="Choose the article to compare">
+          <SelectTrigger
+            aria-label={t("Compare with step input")}
+            className="w-full min-w-0"
+            isWrapped
+          >
+            <SelectValue placeholder={t("Choose the article to compare")}>
               {source === undefined || sourceHeading === undefined
                 ? null
                 : `${source.label} · ${sourceHeading.text}`}
@@ -334,28 +345,29 @@ export function RecordComparison({
         </Select>
         {source === undefined ? (
           <p className="text-sm text-muted-foreground">
-            The proposal does not identify a source record. Choose one to compare; no match is
-            assumed.
+            {t(
+              "The proposal does not identify a source record. Choose one to compare; no match is assumed.",
+            )}
           </p>
         ) : null}
       </div>
       <div className="overflow-x-auto rounded-lg border">
         <table
-          aria-label="Record comparison"
+          aria-label={t("Record comparison")}
           className="w-full min-w-[36rem] table-fixed border-collapse text-sm"
         >
           <thead className="bg-muted/60 text-left align-top">
             <tr>
               <th scope="col" className="w-1/6 p-3 font-medium">
-                Property
+                {t("Property")}
               </th>
               <th scope="col" className="w-5/12 border-l p-3">
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
-                  {source?.label ?? "Step input"} · Source record
+                  {source?.label ?? t("Step input")} {t("· Source record")}
                 </div>
                 <h3 className="wrap-anywhere font-semibold">
                   {sourceHeading === undefined ? (
-                    "Choose a source record"
+                    t("Choose a source record")
                   ) : (
                     <RecordHeading heading={sourceHeading} />
                   )}
@@ -363,7 +375,7 @@ export function RecordComparison({
               </th>
               <th scope="col" className="w-5/12 border-l p-3">
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
-                  Proposed record
+                  {t("Proposed record")}
                 </div>
                 <h3 className="wrap-anywhere font-semibold">
                   <RecordHeading heading={proposedHeading} />
@@ -385,14 +397,14 @@ export function RecordComparison({
         </table>
       </div>
       <details className="rounded-lg border p-3">
-        <summary className="cursor-pointer text-sm font-medium">Full record details</summary>
+        <summary className="cursor-pointer text-sm font-medium">{t("Full record details")}</summary>
         <div className="mt-4 grid min-w-0 gap-6 lg:grid-cols-2">
           {source === undefined ? null : (
-            <section aria-label="Source record details" className="min-w-0">
+            <section aria-label={t("Source record details")} className="min-w-0">
               <RecordShowcase collection={source.collection} record={source.record} />
             </section>
           )}
-          <section aria-label="Proposed record details" className="min-w-0">
+          <section aria-label={t("Proposed record details")} className="min-w-0">
             <RecordShowcase collection={collection} record={record} />
           </section>
         </div>

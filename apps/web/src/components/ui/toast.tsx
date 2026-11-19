@@ -1,4 +1,5 @@
 "use client";
+import { useTranslation } from "~/i18n/locale";
 
 import { Toast } from "@base-ui/react/toast";
 import type { CSSProperties, ReactNode } from "react";
@@ -34,6 +35,7 @@ function ToastProvider({ children }: { children: ReactNode }) {
 
 /** The stack in the top-right corner: newest in front, the rest peeking behind until hovered. */
 function Toasts() {
+  const t = useTranslation();
   const { toasts } = Toast.useToastManager<ToastData>();
   const layout = buildToastLayout(toasts);
 
@@ -72,7 +74,7 @@ function Toasts() {
               toast={toast}
             >
               <Toast.Close
-                aria-label="Dismiss notification"
+                aria-label={t("Dismiss notification")}
                 className="absolute -top-1.5 -right-1.5 z-20 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 bg-popover/92 text-muted-foreground shadow-sm outline-none backdrop-blur-sm transition-[color,background-color,box-shadow] hover:bg-popover hover:text-foreground focus-ring"
               >
                 <XIcon className="size-3" strokeWidth={2.25} />

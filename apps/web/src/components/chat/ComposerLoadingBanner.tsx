@@ -1,9 +1,11 @@
+import { useTranslation } from "~/i18n/locale";
 import { Spinner } from "~/components/ui/spinner";
 
 import { ComposerBanner } from "./ComposerBanner";
 
 /** Says the chat's messages are loading, until its first snapshot. */
 export function ComposerLoadingBanner() {
+  const t = useTranslation();
   return (
     <ComposerBanner.Root>
       <ComposerBanner.Row>
@@ -12,7 +14,7 @@ export function ComposerLoadingBanner() {
         </ComposerBanner.Icon>
         <ComposerBanner.Content>
           <span className="shrink-0 whitespace-nowrap text-muted-foreground" role="status">
-            Loading messages…
+            {t("Loading messages…")}
           </span>
         </ComposerBanner.Content>
       </ComposerBanner.Row>

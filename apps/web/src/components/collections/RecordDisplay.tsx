@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { Collection } from "@t45/contracts/models/Collection";
 import { type Field, holdsData, isUrlFieldValue } from "@t45/contracts/models/Field";
 import {
@@ -113,6 +114,7 @@ export function RecordCards({
   readonly records: ReadonlyArray<CollectionRecordView>;
   readonly onOpen: (record: CollectionRecordView) => void;
 }) {
+  const t = useTranslation();
   const display = resolveRecordDisplay(collection);
   const { sortBy } = resolveTableLayout(collection.fields, collection.layout);
   return (
@@ -123,7 +125,7 @@ export function RecordCards({
           <li key={record.key} className="flex">
             <button
               type="button"
-              aria-label={`Record ${record.key}`}
+              aria-label={t("Record {0}", record.key)}
               onClick={() => onOpen(record)}
               className="flex w-full flex-col overflow-hidden rounded-xl border bg-card text-left transition-colors hover:border-primary focus-visible:outline-2 focus-visible:outline-primary"
             >
@@ -186,6 +188,7 @@ export function RecordShowcase({
   readonly collection: RecordShape;
   readonly record: CollectionRecordView;
 }) {
+  const t = useTranslation();
   const hidden = new Set(collection.layout?.page?.hiddenFields);
   const visible = {
     ...collection,
@@ -232,7 +235,7 @@ export function RecordShowcase({
                 <button
                   key={url}
                   type="button"
-                  aria-label={`Image ${at + 1}`}
+                  aria-label={t("Image {0}", at + 1)}
                   aria-pressed={at === shownImage}
                   onClick={() => setShownImage(at)}
                   className="size-16 overflow-hidden rounded-md border-2 border-transparent bg-muted aria-pressed:border-primary"
@@ -273,6 +276,7 @@ export function RecordShowcase({
                     record.files,
                     getFieldLink(field.id, visible.fields, record.values),
                     true,
+                    t,
                   )}
                 </dd>
               </div>

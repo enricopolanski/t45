@@ -1,3 +1,4 @@
+import { type Message, useTranslation } from "~/i18n/locale";
 import { Link, useLocation } from "@tanstack/react-router";
 import { InboxIcon, KanbanSquareIcon, LibraryBigIcon, MessagesSquareIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -16,7 +17,7 @@ import {
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome";
 
 export type NavLink = {
-  readonly label: string;
+  readonly label: Message;
   readonly icon: ReactNode;
   readonly to:
     | "/boards"
@@ -30,7 +31,7 @@ export type NavLink = {
     | "/settings/people";
   /** Pages listed below it, always shown. */
   readonly children?: ReadonlyArray<{
-    readonly label: string;
+    readonly label: Message;
     readonly to: "/settings/automations/runs" | "/settings/automations/benchmarks";
   }>;
 };
@@ -61,12 +62,13 @@ export function AppNavSidebar() {
 const loadCollections = () => api("collections.list", undefined);
 
 function PublishedCollections() {
+  const t = useTranslation();
   const { setOpenMobile } = useSidebar();
   const { detail } = useWorkflowData(loadCollections);
   const collections = detail?.filter((collection) => collection.isPublished) ?? [];
   if (collections.length === 0) return null;
   return (
-    <AppNavGroup label="Collections">
+    <AppNavGroup label={t("Collections")}>
       {collections.map((collection) => (
         <SidebarMenuItem key={collection.id}>
           <SidebarMenuButton
@@ -85,6 +87,7 @@ function PublishedCollections() {
 }
 
 export function NavLinks({ links }: { readonly links: ReadonlyArray<NavLink> }) {
+  const t = useTranslation();
   const { setOpenMobile } = useSidebar();
   const closeMobileSidebar = () => setOpenMobile(false);
   return links.map((link) =>
@@ -94,14 +97,14 @@ export function NavLinks({ links }: { readonly links: ReadonlyArray<NavLink> }) 
       <SidebarMenuItem key={link.to}>
         <SidebarMenuButton onClick={closeMobileSidebar} render={<Link to={link.to} />}>
           {link.icon}
-          <span>{link.label}</span>
+          <span>{t(link.label)}</span>
         </SidebarMenuButton>
         {link.children === undefined ? null : (
           <SidebarMenuSub>
             {link.children.map((child) => (
               <SidebarMenuItem key={child.to}>
                 <SidebarMenuButton onClick={closeMobileSidebar} render={<Link to={child.to} />}>
-                  <span>{child.label}</span>
+                  <span>{t(child.label)}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
@@ -123,6 +126,7 @@ function BoardsItem({
   readonly link: NavLink;
   readonly onNavigate: () => void;
 }) {
+  const t = useTranslation();
   const boards = useOpenBoards();
   const [only] = boards;
   if (only !== undefined && boards.length === 1) {
@@ -145,7 +149,7 @@ function BoardsItem({
         render={<Link to={link.to} activeOptions={{ exact: true }} />}
       >
         {link.icon}
-        <span>{link.label}</span>
+        <span>{t(link.label)}</span>
       </SidebarMenuButton>
       {boards.length > 0 ? (
         <SidebarMenuSub>

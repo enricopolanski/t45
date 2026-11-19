@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Link } from "@tanstack/react-router";
 import { stepAutomationList } from "../../state/agents";
 import { useApiQuery } from "../../state/rpc";
@@ -16,6 +17,7 @@ export function StepAutomationsEditor({
   readonly disabled?: boolean;
   readonly onChange: (ids: ReadonlyArray<string>) => void;
 }) {
+  const t = useTranslation();
   const query = useApiQuery(stepAutomationList);
   const isAdmin = useIsAdmin();
   const available = (query.data ?? []).filter(
@@ -28,7 +30,7 @@ export function StepAutomationsEditor({
         const automation = query.data?.find((automation) => automation.id === id);
         return (
           <div key={id} className="flex flex-col gap-2 rounded-lg border p-3 text-sm">
-            <p className="font-medium">{automation?.title ?? "Unavailable automation"}</p>
+            <p className="font-medium">{automation?.title ?? t("Unavailable automation")}</p>
             <p className="whitespace-pre-wrap text-muted-foreground">{automation?.prompt}</p>
             <Button
               variant="ghost"
@@ -36,7 +38,7 @@ export function StepAutomationsEditor({
               disabled={disabled}
               onClick={() => onChange(automationIds.filter((other) => other !== id))}
             >
-              Remove
+              {t("Remove")}
             </Button>
           </div>
         );
@@ -48,8 +50,8 @@ export function StepAutomationsEditor({
           if (typeof value === "string") onChange([...automationIds, value]);
         }}
       >
-        <SelectTrigger aria-label="Add automation">
-          <SelectValue placeholder="Add automation" />
+        <SelectTrigger aria-label={t("Add automation")}>
+          <SelectValue placeholder={t("Add automation")} />
         </SelectTrigger>
         <SelectPopup>
           {available.map((automation) => (
@@ -61,7 +63,7 @@ export function StepAutomationsEditor({
       </Select>
       {isAdmin && (
         <Link to="/settings/automations/runs" className="text-sm text-muted-foreground underline">
-          Manage automations
+          {t("Manage automations")}
         </Link>
       )}
     </div>

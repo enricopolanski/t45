@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { StringId, makeId, TrimmedNonEmptyString } from "../models/primitives.ts";
-import { Role, State } from "../models/User.ts";
+import { Locale, Role, State } from "../models/User.ts";
 
 export const AuthSessionId = makeId("AuthSessionId");
 export type AuthSessionId = typeof AuthSessionId.Type;
@@ -19,6 +19,7 @@ export const AuthSessionState = Schema.Union([
     userId: StringId,
     role: Role,
     state: State,
+    locale: Schema.optionalKey(Locale),
     deployVersion: DeployVersion,
   }),
 ]);

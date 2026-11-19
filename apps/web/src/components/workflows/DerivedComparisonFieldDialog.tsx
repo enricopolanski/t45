@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import {
   comparisonFieldReference,
   DerivedComparisonField,
@@ -80,6 +81,7 @@ function TemplateInput({
   readonly fields: ReadonlyArray<RecordField>;
   readonly onChange: (template: string) => void;
 }) {
+  const t = useTranslation();
   const [groupId, setGroupId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<string | null>(null);
   const groups = fields
@@ -96,7 +98,8 @@ function TemplateInput({
         label={label}
         description={
           <>
-            Insert a field, or divide two numeric values with <code>{"${amount / quantity}"}</code>.
+            {t("Insert a field, or divide two numeric values with")}{" "}
+            <code>{"${amount / quantity}"}</code>.
           </>
         }
       >
@@ -104,14 +107,14 @@ function TemplateInput({
       </Field>
       <div className="flex flex-wrap gap-2">
         <TemplatePicker
-          label="Insert field"
+          label={t("Insert field")}
           value={null}
           options={fields.filter(canUseInComparisonTemplate)}
           onChange={insert}
         />
         {groups.length === 0 ? null : (
           <TemplatePicker
-            label="Repeatable group"
+            label={t("Repeatable group")}
             value={groupId}
             options={groups}
             onChange={(id) => {
@@ -122,7 +125,7 @@ function TemplateInput({
         )}
         {groupId === null ? null : (
           <TemplatePicker
-            label="Lowest value of"
+            label={t("Lowest value of")}
             value={sortBy}
             options={groupFields.filter((field) => field.type === "number")}
             onChange={setSortBy}
@@ -130,7 +133,7 @@ function TemplateInput({
         )}
         {groupId === null || sortBy === null ? null : (
           <TemplatePicker
-            label="Insert group field"
+            label={t("Insert group field")}
             value={null}
             options={groupFields.filter(
               (field) =>
@@ -163,6 +166,7 @@ export function DerivedComparisonFieldDialog({
   readonly onRemove: (() => void) | undefined;
   readonly onClose: () => void;
 }) {
+  const t = useTranslation();
   const [label, setLabel] = useState(field.label);
   const [template, setTemplate] = useState(field.template);
   const [proposedTemplate, setProposedTemplate] = useState(field.proposedTemplate);
@@ -190,11 +194,11 @@ export function DerivedComparisonFieldDialog({
       <DialogPopup className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {onRemove === undefined ? "Add derived field" : "Edit derived field"}
+            {onRemove === undefined ? t("Add derived field") : t("Edit derived field")}
           </DialogTitle>
         </DialogHeader>
         <DialogPanel>
-          <Field label="Name">
+          <Field label={t("Name")}>
             <Input value={label} onChange={(event) => setLabel(event.target.value)} />
           </Field>
           <label className="flex items-center gap-2 text-sm">
@@ -203,18 +207,18 @@ export function DerivedComparisonFieldDialog({
               checked={usesSeparateTemplates}
               onCheckedChange={(checked) => setProposedTemplate(checked ? template : undefined)}
             />
-            Separate templates
+            {t("Separate templates")}
           </label>
           <TemplateInput
             key={usesSeparateTemplates ? "source" : "shared"}
-            label={usesSeparateTemplates ? "Source template" : "Template"}
+            label={usesSeparateTemplates ? t("Source template") : t("Template")}
             value={template}
             fields={availableSourceFields}
             onChange={setTemplate}
           />
           {proposedTemplate === undefined ? null : (
             <TemplateInput
-              label="Proposed template"
+              label={t("Proposed template")}
               value={proposedTemplate}
               fields={proposedFields}
               onChange={setProposedTemplate}
@@ -224,14 +228,14 @@ export function DerivedComparisonFieldDialog({
         <DialogFooter>
           {onRemove === undefined ? null : (
             <Button type="button" variant="ghost" className="sm:me-auto" onClick={onRemove}>
-              Remove derived field
+              {t("Remove derived field")}
             </Button>
           )}
           <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button type="button" disabled={!isValid} onClick={() => onChange(next)}>
-            {onRemove === undefined ? "Add field" : "Save field"}
+            {onRemove === undefined ? t("Add field") : t("Save field")}
           </Button>
         </DialogFooter>
       </DialogPopup>

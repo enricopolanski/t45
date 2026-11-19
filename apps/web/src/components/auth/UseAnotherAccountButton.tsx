@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useState } from "react";
 
 import { signOut } from "../../http/auth";
@@ -6,6 +7,7 @@ import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 
 export function UseAnotherAccountButton() {
+  const t = useTranslation();
   const [error, setError] = useState<string | null>(null);
   return (
     <div className="flex flex-col items-center gap-2">
@@ -14,7 +16,7 @@ export function UseAnotherAccountButton() {
         size="sm"
         onClick={() => void signOut().catch((cause: unknown) => setError(describeFailure(cause)))}
       >
-        Use another account
+        {t("Use another account")}
       </Button>
       {error && <ErrorText text={error} />}
     </div>

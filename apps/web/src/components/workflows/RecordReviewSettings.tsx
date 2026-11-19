@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { RecordEntryReview } from "@t45/contracts/models/Field";
 import { canReviewEntryField } from "@t45/contracts/models/Workflow";
 import { ClipboardCheckIcon } from "lucide-react";
@@ -32,6 +33,7 @@ export function RecordReviewSettings({
   readonly onChange: (group: Group) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   const [draft, setDraft] = useState<RecordEntryReview | null>(null);
   const records = fields.filter((field) => field.type === "records");
   const keys = group.fields.filter((field) => field.type === "text");
@@ -60,7 +62,7 @@ export function RecordReviewSettings({
         }
       >
         <ClipboardCheckIcon />
-        Review by record
+        {t("Review by record")}
       </Button>
       <Dialog
         open={draft !== null}
@@ -71,34 +73,35 @@ export function RecordReviewSettings({
         {draft === null ? null : (
           <DialogPopup>
             <DialogHeader>
-              <DialogTitle>Review by record</DialogTitle>
+              <DialogTitle>{t("Review by record")}</DialogTitle>
             </DialogHeader>
             <DialogPanel>
               <p className="text-sm text-muted-foreground">
-                Require confirmation of one entry for each linked record before this step can
-                finish.
+                {t(
+                  "Require confirmation of one entry for each linked record before this step can finish.",
+                )}
               </p>
               <Choice
-                label="Linked records"
+                label={t("Linked records")}
                 value={draft.recordsFieldId}
                 choices={{
-                  [NONE]: "Choose linked records",
+                  [NONE]: t("Choose linked records"),
                   ...Object.fromEntries(records.map(({ id, label }) => [id, label])),
                 }}
                 onChange={(recordsFieldId) => setDraft({ ...draft, recordsFieldId })}
               />
               <Choice
-                label="Record key field"
+                label={t("Record key field")}
                 value={draft.recordKeyFieldId}
                 choices={{
-                  [NONE]: "Choose the entry's record key field",
+                  [NONE]: t("Choose the entry's record key field"),
                   ...Object.fromEntries(keys.map(({ id, label }) => [id, label])),
                 }}
                 onChange={(recordKeyFieldId) => setDraft({ ...draft, recordKeyFieldId })}
               />
-              <Field label="Review message" size="xs">
+              <Field label={t("Review message")} size="xs">
                 <Textarea
-                  placeholder="Optional message for the reviewer"
+                  placeholder={t("Optional message for the reviewer")}
                   value={draft.message ?? ""}
                   onChange={(event) => setDraft({ ...draft, message: event.target.value })}
                 />
@@ -115,7 +118,7 @@ export function RecordReviewSettings({
                     setDraft(null);
                   }}
                 >
-                  Remove review
+                  {t("Remove review")}
                 </Button>
               )}
               <Button
@@ -131,7 +134,7 @@ export function RecordReviewSettings({
                   setDraft(null);
                 }}
               >
-                Save review
+                {t("Save review")}
               </Button>
             </DialogFooter>
           </DialogPopup>

@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** Copy fallback for remote web pages served over plain HTTP. */
@@ -30,7 +31,8 @@ function writeTextWithExecCommand(value: string): boolean {
 
 async function writeText(value: string) {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
-  if (!writeTextWithExecCommand(value)) throw new Error("The clipboard isn't available here.");
+  if (!writeTextWithExecCommand(value))
+    throw new Error(translate("The clipboard isn't available here."));
 }
 
 export function useCopyToClipboard(

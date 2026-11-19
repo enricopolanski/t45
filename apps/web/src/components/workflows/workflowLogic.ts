@@ -1,3 +1,4 @@
+import type { Message } from "~/i18n/locale";
 import {
   isSameInput,
   type StepDefinition,
@@ -113,7 +114,7 @@ export function editsBetween(
   return ofSteps(null, saved, edited);
 }
 
-export const FIELD_TYPES: Record<FieldType, string> = {
+export const FIELD_TYPES = {
   text: "Text",
   url: "URL",
   number: "Number",
@@ -123,7 +124,7 @@ export const FIELD_TYPES: Record<FieldType, string> = {
   select: "Select",
   records: "Collection records",
   group: "Group",
-};
+} as const satisfies Record<FieldType, Message>;
 
 /**
  * A key for a new step, sub-step, field, or group entry: stable once chosen, unique within the

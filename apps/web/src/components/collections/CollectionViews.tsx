@@ -1,3 +1,4 @@
+import { type Message, type Translate, translateChoices, useTranslation } from "~/i18n/locale";
 import type { Collection, CollectionLayout } from "@t45/contracts/models/Collection";
 import type { Field } from "@t45/contracts/models/Field";
 import {
@@ -35,17 +36,17 @@ type PageLayout = NonNullable<CollectionLayout["page"]>;
 type Role = "image" | "title" | "subtitle" | "highlight";
 
 const NONE = "$none";
-const ROLES: ReadonlyArray<readonly [Role, string]> = [
+const ROLES: ReadonlyArray<readonly [Role, Message]> = [
   ["image", "Image"],
   ["title", "Title"],
   ["subtitle", "Subtitle"],
   ["highlight", "Highlight"],
 ];
-const SIZES = { small: "Small", medium: "Medium", large: "Large" };
-const RATIOS = { square: "Square", portrait: "Portrait", landscape: "Landscape" };
-const FITS = { contain: "Whole image", cover: "Fill, cropped" };
-const VIEWS = { table: "Table", cards: "Grid" };
-const TEMPLATES = { form: "Form", showcase: "Showcase" };
+const SIZES = { small: "Small", medium: "Medium", large: "Large" } as const;
+const RATIOS = { square: "Square", portrait: "Portrait", landscape: "Landscape" } as const;
+const FITS = { contain: "Whole image", cover: "Fill, cropped" } as const;
+const VIEWS = { table: "Table", cards: "Grid" } as const;
+const TEMPLATES = { form: "Form", showcase: "Showcase" } as const;
 
 /** Some of `fields`, up to `max`, picked by checkbox in the order picked. */
 function PickFields({
@@ -93,6 +94,7 @@ function GridSettings({
   readonly layout: CollectionLayout | undefined;
   readonly onChange: (layout: CollectionLayout | undefined) => void;
 }) {
+  const t = useTranslation();
   const resolved = resolveRecordDisplay({ ...collection, layout: layout ?? {} });
   // A display starts from the parts shown without one.
   const display: Display = layout?.display ?? {
@@ -119,20 +121,23 @@ function GridSettings({
   };
   return (
     <>
-      <PanelSection title="Parts" hint="Which field each part of a card and a record's page shows.">
+      <PanelSection
+        title={t("Parts")}
+        hint={t("Which field each part of a card and a record's page shows.")}
+      >
         {ROLES.map(([role, label]) => (
           <LabeledField
             key={role}
-            label={label}
+            label={t(label)}
             size="xs"
             className="flex-row items-center justify-between"
           >
             <Choice
-              label={label}
+              label={t(label)}
               value={resolved[role]?.id ?? NONE}
               // A record always has a title: the primary key without one.
               choices={{
-                ...(role === "title" ? {} : { [NONE]: "None" }),
+                ...(role === "title" ? {} : { [NONE]: t("None") }),
                 ...Object.fromEntries(fitting[role].map((field) => [field.id, field.label])),
               }}
               onChange={(id) => setDisplay(withKey(display, role, id === NONE ? undefined : id))}
@@ -140,7 +145,7 @@ function GridSettings({
           </LabeledField>
         ))}
         <PickFields
-          label="Badges"
+          label={t("Badges")}
           max={3}
           fields={collection.fields.filter((field) => field.type === "select")}
           picked={resolved.badges.map((field) => field.id)}
@@ -149,9 +154,9 @@ function GridSettings({
           }
         />
       </PanelSection>
-      <PanelSection title="Cards">
+      <PanelSection title={t("Cards")}>
         <PickFields
-          label="Lines under the title"
+          label={t("Lines under the title")}
           max={3}
           fields={lines}
           picked={resolved.extra.map((field) => field.id)}
@@ -159,49 +164,57 @@ function GridSettings({
             setCards(withKey(cards, "extra", extra.length === 0 ? undefined : extra))
           }
         />
-        <LabeledField label="Card size" size="xs" className="flex-row items-center justify-between">
+        <LabeledField
+          label={t("Card size")}
+          size="xs"
+          className="flex-row items-center justify-between"
+        >
           <Choice
-            label="Card size"
+            label={t("Card size")}
             value={resolved.size}
-            choices={SIZES}
+            choices={translateChoices(t, SIZES)}
             onChange={(size) =>
               setCards(withKey(cards, "size", size === "medium" ? undefined : size))
             }
           />
         </LabeledField>
         <LabeledField
-          label="Image shape"
+          label={t("Image shape")}
           size="xs"
           className="flex-row items-center justify-between"
         >
           <Choice
-            label="Image shape"
+            label={t("Image shape")}
             value={resolved.imageRatio}
-            choices={RATIOS}
+            choices={translateChoices(t, RATIOS)}
             onChange={(ratio) =>
               setCards(withKey(cards, "imageRatio", ratio === "square" ? undefined : ratio))
             }
           />
         </LabeledField>
-        <LabeledField label="Image fit" size="xs" className="flex-row items-center justify-between">
+        <LabeledField
+          label={t("Image fit")}
+          size="xs"
+          className="flex-row items-center justify-between"
+        >
           <Choice
-            label="Image fit"
+            label={t("Image fit")}
             value={resolved.imageFit}
-            choices={FITS}
+            choices={translateChoices(t, FITS)}
             onChange={(fit) =>
               setCards(withKey(cards, "imageFit", fit === "contain" ? undefined : fit))
             }
           />
         </LabeledField>
         <LabeledField
-          label="Records show first as"
+          label={t("Records show first as")}
           size="xs"
           className="flex-row items-center justify-between"
         >
           <Choice
-            label="Records show first as"
+            label={t("Records show first as")}
             value={resolved.defaultView}
-            choices={VIEWS}
+            choices={translateChoices(t, VIEWS)}
             onChange={(view) =>
               onChange(withPart(layout, "defaultView", view === "table" ? undefined : view))
             }
@@ -222,6 +235,7 @@ function SearchSettings({
   readonly layout: CollectionLayout | undefined;
   readonly onChange: (layout: CollectionLayout | undefined) => void;
 }) {
+  const t = useTranslation();
   const search: Search = layout?.search ?? {};
   const resolved = resolveRecordSearch({ ...collection, layout: layout ?? {} });
   const filterIds = resolved.filters.map((field) => field.id);
@@ -245,11 +259,13 @@ function SearchSettings({
   return (
     <>
       <PanelSection
-        title="Search"
-        hint="Every word of a search appears in one of these fields. With none picked, it looks in every text value."
+        title={t("Search")}
+        hint={t(
+          "Every word of a search appears in one of these fields. With none picked, it looks in every text value.",
+        )}
       >
         <PickFields
-          label="Search in"
+          label={t("Search in")}
           fields={collection.fields.filter(isSearchable)}
           picked={resolved.fields?.map((field) => field.id) ?? []}
           onChange={(ids) =>
@@ -258,8 +274,10 @@ function SearchSettings({
         />
       </PanelSection>
       <PanelSection
-        title="Filters"
-        hint="Shown above the records in this order: a select, yes/no or text field picks a value, a number or date field a range."
+        title={t("Filters")}
+        hint={t(
+          "Shown above the records in this order: a select, yes/no or text field picks a value, a number or date field a range.",
+        )}
       >
         {resolved.filters.length > 0 ? (
           <ol className="flex flex-col divide-y rounded-lg border">
@@ -274,12 +292,12 @@ function SearchSettings({
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{field.label}</span>
                 {urlFields.length > 0 && field.type !== "number" && field.type !== "date" ? (
                   <Choice
-                    label={`Site icons of the ${field.label} filter`}
+                    label={t("Site icons of the {0} filter", field.label)}
                     value={resolved.iconLinks[field.id] ?? NONE}
                     choices={{
-                      [NONE]: "No site icons",
+                      [NONE]: t("No site icons"),
                       ...Object.fromEntries(
-                        urlFields.map((url) => [url.id, `Site icons from ${url.label}`]),
+                        urlFields.map((url) => [url.id, t("Site icons from {0}", url.label)]),
                       ),
                     }}
                     onChange={(id) => {
@@ -292,7 +310,7 @@ function SearchSettings({
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  aria-label={`Remove the ${field.label} filter`}
+                  aria-label={t("Remove the {0} filter", field.label)}
                   onClick={() => setFilters(filterIds.filter((id) => id !== field.id))}
                 >
                   <XIcon />
@@ -303,10 +321,10 @@ function SearchSettings({
         ) : null}
         {addable.length > 0 ? (
           <Choice
-            label="Add a filter"
+            label={t("Add a filter")}
             value={NONE}
             choices={{
-              [NONE]: "Add a filter…",
+              [NONE]: t("Add a filter…"),
               ...Object.fromEntries(addable.map((field) => [field.id, field.label])),
             }}
             onChange={(id) => (id === NONE ? undefined : setFilters([...filterIds, id]))}
@@ -325,6 +343,7 @@ function SearchPreview({
   readonly collection: Collection;
   readonly layout: CollectionLayout | undefined;
 }) {
+  const t = useTranslation();
   const shown = useMemo(() => ({ ...collection, layout: layout ?? {} }), [collection, layout]);
   const { text, setText, filters, setFilters, filterChoices, found, error } =
     useRecordSearch(shown);
@@ -332,8 +351,8 @@ function SearchPreview({
     <div className="flex flex-col gap-3">
       <Input
         type="search"
-        aria-label="Search records"
-        placeholder="Search records"
+        aria-label={t("Search records")}
+        placeholder={t("Search records")}
         value={text}
         onChange={(event) => setText(event.target.value)}
       />
@@ -347,7 +366,7 @@ function SearchPreview({
       {found === null ? null : (
         <>
           <RecordCount matchCount={found.matchCount} totalCount={found.totalCount} />
-          <RecordTable label="Records" collection={shown} records={found.records} />
+          <RecordTable label={t("Records")} collection={shown} records={found.records} />
         </>
       )}
     </div>
@@ -363,6 +382,7 @@ function PageSettings({
   readonly layout: CollectionLayout | undefined;
   readonly onChange: (layout: CollectionLayout | undefined) => void;
 }) {
+  const t = useTranslation();
   const page: PageLayout = layout?.page ?? { template: "form" };
   const textFields = collection.fields.filter((field) => field.type === "text");
   const setPage = (next: PageLayout) =>
@@ -379,36 +399,42 @@ function PageSettings({
     );
   return (
     <PanelSection
-      title="Record page"
-      hint="Showcase shows a record's images beside its parts and values, its long text below, and edits it on demand."
+      title={t("Record page")}
+      hint={t(
+        "Showcase shows a record's images beside its parts and values, its long text below, and edits it on demand.",
+      )}
     >
-      <LabeledField label="Template" size="xs" className="flex-row items-center justify-between">
+      <LabeledField
+        label={t("Template")}
+        size="xs"
+        className="flex-row items-center justify-between"
+      >
         <Choice
-          label="Template"
+          label={t("Template")}
           value={page.template}
-          choices={TEMPLATES}
+          choices={translateChoices(t, TEMPLATES)}
           onChange={(template) => setPage({ ...page, template })}
         />
       </LabeledField>
       {page.template === "showcase" ? (
         <>
           <LabeledField
-            label="Description"
+            label={t("Description")}
             size="xs"
             className="flex-row items-center justify-between"
           >
             <Choice
-              label="Description"
+              label={t("Description")}
               value={textFields.find((field) => field.id === page.description)?.id ?? NONE}
               choices={{
-                [NONE]: "None",
+                [NONE]: t("None"),
                 ...Object.fromEntries(textFields.map((field) => [field.id, field.label])),
               }}
               onChange={(id) => setPage(withKey(page, "description", id === NONE ? undefined : id))}
             />
           </LabeledField>
           <PickFields
-            label="Hide fields in showcase"
+            label={t("Hide fields in showcase")}
             fields={collection.fields}
             picked={page.hiddenFields ?? []}
             onChange={(fields) =>
@@ -429,17 +455,18 @@ export const makeCollectionViews = (
   collection: Collection,
   records: ReadonlyArray<CollectionRecordView>,
   renderForm: (layout: CollectionLayout | undefined, key: string) => ReactNode,
+  t: Translate,
 ): ReadonlyArray<LayoutView<CollectionLayout>> => [
   {
     value: "cards",
-    label: "Grid",
+    label: t("Grid"),
     isPerEntry: false,
     settings: (layout, onChange) => (
       <GridSettings collection={collection} layout={layout} onChange={onChange} />
     ),
     preview: (layout, _, onOpen) => (
       <RecordCards
-        label="Records"
+        label={t("Records")}
         collection={{ ...collection, layout: layout ?? {} }}
         records={records}
         onOpen={(record) => onOpen(record.key, "page")}
@@ -448,7 +475,7 @@ export const makeCollectionViews = (
   },
   {
     value: "search",
-    label: "Search",
+    label: t("Search"),
     isPerEntry: false,
     settings: (layout, onChange) => (
       <SearchSettings collection={collection} layout={layout} onChange={onChange} />
@@ -457,7 +484,7 @@ export const makeCollectionViews = (
   },
   {
     value: "page",
-    label: "Page",
+    label: t("Page"),
     isPerEntry: true,
     settings: (layout, onChange) => (
       <PageSettings collection={collection} layout={layout} onChange={onChange} />

@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 /**
  * Downscale + re-encode for image attachments. The composer accepts
  * pasted/dropped images larger than the `ATTACHMENT_MAX_IMAGE_BYTES` wire cap
@@ -88,7 +89,7 @@ export async function imageDataUrl(
     canvas.width = mode === "pad" ? Math.max(width, height) : width;
     canvas.height = mode === "pad" ? canvas.width : height;
     const context = canvas.getContext("2d");
-    if (context === null) throw new Error("This browser can't prepare the image.");
+    if (context === null) throw new Error(translate("This browser can't prepare the image."));
     context.imageSmoothingQuality = "high";
     context.drawImage(
       bitmap,

@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import { RpcApi } from "@t45/contracts/resources/RpcApi";
 import { AccessDenied } from "@t45/contracts/resources/errors";
 import * as Cause from "effect/Cause";
@@ -107,7 +108,7 @@ const failed = (error: unknown) =>
   });
 
 const serverDefect = (defect: unknown) =>
-  new Cause.UnknownError(defect, "Something went wrong on the server.");
+  new Cause.UnknownError(defect, translate("Something went wrong on the server."));
 
 export const call = <T extends UnaryTag>(tag: T, input: ApiInput<T>) =>
   ApiClient.use((client) => client.unary[tag](input)).pipe(

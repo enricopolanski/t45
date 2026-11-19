@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { canEditRecords, type Collection } from "@t45/contracts/models/Collection";
 import { defaultValues } from "@t45/contracts/models/Field";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
@@ -34,6 +35,7 @@ export function CollectionPage({
   readonly onPage: (page: number) => void;
   readonly isInSettings?: boolean;
 }) {
+  const t = useTranslation();
   const viewer = useSession();
   const isAdmin = viewer?.role === "admin";
   const navigate = useNavigate();
@@ -85,9 +87,9 @@ export function CollectionPage({
 
   if (collection === null)
     return (
-      <WorkFrame title="Collection">
+      <WorkFrame title={t("Collection")}>
         <p role={error === null ? undefined : "alert"} className="text-sm text-muted-foreground">
-          {error ?? "Loading…"}
+          {error ?? t("Loading…")}
         </p>
       </WorkFrame>
     );
@@ -114,13 +116,13 @@ export function CollectionPage({
                 <Link to="/settings/collections/$collectionId/edit" params={{ collectionId }} />
               }
             >
-              Edit collection
+              {t("Edit collection")}
             </Button>
           ) : null}
           {canEdit ? (
             <Button size="sm" onClick={() => setIsAdding(true)}>
               <PlusIcon />
-              New record
+              {t("New record")}
             </Button>
           ) : null}
         </>
@@ -129,8 +131,8 @@ export function CollectionPage({
       <div className="flex items-center gap-4">
         <Input
           type="search"
-          aria-label="Search records"
-          placeholder="Search records"
+          aria-label={t("Search records")}
+          placeholder={t("Search records")}
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
@@ -138,16 +140,16 @@ export function CollectionPage({
           value={shownView}
           onValueChange={(next) => setView(next === "cards" ? "cards" : "table")}
         >
-          <TabsList aria-label="Show records as">
-            <TabsTab value="table">Table</TabsTab>
-            <TabsTab value="cards">Grid</TabsTab>
+          <TabsList aria-label={t("Show records as")}>
+            <TabsTab value="table">{t("Table")}</TabsTab>
+            <TabsTab value="cards">{t("Grid")}</TabsTab>
           </TabsList>
         </Tabs>
         {/* A layout's columns replace the column order, so it reorders only without them. */}
         {isAdmin && shownView === "table" && collection.layout?.table?.columns === undefined ? (
           <label className="flex shrink-0 items-center gap-2 text-sm">
             <Switch size="sm" checked={isReordering} onCheckedChange={setIsReordering} />
-            Reorder
+            {t("Reorder")}
           </label>
         ) : null}
       </div>
@@ -159,15 +161,15 @@ export function CollectionPage({
       />
       {error && <ErrorText text={error} />}
       {found === null ? null : found.totalCount === 0 ? (
-        <p className="text-sm text-muted-foreground">No records yet.</p>
+        <p className="text-sm text-muted-foreground">{t("No records yet.")}</p>
       ) : found.matchCount === 0 ? (
-        <p className="text-sm text-muted-foreground">No record matches.</p>
+        <p className="text-sm text-muted-foreground">{t("No record matches.")}</p>
       ) : (
         <RecordCount matchCount={found.matchCount} totalCount={found.totalCount} />
       )}
       {found !== null && found.records.length > 0 && shownView === "cards" ? (
         <RecordCards
-          label="Records"
+          label={t("Records")}
           collection={collection}
           records={found.records}
           onOpen={openRecord}
@@ -175,7 +177,7 @@ export function CollectionPage({
       ) : null}
       {found !== null && (found.records.length > 0 || isReordering) && shownView === "table" ? (
         <RecordTable
-          label="Records"
+          label={t("Records")}
           collection={collection}
           records={found.records}
           onOpen={openRecord}

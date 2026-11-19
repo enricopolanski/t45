@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import type { StepView } from "@t45/contracts/resources/Workflows";
 import * as DateTime from "effect/DateTime";
@@ -16,7 +17,7 @@ import { MarkdownText } from "../markdown/MarkdownText";
 import { Textarea } from "../ui/textarea";
 import { ActorName } from "./ActorAvatar";
 import { useWorkDirectory } from "./useWorkDirectory";
-import { actorName, plural } from "./workLogic";
+import { actorName } from "./workLogic";
 
 /** "13 Nov 2026": the day a file was added, in the viewer's time zone. */
 const addedDay = (instant: DateTime.Utc) =>
@@ -43,6 +44,7 @@ export function StepFiles({
   readonly onAttach: (files: ReadonlyArray<File>) => void;
   readonly onRemove: (attachmentId: AttachmentId) => void;
 }) {
+  const t = useTranslation();
   const [isNewestFirst, setIsNewestFirst] = useState(true);
   const [isDragActive, setIsDragActive] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
@@ -53,26 +55,30 @@ export function StepFiles({
   const isEmpty = files.length === 0;
   return (
     <section
-      aria-label="Files"
+      aria-label={t("Files")}
       className={cn("card flex flex-col gap-3 p-4", isDragActive && "border-primary bg-primary/4")}
       {...(canWrite
         ? makeFileDropHandlers({ setDragActive: setIsDragActive, addFiles: onAttach })
         : {})}
     >
       <div className="flex items-center gap-2.5">
-        <h2 className="text-sm font-semibold">Files</h2>
-        {isEmpty ? null : <Badge variant="info">{plural(files.length, "file", "files")}</Badge>}
+        <h2 className="text-sm font-semibold">{t("Files")}</h2>
+        {isEmpty ? null : (
+          <Badge variant="info">
+            {t(files.length === 1 ? "{0} file" : "{0} files", files.length)}
+          </Badge>
+        )}
         {canWrite ? (
           <Button
             size="sm"
             variant="outline"
             className="ms-auto"
-            aria-label="Attach a file"
+            aria-label={t("Attach a file")}
             disabled={busy}
             onClick={() => picker.current?.click()}
           >
             <PaperclipIcon aria-hidden />
-            Attach
+            {t("Attach")}
           </Button>
         ) : null}
       </div>
@@ -82,7 +88,7 @@ export function StepFiles({
             <thead>
               <tr>
                 <th scope="col" className={cn(headerCell, "w-[52%] ps-4")}>
-                  Name
+                  {t("Name")}
                 </th>
                 <th
                   scope="col"
@@ -91,11 +97,14 @@ export function StepFiles({
                 >
                   <button
                     type="button"
-                    aria-label={`Date added, ${isNewestFirst ? "newest" : "oldest"} first. Change sort order`}
+                    aria-label={t(
+                      "Date added, {0} first. Change sort order",
+                      isNewestFirst ? "newest" : "oldest",
+                    )}
                     className="inline-flex cursor-pointer items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => setIsNewestFirst(!isNewestFirst)}
                   >
-                    Date added
+                    {t("Date added")}
                     {isNewestFirst ? (
                       <ArrowDownIcon className="size-3" />
                     ) : (
@@ -104,11 +113,11 @@ export function StepFiles({
                   </button>
                 </th>
                 <th scope="col" className={headerCell}>
-                  Added by
+                  {t("Added by")}
                 </th>
                 {canWrite ? (
                   <th scope="col" className={cn(headerCell, "w-12")}>
-                    <span className="sr-only">Remove</span>
+                    <span className="sr-only">{t("Remove")}</span>
                   </th>
                 ) : null}
               </tr>
@@ -126,7 +135,8 @@ export function StepFiles({
                         aria-hidden
                         className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-3xs font-bold tracking-wide text-muted-foreground"
                       >
-                        {/\.(\w{1,4})$/.exec(file.name)?.[1]?.toUpperCase() ?? "FILE"}
+                        {/\.(\w{1,4})$/.exec(file.name)?.[1]?.toUpperCase() ??
+                          t("File").toUpperCase()}
                       </span>
                       <span className="truncate">{file.name}</span>
                     </a>
@@ -142,7 +152,7 @@ export function StepFiles({
                       <Button
                         size="icon-xs"
                         variant="ghost"
-                        aria-label={`Remove ${file.name}`}
+                        aria-label={t("Remove {0}", file.name)}
                         disabled={busy}
                         onClick={() => onRemove(file.id)}
                       >
@@ -171,11 +181,13 @@ export function StepFiles({
       ) : null}
       {isEmpty ? (
         <p className="rounded-lg border border-dashed bg-muted/50 px-4 py-3.5 text-center text-sm text-muted-foreground">
-          {canWrite ? "No files yet. Attach them with the button, or drop them here." : "No files."}
+          {canWrite
+            ? t("No files yet. Attach them with the button, or drop them here.")
+            : t("No files.")}
         </p>
       ) : canWrite ? (
         <p className="text-xs text-muted-foreground">
-          You can also drop files here to attach them.
+          {t("You can also drop files here to attach them.")}
         </p>
       ) : null}
     </section>
@@ -194,16 +206,17 @@ export function StepComments({
   readonly busy: boolean;
   readonly onComment: (body: string) => Promise<boolean>;
 }) {
+  const t = useTranslation();
   const directory = useWorkDirectory();
   const now = useNowMinute();
   const { pending, onSubmit } = useSubmit(async (fields, form) => {
     if (await onComment(String(fields.get("body")).trim())) form.reset();
   });
   return (
-    <section aria-label="Comments" className="flex flex-col gap-2.5">
-      <h2 className="text-sm font-semibold">Comments</h2>
+    <section aria-label={t("Comments")} className="flex flex-col gap-2.5">
+      <h2 className="text-sm font-semibold">{t("Comments")}</h2>
       {view.comments.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No comments yet.</p>
+        <p className="text-sm text-muted-foreground">{t("No comments yet.")}</p>
       ) : (
         <ul className="flex flex-col gap-3">
           {view.comments.map((comment) => (
@@ -227,11 +240,11 @@ export function StepComments({
           <Textarea
             name="body"
             required
-            aria-label="New comment"
-            placeholder="Write a comment (Markdown supported)"
+            aria-label={t("New comment")}
+            placeholder={t("Write a comment (Markdown supported)")}
           />
           <Button type="submit" size="sm" variant="outline" disabled={busy || pending}>
-            Comment
+            {t("Comment")}
           </Button>
         </form>
       ) : null}

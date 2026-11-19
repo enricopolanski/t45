@@ -75,6 +75,7 @@ const sessionRoute = HttpRouter.add(
             userId: session.userId,
             role: session.role,
             state: session.state,
+            ...(session.locale === null ? {} : { locale: session.locale }),
             deployVersion,
           },
     );

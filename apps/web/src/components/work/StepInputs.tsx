@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { isUrlFieldValue } from "@t45/contracts/models/Field";
 import { resolveRecordDisplay, resolveTableLayout } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
@@ -36,7 +37,6 @@ import {
   sortEntries,
   shownValue,
 } from "./StepFields";
-import { plural } from "./workLogic";
 
 // Read-only: no text cursor or caret, so nothing suggests typing; the value still selects and copies.
 const readOnlyCursor = "cursor-default caret-transparent";
@@ -66,6 +66,7 @@ function ReadOnlyControl({
   readonly id: string;
   readonly isStacked: boolean;
 }) {
+  const t = useTranslation();
   if (field.linkUrl !== undefined)
     return (
       <div id={id} className={cn(readOnlyBox, "flex min-h-8 items-center px-2.5 py-1")}>
@@ -77,14 +78,14 @@ function ReadOnlyControl({
       <div id={id} className={cn(readOnlyBox, "flex min-h-8 items-center px-2.5 py-1")}>
         {field.type === "file" ? (
           field.file === null ? (
-            <span className="text-muted-foreground">No file</span>
+            <span className="text-muted-foreground">{t("No file")}</span>
           ) : (
             <AttachmentLink attachment={field.file} />
           )
         ) : isUrlFieldValue(field.value) ? (
           <ExternalUrl href={field.value} />
         ) : (
-          <span className="text-muted-foreground">Not filled in</span>
+          <span className="text-muted-foreground">{t("Not filled in")}</span>
         )}
       </div>
     );
@@ -101,7 +102,7 @@ function ReadOnlyControl({
       id={id}
       readOnly
       value={value}
-      placeholder="Not filled in"
+      placeholder={t("Not filled in")}
       className={cn(
         readOnlyBox,
         "block w-full resize-none px-2.5 field-sizing-content placeholder:text-muted-foreground",
@@ -113,7 +114,7 @@ function ReadOnlyControl({
       id={id}
       readOnly
       value={value}
-      placeholder="Not filled in"
+      placeholder={t("Not filled in")}
       className={cn(readOnlyBox, "h-8 w-full min-w-0 px-2.5 placeholder:text-muted-foreground")}
     />
   );
@@ -304,6 +305,7 @@ export function EntryTable({
   readonly field: FieldView;
   readonly entries: ReadonlyArray<Entry>;
 }) {
+  const t = useTranslation();
   const { columns, density } = resolveTableLayout(field.rowFields, field.layout);
   const hasDetails = field.rowFields.some(
     (child) => !columns.some((column) => column.field.id === child.id),
@@ -343,7 +345,7 @@ export function EntryTable({
             ))}
             {hasDetails ? (
               <th scope="col" className={headerCell}>
-                <span className="sr-only">Details</span>
+                <span className="sr-only">{t("Details")}</span>
               </th>
             ) : null}
           </tr>
@@ -361,7 +363,7 @@ export function EntryTable({
                     {child === undefined ? null : (
                       <CellValue
                         field={child}
-                        label={`${child.label}, entry ${at + 1}`}
+                        label={t("{0}, entry {1}", child.label, at + 1)}
                         isWrapped={column.isWrapped}
                       />
                     )}
@@ -374,10 +376,10 @@ export function EntryTable({
                     type="button"
                     size="xs"
                     variant="ghost"
-                    aria-label={`Details of entry ${at + 1} of ${field.label}`}
+                    aria-label={t("Details of entry {0} of {1}", at + 1, field.label)}
                     onClick={() => setDetailsAt(at)}
                   >
-                    Details
+                    {t("Details")}
                   </Button>
                 </td>
               ) : null}
@@ -397,7 +399,7 @@ export function EntryTable({
             }
           >
             <DialogHeader>
-              <DialogTitle>{`${field.label}, entry ${(detailsAt ?? 0) + 1}`}</DialogTitle>
+              <DialogTitle>{t("{0}, entry {1}", field.label, (detailsAt ?? 0) + 1)}</DialogTitle>
             </DialogHeader>
             <DialogPanel>
               <ReadOnlyForm form={form} />
@@ -422,6 +424,7 @@ export function ReadOnlyForm({ form }: { readonly form: ReturnType<typeof layOut
 
 /** A repeatable group's entries, as a table or as a form each; entries holding a group only as forms. */
 function Entries({ field }: { readonly field: FieldView }) {
+  const t = useTranslation();
   const isTable = field.rowFields.every((child) => child.type !== "group");
   const [shown, setShown] = useState(isTable ? "table" : "form");
   const entries = sortEntries(field);
@@ -430,15 +433,15 @@ function Entries({ field }: { readonly field: FieldView }) {
       <div className="py-2 pr-3 pl-4">
         <BlockHeading field={field}>
           <span className="text-xs text-muted-foreground">
-            {plural(entries.length, "entry", "entries")}
+            {t(entries.length === 1 ? "{0} entry" : "{0} entries", entries.length)}
           </span>
           {isTable && entries.length > 0 ? (
-            <TabsList size="sm" aria-label={`Show ${field.label} as`} className="ml-auto">
+            <TabsList size="sm" aria-label={t("Show {0} as", field.label)} className="ml-auto">
               <TabsTab size="sm" value="table">
-                Table
+                {t("Table")}
               </TabsTab>
               <TabsTab size="sm" value="form">
-                Form
+                {t("Form")}
               </TabsTab>
             </TabsList>
           ) : null}
@@ -480,6 +483,7 @@ function LinkedRecords({
   readonly renderStatus?: ((record: CollectionRecordView) => ReactNode) | undefined;
   readonly reviewFields?: ((record: CollectionRecordView) => ReadonlyArray<FieldView>) | undefined;
 }) {
+  const t = useTranslation();
   const [openedKey, setOpenedKey] = useState<string | null>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const opened = field.records.find((record) => record.key === openedKey);
@@ -504,11 +508,11 @@ function LinkedRecords({
     <div className="flex flex-col gap-2 px-4 pt-3 pb-4">
       <BlockHeading field={field}>
         <span className="text-xs text-muted-foreground">
-          {plural(field.records.length, "record", "records")}
+          {t(field.records.length === 1 ? "{0} record" : "{0} records", field.records.length)}
         </span>
       </BlockHeading>
       {field.collection === null ? (
-        <p className="text-sm text-muted-foreground">Its collection is gone.</p>
+        <p className="text-sm text-muted-foreground">{t("Its collection is gone.")}</p>
       ) : field.records.length > 0 ? (
         <RecordTable
           label={field.label}
@@ -523,7 +527,7 @@ function LinkedRecords({
           <DialogPopup ref={popupRef} initialFocus={popupRef} className="sm:max-w-5xl">
             <DialogHeader>
               <DialogTitle>{`${field.label} · ${opened.key}`}</DialogTitle>
-              <DialogDescription>Read-only</DialogDescription>
+              <DialogDescription>{t("Read-only")}</DialogDescription>
             </DialogHeader>
             <DialogPanel>
               <RecordShowcase collection={field.collection} record={opened} />
@@ -608,10 +612,11 @@ function ReadOnlyStepFields({
 }
 
 export function ConfirmedRecord() {
+  const t = useTranslation();
   return (
     <span className="inline-flex items-center gap-1.5 font-semibold">
       <CheckIcon aria-hidden className="size-4 text-success-foreground" />
-      Confirmed
+      {t("Confirmed")}
     </span>
   );
 }

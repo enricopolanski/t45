@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { type ChatAttachment } from "@t45/contracts/models/Attachment";
 import { type ChatId } from "@t45/contracts/models/Chat";
 import type { Question } from "@t45/contracts/resources/Chats";
@@ -49,6 +50,7 @@ export function useChatQuestions({
   readonly composerRef: RefObject<ChatComposerHandle | null>;
   readonly promptRef: RefObject<string>;
 }) {
+  const t = useTranslation();
   const [fieldIndexByQuestion, setFieldIndexByQuestion] = useState<Record<string, number>>({});
   // Answered, a question stays busy until it leaves the chat's questions, so it can't be sent twice.
   const [respondingKey, setRespondingKey] = useState<string | null>(null);
@@ -148,7 +150,7 @@ export function useChatQuestions({
       if (!uploaded) {
         toastManager.add({
           type: "error",
-          title: "Wait for attachments to finish uploading, or remove failed uploads.",
+          title: t("Wait for attachments to finish uploading, or remove failed uploads."),
         });
         return;
       }
@@ -165,7 +167,7 @@ export function useChatQuestions({
       });
     } catch (error) {
       setRespondingKey(null);
-      toastFailure("Couldn't send the answer", error);
+      toastFailure(t("Couldn't send the answer"), error);
     }
   };
   const onDismiss = async () => {
@@ -180,7 +182,7 @@ export function useChatQuestions({
       });
     } catch (error) {
       setRespondingKey(null);
-      toastFailure("Couldn't dismiss the question", error);
+      toastFailure(t("Couldn't dismiss the question"), error);
     }
   };
   const setFieldIndex = (index: number) => {

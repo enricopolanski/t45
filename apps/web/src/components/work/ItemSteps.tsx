@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { StepView } from "@t45/contracts/resources/Workflows";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -33,6 +34,7 @@ function StepCard({
 
 /** Another step of the item: state, who has it, its fields. */
 export function OtherStep({ view }: { readonly view: StepView["otherSteps"][number] }) {
+  const t = useTranslation();
   const directory = useWorkDirectory();
   const { step } = view;
   return (
@@ -40,7 +42,7 @@ export function OtherStep({ view }: { readonly view: StepView["otherSteps"][numb
       name={view.name}
       meta={
         <>
-          <Badge variant="outline">{STEP_STATE_LABELS[step.status.type]}</Badge>
+          <Badge variant="outline">{t(STEP_STATE_LABELS[step.status.type])}</Badge>
           <span className="truncate text-xs text-muted-foreground">
             {actorName(directory, step.assignee)}
           </span>
@@ -50,7 +52,7 @@ export function OtherStep({ view }: { readonly view: StepView["otherSteps"][numb
       {view.fields.length > 0 ? (
         <ReadOnlyFields fields={view.fields} />
       ) : (
-        <p className="text-sm text-muted-foreground">No fields.</p>
+        <p className="text-sm text-muted-foreground">{t("No fields.")}</p>
       )}
       <div>
         <Button
@@ -58,7 +60,7 @@ export function OtherStep({ view }: { readonly view: StepView["otherSteps"][numb
           variant="outline"
           render={<Link to="/my-work/$stepId" params={{ stepId: step.id }} />}
         >
-          Open step
+          {t("Open step")}
         </Button>
       </div>
     </StepCard>

@@ -1,11 +1,13 @@
+import { useTranslation } from "~/i18n/locale";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { WorkFrame } from "../components/work/WorkFrame";
 import { SkillEditor } from "../components/agents/SkillEditor";
 
 function NewSkillView() {
+  const t = useTranslation();
   return (
-    <WorkFrame title="New skill">
+    <WorkFrame title={t("New skill")}>
       <SkillEditor skillId={null} />
     </WorkFrame>
   );

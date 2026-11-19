@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useAtomValue } from "@effect/atom-react";
 import type { LegendListRef } from "@legendapp/list/react";
 import type { Session } from "@opencode/schema/session";
@@ -58,6 +59,7 @@ export default function ChatView({
   readonly newAgentId: Agent["id"] | null;
   readonly newProjectId: string | null;
 }) {
+  const t = useTranslation();
   const readOnly = sessionId !== null;
   const newChat = useNewChat();
   const navigate = useNavigate();
@@ -119,9 +121,9 @@ export default function ChatView({
   // A failure already shown in the conversation needs no banner.
   const bannerError =
     view.status === "failed" && !missing
-      ? describeFailure(view.error, "Could not open the chat.")
+      ? describeFailure(view.error, t("Could not open the chat."))
       : status === "failed" && ready?.endsWithError === false
-        ? EXECUTION_FAILED
+        ? t(EXECUTION_FAILED)
         : null;
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   // Dismissal lasts only while the same error remains active.
@@ -266,7 +268,7 @@ export default function ChatView({
         pendingInputs.length === 0)) &&
     sentIn !== chatId;
   const startNewChat = () =>
-    void newChat().catch((error: unknown) => toastFailure("Couldn't start a new chat", error));
+    void newChat().catch((error: unknown) => toastFailure(t("Couldn't start a new chat"), error));
 
   const onSend = (event?: { preventDefault: () => void }) => {
     event?.preventDefault();
@@ -308,11 +310,11 @@ export default function ChatView({
 
   const onInterrupt = () =>
     void api("chats.stop", { chatId }).catch((error: unknown) =>
-      toastFailure("Couldn't stop the agent", error),
+      toastFailure(t("Couldn't stop the agent"), error),
     );
   const onCancelInput = (input: PendingInput) =>
     api("chats.cancel", { chatId, inputId: input.inputId }).catch((error: unknown) =>
-      toastFailure("Couldn't cancel the queued message", error),
+      toastFailure(t("Couldn't cancel the queued message"), error),
     );
 
   const history: ChatTimelineHistory | null =
@@ -332,7 +334,7 @@ export default function ChatView({
       search: target === null || target === rootSessionId ? {} : { session: target },
     });
   const promptHistoryMessages = ready?.promptHistory ?? NO_PROMPT_HISTORY;
-  const sendDisabledReason = loading ? "Messages loading" : null;
+  const sendDisabledReason = loading ? t("Messages loading") : null;
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
@@ -359,7 +361,7 @@ export default function ChatView({
                   className="flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-4 py-2.5 text-sm font-medium text-foreground shadow-lg"
                 >
                   <PaperclipIcon className="size-4 text-primary" aria-hidden="true" />
-                  Drop files to attach
+                  {t("Drop files to attach")}
                 </div>
               </div>
             ) : null}
@@ -403,7 +405,9 @@ export default function ChatView({
                     <div className="absolute inset-x-0 bottom-full">
                       <div className="pb-4">
                         <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-                          {agentName ? `Chat with ${agentName}` : "What can I help you with?"}
+                          {agentName
+                            ? t("Chat with {0}", agentName)
+                            : t("What can I help you with?")}
                         </h1>
                       </div>
                     </div>
@@ -420,7 +424,7 @@ export default function ChatView({
                         variant="glass"
                       >
                         <ChevronDownIcon className="size-3.5" />
-                        Scroll to end
+                        {t("Scroll to end")}
                       </Button>
                     </div>
                   ) : null}
@@ -488,18 +492,21 @@ function SubagentSessionBar(props: {
   readonly title: string | null;
   readonly onOpenParent: () => void;
 }) {
+  const t = useTranslation();
   return (
     <div className="flex min-h-12 items-center gap-3 rounded-3xl py-2 ps-5 pe-2 text-sm">
       <span className="flex min-w-0 items-center gap-2">
         <BotIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 truncate font-medium text-foreground">
-          {props.title || "Subagent"}
+          {props.title || t("Subagent")}
         </span>
       </span>
-      <span className="ms-auto shrink-0 text-muted-foreground max-sm:hidden">Runs on its own</span>
+      <span className="ms-auto shrink-0 text-muted-foreground max-sm:hidden">
+        {t("Runs on its own")}
+      </span>
       <Button size="sm" variant="ghost" onClick={props.onOpenParent}>
         <ArrowUpLeftIcon />
-        Open parent
+        {t("Open parent")}
       </Button>
     </div>
   );

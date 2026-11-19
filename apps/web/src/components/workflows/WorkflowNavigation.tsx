@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Link } from "@tanstack/react-router";
 
 const tabClassName =
@@ -5,13 +6,14 @@ const tabClassName =
 
 /** Tabs between projects and workflows, at the start of their pages' actions. */
 export function WorkflowNavigation() {
+  const t = useTranslation();
   return (
-    <nav aria-label="Workflow navigation" className="mr-auto flex flex-wrap gap-2">
+    <nav aria-label={t("Workflow navigation")} className="mr-auto flex flex-wrap gap-2">
       <Link to="/settings/projects" className={tabClassName}>
-        Projects
+        {t("Projects")}
       </Link>
       <Link to="/settings/workflows" className={tabClassName}>
-        Workflows
+        {t("Workflows")}
       </Link>
     </nav>
   );

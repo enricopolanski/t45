@@ -1,11 +1,13 @@
+import { useTranslation } from "~/i18n/locale";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { WorkFrame } from "../components/work/WorkFrame";
 import { AgentList } from "../components/agents/AgentList";
 
 function AgentsIndexView() {
+  const t = useTranslation();
   return (
-    <WorkFrame title="Agents">
+    <WorkFrame title={t("Agents")}>
       <AgentList />
     </WorkFrame>
   );

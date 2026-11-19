@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { useWorkDirectory } from "./useWorkDirectory";
 import { actorName, assignablePeople } from "./workLogic";
@@ -28,6 +29,7 @@ export function PersonPicker({
   disabled,
   ...rest
 }: PersonPickerProps) {
+  const t = useTranslation();
   const directory = useWorkDirectory();
   const actors = assignablePeople(directory);
   return (
@@ -50,7 +52,7 @@ export function PersonPicker({
               ? noneLabel
               : (actors.find((candidate) => candidate.id === key)?.label ??
                 (value !== null && value === key
-                  ? `${actorName(directory, value)} (can't take work)`
+                  ? t("{0} (can't take work)", actorName(directory, value))
                   : placeholder))
           }
         </SelectValue>

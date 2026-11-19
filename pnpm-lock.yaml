@@ -6,6 +6,9 @@ settings:
 
 catalogs:
   default:
+    '@clerk/localizations':
+      specifier: 4.17.1
+      version: 4.17.1
     '@effect/tsgo':
       specifier: 0.41.0
       version: 0.41.0
@@ -168,6 +171,9 @@ importers:
       '@base-ui/react':
         specifier: ^1.4.1
         version: 1.5.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      '@clerk/localizations':
+        specifier: 'catalog:'
+        version: 4.17.1(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@clerk/react':
         specifier: 6.16.1
         version: 6.16.1(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -582,6 +588,10 @@ packages:
 
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
+
+  '@clerk/localizations@4.17.1':
+    resolution: {integrity: sha512-XXcjk3TlR6L5B0Z5NndgSOdBUuN0oBfqXje6nk0Gy5jwk8FgReT+tffb024qwDdwEmNBogSH9WVNi5OckQQJng==}
+    engines: {node: '>=20.9.0'}
 
   '@clerk/react@6.16.1':
     resolution: {integrity: sha512-fYNiouRyVaEAKz8PZwWx7Y/jLnX0OxSplELfc+8VezgU36Xjx79Qu8xnr0XLhF/zwAuj+Avguvz60JbeIiiJ0Q==}
@@ -4978,6 +4988,13 @@ snapshots:
     optional: true
 
   '@chevrotain/types@11.1.2': {}
+
+  '@clerk/localizations@4.17.1(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
+    dependencies:
+      '@clerk/shared': 4.33.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+    transitivePeerDependencies:
+      - react
+      - react-dom
 
   '@clerk/react@6.16.1(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
     dependencies:

@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { canEditRecords, type Collection } from "@t45/contracts/models/Collection";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
@@ -14,7 +15,7 @@ import { ErrorText } from "../ui/error-text";
 import { FormGrid, ReadOnlyFields } from "../work/StepFields";
 import { WorkFrame } from "../work/WorkFrame";
 import { RecordShowcase } from "./RecordDisplay";
-import { useRecordForm } from "./Records";
+import { formatRecordValue, useRecordForm } from "./Records";
 
 /**
  * A record of a collection on a page of its own, edited and saved whole; with a showcase layout, shown
@@ -29,6 +30,7 @@ export function RecordPage({
   readonly recordKey: string;
   readonly isInSettings?: boolean;
 }) {
+  const t = useTranslation();
   const viewer = useSession();
   const navigate = useNavigate();
   const collectionRoute = isInSettings
@@ -66,22 +68,30 @@ export function RecordPage({
       <WorkFrame title={recordKey} parent={parent}>
         <p role={error === null ? undefined : "alert"} className="text-sm text-muted-foreground">
           {error ??
-            (loaded === null ? "Loading…" : "This collection holds no record with this key.")}
+            (loaded === null ? t("Loading…") : t("This collection holds no record with this key."))}
         </p>
       </WorkFrame>
     );
   const { collection, record } = loaded;
+  const display = resolveRecordDisplay(collection);
+  const titleField = display.title;
+  const tabTitle =
+    titleField === undefined || collection.layout?.page?.hiddenFields?.includes(titleField.id)
+      ? recordKey
+      : formatRecordValue(titleField, record.values[titleField.id], record.files).trim() ||
+        recordKey;
   const canEdit = viewer !== null && canEditRecords({ ...viewer, id: viewer.userId }, collection);
-  if ((!isEditing || !canEdit) && resolveRecordDisplay(collection).template === "showcase")
+  if ((!isEditing || !canEdit) && display.template === "showcase")
     return (
       <WorkFrame
         title={recordKey}
+        tabTitle={tabTitle}
         parent={parent}
         width="full"
         actions={
           canEdit ? (
             <Button size="sm" onClick={() => setIsEditing(true)}>
-              Edit record
+              {t("Edit record")}
             </Button>
           ) : null
         }
@@ -91,7 +101,7 @@ export function RecordPage({
     );
   if (!canEdit)
     return (
-      <WorkFrame title={recordKey} parent={parent}>
+      <WorkFrame title={recordKey} tabTitle={tabTitle} parent={parent}>
         <ReadOnlyFields
           fields={buildFieldViews(
             collection.fields,
@@ -104,6 +114,7 @@ export function RecordPage({
   return (
     <RecordForm
       title={recordKey}
+      tabTitle={tabTitle}
       parent={parent}
       collection={collection}
       record={record}
@@ -115,32 +126,36 @@ export function RecordPage({
 /** The record's form, saved from the page's actions, which stay put while its fields change size. */
 function RecordForm({
   title,
+  tabTitle,
   parent,
   collection,
   record,
   onSaved,
 }: {
   readonly title: string;
+  readonly tabTitle: string;
   readonly parent: ReactNode;
   readonly collection: Collection;
   readonly record: CollectionRecordView;
   readonly onSaved: () => void;
 }) {
+  const t = useTranslation();
   const formId = useId();
   const { editor, form, isBusy, error, save } = useRecordForm(collection, record, onSaved);
   return (
     <WorkFrame
       title={title}
+      tabTitle={tabTitle}
       parent={parent}
       actions={
         <Button type="submit" form={formId} size="sm" disabled={isBusy}>
-          Save record
+          {t("Save record")}
         </Button>
       }
     >
       <form
         id={formId}
-        aria-label="Record"
+        aria-label={t("Record")}
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault();

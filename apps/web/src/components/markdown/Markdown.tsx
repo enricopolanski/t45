@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { ChatContextKind } from "@t45/contracts/models/Attachment";
 import { parseComposerContextHref } from "@t45/core/composerContextReferences";
 import { Check, Copy, Maximize2, Minimize2 } from "lucide";
@@ -184,7 +185,7 @@ const GITHUB_ALERTS = {
   important: { label: "Important", Icon: MessageSquareWarningIcon },
   warning: { label: "Warning", Icon: TriangleAlertIcon },
   caution: { label: "Caution", Icon: OctagonAlertIcon },
-};
+} as const;
 
 /**
  * The default `1.25rem` marker gutter (`.chat-markdown ol`) fits one-character
@@ -229,6 +230,7 @@ const COMPONENTS = {
     "data-alert": kind = "",
     ...props
   }: ElementProps<"blockquote"> & { "data-alert"?: string }) {
+    const t = useTranslation();
     const alert = Object.hasOwn(GITHUB_ALERTS, kind)
       ? GITHUB_ALERTS[kind as keyof typeof GITHUB_ALERTS]
       : undefined;
@@ -241,7 +243,7 @@ const COMPONENTS = {
       <div role="note" data-alert={kind} data-md={props["data-md"]} className="chat-markdown-alert">
         <p data-md-ui="" className="flex items-center gap-1.5 font-medium select-none">
           <alert.Icon aria-hidden className="size-3.5 shrink-0" />
-          {alert.label}
+          {t(alert.label)}
         </p>
         {children}
       </div>
@@ -262,13 +264,14 @@ const COMPONENTS = {
   details: MarkdownDetails,
   summary: MarkdownSummary,
   pre: function MarkdownPre(props) {
+    const t = useTranslation();
     const { onImageExpand, isStreaming } = use(MarkdownContext);
     return (
       <CodeBlock
         {...props}
         isStreaming={isStreaming}
         onExpandDiagram={(src) =>
-          onImageExpand({ images: [{ src, name: "Mermaid diagram" }], index: 0 })
+          onImageExpand({ images: [{ src, name: t("Mermaid diagram") }], index: 0 })
         }
       />
     );
@@ -276,6 +279,7 @@ const COMPONENTS = {
 } satisfies Components;
 
 function MarkdownDetails({ node, children, ...props }: ElementProps<"details">) {
+  const t = useTranslation();
   const summarized = node?.children.some(
     (child) => child.type === "element" && child.tagName === "summary",
   );
@@ -284,7 +288,7 @@ function MarkdownDetails({ node, children, ...props }: ElementProps<"details">) 
       {...props}
       className="my-2 border-y border-border/60 ps-6 open:pb-3 [&[open]>summary>svg]:rotate-90"
     >
-      {summarized ? null : <MarkdownSummary data-md-ui="">Details</MarkdownSummary>}
+      {summarized ? null : <MarkdownSummary data-md-ui="">{t("Details")}</MarkdownSummary>}
       {children}
     </details>
   );
@@ -601,6 +605,7 @@ function MarkdownImage({
   url: string;
   onImageExpand?: ((gallery: ImageGallery) => void) | undefined;
 }) {
+  const t = useTranslation();
   const [status, setStatus] = useState<"loading" | "loaded" | "failed">("loading");
   // Cached images are complete before `onLoad` can fire.
   const markLoadedIfComplete = useCallback((image: HTMLImageElement | null) => {
@@ -655,7 +660,7 @@ function MarkdownImage({
         ? {
             role: "button" as const,
             tabIndex: 0,
-            "aria-label": `Preview ${alt.trim() || "image"}`,
+            "aria-label": t("Preview {0}", alt.trim() || "image"),
             onClick: expand,
             onKeyDown: (event: ReactKeyboardEvent<HTMLImageElement>) => {
               if (event.key === "Enter" || event.key === " ") expand(event);
@@ -669,11 +674,12 @@ function MarkdownImage({
 }
 
 function MarkdownTable({ node: _node, children, ...props }: ElementProps<"table">) {
+  const t = useTranslation();
   const tableRef = useRef<HTMLTableElement>(null);
   const [expanded, setExpanded] = useState(true);
   const { copyToClipboard, isCopied } = useCopyToClipboard({ timeout: 1200 });
-  const expandLabel = expanded ? "Collapse table cells" : "Expand table cells";
-  const copyLabel = isCopied ? "Copied" : "Copy table";
+  const expandLabel = expanded ? t("Collapse table cells") : t("Expand table cells");
+  const copyLabel = isCopied ? t("Copied") : t("Copy table");
 
   function toggleExpanded() {
     const table = tableRef.current;
@@ -720,14 +726,14 @@ function MarkdownTable({ node: _node, children, ...props }: ElementProps<"table"
                 if (markdown) copyToClipboard(markdown);
               }}
             >
-              Copy as Markdown
+              {t("Copy as Markdown")}
             </MenuItem>
             <MenuItem
               onClick={() => {
                 if (tableRef.current) copyToClipboard(tableToCsv(tableRef.current));
               }}
             >
-              Copy as CSV
+              {t("Copy as CSV")}
             </MenuItem>
           </MenuPopup>
         </Menu>

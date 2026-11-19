@@ -1,16 +1,18 @@
+import { translate } from "~/i18n/locale";
 import { canManageUsers } from "@t45/contracts/models/User";
 import { AuthFailure, AuthSessionState } from "@t45/contracts/resources/Session";
 import { redirect } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 
 import { api } from "../rpc/api";
+import { setLocale } from "../i18n/locale";
 
 export class ServerClerkTokenUnavailableError extends Schema.TaggedError<ServerClerkTokenUnavailableError>()(
   "ServerClerkTokenUnavailableError",
   {},
 ) {
   override get message(): string {
-    return "Clerk did not return a session token. Sign in again.";
+    return translate("Clerk did not return a session token. Sign in again.");
   }
 }
 
@@ -21,11 +23,11 @@ export class AuthRequestError extends Schema.TaggedError<AuthRequestError>()("Au
   override get message(): string {
     switch (this.reason) {
       case "invalid_credential":
-        return "This sign-in is not valid for this address. Sign out and sign in again.";
+        return translate("This sign-in is not valid for this address. Sign out and sign in again.");
       case "deactivated":
-        return "Your access to this organization has been deactivated.";
+        return translate("Your access to this organization has been deactivated.");
       default:
-        return "Couldn't sign in right now. Try again.";
+        return translate("Couldn't sign in right now. Try again.");
     }
   }
 }
@@ -109,6 +111,7 @@ export async function requireAdmin(): Promise<void> {
 
 async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
   const currentSession = await fetchSessionState();
+  setLocale(currentSession.isAuthenticated ? currentSession.locale : undefined);
   if (!currentSession.isAuthenticated) {
     return { status: "requires-auth" };
   }

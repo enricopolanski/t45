@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Name, type Skill } from "@t45/contracts/models/Skill";
 import { useNavigate } from "@tanstack/react-router";
 import { useState, useTransition } from "react";
@@ -14,6 +15,7 @@ import { Section } from "../Section";
 import { fileRecord, fileRows, FilesEditor } from "./FilesEditor";
 
 function SkillForm({ skill }: { readonly skill: Skill | null }) {
+  const t = useTranslation();
   const navigate = useNavigate();
   // Rows while editing, so a path can be blank or repeated until it's saved.
   const [files, setFiles] = useState(() => fileRows(skill?.files ?? {}));
@@ -31,7 +33,7 @@ function SkillForm({ skill }: { readonly skill: Skill | null }) {
     });
   return (
     <form
-      aria-label={skill ? `Edit ${skill.name}` : "New skill"}
+      aria-label={skill ? t("Edit {0}", skill.name) : t("New skill")}
       className="flex flex-col gap-6"
       onSubmit={(event) => {
         event.preventDefault();
@@ -48,17 +50,17 @@ function SkillForm({ skill }: { readonly skill: Skill | null }) {
     >
       <fieldset disabled={busy} className="contents">
         <Section
-          title="Skill"
-          description="Agents read the description to decide when to use the skill."
+          title={t("Skill")}
+          description={t("Agents read the description to decide when to use the skill.")}
           card
         >
-          <Field label="Name">
+          <Field label={t("Name")}>
             <Input
               name="name"
               required
               maxLength={64}
               pattern="[a-z0-9]+(-[a-z0-9]+)*"
-              placeholder="e.g. read-excel"
+              placeholder={t("e.g. read-excel")}
               defaultValue={skill?.name}
               onChange={(event) => {
                 const input = event.currentTarget;
@@ -67,29 +69,31 @@ function SkillForm({ skill }: { readonly skill: Skill | null }) {
               }}
             />
           </Field>
-          <Field label="Description">
+          <Field label={t("Description")}>
             <Input
               name="description"
               required
               pattern=".*\S.*"
               maxLength={1024}
-              placeholder="When to use it, e.g. Extracts tables from .xlsx files"
+              placeholder={t("When to use it, e.g. Extracts tables from .xlsx files")}
               defaultValue={skill?.description}
             />
           </Field>
         </Section>
-        <Section title="SKILL.md" description="How to do the job, step by step." card>
+        <Section title="SKILL.md" description={t("How to do the job, step by step.")} card>
           <Textarea
             name="content"
-            aria-label="Skill instructions"
-            placeholder="Run scripts/read.py <file> and summarize the sheets it prints."
+            aria-label={t("Skill instructions")}
+            placeholder={t("Run scripts/read.py <file> and summarize the sheets it prints.")}
             rows={12}
             defaultValue={skill?.content}
           />
         </Section>
         <Section
-          title="Files"
-          description="Scripts and references next to SKILL.md. Files starting with #! are executable."
+          title={t("Files")}
+          description={t(
+            "Scripts and references next to SKILL.md. Files starting with #! are executable.",
+          )}
           card
         >
           <FilesEditor files={files} onChange={setFiles} />
@@ -97,7 +101,7 @@ function SkillForm({ skill }: { readonly skill: Skill | null }) {
         {error && <ErrorText text={error} />}
         <div className="flex gap-2">
           <Button type="submit" size="sm">
-            {skill ? "Save skill" : "Create skill"}
+            {skill ? t("Save skill") : t("Create skill")}
           </Button>
           <Button
             type="button"
@@ -105,7 +109,7 @@ function SkillForm({ skill }: { readonly skill: Skill | null }) {
             variant="ghost"
             onClick={() => void navigate({ to: "/settings/agents" })}
           >
-            Cancel
+            {t("Cancel")}
           </Button>
           {skill ? (
             <Button
@@ -114,12 +118,14 @@ function SkillForm({ skill }: { readonly skill: Skill | null }) {
               variant="ghost"
               className="ml-auto"
               onClick={() => {
-                if (window.confirm(`Delete ${skill.name}?\nEvery agent that uses it loses it.`)) {
+                if (
+                  window.confirm(t("Delete {0}?\nEvery agent that uses it loses it.", skill.name))
+                ) {
                   run(() => deleteSkill(skill.id));
                 }
               }}
             >
-              Delete skill
+              {t("Delete skill")}
             </Button>
           ) : null}
         </div>

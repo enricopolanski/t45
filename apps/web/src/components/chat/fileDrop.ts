@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import type { DragEvent } from "react";
 
 import { toastManager } from "../ui/toast";
@@ -58,8 +59,8 @@ export function makeFileDropHandlers(host: FileDropHost) {
       if (droppedFolder) {
         toastManager.add({
           type: "error",
-          title: "Folders can't be dropped here",
-          description: "Attach the files inside it instead.",
+          title: translate("Folders can't be dropped here"),
+          description: translate("Attach the files inside it instead."),
         });
       }
     },

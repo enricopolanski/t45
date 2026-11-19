@@ -1,3 +1,5 @@
+import { translate } from "~/i18n/locale";
+import type { Message } from "~/i18n/locale";
 import type { Role, User } from "@t45/contracts/models/User";
 import type { UpdateProfileRequest } from "@t45/contracts/resources/Users";
 
@@ -17,7 +19,7 @@ const byState = (users: ReadonlyArray<User>) => ({
 
 export const useUsers = () => byState(useLoaded(usersList));
 
-export const ROLE_LABELS: Record<Role, string> = {
+export const ROLE_LABELS: Record<Role, Message> = {
   member: "Member",
   admin: "Admin",
 };
@@ -28,10 +30,11 @@ export const updateProfile = (request: UpdateProfileRequest) =>
   mutate(
     api("users.updateProfile", request).then(() => appAtomRegistry.refresh(usersList)),
     profile,
-    "Couldn't update your profile",
+    translate("Couldn't update your profile"),
   );
 
-const act = (request: Promise<unknown>) => mutate(request, usersList, "Couldn't update the member");
+const act = (request: Promise<unknown>) =>
+  mutate(request, usersList, translate("Couldn't update the member"));
 
 export const userActions = {
   approve: (userId: User["id"], role: Role) => act(api("users.approve", { userId, role })),

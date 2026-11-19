@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 
 import { requireAdmin } from "../http/auth";
@@ -9,6 +10,7 @@ import { PageHeader } from "../components/PageHeader";
 import { useEscapeToGoBack } from "../hooks/useEscapeToGoBack";
 
 function SettingsContentLayout() {
+  const t = useTranslation();
   const pathname = useLocation({ select: (location) => location.pathname });
   const title =
     SETTINGS_GROUPS.flatMap((group) => group.links)
@@ -21,7 +23,7 @@ function SettingsContentLayout() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <PageHeader>
-          <PageBreadcrumb title={title} />
+          <PageBreadcrumb title={t(title)} />
         </PageHeader>
 
         <div className="min-h-0 flex flex-1 flex-col">

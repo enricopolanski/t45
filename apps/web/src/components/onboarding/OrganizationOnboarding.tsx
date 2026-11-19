@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useNavigate } from "@tanstack/react-router";
 
 import { api } from "../../rpc/api";
@@ -14,6 +15,7 @@ import { UseAnotherAccountButton } from "../auth/UseAnotherAccountButton";
  * names it here.
  */
 export function OrganizationOnboarding() {
+  const t = useTranslation();
   const navigate = useNavigate();
   const {
     error,
@@ -32,11 +34,13 @@ export function OrganizationOnboarding() {
   return (
     <StandalonePage>
       <StandalonePageHeader
-        title="Name your organization"
-        description="This deployment becomes your organization's home. You can change the name later."
+        title={t("Name your organization")}
+        description={t(
+          "This deployment becomes your organization's home. You can change the name later.",
+        )}
       />
       <form className="mt-6 flex flex-col gap-3" onSubmit={onSubmit}>
-        <Field label="Organization name">
+        <Field label={t("Organization name")}>
           <Input
             name="name"
             required
@@ -50,7 +54,7 @@ export function OrganizationOnboarding() {
         <div className="flex items-center justify-between gap-2">
           <UseAnotherAccountButton />
           <Button type="submit" size="sm" disabled={submitting}>
-            {submitting ? "Creating…" : "Create organization"}
+            {submitting ? t("Creating…") : t("Create organization")}
           </Button>
         </div>
       </form>

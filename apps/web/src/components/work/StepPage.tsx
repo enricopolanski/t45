@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { AutomationId } from "@t45/contracts/models/Automation";
 import { StringId } from "@t45/contracts/models/primitives";
 import type { FieldView, StepNameView, StepView } from "@t45/contracts/resources/Workflows";
@@ -78,6 +79,7 @@ const isStepId = Schema.is(StringId);
  * actions open to the viewer. Keyed by step, so moving to another step starts fresh.
  */
 export function StepPage({ stepId }: { readonly stepId: string }) {
+  const t = useTranslation();
   const stepView = isStepId(stepId) ? stepViews({ stepId }) : null;
   const { data: view, error: loadError, refresh } = useApiQuery(stepView);
   const [busy, setBusy] = useState(false);
@@ -119,11 +121,11 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
 
   if (view === null || loadError !== null) {
     return (
-      <WorkFrame title="Item">
+      <WorkFrame title={t("Item")}>
         {loadError !== null || !isStepId(stepId) ? (
-          <ErrorText text={loadError ?? "This step could not be found."} />
+          <ErrorText text={loadError ?? t("This step could not be found.")} />
         ) : (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t("Loading…")}</p>
         )}
       </WorkFrame>
     );
@@ -206,14 +208,14 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     );
   };
   const open = (
-    <section key="open" aria-label="Open step" className="flex flex-col gap-4">
+    <section key="open" aria-label={t("Open step")} className="flex flex-col gap-4">
       {error && <ErrorText text={error} />}
       {missing.length > 0 || unfinished.length > 0 || unconfirmed.length > 0 ? (
         <MissingRecap missing={missing} unfinished={unfinished} unconfirmed={unconfirmed} />
       ) : null}
       <ItemDescription description={view.ticket.description} />
       <ReadOnlyStepFieldCard
-        title="Inputs"
+        title={t("Inputs")}
         fields={view.inputs}
         reviews={inputReviews}
         defaultOpen={false}
@@ -233,7 +235,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
       />
       {isHistorical ? (
         <ReadOnlyStepFieldCard
-          title="Fields"
+          title={t("Fields")}
           fields={view.fields}
           reviews={completedReviews}
           defaultOpen
@@ -291,7 +293,12 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     </>
   );
   return (
-    <WorkFrame title={view.ticket.title} width="full" contentClassName="p-6">
+    <WorkFrame
+      title={view.ticket.title}
+      tabTitle={`${view.ticket.title} · ${view.definition.name}`}
+      width="full"
+      contentClassName="p-6"
+    >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-4">
           <ItemHeader view={view} />
@@ -299,13 +306,14 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           {isHistorical ? (
             <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 px-4 py-3 text-sm">
               <p>
-                <span className="font-medium">Read-only</span> · Completed{" "}
+                <span className="font-medium">{t("Read-only")}</span> {t("· Completed")}{" "}
                 {formatChatTimestampTooltip(view.step.status.at)}
               </p>
               {view.completedStep === "legacy" ? (
                 <p className="text-muted-foreground">
-                  This step was completed before snapshots were available. Linked records show
-                  current collection data.
+                  {t(
+                    "This step was completed before snapshots were available. Linked records show current collection data.",
+                  )}
                 </p>
               ) : null}
             </div>
@@ -323,8 +331,8 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           {hasInstructions ? (
             <Tabs defaultValue="overview">
               <TabsList>
-                <TabsTab value="overview">Overview</TabsTab>
-                <TabsTab value="instructions">Instructions</TabsTab>
+                <TabsTab value="overview">{t("Overview")}</TabsTab>
+                <TabsTab value="instructions">{t("Instructions")}</TabsTab>
               </TabsList>
               <TabsPanel value="overview">
                 <div className="flex flex-col gap-3">{overview}</div>
@@ -342,7 +350,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   );
 }
 
-const stepNameParts = /^(Step \d+)\s+[—–-]\s+(.+)$/iu;
+const stepNameParts = /^Step (\d+)\s+[—–-]\s+(.+)$/iu;
 const stepperStatus = {
   completed: {
     label: "Completed",
@@ -368,13 +376,14 @@ const stepperStatus = {
     marker: "border-border bg-muted text-muted-foreground",
     text: "text-muted-foreground",
   },
-};
+} as const;
 
 function StepStepper({ view, rootId }: { readonly view: StepView; readonly rootId: string }) {
+  const t = useTranslation();
   const steps = view.stepNavigation ?? [];
   if (steps.length === 0) return null;
   return (
-    <nav aria-label="Item steps" className="min-w-0 rounded-xl border border-border bg-card">
+    <nav aria-label={t("Item steps")} className="min-w-0 rounded-xl border border-border bg-card">
       <ol className="flex gap-2 overflow-x-auto rounded-xl p-2 sm:px-3">
         {steps.map(({ id, name, status }, index) => {
           const isSelected = id === rootId;
@@ -405,13 +414,13 @@ function StepStepper({ view, rootId }: { readonly view: StepView; readonly rootI
                 </span>
                 <span className="flex min-w-0 flex-col gap-0.5">
                   {label === null ? null : (
-                    <span className="text-xs text-muted-foreground">{label[1]}</span>
+                    <span className="text-xs text-muted-foreground">{t("Step {0}", label[1])}</span>
                   )}
                   <span className="text-sm leading-snug font-medium wrap-anywhere">
                     {label?.[2] ?? name}
                   </span>
                   <span className={cn("text-xs font-medium", appearance.text)}>
-                    {appearance.label}
+                    {t(appearance.label)}
                   </span>
                 </span>
               </Link>
@@ -434,12 +443,13 @@ function StepStepper({ view, rootId }: { readonly view: StepView; readonly rootI
 
 /** What was done on the step, oldest first: who or which agent, what, and when. */
 function StepHistory({ view }: { readonly view: StepView }) {
+  const t = useTranslation();
   const now = useNowMinute();
   if (view.history.length === 0) return null;
   return (
-    <CardFold as="aside" title="History">
+    <CardFold as="aside" title={t("History")}>
       <ol className="flex flex-col gap-2 text-sm">
-        {summarizeHistory(view.history).map((entry, at) => (
+        {summarizeHistory(view.history, t).map((entry, at) => (
           // oxlint-disable-next-line react/no-array-index-key -- The log only grows at its end.
           <li key={at} className="flex flex-col gap-0.5">
             <ActorName actor={entry.agentId ?? entry.userId} />
@@ -470,6 +480,7 @@ function StepAutomations({
   readonly busy: boolean;
   readonly act: StepAct;
 }) {
+  const t = useTranslation();
   const titles = useApiQuery(stepAutomationList);
   const directory = useWorkDirectory();
   const now = useNowMinute();
@@ -485,24 +496,28 @@ function StepAutomations({
     .toSorted((a, b) => DateTime.toEpochMillis(b.startedAt) - DateTime.toEpochMillis(a.startedAt));
   if (runs.length === 0 && runnable.length === 0) return null;
   const titleOf = (id: AutomationId) =>
-    titles.data?.find((automation) => automation.id === id)?.title ?? "Unavailable automation";
+    titles.data?.find((automation) => automation.id === id)?.title ?? t("Unavailable automation");
   const call = (
     tag: "workflows.runStepAutomation" | "workflows.stopStepAutomation",
     automationId: AutomationId,
   ) => void act(() => api(tag, { stepId: view.step.id, automationId }));
   const runningCount = runs.filter(({ status }) => status === "running").length;
   return (
-    <aside aria-label="Automations" className="card flex flex-col gap-3 p-4 text-sm">
+    <aside aria-label={t("Automations")} className="card flex flex-col gap-3 p-4 text-sm">
       <div className="flex items-center gap-2.5">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <ZapIcon aria-hidden className="size-4" />
         </span>
-        <h2 className="min-w-0 flex-1 text-sm font-semibold">Automations</h2>
-        {runningCount > 0 && <Badge variant="info">{runningCount} running</Badge>}
+        <h2 className="min-w-0 flex-1 text-sm font-semibold">{t("Automations")}</h2>
+        {runningCount > 0 && (
+          <Badge variant="info">
+            {runningCount} {t("running")}
+          </Badge>
+        )}
       </div>
       {titles.error && <ErrorText text={titles.error} />}
       {runs.length === 0 ? (
-        <p className="text-muted-foreground">No automation has run on this item yet.</p>
+        <p className="text-muted-foreground">{t("No automation has run on this item yet.")}</p>
       ) : (
         <ol className="flex flex-col gap-2">
           {runs.map(({ automation, number, ...run }) => {
@@ -516,7 +531,7 @@ function StepAutomations({
                 )}
               >
                 <div className="flex min-h-6 items-center gap-2">
-                  <span role="img" aria-label={label} className="flex size-4 shrink-0">
+                  <span role="img" aria-label={t(label)} className="flex size-4 shrink-0">
                     <Icon aria-hidden className={`size-4 ${tone}`} />
                   </span>
                   <span className="min-w-0 flex-1 font-semibold">{titleOf(automation.id)}</span>
@@ -529,7 +544,7 @@ function StepAutomations({
                           onClick={() => call("workflows.stopStepAutomation", automation.id)}
                         >
                           <SquareIcon aria-hidden className="size-2.5 fill-current" />
-                          Stop
+                          {t("Stop")}
                         </Button>
                       )
                     : automation.runLabel !== null && (
@@ -540,7 +555,7 @@ function StepAutomations({
                                 size="icon-xs"
                                 variant="ghost"
                                 disabled={busy}
-                                aria-label={`Options for run ${number}`}
+                                aria-label={t("Options for run {0}", number)}
                               />
                             }
                           >
@@ -551,7 +566,7 @@ function StepAutomations({
                               onClick={() => call("workflows.runStepAutomation", automation.id)}
                             >
                               <PlayIcon />
-                              Run again
+                              {t("Run again")}
                             </MenuItem>
                           </MenuPopup>
                         </Menu>
@@ -566,7 +581,7 @@ function StepAutomations({
                     >
                       #{number}
                     </Link>{" "}
-                    · Manually run by {actorName(directory, run.ranBy)}
+                    {t("· Manually run by")} {actorName(directory, run.ranBy)}
                   </p>
                   {run.status !== "running" && run.latestReport !== null && (
                     <p className="pl-6 wrap-break-word text-foreground">
@@ -578,7 +593,7 @@ function StepAutomations({
                   </RunDetail>
                   {run.endedAt === null ? (
                     <Badge variant="info" className="ms-6 self-start">
-                      In progress
+                      {t("In progress")}
                     </Badge>
                   ) : (
                     <RunDetail Icon={TimerIcon}>
@@ -632,6 +647,7 @@ function RunAutomation({
   readonly busy: boolean;
   readonly onRun: (automationId: AutomationId) => void;
 }) {
+  const t = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [chosen, setChosen] = useState<AutomationId | null>(null);
   const selected = automations.find(({ id }) => id === chosen) ?? automations[0];
@@ -639,11 +655,11 @@ function RunAutomation({
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger render={<Button className="w-full" />}>
         <PlayIcon aria-hidden className="fill-current" />
-        Run Automation
+        {t("Run Automation")}
       </PopoverTrigger>
       <PopoverPopup align="start" width="md">
         <div className="flex flex-col gap-3">
-          <Field label="Automation">
+          <Field label={t("Automation")}>
             <Select
               value={selected?.id ?? null}
               onValueChange={(value) =>
@@ -664,7 +680,7 @@ function RunAutomation({
           </Field>
           <div className="flex justify-end gap-2 border-t pt-3">
             <Button size="sm" variant="outline" onClick={() => setIsOpen(false)}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               size="sm"
@@ -674,7 +690,7 @@ function RunAutomation({
                 if (selected !== undefined) onRun(selected.id);
               }}
             >
-              Run automation
+              {t("Run automation")}
             </Button>
           </div>
         </div>
@@ -696,6 +712,7 @@ function MissingRecap({
   readonly unfinished: ReadonlyArray<StepNameView>;
   readonly unconfirmed: StepView["fields"];
 }) {
+  const t = useTranslation();
   const reveal = (key: string) => {
     const target = document.querySelector<HTMLElement>(`[data-field-key="${CSS.escape(key)}"]`);
     target?.scrollIntoView({ block: "center" });
@@ -706,7 +723,7 @@ function MissingRecap({
       role="alert"
       className="flex flex-col gap-1.5 rounded-lg border border-destructive/36 px-3 py-2 text-sm"
     >
-      <p className="font-medium">To mark this step done:</p>
+      <p className="font-medium">{t("To mark this step done:")}</p>
       <ul className="flex flex-col gap-0.5">
         {missing.map((field) => (
           <li key={field.key}>
@@ -715,7 +732,7 @@ function MissingRecap({
               className="text-left text-destructive hover:underline"
               onClick={() => reveal(field.key)}
             >
-              Fill in {field.name}
+              {t("Fill in")} {field.name}
             </button>
           </li>
         ))}
@@ -726,13 +743,13 @@ function MissingRecap({
               className="text-left text-destructive hover:underline"
               onClick={() => reveal(field.key)}
             >
-              Confirm reviews for {field.label}
+              {t("Confirm reviews for")} {field.label}
             </button>
           </li>
         ))}
         {unfinished.map((subStep) => (
           <li key={subStep.id} className="text-destructive">
-            Finish {subStep.name}
+            {t("Finish")} {subStep.name}
           </li>
         ))}
       </ul>
@@ -746,6 +763,7 @@ function MissingRecap({
  * on the page, and why the item was cancelled or the step blocked.
  */
 function ItemHeader({ view }: { readonly view: StepView }) {
+  const t = useTranslation();
   const { step } = view;
   const hasStepper = (view.stepNavigation?.length ?? 0) > 0;
   const current =
@@ -779,17 +797,19 @@ function ItemHeader({ view }: { readonly view: StepView }) {
       </div>
       {!hasStepper && current !== null ? (
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline">In {current}</Badge>
+          <Badge variant="outline">
+            {t("In")} {current}
+          </Badge>
         </div>
       ) : null}
       {view.ticket.status.type === "cancelled" && view.ticket.status.reason !== undefined ? (
         <p className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
-          <span className="font-medium">Cancelled:</span> {view.ticket.status.reason}
+          <span className="font-medium">{t("Cancelled:")}</span> {view.ticket.status.reason}
         </p>
       ) : null}
       {step.status.type === "blocked" ? (
         <p className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
-          <span className="font-medium">Blocked:</span> {step.status.reason}
+          <span className="font-medium">{t("Blocked:")}</span> {step.status.reason}
         </p>
       ) : null}
     </header>
@@ -823,11 +843,12 @@ function ItemDetails({
   readonly busy: boolean;
   readonly act: StepAct;
 }) {
+  const t = useTranslation();
   const { step, ticket: item } = view;
   return (
-    <CardFold as="aside" title="Details">
+    <CardFold as="aside" title={t("Details")}>
       <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
-        <dt className="text-muted-foreground">Assignee</dt>
+        <dt className="text-muted-foreground">{t("Assignee")}</dt>
         <dd className="min-w-0">
           {actions.canSetAssignee ? (
             <AssigneePicker
@@ -847,7 +868,7 @@ function ItemDetails({
             <ActorName actor={step.assignee} />
           )}
         </dd>
-        <dt className="text-muted-foreground">Project</dt>
+        <dt className="text-muted-foreground">{t("Project")}</dt>
         <dd className="min-w-0 truncate">
           <Link to="/boards/$slug" params={{ slug: item.projectId }} className="hover:underline">
             {view.projectName}
