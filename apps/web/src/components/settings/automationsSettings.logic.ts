@@ -1,10 +1,12 @@
 import type { Agent } from "@t45/contracts/models/Agent";
+import type { StepContext } from "@t45/contracts/models/Automation";
 
 import type { ApiInput } from "../../rpc/api";
 
 export interface DraftState {
   readonly title: string;
   readonly prompt: string;
+  readonly stepContext?: StepContext;
   /** The agent each run talks to; null until one is picked. */
   readonly agentId: Agent["id"] | null;
 }
@@ -31,5 +33,12 @@ export function settingsFromDraft(
       },
     };
   }
-  return { settings: { title, prompt, agentId: draft.agentId } };
+  return {
+    settings: {
+      title,
+      prompt,
+      agentId: draft.agentId,
+      ...(draft.stepContext === undefined ? {} : { stepContext: draft.stepContext }),
+    },
+  };
 }

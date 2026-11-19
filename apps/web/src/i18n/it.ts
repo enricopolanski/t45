@@ -1,6 +1,9 @@
 import type { Message } from "./de";
 
 export const it = {
+  "Step context": "Contesto del passaggio",
+  "Include in the initial message": "Includi nel messaggio iniziale",
+  "Read on demand": "Leggi su richiesta",
   " · {0} postponed": " · {0} rinviati",
   "· Automatically run for": "· Avviato automaticamente per",
   "· Completed": "· Completato",

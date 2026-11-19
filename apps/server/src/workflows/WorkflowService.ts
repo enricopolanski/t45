@@ -77,8 +77,10 @@ import {
 import {
   defaultValues,
   type Field,
+  type FieldValues,
   fieldValueProblem,
   fileKeys,
+  groupRows,
   missingRow,
   resolveFieldPath,
   recordKeys,
@@ -90,6 +92,7 @@ import { NotFound } from "@t45/contracts/resources/errors";
 import type { NotificationView } from "@t45/contracts/resources/Notifications";
 import type {
   FieldView,
+  StepFieldSelection,
   StepSnapshot,
   TicketSummaryView,
 } from "@t45/contracts/resources/Workflows";
@@ -146,6 +149,7 @@ const stepFileForChat = (file: Attachment) => ({
 });
 
 const sameStepView = Schema.toEquivalence(StepView);
+const encodeCompactJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 /** Why a chat refuses to start a step's automation; it refuses a new automation chat for nothing else. */
 const SKIP_REASON_OF_CHAT_REFUSAL: Partial<Record<ChatRefusal, AutomationSkipReason>> = {
   agent_unavailable: "automation_unavailable",
@@ -533,11 +537,36 @@ const make = Effect.gen(function* () {
   const formatAutomationContext = (brief: unknown) =>
     ["```json", JSON.stringify(brief, null, 2), "```"].join("\n");
 
+  const describeField = ({ id: key, label, type }: Field) => ({ key, label, type });
+  const listAutomationFields = (work: Work, step: Step) => ({
+    inputs: stepInputFields(work.version.steps, work.ticket, definitionOf(work, step)).map(
+      ({ source, field }) => ({ ...describeField(field), sourceStepId: source.stepDefinitionId }),
+    ),
+    fields: definitionOf(work, step).fields.map((field) => ({
+      ...describeField(field),
+      ...(isReviewedField(field) ? { isReviewed: true } : {}),
+    })),
+  });
+
   const buildAutomationInput = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
     automation: Automation,
   ) {
+    if (automation.stepContext === "on_demand") {
+      const definition = definitionOf(work, step);
+      return {
+        text: [
+          `You are working on "${definition.name}" of "${work.ticket.title}" in "${work.project.name}".`,
+          automation.prompt,
+          "Use step_get_fields to read the input and output values you need. The list below identifies the input and output fields available to you. Use step_propose_value for reviewed fields and step_set_field for other fields.",
+          encodeCompactJson(listAutomationFields(work, step)),
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        attachments: [],
+      };
+    }
     const brief = yield* buildAutomationContext(work, step);
     const instructions = brief.instructions.trim();
     const subject =
@@ -731,6 +760,59 @@ const make = Effect.gen(function* () {
 
   const buildStepFieldViews = (work: Work, step: Step) =>
     buildCurrentStepFieldViews(definitionOf(work, step).fields, step.values);
+
+  /** A field's data without the options and layout used to display it in the app. */
+  const readFieldValue = (
+    field: Field,
+    values: FieldValues,
+    path: string,
+    selection?: StepFieldSelection,
+  ): Effect.Effect<Schema.Json> =>
+    Effect.gen(function* () {
+      const value = values[path] ?? null;
+      if (field.type === "group") {
+        const rows = yield* Effect.forEach(groupRows(field, value), (id) => {
+          const prefix = id === null ? path : `${path}.${id}`;
+          return Effect.forEach(field.fields, (child) =>
+            Effect.map(
+              readFieldValue(child, values, `${prefix}.${child.id}`),
+              (value) => [child.id, value] as const,
+            ),
+          ).pipe(Effect.map((entries) => ({ id, values: Object.fromEntries(entries) })));
+        });
+        return { fields: field.fields.map(describeField), rows };
+      }
+      if (field.type === "records") {
+        const requested = selection?.recordKeys;
+        const columns = selection?.recordFields;
+        const keys = recordKeys(value).filter(
+          (key) => requested === undefined || requested.includes(key),
+        );
+        const records = yield* Effect.forEach(keys, (key) => {
+          if (columns?.length === 0) return Effect.succeed({ key, values: {} });
+          return Effect.map(collectionRecords.get(field.collectionId, key), (record) => {
+            if (record === null) return null;
+            return {
+              key,
+              values:
+                columns === undefined
+                  ? record.values
+                  : Object.fromEntries(
+                      Object.entries(record.values).filter(([path]) =>
+                        columns.some((column) => path === column || path.startsWith(`${column}.`)),
+                      ),
+                    ),
+            };
+          });
+        });
+        return {
+          collectionId: field.collectionId,
+          records: records.filter((record) => record !== null),
+        };
+      }
+      return value;
+    });
+
   /** The fields of earlier steps the step declares as inputs: all it gets of them. */
   const buildInputs = (work: Work, step: Step, includeReviews = false) =>
     Effect.gen(function* () {
@@ -1207,15 +1289,65 @@ const make = Effect.gen(function* () {
     );
   }, transaction);
 
-  /** One read of a step's view: an automation reads its own step with its starter's access. */
-  const readStep = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
+  /** An automation reads its own step with the access of the person it runs for. */
+  const loadStepReader = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
     if (typeof caller !== "string" && caller.origin.kind === "automation") {
       const { work, step } = yield* loadAutomationStep(caller.origin);
       if (step.id !== stepId) return yield* new NotFound();
-      return yield* getStep(caller.origin.trigger.effectiveUserId, work.ticket.id, stepId);
+      return { work, step, actorId: caller.origin.trigger.effectiveUserId };
     }
-    const { work } = yield* loadStep(stepId);
-    return yield* getStep(yield* resolvePerson(caller, work.project.id), work.ticket.id, stepId);
+    const { work, step } = yield* loadStep(stepId);
+    return { work, step, actorId: yield* resolvePerson(caller, work.project.id) };
+  });
+
+  const readStep = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
+    const { work, actorId } = yield* loadStepReader(caller, stepId);
+    return yield* getStep(actorId, work.ticket.id, stepId);
+  });
+
+  const readStepFields = Effect.fnUntraced(function* (
+    caller: Caller,
+    query: Payload<"getStepFields">,
+  ) {
+    const { work, step, actorId } = yield* loadStepReader(caller, query.stepId);
+    yield* requireSees(work, step, actorId);
+    const definition = definitionOf(work, step);
+    const inputs = yield* Effect.forEach(
+      stepInputFields(work.version.steps, work.ticket, definition),
+      ({ source, field }) => {
+        const selection = query.inputs?.find(
+          ({ key, sourceStepId }) =>
+            key === field.id &&
+            (sourceStepId === undefined || sourceStepId === source.stepDefinitionId),
+        );
+        return selection === undefined
+          ? Effect.succeed(null)
+          : Effect.map(readFieldValue(field, source.values, field.id, selection), (value) => ({
+              ...describeField(field),
+              sourceStepId: source.stepDefinitionId,
+              value,
+            }));
+      },
+    );
+    const fields = yield* Effect.forEach(definition.fields, (field) => {
+      const selection = query.fields?.find(({ key }) => key === field.id);
+      return selection === undefined
+        ? Effect.succeed(null)
+        : Effect.map(readFieldValue(field, step.values, field.id, selection), (value) => ({
+            ...describeField(field),
+            value,
+          }));
+    });
+    const selected = fields.filter((field) => field !== null);
+    return {
+      inputs: inputs.filter((input) => input !== null),
+      fields: selected,
+      proposals: (step.proposals ?? []).flatMap(({ fieldKey, value, isDiscarded }) =>
+        selected.some(({ key }) => key === fieldKey || fieldKey.startsWith(`${key}.`))
+          ? [{ fieldKey, value, isDiscarded }]
+          : [],
+      ),
+    };
   });
 
   const stepContents = Effect.fnUntraced(function* (work: Work, step: Step, forPage: boolean) {
@@ -1942,6 +2074,7 @@ const make = Effect.gen(function* () {
     startTicket,
     cancelTicket,
     readStep,
+    readStepFields,
     watchStep: (actorId: string, stepId: string) =>
       Stream.unwrap(
         Effect.map(found(tickets.getByStepId(stepId)), (ticket) =>

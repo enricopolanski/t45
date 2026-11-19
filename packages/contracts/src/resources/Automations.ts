@@ -10,7 +10,7 @@ import { Refused as AutomationRefused, Automation, AutomationId } from "../model
 import { AdminOnly } from "../Authorization.ts";
 import { AccessDenied, NotFound } from "./errors.ts";
 
-const Settings = Struct.pick(Automation.fields, ["title", "prompt", "agentId"]);
+const Settings = Struct.pick(Automation.fields, ["title", "prompt", "agentId", "stepContext"]);
 const Errors = Schema.Union([AutomationRefused, NotFound, AccessDenied]);
 
 export const AutomationRun = Schema.Struct({

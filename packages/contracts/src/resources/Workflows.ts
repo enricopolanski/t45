@@ -206,6 +206,24 @@ export class FieldView extends Schema.Opaque<FieldView>()(
   }),
 ) {}
 
+const StepFieldSelection = Schema.Struct({
+  key: FieldPathSegment,
+  /** For an input, disambiguates the same field key from multiple source steps. */
+  sourceStepId: Schema.optionalKey(StringId),
+  /** For a records field, return only these linked records. */
+  recordKeys: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  /** Collection field keys to include in each record's values. An empty list returns keys only. */
+  recordFields: Schema.optionalKey(Schema.Array(FieldPathSegment)),
+});
+export type StepFieldSelection = typeof StepFieldSelection.Type;
+
+const StepFieldData = Schema.Struct({
+  key: FieldPathSegment,
+  label: TrimmedNonEmptyString,
+  type: FieldView.fields.type,
+  value: Schema.Json,
+});
+
 const RecordReviewEntries = Schema.Array(
   Schema.Struct({
     recordKey: TrimmedNonEmptyString,
@@ -511,6 +529,21 @@ export const Workflows = RpcGroup.make(
   Rpc.make("watchStep", { payload: step, success: StepView, error: WorkflowErrors, stream: true }),
   /** The step as the web shows it, once; an automation reads its own step. */
   Rpc.make("getStep", { payload: step, success: StepView, error: WorkflowErrors }),
+  Rpc.make("getStepFields", {
+    payload: {
+      ...step,
+      inputs: Schema.optionalKey(Schema.Array(StepFieldSelection)),
+      fields: Schema.optionalKey(Schema.Array(StepFieldSelection)),
+    },
+    success: Schema.Struct({
+      inputs: Schema.Array(Schema.Struct({ ...StepFieldData.fields, sourceStepId: StringId })),
+      fields: Schema.Array(StepFieldData),
+      proposals: Schema.Array(
+        Schema.Struct(Struct.pick(Proposal.fields, ["fieldKey", "value", "isDiscarded"])),
+      ),
+    }),
+    error: WorkflowErrors,
+  }),
   Rpc.make("setStepField", {
     payload: { ...step, fieldKey: TrimmedNonEmptyString, value: FieldValue },
     error: WorkflowErrors,

@@ -8,11 +8,16 @@ import { canManageUsers, type Role, type State } from "./User.ts";
 export const AutomationId = makeId("AutomationId");
 export type AutomationId = typeof AutomationId.Type;
 
+const StepContext = Schema.Literals(["included", "on_demand"]);
+export type StepContext = typeof StepContext.Type;
+
 export class Automation extends Schema.Opaque<Automation>()(
   Schema.Struct({
     id: AutomationId,
     title: Title,
     prompt: TrimmedNonEmptyString,
+    /** By default a step run receives its inputs with the instructions. */
+    stepContext: Schema.optionalKey(StepContext),
     /** The agent each run talks to, in a new chat per run. */
     agentId: StringId,
     /** Archived for good: it runs no more, by hand or on a step. */

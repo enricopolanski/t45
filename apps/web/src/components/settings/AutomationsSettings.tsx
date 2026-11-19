@@ -422,6 +422,10 @@ function AutomationEditorDialog({
   const [draft, setDraft] = useState<DraftState>(automation ?? EMPTY_DRAFT);
   const patch = (change: Partial<DraftState>) => setDraft((current) => ({ ...current, ...change }));
   const [saving, setSaving] = useState(false);
+  const stepContextItems = [
+    { value: "included", label: t("Include in the initial message") },
+    { value: "on_demand", label: t("Read on demand") },
+  ] as const;
 
   // A new automation runs on the first active agent until another is picked.
   const agentId = draft.agentId ?? activeAgents?.[0]?.id ?? null;
@@ -486,6 +490,27 @@ function AutomationEditorDialog({
                 value={draft.prompt}
                 onChange={(event) => patch({ prompt: event.target.value })}
               />
+            </Field>
+
+            <Field label={t("Step context")}>
+              <Select
+                value={draft.stepContext ?? "included"}
+                items={stepContextItems}
+                onValueChange={(value) => {
+                  if (value === "included" || value === "on_demand") patch({ stepContext: value });
+                }}
+              >
+                <SelectTrigger size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  {stepContextItems.map(({ value, label }) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
             </Field>
 
             <Field label={t("Agent")}>

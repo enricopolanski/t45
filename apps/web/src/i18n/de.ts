@@ -1,4 +1,7 @@
 export const de = {
+  "Step context": "Schrittkontext",
+  "Include in the initial message": "In der ersten Nachricht mitsenden",
+  "Read on demand": "Bei Bedarf lesen",
   " · {0} postponed": " · {0} zurückgestellt",
   "· Automatically run for": "· Automatisch gestartet für",
   "· Completed": "· Abgeschlossen",
