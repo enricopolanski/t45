@@ -34,7 +34,9 @@ export default mergeConfig(
       outputOptions: { codeSplitting: false },
       outDir: "dist",
       sourcemap: true,
-      clean: true,
+      // The single-file bundle overwrites bin.mjs and its map; cleaning would also delete dist/client, which the
+      // build copies there and the E2E agent apps serve, whenever a dev server repacks.
+      clean: false,
       deps: {
         alwaysBundle: (id: string) => !id.startsWith("node:"),
         onlyBundle: false,
