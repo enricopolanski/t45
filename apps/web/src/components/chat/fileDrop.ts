@@ -58,7 +58,7 @@ export function makeFileDropHandlers(host: FileDropHost) {
       if (droppedFolder) {
         toastManager.add({
           type: "error",
-          title: "Folders can't be dropped into the composer",
+          title: "Folders can't be dropped here",
           description: "Attach the files inside it instead.",
         });
       }

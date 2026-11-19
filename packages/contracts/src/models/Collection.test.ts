@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 
 import {
   canEditRecords,
+  canReadRecords,
   Collection,
   fieldsChangeRefusal,
   filtersProblem,
@@ -37,6 +38,7 @@ describe("collections", () => {
     fields: encodeFields(fields),
     primaryKeyFieldId,
     memberUserIds: [],
+    isPublished: false,
     createdAt: "2026-11-14T00:00:00.000Z",
     updatedAt: "2026-11-14T00:00:00.000Z",
   });
@@ -54,6 +56,15 @@ describe("collections", () => {
     assert.isTrue(canEditRecords({ id: "admin01", role: "admin", state: "active" }, listings));
     assert.isFalse(canEditRecords({ ...member, id: "member02" }, listings));
     assert.isFalse(canEditRecords({ ...member, state: "deactivated" }, listings));
+  });
+
+  it("give all active members read access to published collections", () => {
+    const visitor = { id: "member02", role: "member", state: "active" } as const;
+    const published = { ...listings, isPublished: true };
+    assert.isTrue(canReadRecords(visitor, published));
+    assert.isFalse(canEditRecords(visitor, published));
+    assert.isFalse(canReadRecords({ ...visitor, state: "pending" }, published));
+    assert.isFalse(canReadRecords(visitor, { ...published, isPublished: false }));
   });
 });
 

@@ -101,7 +101,7 @@ export function AttachmentLink({
   );
 }
 
-export function FilePickButton({
+function FilePickButton({
   label,
   disabled,
   onPick,

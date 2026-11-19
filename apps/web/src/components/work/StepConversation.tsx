@@ -1,19 +1,20 @@
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
 import type { StepView } from "@t45/contracts/resources/Workflows";
 import * as DateTime from "effect/DateTime";
-import { ArrowDownIcon, ArrowUpIcon, FileSpreadsheetIcon, FileTextIcon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { ArrowDownIcon, ArrowUpIcon, PaperclipIcon, XIcon } from "lucide-react";
+import { useRef, useState } from "react";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useSubmit } from "../../hooks/useSubmit";
 import { attachmentUrl } from "../../lib/attachmentUrl";
 import { cn } from "../../lib/utils";
+import { makeFileDropHandlers } from "../chat/fileDrop";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { MarkdownText } from "../markdown/MarkdownText";
 import { Textarea } from "../ui/textarea";
 import { ActorName } from "./ActorAvatar";
-import { FilePickButton } from "./StepFields";
 import { useWorkDirectory } from "./useWorkDirectory";
 import { actorName, plural } from "./workLogic";
 
@@ -25,8 +26,8 @@ const addedDay = (instant: DateTime.Utc) =>
     year: "numeric",
   });
 
-const headerCell = "bg-muted px-3 py-2 text-left text-xs font-medium text-foreground/80";
-const bodyCell = "h-10 border-t border-l border-l-border/60 px-3";
+const headerCell = "bg-muted px-3 py-2 text-left text-xs font-medium text-muted-foreground";
+const bodyCell = "h-12 border-t px-3";
 
 /** The step's files, near the top: what the step is worked from, newest first unless flipped. */
 export function StepFiles({
@@ -39,38 +40,44 @@ export function StepFiles({
   readonly view: StepView;
   readonly canWrite: boolean;
   readonly busy: boolean;
-  readonly onAttach: (file: File) => void;
+  readonly onAttach: (files: ReadonlyArray<File>) => void;
   readonly onRemove: (attachmentId: AttachmentId) => void;
 }) {
   const [isNewestFirst, setIsNewestFirst] = useState(true);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
   const files = view.files.toSorted((one, other) => {
     const age = DateTime.toEpochMillis(other.createdAt) - DateTime.toEpochMillis(one.createdAt);
     return isNewestFirst ? age : -age;
   });
+  const isEmpty = files.length === 0;
   return (
-    <section aria-label="Files" className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm/6 font-medium">Files</h2>
-        {files.length > 0 ? (
-          <span className="text-xs text-muted-foreground">
-            {plural(files.length, "file", "files")}
-          </span>
-        ) : null}
+    <section
+      aria-label="Files"
+      className={cn("card flex flex-col gap-3 p-4", isDragActive && "border-primary bg-primary/4")}
+      {...(canWrite
+        ? makeFileDropHandlers({ setDragActive: setIsDragActive, addFiles: onAttach })
+        : {})}
+    >
+      <div className="flex items-center gap-2.5">
+        <h2 className="text-sm font-semibold">Files</h2>
+        {isEmpty ? null : <Badge variant="info">{plural(files.length, "file", "files")}</Badge>}
         {canWrite ? (
-          <div className="ms-auto flex">
-            <FilePickButton
-              aria-label="Attach a file"
-              label="Attach"
-              disabled={busy}
-              onPick={onAttach}
-            />
-          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="ms-auto"
+            aria-label="Attach a file"
+            disabled={busy}
+            onClick={() => picker.current?.click()}
+          >
+            <PaperclipIcon aria-hidden />
+            Attach
+          </Button>
         ) : null}
       </div>
-      {files.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No files.</p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border bg-card">
+      {isEmpty ? null : (
+        <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-xl table-fixed border-separate border-spacing-0 text-sm">
             <thead>
               <tr>
@@ -80,7 +87,7 @@ export function StepFiles({
                 <th
                   scope="col"
                   aria-sort={isNewestFirst ? "descending" : "ascending"}
-                  className={cn(headerCell, "w-[20%] border-l border-border/60")}
+                  className={cn(headerCell, "w-[20%]")}
                 >
                   <button
                     type="button"
@@ -96,11 +103,11 @@ export function StepFiles({
                     )}
                   </button>
                 </th>
-                <th scope="col" className={cn(headerCell, "border-l border-border/60")}>
+                <th scope="col" className={headerCell}>
                   Added by
                 </th>
                 {canWrite ? (
-                  <th scope="col" className={cn(headerCell, "w-12 border-l border-border/60")}>
+                  <th scope="col" className={cn(headerCell, "w-12")}>
                     <span className="sr-only">Remove</span>
                   </th>
                 ) : null}
@@ -109,18 +116,17 @@ export function StepFiles({
             <tbody>
               {files.map((file) => (
                 <tr key={file.id}>
-                  <td className="h-10 border-t ps-4 pe-3">
+                  <td className="h-12 border-t ps-4 pe-3">
                     <a
                       href={attachmentUrl(file)}
                       download={file.name}
-                      className="flex min-w-0 items-center gap-2.5 text-primary hover:underline"
+                      className="flex min-w-0 items-center gap-2.5 font-semibold text-primary hover:underline"
                     >
-                      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-accent text-muted-foreground">
-                        {/\.(csv|xlsx?|ods)$/i.test(file.name) ? (
-                          <FileSpreadsheetIcon className="size-3.5" />
-                        ) : (
-                          <FileTextIcon className="size-3.5" />
-                        )}
+                      <span
+                        aria-hidden
+                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-3xs font-bold tracking-wide text-muted-foreground"
+                      >
+                        {/\.(\w{1,4})$/.exec(file.name)?.[1]?.toUpperCase() ?? "FILE"}
                       </span>
                       <span className="truncate">{file.name}</span>
                     </a>
@@ -150,6 +156,28 @@ export function StepFiles({
           </table>
         </div>
       )}
+      {canWrite ? (
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          hidden
+          onChange={(event) => {
+            const picked = [...(event.target.files ?? [])];
+            event.target.value = "";
+            if (picked.length > 0) onAttach(picked);
+          }}
+        />
+      ) : null}
+      {isEmpty ? (
+        <p className="rounded-lg border border-dashed bg-muted/50 px-4 py-3.5 text-center text-sm text-muted-foreground">
+          {canWrite ? "No files yet. Attach them with the button, or drop them here." : "No files."}
+        </p>
+      ) : canWrite ? (
+        <p className="text-xs text-muted-foreground">
+          You can also drop files here to attach them.
+        </p>
+      ) : null}
     </section>
   );
 }

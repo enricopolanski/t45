@@ -21,6 +21,7 @@ import { Route as BoardsIndexRouteImport } from './routes/boards.index'
 import { Route as SettingsPeopleRouteImport } from './routes/settings.people'
 import { Route as SettingsOrganizationRouteImport } from './routes/settings.organization'
 import { Route as MyWorkStepIdRouteImport } from './routes/my-work.$stepId'
+import { Route as CollectionsCollectionIdRouteImport } from './routes/collections.$collectionId'
 import { Route as ChatsChatIdRouteImport } from './routes/chats.$chatId'
 import { Route as BoardsSlugRouteImport } from './routes/boards.$slug'
 import { Route as SettingsWorkflowsIndexRouteImport } from './routes/settings_.workflows.index'
@@ -42,6 +43,7 @@ import { Route as SettingsCollectionsCollectionIdEditRouteImport } from './route
 import { Route as SettingsAgentsSkillsNewRouteImport } from './routes/settings_.agents.skills.new'
 import { Route as SettingsAgentsSkillsSkillIdRouteImport } from './routes/settings_.agents.skills.$skillId'
 import { Route as MyWorkStepIdRunsChatIdRouteImport } from './routes/my-work.$stepId_.runs.$chatId'
+import { Route as CollectionsCollectionIdRecordsRecordKeyRouteImport } from './routes/collections.$collectionId_.records.$recordKey'
 import { Route as SettingsProjectsProjectIdEditIndexRouteImport } from './routes/settings_.projects.$projectId.edit.index'
 import { Route as SettingsCollectionsCollectionIdRecordsRecordKeyRouteImport } from './routes/settings_.collections.$collectionId_.records.$recordKey'
 
@@ -103,6 +105,11 @@ const SettingsOrganizationRoute = SettingsOrganizationRouteImport.update({
 const MyWorkStepIdRoute = MyWorkStepIdRouteImport.update({
   id: '/my-work/$stepId',
   path: '/my-work/$stepId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CollectionsCollectionIdRoute = CollectionsCollectionIdRouteImport.update({
+  id: '/collections/$collectionId',
+  path: '/collections/$collectionId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatsChatIdRoute = ChatsChatIdRouteImport.update({
@@ -218,6 +225,12 @@ const MyWorkStepIdRunsChatIdRoute = MyWorkStepIdRunsChatIdRouteImport.update({
   path: '/my-work/$stepId/runs/$chatId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CollectionsCollectionIdRecordsRecordKeyRoute =
+  CollectionsCollectionIdRecordsRecordKeyRouteImport.update({
+    id: '/collections/$collectionId_/records/$recordKey',
+    path: '/collections/$collectionId/records/$recordKey',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const SettingsProjectsProjectIdEditIndexRoute =
   SettingsProjectsProjectIdEditIndexRouteImport.update({
     id: '/settings_/projects/$projectId/edit/',
@@ -240,6 +253,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRouteWithChildren
   '/boards/$slug': typeof BoardsSlugRoute
   '/chats/$chatId': typeof ChatsChatIdRoute
+  '/collections/$collectionId': typeof CollectionsCollectionIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/organization': typeof SettingsOrganizationRoute
   '/settings/people': typeof SettingsPeopleRoute
@@ -259,6 +273,7 @@ export interface FileRoutesByFullPath {
   '/settings/collections/': typeof SettingsCollectionsIndexRoute
   '/settings/projects/': typeof SettingsProjectsIndexRoute
   '/settings/workflows/': typeof SettingsWorkflowsIndexRoute
+  '/collections/$collectionId/records/$recordKey': typeof CollectionsCollectionIdRecordsRecordKeyRoute
   '/my-work/$stepId/runs/$chatId': typeof MyWorkStepIdRunsChatIdRoute
   '/settings/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
   '/settings/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
@@ -277,6 +292,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/boards/$slug': typeof BoardsSlugRoute
   '/chats/$chatId': typeof ChatsChatIdRoute
+  '/collections/$collectionId': typeof CollectionsCollectionIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/organization': typeof SettingsOrganizationRoute
   '/settings/people': typeof SettingsPeopleRoute
@@ -296,6 +312,7 @@ export interface FileRoutesByTo {
   '/settings/collections': typeof SettingsCollectionsIndexRoute
   '/settings/projects': typeof SettingsProjectsIndexRoute
   '/settings/workflows': typeof SettingsWorkflowsIndexRoute
+  '/collections/$collectionId/records/$recordKey': typeof CollectionsCollectionIdRecordsRecordKeyRoute
   '/my-work/$stepId/runs/$chatId': typeof MyWorkStepIdRunsChatIdRoute
   '/settings/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
   '/settings/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
@@ -315,6 +332,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/boards/$slug': typeof BoardsSlugRoute
   '/chats/$chatId': typeof ChatsChatIdRoute
+  '/collections/$collectionId': typeof CollectionsCollectionIdRoute
   '/my-work/$stepId': typeof MyWorkStepIdRoute
   '/settings/organization': typeof SettingsOrganizationRoute
   '/settings/people': typeof SettingsPeopleRoute
@@ -334,6 +352,7 @@ export interface FileRoutesById {
   '/settings_/collections/': typeof SettingsCollectionsIndexRoute
   '/settings_/projects/': typeof SettingsProjectsIndexRoute
   '/settings_/workflows/': typeof SettingsWorkflowsIndexRoute
+  '/collections/$collectionId_/records/$recordKey': typeof CollectionsCollectionIdRecordsRecordKeyRoute
   '/my-work/$stepId_/runs/$chatId': typeof MyWorkStepIdRunsChatIdRoute
   '/settings_/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
   '/settings_/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
@@ -354,6 +373,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/boards/$slug'
     | '/chats/$chatId'
+    | '/collections/$collectionId'
     | '/my-work/$stepId'
     | '/settings/organization'
     | '/settings/people'
@@ -373,6 +393,7 @@ export interface FileRouteTypes {
     | '/settings/collections/'
     | '/settings/projects/'
     | '/settings/workflows/'
+    | '/collections/$collectionId/records/$recordKey'
     | '/my-work/$stepId/runs/$chatId'
     | '/settings/agents/skills/$skillId'
     | '/settings/agents/skills/new'
@@ -391,6 +412,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/boards/$slug'
     | '/chats/$chatId'
+    | '/collections/$collectionId'
     | '/my-work/$stepId'
     | '/settings/organization'
     | '/settings/people'
@@ -410,6 +432,7 @@ export interface FileRouteTypes {
     | '/settings/collections'
     | '/settings/projects'
     | '/settings/workflows'
+    | '/collections/$collectionId/records/$recordKey'
     | '/my-work/$stepId/runs/$chatId'
     | '/settings/agents/skills/$skillId'
     | '/settings/agents/skills/new'
@@ -428,6 +451,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/boards/$slug'
     | '/chats/$chatId'
+    | '/collections/$collectionId'
     | '/my-work/$stepId'
     | '/settings/organization'
     | '/settings/people'
@@ -447,6 +471,7 @@ export interface FileRouteTypes {
     | '/settings_/collections/'
     | '/settings_/projects/'
     | '/settings_/workflows/'
+    | '/collections/$collectionId_/records/$recordKey'
     | '/my-work/$stepId_/runs/$chatId'
     | '/settings_/agents/skills/$skillId'
     | '/settings_/agents/skills/new'
@@ -466,6 +491,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRouteWithChildren
   BoardsSlugRoute: typeof BoardsSlugRoute
   ChatsChatIdRoute: typeof ChatsChatIdRoute
+  CollectionsCollectionIdRoute: typeof CollectionsCollectionIdRoute
   MyWorkStepIdRoute: typeof MyWorkStepIdRoute
   BoardsIndexRoute: typeof BoardsIndexRoute
   ChatsIndexRoute: typeof ChatsIndexRoute
@@ -480,6 +506,7 @@ export interface RootRouteChildren {
   SettingsCollectionsIndexRoute: typeof SettingsCollectionsIndexRoute
   SettingsProjectsIndexRoute: typeof SettingsProjectsIndexRoute
   SettingsWorkflowsIndexRoute: typeof SettingsWorkflowsIndexRoute
+  CollectionsCollectionIdRecordsRecordKeyRoute: typeof CollectionsCollectionIdRecordsRecordKeyRoute
   MyWorkStepIdRunsChatIdRoute: typeof MyWorkStepIdRunsChatIdRoute
   SettingsAgentsSkillsSkillIdRoute: typeof SettingsAgentsSkillsSkillIdRoute
   SettingsAgentsSkillsNewRoute: typeof SettingsAgentsSkillsNewRoute
@@ -574,6 +601,13 @@ declare module '@tanstack/react-router' {
       path: '/my-work/$stepId'
       fullPath: '/my-work/$stepId'
       preLoaderRoute: typeof MyWorkStepIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/collections/$collectionId': {
+      id: '/collections/$collectionId'
+      path: '/collections/$collectionId'
+      fullPath: '/collections/$collectionId'
+      preLoaderRoute: typeof CollectionsCollectionIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chats/$chatId': {
@@ -723,6 +757,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MyWorkStepIdRunsChatIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/collections/$collectionId_/records/$recordKey': {
+      id: '/collections/$collectionId_/records/$recordKey'
+      path: '/collections/$collectionId/records/$recordKey'
+      fullPath: '/collections/$collectionId/records/$recordKey'
+      preLoaderRoute: typeof CollectionsCollectionIdRecordsRecordKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings_/projects/$projectId/edit/': {
       id: '/settings_/projects/$projectId/edit/'
       path: '/settings/projects/$projectId/edit'
@@ -769,6 +810,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRouteWithChildren,
   BoardsSlugRoute: BoardsSlugRoute,
   ChatsChatIdRoute: ChatsChatIdRoute,
+  CollectionsCollectionIdRoute: CollectionsCollectionIdRoute,
   MyWorkStepIdRoute: MyWorkStepIdRoute,
   BoardsIndexRoute: BoardsIndexRoute,
   ChatsIndexRoute: ChatsIndexRoute,
@@ -783,6 +825,8 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsCollectionsIndexRoute: SettingsCollectionsIndexRoute,
   SettingsProjectsIndexRoute: SettingsProjectsIndexRoute,
   SettingsWorkflowsIndexRoute: SettingsWorkflowsIndexRoute,
+  CollectionsCollectionIdRecordsRecordKeyRoute:
+    CollectionsCollectionIdRecordsRecordKeyRoute,
   MyWorkStepIdRunsChatIdRoute: MyWorkStepIdRunsChatIdRoute,
   SettingsAgentsSkillsSkillIdRoute: SettingsAgentsSkillsSkillIdRoute,
   SettingsAgentsSkillsNewRoute: SettingsAgentsSkillsNewRoute,

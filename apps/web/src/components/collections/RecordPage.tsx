@@ -1,15 +1,17 @@
-import type { Collection } from "@t45/contracts/models/Collection";
+import { canEditRecords, type Collection } from "@t45/contracts/models/Collection";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
+import { buildFieldViews } from "@t45/core/fieldViews";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useId, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
 import { api } from "../../rpc/api";
+import { useSession } from "../../state/session";
 import { PageBreadcrumbLink } from "../PageBreadcrumb";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
-import { FormGrid } from "../work/StepFields";
+import { FormGrid, ReadOnlyFields } from "../work/StepFields";
 import { WorkFrame } from "../work/WorkFrame";
 import { RecordShowcase } from "./RecordDisplay";
 import { useRecordForm } from "./Records";
@@ -21,10 +23,17 @@ import { useRecordForm } from "./Records";
 export function RecordPage({
   collectionId,
   recordKey,
+  isInSettings = false,
 }: {
   readonly collectionId: string;
   readonly recordKey: string;
+  readonly isInSettings?: boolean;
 }) {
+  const viewer = useSession();
+  const navigate = useNavigate();
+  const collectionRoute = isInSettings
+    ? "/settings/collections/$collectionId"
+    : "/collections/$collectionId";
   const [loaded, setLoaded] = useState<{
     readonly collection: Collection;
     readonly record: CollectionRecordView | null;
@@ -48,7 +57,7 @@ export function RecordPage({
 
   const parent =
     loaded === null ? undefined : (
-      <PageBreadcrumbLink to="/settings/collections/$collectionId" params={{ collectionId }}>
+      <PageBreadcrumbLink to={collectionRoute} params={{ collectionId }}>
         {loaded.collection.title}
       </PageBreadcrumbLink>
     );
@@ -61,27 +70,44 @@ export function RecordPage({
         </p>
       </WorkFrame>
     );
-  if (!isEditing && resolveRecordDisplay(loaded.collection).template === "showcase")
+  const { collection, record } = loaded;
+  const canEdit = viewer !== null && canEditRecords({ ...viewer, id: viewer.userId }, collection);
+  if ((!isEditing || !canEdit) && resolveRecordDisplay(collection).template === "showcase")
     return (
       <WorkFrame
         title={recordKey}
         parent={parent}
         width="full"
         actions={
-          <Button size="sm" onClick={() => setIsEditing(true)}>
-            Edit record
-          </Button>
+          canEdit ? (
+            <Button size="sm" onClick={() => setIsEditing(true)}>
+              Edit record
+            </Button>
+          ) : null
         }
       >
-        <RecordShowcase collection={loaded.collection} record={loaded.record} />
+        <RecordShowcase collection={collection} record={record} />
+      </WorkFrame>
+    );
+  if (!canEdit)
+    return (
+      <WorkFrame title={recordKey} parent={parent}>
+        <ReadOnlyFields
+          fields={buildFieldViews(
+            collection.fields,
+            record.values,
+            (id) => record.files.find((file) => file.id === id) ?? null,
+          )}
+        />
       </WorkFrame>
     );
   return (
     <RecordForm
       title={recordKey}
       parent={parent}
-      collection={loaded.collection}
-      record={loaded.record}
+      collection={collection}
+      record={record}
+      onSaved={() => void navigate({ to: collectionRoute, params: { collectionId } })}
     />
   );
 }
@@ -92,23 +118,16 @@ function RecordForm({
   parent,
   collection,
   record,
+  onSaved,
 }: {
   readonly title: string;
   readonly parent: ReactNode;
   readonly collection: Collection;
   readonly record: CollectionRecordView;
+  readonly onSaved: () => void;
 }) {
-  const navigate = useNavigate();
   const formId = useId();
-  const { editor, form, isBusy, error, save } = useRecordForm(
-    collection,
-    record,
-    () =>
-      void navigate({
-        to: "/settings/collections/$collectionId",
-        params: { collectionId: collection.id },
-      }),
-  );
+  const { editor, form, isBusy, error, save } = useRecordForm(collection, record, onSaved);
   return (
     <WorkFrame
       title={title}

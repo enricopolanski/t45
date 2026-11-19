@@ -17,6 +17,7 @@ import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { PersonPicker } from "../work/PersonPicker";
 import { useWorkDirectory } from "../work/useWorkDirectory";
 import { WorkFrame } from "../work/WorkFrame";
@@ -33,12 +34,19 @@ interface Draft {
   readonly fields: ReadonlyArray<DraftField>;
   readonly primaryKeyFieldId: string;
   readonly memberUserIds: ReadonlyArray<string>;
+  readonly isPublished: boolean;
 }
 
 /** A new collection starts with one text field as its primary key. */
 const newDraft = (): Draft => {
   const key = { ...blankField(), label: "Key" };
-  return { title: "", fields: [key], primaryKeyFieldId: key.id, memberUserIds: [] };
+  return {
+    title: "",
+    fields: [key],
+    primaryKeyFieldId: key.id,
+    memberUserIds: [],
+    isPublished: false,
+  };
 };
 
 /** A field the collection's records hold: only its display settings can change. */
@@ -115,6 +123,7 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
             fields: encodeFields(collection.fields),
             primaryKeyFieldId: collection.primaryKeyFieldId,
             memberUserIds: collection.memberUserIds,
+            isPublished: collection.isPublished,
           },
     );
   }, []);
@@ -249,8 +258,21 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
         className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-5"
       >
         <span className="text-sm font-medium">People</span>
-        <p className="text-xs text-muted-foreground">
-          Admins and these members see and edit its records.
+        <label className="mt-1 flex w-fit items-center gap-2 text-sm">
+          <Switch
+            size="sm"
+            checked={draft.isPublished}
+            onCheckedChange={(isPublished) => setDraft({ ...draft, isPublished })}
+            aria-describedby={`${id}-publication`}
+            disabled={busy}
+          />
+          Publish to the organization
+        </label>
+        <p id={`${id}-publication`} className="text-xs text-muted-foreground">
+          Everyone in the organization can open published collections from the main menu.
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Admins and the people below can edit records.
         </p>
         <ul className="flex flex-col gap-1">
           {draft.memberUserIds.map((userId) => {

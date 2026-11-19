@@ -1,8 +1,9 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { InboxIcon, KanbanSquareIcon, MessagesSquareIcon } from "lucide-react";
+import { InboxIcon, KanbanSquareIcon, LibraryBigIcon, MessagesSquareIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { api, type ApiSuccess } from "../../rpc/api";
+import { useWorkflowData } from "../workflows/useWorkflowData";
 import {
   SidebarContent,
   SidebarGroup,
@@ -41,7 +42,7 @@ const MAIN_LINKS: ReadonlyArray<NavLink> = [
   { label: "Boards", icon: <KanbanSquareIcon />, to: "/boards" },
 ];
 
-/** The app's main sidebar, for everyone: My work, Chat, and Boards (or the one board). */
+/** The app's main sidebar, with open boards and published collections. */
 export function AppNavSidebar() {
   return (
     <>
@@ -50,9 +51,36 @@ export function AppNavSidebar() {
         <AppNavGroup label={null}>
           <NavLinks links={MAIN_LINKS} />
         </AppNavGroup>
+        <PublishedCollections />
       </SidebarContent>
       <SidebarChromeFooter />
     </>
+  );
+}
+
+const loadCollections = () => api("collections.list", undefined);
+
+function PublishedCollections() {
+  const { setOpenMobile } = useSidebar();
+  const { detail } = useWorkflowData(loadCollections);
+  const collections = detail?.filter((collection) => collection.isPublished) ?? [];
+  if (collections.length === 0) return null;
+  return (
+    <AppNavGroup label="Collections">
+      {collections.map((collection) => (
+        <SidebarMenuItem key={collection.id}>
+          <SidebarMenuButton
+            onClick={() => setOpenMobile(false)}
+            render={
+              <Link to="/collections/$collectionId" params={{ collectionId: collection.id }} />
+            }
+          >
+            <LibraryBigIcon />
+            <span>{collection.title}</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ))}
+    </AppNavGroup>
   );
 }
 

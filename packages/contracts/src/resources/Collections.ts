@@ -40,15 +40,16 @@ const FieldValuesWithCounts = Schema.Array(
 );
 
 /** What an admin sets of a collection. */
-const CollectionDraft = Schema.Struct(
-  Struct.pick(Collection.fields, [
+const CollectionDraft = Schema.Struct({
+  ...Struct.pick(Collection.fields, [
     "title",
     "fields",
     "primaryKeyFieldId",
     "memberUserIds",
     "layout",
   ]),
-);
+  isPublished: Schema.optionalKey(Collection.fields.isPublished),
+});
 
 /**
  * What members and agents do with collections, each checking the caller's access itself; agents'

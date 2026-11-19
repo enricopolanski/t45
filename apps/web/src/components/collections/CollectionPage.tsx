@@ -1,4 +1,4 @@
-import type { Collection } from "@t45/contracts/models/Collection";
+import { canEditRecords, type Collection } from "@t45/contracts/models/Collection";
 import { defaultValues } from "@t45/contracts/models/Field";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
 import { api } from "../../rpc/api";
-import { useIsAdmin } from "../../state/session";
+import { useSession } from "../../state/session";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
@@ -27,12 +27,15 @@ export function CollectionPage({
   collectionId,
   page,
   onPage,
+  isInSettings = false,
 }: {
   readonly collectionId: string;
   readonly page: number;
   readonly onPage: (page: number) => void;
+  readonly isInSettings?: boolean;
 }) {
-  const isAdmin = useIsAdmin();
+  const viewer = useSession();
+  const isAdmin = viewer?.role === "admin";
   const navigate = useNavigate();
   const [collection, setCollection] = useState<Collection | null>(null);
   const { text, filters, found, filterChoices, refresh, ...search } = useRecordSearch(
@@ -89,9 +92,12 @@ export function CollectionPage({
       </WorkFrame>
     );
   const shownView = view ?? resolveRecordDisplay(collection).defaultView;
+  const canEdit = viewer !== null && canEditRecords({ ...viewer, id: viewer.userId }, collection);
   const openRecord = (record: CollectionRecordView) =>
     void navigate({
-      to: "/settings/collections/$collectionId/records/$recordKey",
+      to: isInSettings
+        ? "/settings/collections/$collectionId/records/$recordKey"
+        : "/collections/$collectionId/records/$recordKey",
       params: { collectionId, recordKey: record.key },
     });
   return (
@@ -111,10 +117,12 @@ export function CollectionPage({
               Edit collection
             </Button>
           ) : null}
-          <Button size="sm" onClick={() => setIsAdding(true)}>
-            <PlusIcon />
-            New record
-          </Button>
+          {canEdit ? (
+            <Button size="sm" onClick={() => setIsAdding(true)}>
+              <PlusIcon />
+              New record
+            </Button>
+          ) : null}
         </>
       }
     >
@@ -181,7 +189,7 @@ export function CollectionPage({
       {found === null ? null : (
         <RecordPager page={page} matchCount={found.matchCount} onPage={onPage} />
       )}
-      {isAdding ? (
+      {isAdding && canEdit ? (
         <RecordDialog
           collection={collection}
           record={{ values: defaultValues(collection.fields), files: [] }}

@@ -10,6 +10,7 @@ function CollectionRouteView() {
     <CollectionPage
       key={collectionId}
       collectionId={collectionId}
+      isInSettings
       page={page ?? 1}
       onPage={(next) => void navigate({ search: next === 1 ? {} : { page: next } })}
     />

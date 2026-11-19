@@ -18,6 +18,7 @@ import {
   PlayIcon,
   SquareIcon,
   TimerIcon,
+  ZapIcon,
 } from "lucide-react";
 import { Fragment, type ReactNode, useState } from "react";
 
@@ -26,6 +27,7 @@ import { appAtomRegistry } from "../../state/atomRegistry";
 import { stepAutomationList } from "../../state/agents";
 import { useApiQuery } from "../../state/rpc";
 import { describeFailure } from "../../lib/failures";
+import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Field } from "../ui/field";
@@ -176,7 +178,11 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         view={view}
         canWrite={writes}
         busy={busy}
-        onAttach={(file) => void act(() => attachStepFile(view.step.id, file))}
+        onAttach={(files) =>
+          void act(async () => {
+            for (const file of files) await attachStepFile(view.step.id, file);
+          })
+        }
         onRemove={(attachmentId) =>
           void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
         }
@@ -347,27 +353,30 @@ function StepAutomations({
     tag: "workflows.runStepAutomation" | "workflows.stopStepAutomation",
     automationId: AutomationId,
   ) => void act(() => api(tag, { stepId: view.step.id, automationId }));
+  const runningCount = runs.filter(({ status }) => status === "running").length;
   return (
-    <aside aria-label="Automations" className="flex flex-col gap-2 text-sm">
-      <div className="flex items-center gap-2">
-        <h2 className="min-w-0 flex-1 font-medium">Automations</h2>
-        {runnable.length > 0 && (
-          <RunAutomation
-            automations={runnable.map(({ id }) => ({ id, title: titleOf(id) }))}
-            busy={busy}
-            onRun={(id) => call("workflows.runStepAutomation", id)}
-          />
-        )}
+    <aside aria-label="Automations" className="card flex flex-col gap-3 p-4 text-sm">
+      <div className="flex items-center gap-2.5">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <ZapIcon aria-hidden className="size-4" />
+        </span>
+        <h2 className="min-w-0 flex-1 text-sm font-semibold">Automations</h2>
+        {runningCount > 0 && <Badge variant="info">{runningCount} running</Badge>}
       </div>
       {titles.error && <ErrorText text={titles.error} />}
-      {runs.length > 0 && (
-        <ol className="overflow-hidden rounded-xl border bg-card">
+      {runs.length === 0 ? (
+        <p className="text-muted-foreground">No automation has run on this item yet.</p>
+      ) : (
+        <ol className="flex flex-col gap-2">
           {runs.map(({ automation, number, ...run }) => {
             const { label, Icon, tone } = RUN_STATUSES[run.status];
             return (
               <li
                 key={`${automation.id}-${number}`}
-                className="flex flex-col gap-1 border-t p-3 first:border-t-0"
+                className={cn(
+                  "flex flex-col gap-1 rounded-lg border p-3",
+                  run.status === "running" && "border-info/24 bg-info/6",
+                )}
               >
                 <div className="flex min-h-6 items-center gap-2">
                   <span role="img" aria-label={label} className="flex size-4 shrink-0">
@@ -430,11 +439,15 @@ function StepAutomations({
                   <RunDetail Icon={CalendarIcon}>
                     {formatRelativeTimeLabel(run.startedAt, now)}
                   </RunDetail>
-                  <RunDetail Icon={TimerIcon}>
-                    {run.endedAt === null
-                      ? "In progress"
-                      : formatDurationLabel(run.startedAt, run.endedAt)}
-                  </RunDetail>
+                  {run.endedAt === null ? (
+                    <Badge variant="info" className="ms-6 self-start">
+                      In progress
+                    </Badge>
+                  ) : (
+                    <RunDetail Icon={TimerIcon}>
+                      {formatDurationLabel(run.startedAt, run.endedAt)}
+                    </RunDetail>
+                  )}
                   {run.status === "running" && (
                     <ProgressReport report={run.latestReport} isRunning />
                   )}
@@ -443,6 +456,13 @@ function StepAutomations({
             );
           })}
         </ol>
+      )}
+      {runnable.length > 0 && (
+        <RunAutomation
+          automations={runnable.map(({ id }) => ({ id, title: titleOf(id) }))}
+          busy={busy}
+          onRun={(id) => call("workflows.runStepAutomation", id)}
+        />
       )}
     </aside>
   );
@@ -480,8 +500,11 @@ function RunAutomation({
   const selected = automations.find(({ id }) => id === chosen) ?? automations[0];
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
-      <PopoverTrigger render={<Button size="sm" />}>Run Automation</PopoverTrigger>
-      <PopoverPopup align="end" width="md">
+      <PopoverTrigger render={<Button className="w-full" />}>
+        <PlayIcon aria-hidden className="fill-current" />
+        Run Automation
+      </PopoverTrigger>
+      <PopoverPopup align="start" width="md">
         <div className="flex flex-col gap-3">
           <Field label="Automation">
             <Select
