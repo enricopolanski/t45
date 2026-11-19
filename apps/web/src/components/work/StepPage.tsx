@@ -1,6 +1,6 @@
 import type { AutomationId } from "@t45/contracts/models/Automation";
 import { StringId } from "@t45/contracts/models/primitives";
-import type { StepNameView, StepView } from "@t45/contracts/resources/Workflows";
+import type { FieldView, StepNameView, StepView } from "@t45/contracts/resources/Workflows";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
@@ -10,11 +10,14 @@ import {
   CalendarIcon,
   CheckIcon,
   CircleCheckIcon,
+  CircleDotIcon,
+  CircleIcon,
   CircleStopIcon,
   CircleXIcon,
   LoaderCircleIcon,
   type LucideIcon,
   MoreHorizontalIcon,
+  PauseIcon,
   PlayIcon,
   SquareIcon,
   TimerIcon,
@@ -46,7 +49,7 @@ import { StepComments, StepFiles } from "./StepConversation";
 import { ProposalReview } from "./ProposalReview";
 import { RecordEntryReview } from "./RecordEntryReview";
 import { attachStepFile, StepFields } from "./StepFields";
-import { StepInputs } from "./StepInputs";
+import { ConfirmedRecord, ReadOnlyStepFieldCard } from "./StepInputs";
 import { StepStatus } from "./StepStatus";
 import { StepSubSteps } from "./StepSubSteps";
 import { useWorkDirectory } from "./useWorkDirectory";
@@ -59,7 +62,11 @@ import {
   type StepActions,
   stepActions,
 } from "./workLogic";
-import { formatDurationLabel, formatRelativeTimeLabel } from "../../timestampFormat";
+import {
+  formatChatTimestampTooltip,
+  formatDurationLabel,
+  formatRelativeTimeLabel,
+} from "../../timestampFormat";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { stepViews, workChanged } from "../../state/work";
 
@@ -124,11 +131,21 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
 
   const actions = stepActions(view.ticket, view.step, view.canCancelTicket);
   const step = { stepId: view.step.id };
-  const writes = view.ticket.status.type === "open";
+  const isHistorical = view.completedStep !== undefined;
+  const writes = view.ticket.status.type === "open" && !isHistorical;
   const incomplete = view.subSteps.filter((step) => step.status.type !== "completed");
   const reviewFields = view.recordReviews.flatMap((review) => {
     const group = view.fields.find((field) => field.key === review.groupFieldId);
     return group === undefined ? [] : [{ group, review }];
+  });
+  const inputReviews = (view.inputRecordReviews ?? []).flatMap((review) => {
+    const records = view.inputs[review.recordsIndex];
+    const group = view.inputs[review.groupIndex];
+    return records === undefined || group === undefined ? [] : [{ ...review, records, group }];
+  });
+  const completedReviews = reviewFields.flatMap(({ group, review }) => {
+    const records = view.fields.find((field) => field.key === review.recordsFieldId);
+    return records === undefined ? [] : [{ ...review, group, records }];
   });
   const fields = view.fields.filter((field) => {
     const subject = reviewFields.find(({ group }) => field.key === group.key);
@@ -166,6 +183,28 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   };
   // The workflow's step this one is, or sits in, shown among all the others.
   const rootId = view.parents[0]?.id ?? view.step.id;
+  const recordStatus = (field: FieldView) => {
+    const { collection } = field;
+    const reviews = reviewFields.filter(({ review }) => review.recordsFieldId === field.key);
+    if (collection === null || reviews.length === 0) return undefined;
+    return (record: FieldView["records"][number]) => (
+      <div className="flex flex-wrap gap-1">
+        {reviews.map(({ group, review }) => {
+          const entry = review.entries.find(({ recordKey }) => recordKey === record.key);
+          if (entry === undefined) return null;
+          if (entry.isConfirmed) return <ConfirmedRecord key={group.key} />;
+          return isHistorical ? null : (
+            <RecordEntryReview
+              key={group.key}
+              step={view.step}
+              item={{ group, review, collection, entry, record }}
+              act={act}
+            />
+          );
+        })}
+      </div>
+    );
+  };
   const open = (
     <section key="open" aria-label="Open step" className="flex flex-col gap-4">
       {error && <ErrorText text={error} />}
@@ -173,7 +212,12 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         <MissingRecap missing={missing} unfinished={unfinished} unconfirmed={unconfirmed} />
       ) : null}
       <ItemDescription description={view.ticket.description} />
-      {view.inputs.length > 0 ? <StepInputs fields={view.inputs} /> : null}
+      <ReadOnlyStepFieldCard
+        title="Inputs"
+        fields={view.inputs}
+        reviews={inputReviews}
+        defaultOpen={false}
+      />
       <StepFiles
         view={view}
         canWrite={writes}
@@ -187,60 +231,46 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
         }
       />
-      <StepFields
-        fields={actions.canEditFields ? fields : view.fields}
-        editable={actions.canEditFields}
-        missing={new Set(missing.map((field) => field.key))}
-        holdOpen={unconfirmed.length > 0}
-        onSave={(fieldKey, value) =>
-          void act(() => api("workflows.setStepField", { ...step, fieldKey, value }))
-        }
-        onUpload={(fieldKey, file) => void act(() => attachStepFile(view.step.id, file, fieldKey))}
-        onRecordSaved={() => void act(() => Promise.resolve())}
-        recordStatus={(field) => {
-          const { collection } = field;
-          const reviews = reviewFields.filter(({ review }) => review.recordsFieldId === field.key);
-          if (collection === null || reviews.length === 0) return undefined;
-          return (record) => (
-            <div className="flex flex-wrap gap-1">
-              {reviews.map(({ group, review }) => {
-                const entry = review.entries.find(({ recordKey }) => recordKey === record.key);
-                if (entry === undefined) return null;
-                return entry.isConfirmed ? (
-                  <span key={group.key} className="inline-flex items-center gap-1.5 font-semibold">
-                    <CheckIcon aria-hidden className="size-4 text-success-foreground" />
-                    Confirmed
-                  </span>
-                ) : (
-                  <RecordEntryReview
-                    key={group.key}
-                    step={view.step}
-                    item={{ group, review, collection, entry, record }}
-                    act={act}
-                  />
-                );
-              })}
-            </div>
-          );
-        }}
-        review={
-          actions.canEditFields ? (
-            <ProposalReview
-              view={view}
-              onReview={(proposal, isApproved) => {
-                const reviewed = { ...step, proposalId: proposal.id };
-                return act(
-                  () =>
-                    isApproved
-                      ? api("workflows.approveProposal", reviewed)
-                      : api("workflows.discardProposal", reviewed),
-                  true,
-                );
-              }}
-            />
-          ) : null
-        }
-      />
+      {isHistorical ? (
+        <ReadOnlyStepFieldCard
+          title="Fields"
+          fields={view.fields}
+          reviews={completedReviews}
+          defaultOpen
+        />
+      ) : (
+        <StepFields
+          fields={actions.canEditFields ? fields : view.fields}
+          editable={actions.canEditFields}
+          missing={new Set(missing.map((field) => field.key))}
+          holdOpen={unconfirmed.length > 0}
+          onSave={(fieldKey, value) =>
+            void act(() => api("workflows.setStepField", { ...step, fieldKey, value }))
+          }
+          onUpload={(fieldKey, file) =>
+            void act(() => attachStepFile(view.step.id, file, fieldKey))
+          }
+          onRecordSaved={() => void act(() => Promise.resolve())}
+          recordStatus={recordStatus}
+          review={
+            actions.canEditFields ? (
+              <ProposalReview
+                view={view}
+                onReview={(proposal, isApproved) => {
+                  const reviewed = { ...step, proposalId: proposal.id };
+                  return act(
+                    () =>
+                      isApproved
+                        ? api("workflows.approveProposal", reviewed)
+                        : api("workflows.discardProposal", reviewed),
+                    true,
+                  );
+                }}
+              />
+            ) : null
+          }
+        />
+      )}
       <StepSubSteps view={view} />
       <StepComments
         view={view}
@@ -265,10 +295,27 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-4">
           <ItemHeader view={view} />
+          <StepStepper view={view} rootId={rootId} />
+          {isHistorical ? (
+            <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 px-4 py-3 text-sm">
+              <p>
+                <span className="font-medium">Read-only</span> · Completed{" "}
+                {formatChatTimestampTooltip(view.step.status.at)}
+              </p>
+              {view.completedStep === "legacy" ? (
+                <p className="text-muted-foreground">
+                  This step was completed before snapshots were available. Linked records show
+                  current collection data.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="flex flex-col gap-3">
-            {view.otherSteps.map((entry) =>
-              entry.step.id === rootId ? open : <OtherStep key={entry.step.id} view={entry} />,
-            )}
+            {(view.stepNavigation?.length ?? 0) > 1
+              ? open
+              : view.otherSteps.map((entry) =>
+                  entry.step.id === rootId ? open : <OtherStep key={entry.step.id} view={entry} />,
+                )}
           </div>
         </div>
         <div className="flex flex-col gap-3">
@@ -292,6 +339,96 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         </div>
       </div>
     </WorkFrame>
+  );
+}
+
+const stepNameParts = /^(Step \d+)\s+[—–-]\s+(.+)$/iu;
+const stepperStatus = {
+  completed: {
+    label: "Completed",
+    Icon: CheckIcon,
+    marker: "border-success-foreground/25 bg-success text-success-foreground",
+    text: "text-success-foreground",
+  },
+  working: {
+    label: "In progress",
+    Icon: CircleDotIcon,
+    marker: "border-primary/60 bg-primary/10 text-primary",
+    text: "text-primary",
+  },
+  blocked: {
+    label: "Blocked",
+    Icon: PauseIcon,
+    marker: "border-warning-foreground/30 bg-warning text-warning-foreground",
+    text: "text-warning-foreground",
+  },
+  cancelled: {
+    label: "Cancelled",
+    Icon: CircleIcon,
+    marker: "border-border bg-muted text-muted-foreground",
+    text: "text-muted-foreground",
+  },
+};
+
+function StepStepper({ view, rootId }: { readonly view: StepView; readonly rootId: string }) {
+  const steps = view.stepNavigation ?? [];
+  if (steps.length === 0) return null;
+  return (
+    <nav aria-label="Item steps" className="min-w-0 rounded-xl border border-border bg-card">
+      <ol className="flex gap-2 overflow-x-auto rounded-xl p-2 sm:px-3">
+        {steps.map(({ id, name, status }, index) => {
+          const isSelected = id === rootId;
+          const isCompleted = status === "completed";
+          const label = stepNameParts.exec(name);
+          const appearance =
+            stepperStatus[
+              !isCompleted && view.ticket.status.type === "cancelled" ? "cancelled" : status
+            ];
+          return (
+            <li key={id} className="relative flex min-w-32 flex-1">
+              <Link
+                to="/my-work/$stepId"
+                params={{ stepId: id }}
+                className={cn(
+                  "flex min-w-0 flex-1 flex-col items-start gap-2 rounded-lg p-2 outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                  isSelected && "bg-accent/80 ring-1 ring-border ring-inset",
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "flex size-8 shrink-0 items-center justify-center rounded-full border",
+                    appearance.marker,
+                  )}
+                >
+                  <appearance.Icon className="size-4" />
+                </span>
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  {label === null ? null : (
+                    <span className="text-xs text-muted-foreground">{label[1]}</span>
+                  )}
+                  <span className="text-sm leading-snug font-medium wrap-anywhere">
+                    {label?.[2] ?? name}
+                  </span>
+                  <span className={cn("text-xs font-medium", appearance.text)}>
+                    {appearance.label}
+                  </span>
+                </span>
+              </Link>
+              {index < steps.length - 1 ? (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "pointer-events-none absolute top-6 -right-2 left-12 h-px bg-border",
+                    isCompleted && "bg-success-foreground/50",
+                  )}
+                />
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -610,6 +747,7 @@ function MissingRecap({
  */
 function ItemHeader({ view }: { readonly view: StepView }) {
   const { step } = view;
+  const hasStepper = (view.stepNavigation?.length ?? 0) > 0;
   const current =
     view.otherSteps.find(
       ({ step: other }) => other.id !== step.id && other.status.type !== "completed",
@@ -621,23 +759,25 @@ function ItemHeader({ view }: { readonly view: StepView }) {
       </BackLink>
       <div className="flex flex-col gap-1">
         <h2 className="text-2xl font-semibold tracking-tight wrap-anywhere">{view.ticket.title}</h2>
-        <h3 className="text-sm text-muted-foreground">
-          {view.parents.map((parent) => (
-            <Fragment key={parent.id}>
-              <Link
-                to="/my-work/$stepId"
-                params={{ stepId: parent.id }}
-                className="hover:text-foreground hover:underline"
-              >
-                {parent.name}
-              </Link>
-              {" › "}
-            </Fragment>
-          ))}
-          {view.definition.name}
-        </h3>
+        {!hasStepper || view.parents.length > 0 ? (
+          <h3 className="text-sm text-muted-foreground">
+            {view.parents.map((parent) => (
+              <Fragment key={parent.id}>
+                <Link
+                  to="/my-work/$stepId"
+                  params={{ stepId: parent.id }}
+                  className="hover:text-foreground hover:underline"
+                >
+                  {parent.name}
+                </Link>
+                {" › "}
+              </Fragment>
+            ))}
+            {view.definition.name}
+          </h3>
+        ) : null}
       </div>
-      {current !== null ? (
+      {!hasStepper && current !== null ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="outline">In {current}</Badge>
         </div>

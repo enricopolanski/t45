@@ -1,7 +1,9 @@
 import { isUrlFieldValue } from "@t45/contracts/models/Field";
-import { resolveTableLayout } from "@t45/contracts/models/Layout";
-import type { FieldView } from "@t45/contracts/resources/Workflows";
-import { BookOpenIcon } from "lucide-react";
+import { resolveRecordDisplay, resolveTableLayout } from "@t45/contracts/models/Layout";
+import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
+import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
+import { buildFieldViews } from "@t45/core/fieldViews";
+import { CheckIcon } from "lucide-react";
 import { type ReactNode, useId, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
@@ -20,9 +22,9 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-  DialogTrigger,
 } from "../ui/dialog";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
+import { CardFold } from "./CardFold";
 import {
   AttachmentLink,
   measureColumnWidths,
@@ -469,10 +471,35 @@ function Entries({ field }: { readonly field: FieldView }) {
 }
 
 /** The records a records field links, in the collection's own table. */
-function LinkedRecords({ field }: { readonly field: FieldView }) {
+function LinkedRecords({
+  field,
+  renderStatus,
+  reviewFields,
+}: {
+  readonly field: FieldView;
+  readonly renderStatus?: ((record: CollectionRecordView) => ReactNode) | undefined;
+  readonly reviewFields?: ((record: CollectionRecordView) => ReadonlyArray<FieldView>) | undefined;
+}) {
   const [openedKey, setOpenedKey] = useState<string | null>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const opened = field.records.find((record) => record.key === openedKey);
+  const collection = field.collection;
+  const details =
+    opened === undefined || collection === null
+      ? []
+      : [
+          ...(reviewFields?.(opened) ?? []),
+          ...buildFieldViews(
+            collection.fields.filter(
+              (candidate) =>
+                candidate.type === "group" &&
+                candidate.id !== resolveRecordDisplay(collection).image?.id &&
+                !collection.layout?.page?.hiddenFields?.includes(candidate.id),
+            ),
+            opened.values,
+            (id) => opened.files.find((file) => file.id === id) ?? null,
+          ),
+        ];
   return (
     <div className="flex flex-col gap-2 px-4 pt-3 pb-4">
       <BlockHeading field={field}>
@@ -487,7 +514,8 @@ function LinkedRecords({ field }: { readonly field: FieldView }) {
           label={field.label}
           collection={field.collection}
           records={field.records}
-          onOpen={(record) => setOpenedKey(record.key)}
+          onView={(record) => setOpenedKey(record.key)}
+          renderStatus={renderStatus}
         />
       ) : null}
       {opened === undefined || field.collection === null ? null : (
@@ -495,10 +523,15 @@ function LinkedRecords({ field }: { readonly field: FieldView }) {
           <DialogPopup ref={popupRef} initialFocus={popupRef} className="sm:max-w-5xl">
             <DialogHeader>
               <DialogTitle>{`${field.label} · ${opened.key}`}</DialogTitle>
-              <DialogDescription>Data from a previous step · Read-only</DialogDescription>
+              <DialogDescription>Read-only</DialogDescription>
             </DialogHeader>
             <DialogPanel>
               <RecordShowcase collection={field.collection} record={opened} />
+              {details.length > 0 ? (
+                <div className="mt-5 border-t pt-4">
+                  <ReadOnlyStepFields fields={details} />
+                </div>
+              ) : null}
             </DialogPanel>
           </DialogPopup>
         </Dialog>
@@ -511,7 +544,19 @@ function LinkedRecords({ field }: { readonly field: FieldView }) {
  * Fields in schema order, as blocks a line apart: a run of single fields, a group under its title,
  * a repeatable group's entries, a records field's records.
  */
-function Blocks({ fields }: { readonly fields: ReadonlyArray<FieldView> }) {
+function ReadOnlyStepFields({
+  fields,
+  recordStatus,
+  recordReviewFields,
+}: {
+  readonly fields: ReadonlyArray<FieldView>;
+  readonly recordStatus?:
+    | ((field: FieldView) => ((record: CollectionRecordView) => ReactNode) | undefined)
+    | undefined;
+  readonly recordReviewFields?:
+    | ((field: FieldView, record: CollectionRecordView) => ReadonlyArray<FieldView>)
+    | undefined;
+}) {
   const runs: Array<Array<FieldView>> = [];
   for (const field of fields) {
     const run = runs.at(-1);
@@ -523,7 +568,19 @@ function Blocks({ fields }: { readonly fields: ReadonlyArray<FieldView> }) {
       {runs.map((run) => {
         const [first] = run;
         const key = run.map((field) => field.key).join();
-        if (first?.type === "records") return <LinkedRecords key={key} field={first} />;
+        if (first?.type === "records")
+          return (
+            <LinkedRecords
+              key={key}
+              field={first}
+              renderStatus={recordStatus?.(first)}
+              reviewFields={
+                recordReviewFields === undefined
+                  ? undefined
+                  : (record) => recordReviewFields(first, record)
+              }
+            />
+          );
         if (first?.type === "group") {
           return first.repeatable ? (
             <Entries key={key} field={first} />
@@ -532,7 +589,11 @@ function Blocks({ fields }: { readonly fields: ReadonlyArray<FieldView> }) {
               <div className="px-4 pb-2">
                 <BlockHeading field={first} />
               </div>
-              <Blocks fields={first.rows.flatMap((row) => row.fields)} />
+              <ReadOnlyStepFields
+                fields={first.rows.flatMap((row) => row.fields)}
+                recordStatus={recordStatus}
+                recordReviewFields={recordReviewFields}
+              />
             </div>
           );
         }
@@ -546,27 +607,69 @@ function Blocks({ fields }: { readonly fields: ReadonlyArray<FieldView> }) {
   );
 }
 
-/** The data earlier steps gave this one, opened from a link without leaving the current step. */
-export function StepInputs({ fields }: { readonly fields: ReadonlyArray<FieldView> }) {
+export function ConfirmedRecord() {
   return (
-    <div>
-      <Dialog>
-        <DialogTrigger render={<Button variant="link" size="sm" />}>
-          <BookOpenIcon aria-hidden className="size-4" />
-          View previous step data
-        </DialogTrigger>
-        <DialogPopup className="sm:max-w-7xl">
-          <DialogHeader>
-            <DialogTitle>Previous step data</DialogTitle>
-            <DialogDescription>
-              Data received from earlier steps · Read-only. Open a record to see all its details.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel>
-            <Blocks fields={fields} />
-          </DialogPanel>
-        </DialogPopup>
-      </Dialog>
-    </div>
+    <span className="inline-flex items-center gap-1.5 font-semibold">
+      <CheckIcon aria-hidden className="size-4 text-success-foreground" />
+      Confirmed
+    </span>
+  );
+}
+
+type ReadOnlyRecordReview = Pick<
+  StepView["recordReviews"][number],
+  "entries" | "recordKeyFieldId"
+> & { readonly group: FieldView; readonly records: FieldView };
+
+export function ReadOnlyStepFieldCard({
+  title,
+  fields,
+  reviews,
+  defaultOpen,
+}: {
+  readonly title: string;
+  readonly fields: ReadonlyArray<FieldView>;
+  readonly reviews: ReadonlyArray<ReadOnlyRecordReview>;
+  readonly defaultOpen: boolean;
+}) {
+  if (fields.length === 0) return null;
+  const shown = fields.filter((field) => {
+    const review = reviews.find(({ group }) => group === field);
+    return (
+      review === undefined ||
+      field.rows.some((row) => !review.entries.some(({ rowId }) => rowId === row.id))
+    );
+  });
+  return (
+    <CardFold title={title} defaultOpen={defaultOpen}>
+      <ReadOnlyStepFields
+        fields={shown}
+        recordStatus={(field) => {
+          const linked = reviews.filter(({ records }) => records === field);
+          if (linked.length === 0) return undefined;
+          return (record) =>
+            linked.map(({ group, entries }) =>
+              entries.some(
+                ({ recordKey, isConfirmed }) => record.key === recordKey && isConfirmed,
+              ) ? (
+                <ConfirmedRecord key={group.key} />
+              ) : null,
+            );
+        }}
+        recordReviewFields={(field, record) =>
+          reviews.flatMap(({ group, records, entries, recordKeyFieldId }) => {
+            if (records !== field) return [];
+            const rowId = entries.find(({ recordKey }) => recordKey === record.key)?.rowId;
+            if (rowId == null) return [];
+            const row = group.rows.find(({ id }) => id === rowId);
+            return (
+              row?.fields.filter(
+                ({ key }) => key !== `${group.key}.${rowId}.${recordKeyFieldId}`,
+              ) ?? []
+            );
+          })
+        }
+      />
+    </CardFold>
   );
 }

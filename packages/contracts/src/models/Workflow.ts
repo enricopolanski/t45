@@ -184,6 +184,18 @@ export class WorkflowVersion extends Schema.Opaque<WorkflowVersion>()(
   }),
 ) {}
 
+/** Which earlier step the members of a step can consult after it is completed. */
+export const StepHistoryAccess = Schema.Struct({ stepId: StringId, previousStepId: StringId });
+export type StepHistoryAccess = typeof StepHistoryAccess.Type;
+
+export const isPreviousStep = (
+  steps: ReadonlyArray<Pick<StepDefinition, "id">>,
+  { stepId, previousStepId }: StepHistoryAccess,
+) => {
+  const previous = steps.findIndex(({ id }) => id === previousStepId);
+  return previous >= 0 && previous < steps.findIndex(({ id }) => id === stepId);
+};
+
 /** A team's use of a workflow, with its own people, settings and board. */
 export class Project extends Schema.Opaque<Project>()(
   Schema.Struct({
@@ -197,6 +209,7 @@ export class Project extends Schema.Opaque<Project>()(
     defaultAssignees: Schema.Record(Schema.String, StringId).check(
       Schema.isPropertyNames(StringId),
     ),
+    stepHistoryAccess: Schema.optionalKey(Schema.Array(StepHistoryAccess)),
     slug: Schema.NullOr(Slug),
     isArchived: Schema.Boolean,
   }),
@@ -372,6 +385,7 @@ const REFUSALS = {
   invalid_input:
     "A step's input must be a field of a step that comes earlier in the workflow. Remove the inputs that no longer are.",
   inputs_missing: "The next step can't start: one of its inputs has no value.",
+  invalid_step_history: "Previous step access must point to an earlier step of the workflow.",
   slug_taken: "Another project already has that slug.",
   invalid_people_ref: "That person or agent can no longer be given work.",
   no_steps: "This version has no steps yet.",
@@ -661,6 +675,27 @@ export const topLevelStep = (ticket: Ticket, step: Step) =>
 
 export const canSeeStep = (access: TicketAccess, ticket: Ticket, step: Step) =>
   access !== null && (access.type === "all" || topLevelStep(ticket, step).id === access.step.id);
+
+/** The page of a completed step may also be read through the project's explicit history access. */
+export const canReadStepHistory = (
+  access: TicketAccess,
+  project: Pick<Project, "stepHistoryAccess">,
+  version: Pick<WorkflowVersion, "steps">,
+  ticket: Ticket,
+  step: Step,
+) => {
+  if (access?.type !== "step" || step.status.type !== "completed") return false;
+  const root = topLevelStep(ticket, step);
+  return (
+    root.status.type === "completed" &&
+    (project.stepHistoryAccess ?? []).some(
+      (permission) =>
+        permission.stepId === access.step.stepDefinitionId &&
+        permission.previousStepId === root.stepDefinitionId &&
+        isPreviousStep(version.steps, permission),
+    )
+  );
+};
 
 /**
  * The steps `userId` is assigned to under the workflow's step `stepDefinitionId`, sub-steps

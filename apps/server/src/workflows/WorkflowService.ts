@@ -12,7 +12,7 @@ import type { ChatId } from "@t45/contracts/models/Chat";
 import { type AutomationOrigin, effectiveUserIdOf } from "@t45/contracts/models/ChatOrigin";
 import { canUse } from "@t45/contracts/models/Agent";
 import { canWorkSteps } from "@t45/contracts/models/Workflow";
-import type { Attachment } from "@t45/contracts/models/Attachment";
+import type { Attachment, AttachmentId } from "@t45/contracts/models/Attachment";
 import type { CollectionRecord } from "@t45/contracts/models/Collection";
 import {
   type Notification,
@@ -45,6 +45,8 @@ import {
   isProjectAdmin,
   ticketAccess,
   canSeeStep,
+  canReadStepHistory,
+  isPreviousStep,
   topLevelStep,
   stepsAssignedUnder,
   stepInputFields,
@@ -74,6 +76,7 @@ import {
   defaultValues,
   type Field,
   fieldValueProblem,
+  fileKeys,
   missingRow,
   resolveFieldPath,
   recordKeys,
@@ -83,7 +86,11 @@ import type { AssignmentView } from "@t45/contracts/resources/Assignments";
 import { buildFieldViews } from "@t45/core/fieldViews";
 import { NotFound } from "@t45/contracts/resources/errors";
 import type { NotificationView } from "@t45/contracts/resources/Notifications";
-import type { FieldView, TicketSummaryView } from "@t45/contracts/resources/Workflows";
+import type {
+  FieldView,
+  StepSnapshot,
+  TicketSummaryView,
+} from "@t45/contracts/resources/Workflows";
 import { StepView } from "@t45/contracts/resources/Workflows";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -161,11 +168,20 @@ const make = Effect.gen(function* () {
   const collectionRecords = yield* CollectionRecordRepository;
   const collectionAccess = yield* CollectionService;
   /** A record with the files its values hold. */
-  const recordView = (record: CollectionRecord) =>
-    Effect.map(files.forIds(Object.values(record.values).filter(isAttachmentId)), (held) => ({
-      ...record,
-      files: held.map(({ id, name }) => ({ id, name })),
-    }));
+  const recordView = (record: CollectionRecord, fields: ReadonlyArray<Field>) =>
+    Effect.map(
+      files.forIds(
+        fileKeys(fields, record.values)
+          .map((key) => record.values[key])
+          .filter(isAttachmentId),
+      ),
+      (held) => ({
+        ...record,
+        files: held
+          .filter((file) => file.collectionId === record.collectionId)
+          .map(({ id, name }) => ({ id, name })),
+      }),
+    );
   /** The views of `fields` with the records their records fields link, as long as those exist. */
   const linkRecords = (
     fields: ReadonlyArray<Field>,
@@ -202,7 +218,7 @@ const make = Effect.gen(function* () {
           ]),
           records: yield* Effect.forEach(
             linked.filter((record) => record !== null),
-            recordView,
+            (record) => recordView(record, collection.fields),
           ),
         };
       }),
@@ -484,7 +500,7 @@ const make = Effect.gen(function* () {
         name: nameOf(work, parent),
         instructions: definitionOf(work, parent).instructions,
       })),
-      inputs: yield* buildInputViews(work, step),
+      inputs: (yield* buildInputs(work, step)).inputs,
       fields: yield* buildStepFieldViews(work, step),
       comments: (yield* tickets.comments(step.id)).map(({ author, body, createdAt }) => ({
         author,
@@ -622,7 +638,7 @@ const make = Effect.gen(function* () {
   const buildStepFieldViews = (work: Work, step: Step) =>
     buildCurrentStepFieldViews(definitionOf(work, step).fields, step.values);
   /** The fields of earlier steps the step declares as inputs: all it gets of them. */
-  const buildInputViews = (work: Work, step: Step) =>
+  const buildInputs = (work: Work, step: Step, includeReviews = false) =>
     Effect.gen(function* () {
       const inputs = stepInputFields(work.version.steps, work.ticket, definitionOf(work, step));
       const bySource = new Map<Step, Array<Field>>();
@@ -637,7 +653,30 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
-      return inputs.flatMap(({ source, field }) => views.get(source.id)?.get(field.id) ?? []);
+      const shown = inputs.flatMap(({ source, field }) => {
+        const view = views.get(source.id)?.get(field.id);
+        return view === undefined ? [] : [{ source, field, view }];
+      });
+      const inputViews = shown.map(({ view }) => view);
+      if (!includeReviews) return { inputs: inputViews };
+      const inputRecordReviews = [...bySource].flatMap(([source, fields]) => {
+        const indexOf = (id: string) =>
+          shown.findIndex((input) => input.source.id === source.id && input.field.id === id);
+        return recordReviewsOf(fields, source).flatMap((review) => {
+          const recordsIndex = indexOf(review.recordsFieldId);
+          const groupIndex = indexOf(review.groupFieldId);
+          if (recordsIndex < 0 || groupIndex < 0) return [];
+          return [
+            {
+              recordsIndex,
+              groupIndex,
+              recordKeyFieldId: review.recordKeyFieldId,
+              entries: review.entries,
+            },
+          ];
+        });
+      });
+      return { inputs: inputViews, inputRecordReviews };
     });
 
   const listProjects = Effect.fnUntraced(function* (actorId: string) {
@@ -911,6 +950,15 @@ const make = Effect.gen(function* () {
     { projectId, ...changes }: Payload<"updateProject">,
   ) {
     const project = yield* loadManaged(actorId, projectId);
+    if (changes.stepHistoryAccess !== undefined) {
+      const versions = yield* versionsOf(project.workflowId);
+      if (
+        changes.stepHistoryAccess.some(
+          (entry) => !versions.some(({ steps }) => isPreviousStep(steps, entry)),
+        )
+      )
+        return yield* refuse("invalid_step_history");
+    }
     for (const assignee of Object.values(changes.defaultAssignees ?? {}))
       yield* requireValidPerson(assignee);
     const adminUserIds = [...new Set(changes.adminUserIds ?? project.adminUserIds)];
@@ -1074,15 +1122,51 @@ const make = Effect.gen(function* () {
     return yield* getStep(yield* resolvePerson(caller, work.project.id), work.ticket.id, stepId);
   });
 
-  const getStep = Effect.fnUntraced(function* (actorId: string, ticketId: string, stepId: string) {
+  const stepContents = Effect.fnUntraced(function* (work: Work, step: Step, forPage: boolean) {
+    const definition = definitionOf(work, step);
+    return {
+      definition,
+      assignee: step.assignee,
+      ...(yield* buildInputs(work, step, forPage)),
+      fields: yield* buildStepFieldViews(work, step),
+      recordReviews: recordReviewsOf(definition.fields, step),
+      subSteps: childSteps(work.ticket, work.version.steps, step).map((child) => ({
+        ...child,
+        name: nameOf(work, child),
+      })),
+      comments: yield* tickets.comments(step.id),
+      files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
+    } satisfies StepSnapshot;
+  });
+
+  const canBrowseHistory = (work: Work, access: TicketAccess, step: Step) =>
+    canReadStepHistory(access, work.project, work.version, work.ticket, step);
+
+  const getStep = Effect.fnUntraced(function* (
+    actorId: string,
+    ticketId: string,
+    stepId: string,
+    forPage = false,
+  ) {
     const work = yield* loadTicket(ticketId);
     const step = stepIn(work, stepId);
     const access = yield* accessOf(work, actorId);
-    if (step === null || access === null || !canSeeStep(access, work.ticket, step))
-      return yield* new NotFound();
+    if (step === null || access === null) return yield* new NotFound();
+    const canSee = canSeeStep(access, work.ticket, step);
+    if (!canSee && !(forPage && canBrowseHistory(work, access, step))) return yield* new NotFound();
     const parents = ancestorSteps(work.ticket, step).toReversed();
     const root = parents[0] ?? step;
     const isOpen = work.ticket.status.type === "open";
+    const isCompleted = forPage && step.status.type === "completed";
+    const snapshot = isCompleted ? yield* tickets.completedSteps.get(step.id) : null;
+    const { assignee, ...contents } = snapshot ?? (yield* stepContents(work, step, forPage));
+    const stepNavigation = work.ticket.steps
+      .filter(
+        (other) =>
+          other.parentStepId === null &&
+          (canSeeStep(access, work.ticket, other) || canBrowseHistory(work, access, other)),
+      )
+      .map((other) => ({ id: other.id, name: nameOf(work, other), status: other.status.type }));
     const history = yield* commandLog.listForStep(work.ticket.id, step.id);
     const historyAutomations = yield* automations.listByIds([
       ...new Set(
@@ -1092,9 +1176,13 @@ const make = Effect.gen(function* () {
       ),
     ]);
     return {
+      ...contents,
       ticket: work.ticket,
       projectName: work.project.name,
-      // Someone who sees one step gets no other step, not even its name.
+      ...(forPage ? { stepNavigation } : {}),
+      ...(isCompleted
+        ? { completedStep: snapshot === null ? ("legacy" as const) : ("snapshot" as const) }
+        : {}),
       otherSteps: yield* Effect.forEach(
         access.type === "all"
           ? work.ticket.steps.filter((other) => other.parentStepId === null)
@@ -1108,13 +1196,14 @@ const make = Effect.gen(function* () {
             };
           }),
       ),
-      inputs: yield* buildInputViews(work, step),
-      assignableUserIds: yield* Effect.filter(
-        (yield* projects.members.listForProject(work.project.id))
-          .filter((member) => member.stepId === root.stepDefinitionId)
-          .map((member) => member.userId),
-        isActivePerson,
-      ),
+      assignableUserIds: isCompleted
+        ? []
+        : yield* Effect.filter(
+            (yield* projects.members.listForProject(work.project.id))
+              .filter((member) => member.stepId === root.stepDefinitionId)
+              .map((member) => member.userId),
+            isActivePerson,
+          ),
       history: history.map(({ details, ...entry }) => {
         const automation = historyAutomations.find(({ id }) => id === details.automationId);
         return {
@@ -1124,56 +1213,63 @@ const make = Effect.gen(function* () {
             automation === undefined ? null : { id: automation.id, title: automation.title },
         };
       }),
-      canCancelTicket: isOpen && isProjectAdmin(yield* actorOf(actorId), work.project),
-      step,
-      definition: definitionOf(work, step),
+      canCancelTicket:
+        !isCompleted && isOpen && isProjectAdmin(yield* actorOf(actorId), work.project),
+      step: { ...step, assignee },
       parents: parents.map((parent) => ({ id: parent.id, name: nameOf(work, parent) })),
-      fields: yield* buildStepFieldViews(work, step),
-      recordReviews: recordReviewsOf(definitionOf(work, step).fields, step),
-      subSteps: childSteps(work.ticket, work.version.steps, step).map((child) => ({
-        ...child,
-        name: nameOf(work, child),
-      })),
-      comments: yield* tickets.comments(step.id),
-      proposals: yield* Effect.forEach(step.proposals ?? [], (proposal) =>
-        Effect.gen(function* () {
-          const resolved = resolveFieldPath(definitionOf(work, step).fields, proposal.fieldKey);
-          const record =
-            typeof resolved !== "string" &&
-            resolved.field.type === "records" &&
-            typeof proposal.value === "string"
-              ? yield* collectionRecords.get(resolved.field.collectionId, proposal.value)
-              : null;
-          return { ...proposal, record: record === null ? null : yield* recordView(record) };
-        }),
-      ),
-      files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
-      automations: yield* Effect.gen(function* () {
-        const attempts = yield* stepRuns(work, step);
-        const isRunnable = isOpen && isActionable(step);
-        const attached = definitionOf(work, step).automationIds;
-        // An archived automation starts no new run.
-        const live = yield* Effect.filter(attached, (id) =>
-          Effect.map(automations.get(id), (automation) => automation !== null),
-        );
-        return attached.map((id) => {
-          const canRun = isRunnable && live.includes(id);
-          const runs = attempts
-            .filter((run) => run.trigger.automationId === id)
-            .map(({ trigger, ...run }) => ({ ...run, ranBy: trigger.effectiveUserId }))
-            .toReversed();
-          return {
-            id,
-            runs,
-            runLabel: canRun
-              ? runs.length === 0
-                ? ("Run" as const)
-                : ("Run again" as const)
-              : null,
-            canStop: canRun && runs[0]?.status === "running",
-          };
-        });
-      }),
+      proposals: isCompleted
+        ? []
+        : yield* Effect.forEach(step.proposals ?? [], (proposal) =>
+            Effect.gen(function* () {
+              const resolved = resolveFieldPath(definitionOf(work, step).fields, proposal.fieldKey);
+              if (
+                typeof resolved === "string" ||
+                resolved.field.type !== "records" ||
+                typeof proposal.value !== "string"
+              )
+                return { ...proposal, record: null };
+              const collection = yield* collections.get(resolved.field.collectionId);
+              const record =
+                collection === null
+                  ? null
+                  : yield* collectionRecords.get(collection.id, proposal.value);
+              return {
+                ...proposal,
+                record:
+                  record === null || collection === null
+                    ? null
+                    : yield* recordView(record, collection.fields),
+              };
+            }),
+          ),
+      automations: !canSee
+        ? []
+        : yield* Effect.gen(function* () {
+            const attempts = yield* stepRuns(work, step);
+            const isRunnable = isOpen && isActionable(step);
+            const attached = definitionOf(work, step).automationIds;
+            // An archived automation starts no new run.
+            const live = yield* Effect.filter(attached, (id) =>
+              Effect.map(automations.get(id), (automation) => automation !== null),
+            );
+            return attached.map((id) => {
+              const canRun = isRunnable && live.includes(id);
+              const runs = attempts
+                .filter((run) => run.trigger.automationId === id)
+                .map(({ trigger, ...run }) => ({ ...run, ranBy: trigger.effectiveUserId }))
+                .toReversed();
+              return {
+                id,
+                runs,
+                runLabel: canRun
+                  ? runs.length === 0
+                    ? ("Run" as const)
+                    : ("Run again" as const)
+                  : null,
+                canStop: canRun && runs[0]?.status === "running",
+              };
+            });
+          }),
     };
   });
 
@@ -1370,6 +1466,19 @@ const make = Effect.gen(function* () {
         : stepEntryRefusal(work.version.steps, completed.ticket, completed.next);
     if (entryRefusal !== null) return yield* refuse(entryRefusal);
     yield* stopStepRuns(work, step);
+    const snapshot = yield* stepContents(work, step, true);
+    const linkedFileIds = (fields: ReadonlyArray<FieldView>): ReadonlyArray<AttachmentId> =>
+      fields.flatMap((field) => [
+        ...field.records.flatMap((record) => record.files.map(({ id }) => id)),
+        ...field.rows.flatMap((row) => linkedFileIds(row.fields)),
+      ]);
+    const fields = [...snapshot.fields, ...snapshot.inputs];
+    const attachments = new Set([
+      ...snapshot.files.map(({ id }) => id),
+      ...buildFieldFileIds(fields).filter(isAttachmentId),
+      ...linkedFileIds(fields),
+    ]);
+    yield* tickets.completedSteps.save(work.ticket.id, step.id, snapshot, [...attachments]);
     work.ticket = completed.ticket;
     if (completed.next !== null)
       yield* enterStep(work, completed.next, null, step.assignee, actorId);
@@ -1683,6 +1792,8 @@ const make = Effect.gen(function* () {
     const { work, step } = loaded.value;
     const access = yield* accessOf(work, userId);
     if (canSeeStep(access, work.ticket, step)) return true;
+    if (canBrowseHistory(work, access, step) && !(yield* tickets.completedSteps.has(step.id)))
+      return true;
     const isInput = isSameInput({
       stepId: step.stepDefinitionId,
       fieldId: file.fieldKey?.split(".")[0] ?? "",
@@ -1692,6 +1803,20 @@ const make = Effect.gen(function* () {
         canSeeStep(access, work.ticket, reader) && definitionOf(work, reader).inputs.some(isInput),
     );
   });
+  const completedStepFileAccess = Effect.fnUntraced(function* (userId: string, id: AttachmentId) {
+    const holders = yield* tickets.completedSteps.holdingFile(id);
+    if (holders.length === 0) return null;
+    for (const holder of holders) {
+      const work = yield* loadTicket(holder.ticketId).pipe(Effect.option);
+      if (Option.isNone(work)) continue;
+      const step = stepIn(work.value, holder.stepId);
+      if (step === null) continue;
+      const access = yield* accessOf(work.value, userId);
+      if (canSeeStep(access, work.value.ticket, step) || canBrowseHistory(work.value, access, step))
+        return true;
+    }
+    return false;
+  });
   yield* chats.onEnd((chatId) => automationEnded(chatId, null));
 
   return {
@@ -1699,6 +1824,7 @@ const make = Effect.gen(function* () {
     listTickets,
     getTicket,
     canReadStepFile,
+    completedStepFileAccess,
     memberDeactivated,
     runStepAutomation,
     stopStepAutomation,
@@ -1741,7 +1867,7 @@ const make = Effect.gen(function* () {
     watchStep: (actorId: string, stepId: string) =>
       Stream.unwrap(
         Effect.map(found(tickets.getByStepId(stepId)), (ticket) =>
-          tickets.watch(ticket, getStep(actorId, ticket.id, stepId)),
+          tickets.watch(ticket, getStep(actorId, ticket.id, stepId, true)),
         ),
       ).pipe(Stream.changesWith(sameStepView)),
     setStepField,

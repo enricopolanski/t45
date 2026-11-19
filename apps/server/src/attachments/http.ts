@@ -87,11 +87,16 @@ const attachmentRoute = HttpRouter.add(
     const workflows = yield* WorkflowService;
     const collections = yield* CollectionService;
     const readable = Effect.gen(function* () {
+      const historical = yield* workflows.completedStepFileAccess(
+        currentUser.userId,
+        attachment.id,
+      );
+      if (historical === true) return true;
       if (attachment.collectionId !== null)
         return yield* collections.canReadFile(currentUser.userId, attachment);
       const holders = yield* files.chatsHolding(attachment.id);
       if (attachment.stepId === null && holders.length === 0) {
-        return attachment.uploader === currentUser.userId;
+        return historical === null && attachment.uploader === currentUser.userId;
       }
       for (const chatId of holders) {
         if ((yield* chats.access(currentUser, chatId)) !== null) return true;

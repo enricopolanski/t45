@@ -17,15 +17,17 @@ export function CardFold({
   title,
   as: Card = "section",
   held = false,
+  defaultOpen = true,
   children,
 }: {
   readonly title: string;
   readonly as?: "aside" | "section";
   /** True keeps the content open, as when a field in it needs filling. */
   readonly held?: boolean;
+  readonly defaultOpen?: boolean;
   readonly children: ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <Card aria-label={title} className="card p-4">
       <Collapsible open={open || held} onOpenChange={setOpen}>

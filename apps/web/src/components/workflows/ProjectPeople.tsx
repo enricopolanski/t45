@@ -11,6 +11,7 @@ import { describeFailure } from "../../lib/failures";
 import { useIsAdmin, useSession } from "../../state/session";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import {
   AlertDialog,
   DialogClose,
@@ -162,6 +163,13 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
     const defaultAssignees = assignee === null ? others : { ...others, [stepId]: assignee };
     return run(() => api("workflows.updateProject", { projectId: project.id, defaultAssignees }));
   };
+  const setHistoryAccess = (stepId: string, previousStepId: string, checked: boolean) => {
+    const access = (project.stepHistoryAccess ?? []).filter(
+      (entry) => entry.stepId !== stepId || entry.previousStepId !== previousStepId,
+    );
+    const stepHistoryAccess = checked ? [...access, { stepId, previousStepId }] : access;
+    return run(() => api("workflows.updateProject", { projectId: project.id, stepHistoryAccess }));
+  };
   const renderDefault = (step: StepDefinition, stepPath: string, inherited: string) => (
     <div className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-muted-foreground">Assignee on entry</span>
@@ -198,11 +206,19 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
     <section aria-label="Who does each step" className="flex flex-col gap-2.5">
       <h2 className="text-sm font-semibold">Who does each step</h2>
       <p className="text-xs text-muted-foreground">
-        A step's members see the tickets in it, and nothing of the others. Every step needs a member
-        before the project adopts a version.
+        Every step needs a member before the project adopts a version.
       </p>
       {steps.length === 0 && <p className="text-sm text-muted-foreground">No steps yet.</p>}
       {steps.map((step, at) => {
+        const previousSteps = new Map(
+          [adopted, latest].flatMap((version) => {
+            const source = version?.steps ?? [];
+            const index = source.findIndex(({ id }) => id === step.id);
+            return index < 0
+              ? []
+              : source.slice(0, index).map((previous) => [previous.id, previous] as const);
+          }),
+        );
         const memberIds = members
           .filter((member) => member.stepId === step.id)
           .map((member) => member.userId);
@@ -299,6 +315,28 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
                 step.name,
                 at === 0 ? "Unassigned" : "Whoever did the step before",
               )}
+              {previousSteps.size > 0 ? (
+                <fieldset className="flex flex-col gap-2">
+                  <legend className="mb-1 text-xs font-medium text-muted-foreground">
+                    Read completed steps
+                  </legend>
+                  {[...previousSteps.values()].map((previous) => (
+                    <label key={previous.id} className="flex w-fit items-center gap-2 text-sm">
+                      <Checkbox
+                        disabled={busy}
+                        checked={(project.stepHistoryAccess ?? []).some(
+                          (entry) =>
+                            entry.stepId === step.id && entry.previousStepId === previous.id,
+                        )}
+                        onCheckedChange={(checked) =>
+                          void setHistoryAccess(step.id, previous.id, checked)
+                        }
+                      />
+                      {previous.name}
+                    </label>
+                  ))}
+                </fieldset>
+              ) : null}
               {renderSubSteps(step.subSteps, step.name)}
             </div>
           </details>
