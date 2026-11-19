@@ -35,6 +35,13 @@ test("a step lists the collection records it links, adds new ones to the collect
   await expect(ada.getByRole("heading", { name: "Listings", level: 1 })).toBeVisible();
   await ada.getByRole("button", { name: "New record" }).click();
   await saveRecord(ada, "B0OLD", "12");
+  await ada.getByRole("link", { name: "Edit collection" }).click();
+  await ada.getByRole("button", { name: "Layout", exact: true }).click();
+  const layout = ada.getByRole("dialog", { name: "Layout — Listings" });
+  await layout.getByRole("tab", { name: "Page", exact: true }).click();
+  await chooseOption(ada, "Template", "Showcase");
+  await layout.getByRole("button", { name: "Save layout" }).click();
+  await expect(layout).toHaveCount(0);
 
   const workflowId = await createWorkflow(ada, "Market check");
   await ada.getByRole("button", { name: "Add step" }).click();
@@ -62,10 +69,20 @@ test("a step lists the collection records it links, adds new ones to the collect
   // A new record goes to the collection and is linked here.
   await ada.getByRole("button", { name: "New record" }).click();
   await saveRecord(ada, "B0NEW", "9.5");
-  await expect(linked.getByRole("row", { name: "Record B0NEW" })).toContainText("9.5");
+  await expect(linked.getByRole("row", { name: "Record B0NEW" })).toContainText("9,5");
 
-  // A linked record opens as on the collection's page, and saving it shows here.
-  await linked.getByRole("row", { name: "Record B0OLD" }).click();
+  // The eye opens the configured showcase; the pencil opens the edit form directly.
+  const listing = linked.getByRole("row", { name: "Record B0OLD" });
+  const details = ada.getByRole("dialog", { name: "Record details", exact: true });
+  await listing.getByRole("cell", { name: "B0OLD", exact: true }).click();
+  await expect(details).toHaveCount(0);
+  await expect(ada.getByRole("dialog", { name: "Record", exact: true })).toHaveCount(0);
+  await listing.getByRole("button", { name: "View record B0OLD", exact: true }).click();
+  await expect(details.getByRole("heading", { name: "B0OLD" })).toBeVisible();
+  await details.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(details).toHaveCount(0);
+  await expect(linked.getByRole("columnheader", { name: "Actions", exact: true })).toBeVisible();
+  await linked.getByRole("button", { name: "Edit record B0OLD", exact: true }).click();
   await saveRecord(ada, null, "11");
   await expect(linked.getByRole("row", { name: "Record B0OLD" })).toContainText("11");
 

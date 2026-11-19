@@ -9,6 +9,7 @@ import {
   Collection,
   CollectionColumnOrder,
   CollectionRecord,
+  RecordFilters,
   Refused,
 } from "../models/Collection.ts";
 import { FieldPathSegment, FieldValues } from "../models/Field.ts";
@@ -23,6 +24,20 @@ export const CollectionRecordView = Schema.Struct({
   files: Schema.Array(Schema.Struct(Struct.pick(Attachment.fields, ["id", "name"]))),
 });
 export type CollectionRecordView = typeof CollectionRecordView.Type;
+
+const FieldValueQuery = Schema.Struct({
+  fieldId: FieldPathSegment,
+  /** A URL field: each value then names a web address one of its records holds there. */
+  linkFieldId: Schema.optionalKey(FieldPathSegment),
+});
+
+const FieldValuesWithCounts = Schema.Array(
+  Schema.Struct({
+    value: Schema.Union([Schema.String, Schema.Finite]),
+    count: Schema.Finite,
+    link: Schema.optionalKey(Schema.String),
+  }),
+);
 
 /** What an admin sets of a collection. */
 const CollectionDraft = Schema.Struct(
@@ -67,15 +82,14 @@ export const CollectionOperations = RpcGroup.make(
   Rpc.make("searchRecords", {
     payload: {
       collectionId: StringId,
-      /** Words any of a record's text values contain, ignoring case. */
+      /** Words that each appear in one of the searched fields, ignoring case. */
       text: Schema.optionalKey(Schema.String),
-      /** Values that top-level fields hold exactly, all of them. */
-      filters: Schema.optionalKey(
-        Schema.Record(
-          FieldPathSegment,
-          Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]),
-        ),
-      ),
+      /** The fields the words are looked for in; those the collection's layout searches without it. */
+      fields: Schema.optionalKey(Schema.Array(FieldPathSegment)),
+      /** What top-level fields' values must be, all of them: exactly a value, or within a range. */
+      filters: Schema.optionalKey(RecordFilters),
+      /** Which filter menus need their available values and counts with this search. */
+      filterChoices: Schema.optionalKey(Schema.Array(FieldValueQuery)),
       offset: Schema.optionalKey(NonNegativeInt),
       limit: Schema.optionalKey(
         NonNegativeInt.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
@@ -85,7 +99,21 @@ export const CollectionOperations = RpcGroup.make(
       records: Schema.Array(CollectionRecordView),
       /** Whether more records match after these. */
       hasMore: Schema.Boolean,
+      /** How many records match, and how many the collection holds. */
+      matchCount: NonNegativeInt,
+      totalCount: NonNegativeInt,
+      /** The values that match the search and all other filters, by filter field. */
+      filterChoices: Schema.optionalKey(Schema.Record(FieldPathSegment, FieldValuesWithCounts)),
     }),
+    error: CollectionErrors,
+  }),
+  Rpc.make("listFieldValues", {
+    payload: {
+      collectionId: StringId,
+      ...FieldValueQuery.fields,
+    },
+    /** The distinct values a top-level field holds, in order, up to 500, each with how many records hold it. */
+    success: FieldValuesWithCounts,
     error: CollectionErrors,
   }),
   Rpc.make("saveRecord", {

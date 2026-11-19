@@ -12,7 +12,7 @@ import {
   HttpClientResponse,
 } from "effect/http";
 import { Atom } from "effect/reactivity";
-import { Rpc, RpcSchema, RpcSerialization } from "effect/rpc";
+import { Rpc, RpcClient, RpcSchema, RpcSerialization } from "effect/rpc";
 import { vi } from "@effect/vitest";
 
 import { layer as apiLayer } from "../src/rpc/api";
@@ -102,7 +102,12 @@ export const makeFakeApi = Effect.gen(function* () {
       Effect.flatMap(request, respond),
     preprocess,
   );
-  const layer = apiLayer.pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, client)));
+  // The fake answers the HTTP protocol, which the agents' tools also call.
+  const layer = apiLayer.pipe(
+    Layer.provide(RpcClient.layerProtocolHttp({ url: "/api/rpc" })),
+    Layer.provide(RpcSerialization.layerNdjson),
+    Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
+  );
   return {
     layer,
     atomRuntime: Atom.context({ memoMap: Layer.makeMemoMapUnsafe() })(layer),

@@ -10,11 +10,21 @@ import { RunStatus } from "../models/ChatOrigin.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { Collection } from "../models/Collection.ts";
-import { Field, FieldDecimals, FieldPathSegment, FieldTones, Layout } from "../models/Field.ts";
+import {
+  ComparisonFields,
+  Field,
+  FieldDecimals,
+  FieldPathSegment,
+  FieldTones,
+  FieldValues,
+  Layout,
+  RecordEntryReview,
+} from "../models/Field.ts";
 import { CollectionRecordView } from "./Collections.ts";
 
 import {
   Comment,
+  Proposal,
   Refused as WorkflowRefused,
   Slug,
   Step,
@@ -157,6 +167,9 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     layout: Schema.optionalKey(Layout),
     /** Whether the text is shown as Markdown; its value stays the original source. */
     isMarkdown: Schema.optionalKey(Schema.Boolean),
+    /** Whether agents only propose its value, for a member to approve. */
+    isReviewed: Schema.optionalKey(Schema.Boolean),
+    comparisonFields: Schema.optionalKey(ComparisonFields),
     /** A sibling URL displayed on this field; its value is still kept in that URL field. */
     linkUrl: Schema.optionalKey(Schema.String),
     repeatable: Schema.Boolean,
@@ -230,8 +243,29 @@ export const StepView = Schema.Struct({
   /** The steps a sub-step sits in, outermost first; empty for a step. */
   parents: Schema.Array(StepNameView),
   fields: Schema.Array(FieldView),
+  recordReviews: Schema.Array(
+    Schema.Struct({
+      groupFieldId: FieldPathSegment,
+      ...RecordEntryReview.fields,
+      entries: Schema.Array(
+        Schema.Struct({
+          recordKey: TrimmedNonEmptyString,
+          rowId: Schema.NullOr(FieldPathSegment),
+          hasDuplicateEntries: Schema.Boolean,
+          isConfirmed: Schema.Boolean,
+        }),
+      ),
+    }),
+  ),
   subSteps: Schema.Array(Schema.Struct({ ...StepSummaryView.fields, name: TrimmedNonEmptyString })),
   comments: Schema.Array(Comment),
+  /**
+   * The values proposed for its reviewed fields, open or discarded; a records field's with the
+   * record it would link, null when it is gone.
+   */
+  proposals: Schema.Array(
+    Schema.Struct({ ...Proposal.fields, record: Schema.NullOr(CollectionRecordView) }),
+  ),
   files: Schema.Array(StepFileView),
   /** The automations the step's definition attaches, each with its latest run on this step. */
   automations: Schema.Array(
@@ -425,7 +459,7 @@ export const Workflows = RpcGroup.make(
     error: WorkflowErrors,
   }),
   Rpc.make("cancelTicket", {
-    payload: { ...ticket, reason: Schema.String },
+    payload: { ...ticket, reason: Schema.optionalKey(Schema.String) },
     error: WorkflowErrors,
   }),
   Rpc.make("watchStep", { payload: step, success: StepView, error: WorkflowErrors, stream: true }),
@@ -433,6 +467,41 @@ export const Workflows = RpcGroup.make(
   Rpc.make("getStep", { payload: step, success: StepView, error: WorkflowErrors }),
   Rpc.make("setStepField", {
     payload: { ...step, fieldKey: TrimmedNonEmptyString, value: FieldValue },
+    error: WorkflowErrors,
+  }),
+  /**
+   * Proposes a value for a reviewed field, for a member to approve or discard: a records field's
+   * proposal is one record's key. Refused when the value is already proposed, discarded or held.
+   */
+  Rpc.make("proposeStepField", {
+    payload: {
+      ...step,
+      fieldKey: TrimmedNonEmptyString,
+      value: FieldValue,
+      ...Struct.pick(Proposal.fields, ["whyYes", "whyNo", "score"]),
+    },
+    error: WorkflowErrors,
+  }),
+  /** A member sets the field to the proposed value, or links its record. */
+  Rpc.make("approveProposal", {
+    payload: { ...step, proposalId: StringId },
+    error: WorkflowErrors,
+  }),
+  /** A member turns the proposal down; nobody can propose its value again. */
+  Rpc.make("discardProposal", {
+    payload: { ...step, proposalId: StringId },
+    error: WorkflowErrors,
+  }),
+  /** A member saves and confirms one group entry for a linked record. */
+  Rpc.make("confirmRecordEntry", {
+    payload: {
+      ...step,
+      groupFieldId: FieldPathSegment,
+      recordKey: TrimmedNonEmptyString,
+      rowId: FieldPathSegment,
+      previousValues: Schema.NullOr(FieldValues),
+      values: FieldValues,
+    },
     error: WorkflowErrors,
   }),
   Rpc.make("markStepDone", { payload: step, error: WorkflowErrors }),

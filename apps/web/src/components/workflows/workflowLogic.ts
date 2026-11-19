@@ -242,10 +242,15 @@ export function inputSourcesFor(steps: ReadonlyArray<DraftStep>, id: string) {
   const fieldsOf = (
     step: DraftStep,
     path: string,
-  ): ReadonlyArray<{ readonly input: StepInput; readonly label: string }> => [
+  ): ReadonlyArray<{
+    readonly input: StepInput;
+    readonly label: string;
+    readonly field: DraftField;
+  }> => [
     ...step.fields.map((field) => ({
       input: { stepId: step.id, fieldId: field.id },
       label: `${path} › ${field.label || "Untitled field"}`,
+      field,
     })),
     ...step.subSteps.flatMap((subStep) =>
       fieldsOf(subStep, `${path} › ${subStep.name || "Untitled sub-step"}`),

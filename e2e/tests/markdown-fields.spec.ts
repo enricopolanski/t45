@@ -98,10 +98,14 @@ test("Markdown fields edit their source and keep formatting in entries, complete
   await page.waitForURL(/\/my-work$/u);
   await page.goto(`/boards/${projectId}`);
   await page.getByRole("region", { name: "Review", exact: true }).getByText("Tape").click();
-  await page.getByRole("button", { name: "Inputs", exact: true }).click();
+  await page.getByRole("button", { name: "View previous step data", exact: true }).click();
   await expect(page.locator(".chat-markdown strong", { hasText: "Sources" })).toBeVisible();
   await expect(page.locator("td .chat-markdown strong", { hasText: "Costs" })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Edit /u })).toHaveCount(0);
+  await page
+    .getByRole("dialog", { name: "Previous step data", exact: true })
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
   await page.getByRole("button", { name: /^Status: To do/u }).click();
   await page.getByRole("menuitem", { name: "Mark done" }).click();
   await page.waitForURL(/\/my-work$/u);
@@ -143,15 +147,17 @@ test("an existing collection can enable and disable Markdown without changing it
   await expect(destination).toHaveURL("https://example.com/listing");
   await destination.close();
   await expect(dialog).toHaveCount(0);
+  // An existing record opens on its own page.
+  const record = page.getByRole("form", { name: "Record", exact: true });
   await row.getByRole("cell").first().click();
-  await expect(dialog.locator("strong")).toHaveText("Sources");
-  await dialog.getByRole("button", { name: "Edit Notes", exact: true }).click();
-  await expect(dialog.getByRole("textbox", { name: "Notes", exact: true })).toHaveValue(rationale);
-  await dialog
+  await expect(record.locator("strong")).toHaveText("Sources");
+  await record.getByRole("button", { name: "Edit Notes", exact: true }).click();
+  await expect(record.getByRole("textbox", { name: "Notes", exact: true })).toHaveValue(rationale);
+  await record
     .getByRole("textbox", { name: "Notes", exact: true })
     .fill(`${rationale}\n- Verified`);
-  await dialog.getByRole("button", { name: "Save record" }).click();
-  await expect(dialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Save record" }).click();
+  await expect(record).toHaveCount(0);
   await expect(row.getByRole("listitem")).toHaveCount(3);
   await page.reload();
   await expect(row.getByRole("listitem")).toHaveCount(3);
@@ -160,7 +166,7 @@ test("an existing collection can enable and disable Markdown without changing it
   await page.getByRole("button", { name: "Save collection" }).click();
   await expect(row.locator("strong")).toHaveCount(0);
   await row.getByRole("cell").first().click();
-  await expect(dialog.getByRole("textbox", { name: "Notes", exact: true })).toHaveValue(
+  await expect(record.getByRole("textbox", { name: "Notes", exact: true })).toHaveValue(
     `${rationale}\n- Verified`,
   );
 });

@@ -9,9 +9,9 @@ import * as References from "effect/References";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { FetchHttpClient } from "effect/http";
 import { Atom } from "effect/reactivity";
 import { type Rpc, type RpcGroup, RpcClient, RpcClientError, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 
 import { appAtomRegistry } from "../state/atomRegistry";
 import { isRpcClientError } from "../lib/failures";
@@ -43,20 +43,34 @@ export class ApiClient extends Context.Service<
   { readonly unary: UnaryCalls; readonly streams: StreamCalls }
 >()("@t45/web/rpc/api/ApiClient") {}
 
+/** The client over whichever RPC protocol is provided. */
 export const layer = Layer.effect(
   ApiClient,
   Effect.map(RpcClient.make(RpcApi, { disableTracing: true }), (client) =>
     ApiClient.of({ unary: client, streams: client }),
   ),
-).pipe(
-  Layer.provide(RpcClient.layerProtocolHttp({ url: "/api/rpc" })),
-  Layer.provide(RpcSerialization.layerNdjson),
+);
+
+/**
+ * One WebSocket carries every call and watch: over HTTP/1.1 each open watch would take one of the
+ * 6 connections a browser keeps per host, across tabs, and stall the other calls.
+ */
+const socketProtocol = RpcClient.layerProtocolSocket().pipe(
+  Layer.provide(
+    Socket.layerWebSocket(
+      Effect.sync(
+        () => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/rpc/socket`,
+      ),
+    ),
+  ),
+  Layer.provide(Socket.layerWebSocketConstructorGlobal),
+  Layer.provide(RpcSerialization.layerJson),
 );
 
 /** Runs calls and other one-off Effects on the server's RPC client. */
 export const runtime = ManagedRuntime.make(
   layer.pipe(
-    Layer.provideMerge(FetchHttpClient.layer),
+    Layer.provide(socketProtocol),
     Layer.provideMerge(Layer.succeed(References.TracerEnabled, false)),
   ),
 );

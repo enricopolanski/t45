@@ -55,16 +55,19 @@ test("admins define collections whose records people and agents look up and save
 
   // Saving a key the collection holds replaces that record.
   const records = ada.getByRole("table", { name: "Records" });
+  // A record opens on a page of its own, which its address opens again.
   const fileUrl = async (name: string) => {
     await records.getByRole("row", { name: "Record B0ABC" }).click();
-    const dialog = ada.getByRole("dialog", { name: "Record" });
-    const url = await dialog.getByRole("link", { name }).getAttribute("href");
-    await ada.keyboard.press("Escape");
-    await expect(dialog).toHaveCount(0);
+    await expect(ada).toHaveURL(`/settings/collections/${collectionId}/records/B0ABC`);
+    await ada.reload();
+    const record = ada.getByRole("form", { name: "Record" });
+    const url = await record.getByRole("link", { name }).getAttribute("href");
+    await ada.goBack();
+    await expect(record).toHaveCount(0);
     return url!;
   };
   await saveRecord(ada, "B0ABC", "4.5", "manual.pdf");
-  await expect(records.getByRole("row", { name: "Record B0ABC" })).toContainText("4.50 €");
+  await expect(records.getByRole("row", { name: "Record B0ABC" })).toContainText("4,50 €");
   await expect(records.getByRole("columnheader", { name: "Price" })).toBeVisible();
   await expect(records.getByRole("columnheader", { name: "Manual" })).toHaveCount(0);
   const firstUrl = await fileUrl("manual.pdf");
@@ -135,9 +138,24 @@ test("admins define collections whose records people and agents look up and save
   const lastPage = await search({ limit: 1, offset: 1 });
   expect(lastPage.records.map(({ key }) => key)).toEqual(["B0XYZ"]);
   expect(lastPage.hasMore).toBe(false);
+  // An import uploads the files its lines name from the working folder.
+  const manualId = listings!.fields.find((field) => field.label === "Manual")!.id;
+  await agentApp.writeFile("imported.pdf", "%PDF-1.4 imported");
+  await agentApp.writeFile(
+    "import.jsonl",
+    `${JSON.stringify({ [keyId]: "B0IMP", [priceId]: 7, [manualId]: "imported.pdf" })}\n`,
+  );
+  const imported = await callTool("import_records", { collectionId, path: "import.jsonl" });
+  expect(toolText(imported)).toBe("Saved 1 of 1 records.");
   run.finish();
   await ada.goto(`/settings/collections/${collectionId}`);
   await expect(records.getByRole("row", { name: "Record B0XYZ" })).toContainText("3");
+  await records.getByRole("row", { name: "Record B0IMP" }).click();
+  const importedLink = ada.getByRole("form", { name: "Record" }).getByRole("link", {
+    name: "imported.pdf",
+  });
+  expect((await ada.request.get((await importedLink.getAttribute("href"))!)).status()).toBe(200);
+  await ada.goBack();
 
   // In a chat, the agent writes, but reads with the access of the person chatting.
   await ben.goto("/chats");
@@ -174,6 +192,13 @@ test("admins define collections whose records people and agents look up and save
   const layout = ada.getByRole("dialog", { name: "Layout — Listings" });
   const preview = layout.getByRole("table", { name: "Records" });
   await expect(preview.getByRole("columnheader", { name: "Price" })).toBeVisible();
+  await expect(
+    preview.getByRole("columnheader", { name: "Last update", exact: true }),
+  ).toBeVisible();
+  await layout.getByRole("checkbox", { name: "Show Last update", exact: true }).click();
+  await expect(preview.getByRole("columnheader", { name: "Last update", exact: true })).toHaveCount(
+    0,
+  );
   await layout.getByRole("checkbox", { name: "Price" }).click();
   await expect(preview.getByRole("columnheader", { name: "Price" })).toHaveCount(0);
   await layout.getByRole("button", { name: "Save layout" }).click();
@@ -181,4 +206,7 @@ test("admins define collections whose records people and agents look up and save
   await ada.goto(`/settings/collections/${collectionId}`);
   await expect(records.getByRole("row", { name: "Record B0ABC" })).toBeVisible();
   await expect(records.getByRole("columnheader", { name: "Price" })).toHaveCount(0);
+  await expect(records.getByRole("columnheader", { name: "Last update", exact: true })).toHaveCount(
+    0,
+  );
 });

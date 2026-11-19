@@ -37,6 +37,12 @@ serve({
       step,
     ),
     rpcTool(
+      "propose_value",
+      "workflows.proposeStepField",
+      "Propose a value for a field marked isReviewed, which set_field refuses: a member approves or discards it. Give the value as set_field takes it, but one record's key at a time for a records field; whyYes and whyNo in a sentence or two each, saying why it fits and what doesn't; and score, from 0 to 100, how well it fits. A value already proposed, discarded or held is refused: get_step lists the proposals.",
+      step,
+    ),
+    rpcTool(
       "comment",
       "workflows.commentOnStep",
       "Post a Markdown comment on your step: a question or your result. Use short paragraphs separated by blank lines, lists and labelled source links, with real newlines in the saved text, not literal backslash-n sequences. Do not wrap the comment in a code fence. Use progress_report for progress updates.",

@@ -26,10 +26,13 @@ const buttonVariants = cva(
       variant: {
         default:
           "not-disabled:inset-shadow-control-highlight border-primary bg-primary text-primary-foreground shadow-primary/24 shadow-xs [:active,[data-pressed]]:inset-shadow-control-pressed [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-primary/90",
+        success:
+          "not-disabled:inset-shadow-control-highlight border-success-foreground bg-success-foreground text-white shadow-success-foreground/24 shadow-xs [:active,[data-pressed]]:inset-shadow-control-pressed [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-success-foreground/90",
         destructive:
           "not-disabled:inset-shadow-control-highlight border-destructive bg-destructive text-white shadow-destructive/24 shadow-xs [:active,[data-pressed]]:inset-shadow-control-pressed [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-destructive/90",
         "destructive-outline":
           "border-input bg-popover bg-clip-padding text-destructive-foreground shadow-xs/5 not-disabled:not-active:not-data-pressed:before:shadow-[0_1px_--theme(--color-black/4%)] [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:border-destructive/32 [:hover,[data-pressed]]:bg-destructive/4",
+        link: "border-transparent text-primary underline underline-offset-4 [:hover,[data-pressed]]:text-primary/80",
         ghost:
           "[--control-icon-color:var(--muted-foreground)] border-transparent text-foreground [:hover,[data-pressed]]:bg-accent",
         "ghost-muted":

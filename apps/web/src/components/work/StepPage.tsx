@@ -8,6 +8,7 @@ import * as Stream from "effect/Stream";
 import { AtomRegistry } from "effect/reactivity";
 import {
   CalendarIcon,
+  CheckIcon,
   CircleCheckIcon,
   CircleStopIcon,
   CircleXIcon,
@@ -40,6 +41,8 @@ import { CardFold } from "./CardFold";
 import { OtherStep } from "./ItemSteps";
 import { ItemDescription } from "./ItemDescription";
 import { StepComments, StepFiles } from "./StepConversation";
+import { ProposalReview } from "./ProposalReview";
+import { RecordEntryReview } from "./RecordEntryReview";
 import { attachStepFile, StepFields } from "./StepFields";
 import { StepInputs } from "./StepInputs";
 import { StepStatus } from "./StepStatus";
@@ -121,13 +124,37 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const step = { stepId: view.step.id };
   const writes = view.ticket.status.type === "open";
   const incomplete = view.subSteps.filter((step) => step.status.type !== "completed");
-  const empty = missingFields(view.fields);
+  const reviewFields = view.recordReviews.flatMap((review) => {
+    const group = view.fields.find((field) => field.key === review.groupFieldId);
+    return group === undefined ? [] : [{ group, review }];
+  });
+  const fields = view.fields.filter((field) => {
+    const subject = reviewFields.find(({ group }) => field.key === group.key);
+    return (
+      subject === undefined ||
+      field.rows.some(
+        ({ id }) =>
+          !subject.review.entries.some(
+            ({ rowId, hasDuplicateEntries }) => rowId === id && !hasDuplicateEntries,
+          ),
+      )
+    );
+  });
+  const pendingReviews = view.fields.filter((field) =>
+    view.recordReviews.some(
+      (review) =>
+        review.recordsFieldId === field.key &&
+        review.entries.some(({ isConfirmed }) => !isConfirmed),
+    ),
+  );
+  const empty = missingFields(fields);
   const missing = triedDone ? empty : [];
   const unfinished = triedDone ? incomplete : [];
+  const unconfirmed = triedDone ? pendingReviews : [];
   const markDone = () => {
     setTriedDone(true);
     setError(null);
-    if (empty.length === 0 && incomplete.length === 0) {
+    if (empty.length === 0 && incomplete.length === 0 && pendingReviews.length === 0) {
       void act(async () => {
         await api("workflows.markStepDone", step);
         // Done, a step of the workflow leaves its members' sight: back to their work.
@@ -140,10 +167,11 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const open = (
     <section key="open" aria-label="Open step" className="flex flex-col gap-4">
       {error && <ErrorText text={error} />}
-      {missing.length > 0 || unfinished.length > 0 ? (
-        <MissingRecap missing={missing} unfinished={unfinished} />
+      {missing.length > 0 || unfinished.length > 0 || unconfirmed.length > 0 ? (
+        <MissingRecap missing={missing} unfinished={unfinished} unconfirmed={unconfirmed} />
       ) : null}
       <ItemDescription description={view.ticket.description} />
+      {view.inputs.length > 0 ? <StepInputs fields={view.inputs} /> : null}
       <StepFiles
         view={view}
         canWrite={writes}
@@ -153,16 +181,59 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
         }
       />
-      {view.inputs.length > 0 ? <StepInputs fields={view.inputs} /> : null}
       <StepFields
-        fields={view.fields}
+        fields={actions.canEditFields ? fields : view.fields}
         editable={actions.canEditFields}
         missing={new Set(missing.map((field) => field.key))}
+        holdOpen={unconfirmed.length > 0}
         onSave={(fieldKey, value) =>
           void act(() => api("workflows.setStepField", { ...step, fieldKey, value }))
         }
         onUpload={(fieldKey, file) => void act(() => attachStepFile(view.step.id, file, fieldKey))}
         onRecordSaved={() => void act(() => Promise.resolve())}
+        recordStatus={(field) => {
+          const { collection } = field;
+          const reviews = reviewFields.filter(({ review }) => review.recordsFieldId === field.key);
+          if (collection === null || reviews.length === 0) return undefined;
+          return (record) => (
+            <div className="flex flex-wrap gap-1">
+              {reviews.map(({ group, review }) => {
+                const entry = review.entries.find(({ recordKey }) => recordKey === record.key);
+                if (entry === undefined) return null;
+                return entry.isConfirmed ? (
+                  <span key={group.key} className="inline-flex items-center gap-1.5 font-semibold">
+                    <CheckIcon aria-hidden className="size-4 text-success-foreground" />
+                    Confirmed
+                  </span>
+                ) : (
+                  <RecordEntryReview
+                    key={group.key}
+                    step={view.step}
+                    item={{ group, review, collection, entry, record }}
+                    act={act}
+                  />
+                );
+              })}
+            </div>
+          );
+        }}
+        review={
+          actions.canEditFields ? (
+            <ProposalReview
+              view={view}
+              onReview={(proposal, isApproved) => {
+                const reviewed = { ...step, proposalId: proposal.id };
+                return act(
+                  () =>
+                    isApproved
+                      ? api("workflows.approveProposal", reviewed)
+                      : api("workflows.discardProposal", reviewed),
+                  true,
+                );
+              }}
+            />
+          ) : null
+        }
       />
       <StepSubSteps view={view} />
       <StepComments
@@ -459,9 +530,11 @@ function RunAutomation({
 function MissingRecap({
   missing,
   unfinished,
+  unconfirmed,
 }: {
   readonly missing: ReturnType<typeof missingFields>;
   readonly unfinished: ReadonlyArray<StepNameView>;
+  readonly unconfirmed: StepView["fields"];
 }) {
   const reveal = (key: string) => {
     const target = document.querySelector<HTMLElement>(`[data-field-key="${CSS.escape(key)}"]`);
@@ -483,6 +556,17 @@ function MissingRecap({
               onClick={() => reveal(field.key)}
             >
               Fill in {field.name}
+            </button>
+          </li>
+        ))}
+        {unconfirmed.map((field) => (
+          <li key={`review-${field.key}`}>
+            <button
+              type="button"
+              className="text-left text-destructive hover:underline"
+              onClick={() => reveal(field.key)}
+            >
+              Confirm reviews for {field.label}
             </button>
           </li>
         ))}
@@ -513,7 +597,7 @@ function ItemHeader({ view }: { readonly view: StepView }) {
         {view.projectName}
       </BackLink>
       <div className="flex flex-col gap-1">
-        <h2 className="text-2xl font-semibold tracking-tight">{view.ticket.title}</h2>
+        <h2 className="text-2xl font-semibold tracking-tight wrap-anywhere">{view.ticket.title}</h2>
         <h3 className="text-sm text-muted-foreground">
           {view.parents.map((parent) => (
             <Fragment key={parent.id}>
@@ -535,7 +619,7 @@ function ItemHeader({ view }: { readonly view: StepView }) {
           <Badge variant="outline">In {current}</Badge>
         </div>
       ) : null}
-      {view.ticket.status.type === "cancelled" ? (
+      {view.ticket.status.type === "cancelled" && view.ticket.status.reason !== undefined ? (
         <p className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
           <span className="font-medium">Cancelled:</span> {view.ticket.status.reason}
         </p>

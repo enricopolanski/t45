@@ -14,8 +14,7 @@ import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 
 /**
- * Asks for a reason before acting: blocking and cancelling both record one. Opened by
- * its caller; `onConfirm` answers with an error message, or null on success.
+ * Asks for a reason before acting. `onConfirm` answers with an error message or null on success.
  */
 export function ReasonDialog({
   open,
@@ -23,6 +22,7 @@ export function ReasonDialog({
   title,
   placeholder,
   confirmLabel,
+  isReasonOptional = false,
   onConfirm,
 }: {
   readonly open: boolean;
@@ -30,14 +30,17 @@ export function ReasonDialog({
   readonly title: string;
   readonly placeholder: string;
   readonly confirmLabel: string;
+  readonly isReasonOptional?: boolean;
   readonly onConfirm: (reason: string) => Promise<string | null>;
 }) {
   const id = useId();
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const canConfirm = !busy && (isReasonOptional || reason.trim() !== "");
 
   const submit = () => {
+    if (!canConfirm) return;
     setBusy(true);
     setError(null);
     void onConfirm(reason.trim()).then((failure) => {
@@ -73,7 +76,9 @@ export function ReasonDialog({
           <DialogPanel>
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor={`${id}-reason`}>Reason</Label>
+                <Label htmlFor={`${id}-reason`}>
+                  {isReasonOptional ? "Reason (optional)" : "Reason"}
+                </Label>
                 <Textarea
                   id={`${id}-reason`}
                   value={reason}
@@ -86,7 +91,7 @@ export function ReasonDialog({
             </div>
           </DialogPanel>
           <DialogFooter>
-            <Button type="submit" disabled={busy || !reason.trim()}>
+            <Button type="submit" disabled={!canConfirm}>
               {confirmLabel}
             </Button>
           </DialogFooter>

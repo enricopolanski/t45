@@ -6,6 +6,7 @@ import {
   canEditRecords,
   Collection,
   fieldsChangeRefusal,
+  filtersProblem,
   recordKeyOf,
   recordProblem,
 } from "./Collection.ts";
@@ -172,5 +173,15 @@ describe("field changes after records exist", () => {
       fieldsChangeRefusal(listings, { ...listings, fields: added, primaryKeyFieldId: "f_checked" }),
       "fields_locked",
     );
+  });
+});
+
+describe("record filters", () => {
+  it("take a value on a field, and a range only on a number or date field", () => {
+    assert.isNull(filtersProblem(fields, { f_asin: "B0ABC", f_price: { min: 2, max: 5 } }));
+    assert.isNotNull(filtersProblem(fields, { f_asin: { min: "A" } }));
+    assert.isNotNull(filtersProblem(fields, { f_price: { min: "cheap" } }));
+    assert.isNotNull(filtersProblem(fields, { f_packs: 2 }));
+    assert.isNotNull(filtersProblem(fields, { f_missing: "x" }));
   });
 });

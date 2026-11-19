@@ -3,7 +3,8 @@ import { CAPABILITIES_DIR, Capability } from "@t45/contracts/models/Capability";
 export const stepOperations = Capability.make({
   id: "step-operations",
   name: "Step operations",
-  description: "Reads a workflow step, fills fields and comments on its work.",
+  description:
+    "Reads a workflow step, fills fields, proposes values for reviewed fields and comments on its work.",
   requiredContext: ["stepId"],
   mcpServers: {
     step: {

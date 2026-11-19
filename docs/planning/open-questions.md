@@ -1,0 +1,13 @@
+# Alfa Product — open pricing questions
+
+Questions for the client about the pricing rules described in [price-suggesting.md](./price-suggesting.md).
+
+1. **What does LC mean in your request, and which costs does it include?** Does it mean landed cost: the purchase price plus the costs of getting the goods to Alfa's warehouse? Please confirm the definition and the included cost items. Landed cost is currently an interpretation, not a confirmed definition.
+2. **Which costs should be included when calculating the achieved contribution margin percentage?** The analysed spreadsheets subtract freight and packing when calculating the margin in euros, but exclude them from the percentage calculation. Should the percentage include those costs too? The minimum and ideal percentages per PU are already supplied in your documentation; this question concerns only the calculation formula.
+3. **Which rule takes priority when the competitor price target conflicts with the minimum margin?** The request aims for prices approximately 20% below Förch, Würth and BTI, and no higher than Amazon. If meeting those prices would put the margin below the minimum, should the proposal retain the minimum margin or allow an exception? The current proposal is to show the conflict for human review.
+4. **What exactly does rounding to €0.05 or €0.09 mean?** Are these price endings or rounding increments, and how should the system choose between them? The exception for selling prices below €1.20 is already stated in the request.
+5. **How should competitor prices be converted to net prices?** Should we use published B2B net prices where available and convert gross prices otherwise? The example calculations divide some gross prices by 1.19, but do not apply that consistently. Please confirm the conversion rule and how to identify the applicable VAT rate.
+6. **Where should Alfa's Datanorm price data come from, and how often should it be updated?** We have a supplied file; the ongoing source and update frequency remain to be confirmed.
+7. **How should new products be matched to comparable Alfa products in Datanorm?** The supplied file has empty product-group fields. Is there an ERP/PIM mapping we can use, or should matching rely on article families and descriptions?
+
+Already agreed: the former steps 3 and 4 become **Price and margin proposal**; the agent applies the documented minimum and ideal CM targets per PU directly, without asking the user to enter them again; the person reviews the proposed prices and calculated margins before passing them to management for a decision on authorising negotiation.

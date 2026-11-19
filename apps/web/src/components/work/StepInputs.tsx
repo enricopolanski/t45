@@ -1,21 +1,28 @@
 import { isUrlFieldValue } from "@t45/contracts/models/Field";
 import { resolveTableLayout } from "@t45/contracts/models/Layout";
 import type { FieldView } from "@t45/contracts/resources/Workflows";
-import { LockIcon } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { BookOpenIcon } from "lucide-react";
+import { type ReactNode, useId, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { RecordTable } from "../collections/Records";
+import { RecordShowcase } from "../collections/RecordDisplay";
 import { ExternalUrl } from "../ExternalUrl";
 import { CONTROL_CELL_DENSITY, FORM_GRIDS, FORM_SPANS } from "../fields/fieldPresentation";
 import { OneLineValue } from "../fields/OneLineValue";
 import { MarkdownText } from "../markdown/MarkdownText";
 import { OptionValue } from "../fields/OptionValue";
 import { Button } from "../ui/button";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+  DialogTrigger,
+} from "../ui/dialog";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
-import { FoldChevron } from "./CardFold";
 import {
   AttachmentLink,
   measureColumnWidths,
@@ -463,6 +470,9 @@ function Entries({ field }: { readonly field: FieldView }) {
 
 /** The records a records field links, in the collection's own table. */
 function LinkedRecords({ field }: { readonly field: FieldView }) {
+  const [openedKey, setOpenedKey] = useState<string | null>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const opened = field.records.find((record) => record.key === openedKey);
   return (
     <div className="flex flex-col gap-2 px-4 pt-3 pb-4">
       <BlockHeading field={field}>
@@ -473,8 +483,26 @@ function LinkedRecords({ field }: { readonly field: FieldView }) {
       {field.collection === null ? (
         <p className="text-sm text-muted-foreground">Its collection is gone.</p>
       ) : field.records.length > 0 ? (
-        <RecordTable label={field.label} collection={field.collection} records={field.records} />
+        <RecordTable
+          label={field.label}
+          collection={field.collection}
+          records={field.records}
+          onOpen={(record) => setOpenedKey(record.key)}
+        />
       ) : null}
+      {opened === undefined || field.collection === null ? null : (
+        <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : setOpenedKey(null))}>
+          <DialogPopup ref={popupRef} initialFocus={popupRef} className="sm:max-w-5xl">
+            <DialogHeader>
+              <DialogTitle>{`${field.label} · ${opened.key}`}</DialogTitle>
+              <DialogDescription>Data from a previous step · Read-only</DialogDescription>
+            </DialogHeader>
+            <DialogPanel>
+              <RecordShowcase collection={field.collection} record={opened} />
+            </DialogPanel>
+          </DialogPopup>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -518,33 +546,27 @@ function Blocks({ fields }: { readonly fields: ReadonlyArray<FieldView> }) {
   );
 }
 
-/** The values earlier steps gave this one, read-only, in a card that starts folded. */
+/** The data earlier steps gave this one, opened from a link without leaving the current step. */
 export function StepInputs({ fields }: { readonly fields: ReadonlyArray<FieldView> }) {
-  const [isOpen, setIsOpen] = useState(false);
   return (
-    <section aria-label="Inputs" className="card overflow-hidden">
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <div className="flex items-start gap-2 px-4 py-3">
-          <div className="flex flex-col gap-0.5">
-            <h2 className="flex">
-              <CollapsibleTrigger className="group flex items-center gap-1.5 text-left text-sm font-semibold">
-                Inputs
-                <FoldChevron />
-              </CollapsibleTrigger>
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              Information necessary to carry this step.
-            </p>
-          </div>
-          <span className="ml-auto flex h-5 items-center gap-1 text-xs text-muted-foreground">
-            <LockIcon aria-hidden className="size-3" />
-            Read-only
-          </span>
-        </div>
-        <CollapsiblePanel keepMounted>
-          <Blocks fields={fields} />
-        </CollapsiblePanel>
-      </Collapsible>
-    </section>
+    <div>
+      <Dialog>
+        <DialogTrigger render={<Button variant="link" size="sm" />}>
+          <BookOpenIcon aria-hidden className="size-4" />
+          View previous step data
+        </DialogTrigger>
+        <DialogPopup className="sm:max-w-7xl">
+          <DialogHeader>
+            <DialogTitle>Previous step data</DialogTitle>
+            <DialogDescription>
+              Data received from earlier steps · Read-only. Open a record to see all its details.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <Blocks fields={fields} />
+          </DialogPanel>
+        </DialogPopup>
+      </Dialog>
+    </div>
   );
 }

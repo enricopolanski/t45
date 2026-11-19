@@ -1,5 +1,8 @@
-import { Collection, CollectionColumnOrder } from "@t45/contracts/models/Collection";
-import { Layout } from "@t45/contracts/models/Field";
+import {
+  Collection,
+  CollectionColumnOrder,
+  CollectionLayout,
+} from "@t45/contracts/models/Collection";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,7 +19,7 @@ const encodeCollection = Schema.encodeEffect(
     fields: Schema.fromJsonString(Collection.fields.fields),
     memberUserIds: Schema.fromJsonString(Collection.fields.memberUserIds),
     columnOrder: Schema.optionalKey(Schema.fromJsonString(CollectionColumnOrder)),
-    layout: Schema.optionalKey(Schema.fromJsonString(Layout)),
+    layout: Schema.optionalKey(Schema.fromJsonString(CollectionLayout)),
   }),
 );
 

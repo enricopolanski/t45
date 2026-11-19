@@ -13,6 +13,7 @@ import { type AutomationOrigin, effectiveUserIdOf } from "@t45/contracts/models/
 import { canUse } from "@t45/contracts/models/Agent";
 import { canWorkSteps } from "@t45/contracts/models/Workflow";
 import type { Attachment } from "@t45/contracts/models/Attachment";
+import type { CollectionRecord } from "@t45/contracts/models/Collection";
 import {
   type Notification,
   NotificationId,
@@ -53,6 +54,12 @@ import {
   occupiedStep,
   stepCompletionRefusal,
   lastAdminRefusal,
+  approvedValue,
+  isReviewedField,
+  proposalRefusal,
+  recordReviewsOf,
+  withEditedStepValues,
+  confirmRecordEntry as withConfirmedRecordEntry,
   Step,
   StepDefinition,
   type Ticket,
@@ -153,6 +160,12 @@ const make = Effect.gen(function* () {
   const collections = yield* CollectionRepository;
   const collectionRecords = yield* CollectionRecordRepository;
   const collectionAccess = yield* CollectionService;
+  /** A record with the files its values hold. */
+  const recordView = (record: CollectionRecord) =>
+    Effect.map(files.forIds(Object.values(record.values).filter(isAttachmentId)), (held) => ({
+      ...record,
+      files: held.map(({ id, name }) => ({ id, name })),
+    }));
   /** The views of `fields` with the records their records fields link, as long as those exist. */
   const linkRecords = (
     fields: ReadonlyArray<Field>,
@@ -189,14 +202,7 @@ const make = Effect.gen(function* () {
           ]),
           records: yield* Effect.forEach(
             linked.filter((record) => record !== null),
-            (record) =>
-              Effect.map(
-                files.forIds(Object.values(record.values).filter(isAttachmentId)),
-                (held) => ({
-                  ...record,
-                  files: held.map(({ id, name }) => ({ id, name })),
-                }),
-              ),
+            recordView,
           ),
         };
       }),
@@ -1042,11 +1048,11 @@ const make = Effect.gen(function* () {
     if (!isProjectAdmin(yield* actorOf(actorId), work.project))
       return yield* refuse("not_project_admin");
     yield* requireOpen(work);
-    const reason = yield* requireReason(input.reason);
+    const reason = input.reason?.trim();
     for (const step of work.ticket.steps) yield* stopStepRuns(work, step);
     work.ticket = {
       ...work.ticket,
-      status: { type: "cancelled", reason },
+      status: reason ? { type: "cancelled", reason } : { type: "cancelled" },
     };
     yield* save(work);
     // Recorded on the step the ticket stopped in, whose history then ends with it.
@@ -1123,11 +1129,24 @@ const make = Effect.gen(function* () {
       definition: definitionOf(work, step),
       parents: parents.map((parent) => ({ id: parent.id, name: nameOf(work, parent) })),
       fields: yield* buildStepFieldViews(work, step),
+      recordReviews: recordReviewsOf(definitionOf(work, step).fields, step),
       subSteps: childSteps(work.ticket, work.version.steps, step).map((child) => ({
         ...child,
         name: nameOf(work, child),
       })),
       comments: yield* tickets.comments(step.id),
+      proposals: yield* Effect.forEach(step.proposals ?? [], (proposal) =>
+        Effect.gen(function* () {
+          const resolved = resolveFieldPath(definitionOf(work, step).fields, proposal.fieldKey);
+          const record =
+            typeof resolved !== "string" &&
+            resolved.field.type === "records" &&
+            typeof proposal.value === "string"
+              ? yield* collectionRecords.get(resolved.field.collectionId, proposal.value)
+              : null;
+          return { ...proposal, record: record === null ? null : yield* recordView(record) };
+        }),
+      ),
       files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
       automations: yield* Effect.gen(function* () {
         const attempts = yield* stepRuns(work, step);
@@ -1158,6 +1177,68 @@ const make = Effect.gen(function* () {
     };
   });
 
+  /** Refused unless the collection `field` links holds each of `keys`, and `caller` reads it. */
+  const requireRecords = Effect.fnUntraced(function* (
+    caller: Caller,
+    field: Extract<Field, { type: "records" }>,
+    keys: ReadonlyArray<string>,
+  ) {
+    yield* collectionAccess.requireReadable(caller, field.collectionId);
+    for (const key of keys) {
+      if ((yield* collectionRecords.get(field.collectionId, key)) === null)
+        return yield* new WorkflowRefused({
+          reason: "invalid_field_value",
+          detail: `Collection ${field.collectionId} has no record ${key}: save it with the collection tools first.`,
+        });
+    }
+  });
+
+  /** Puts `value` in the field at `fieldKey` of `step`, once it fits; `save` keeps it. */
+  const writeField = Effect.fnUntraced(function* (
+    caller: Caller,
+    work: Work,
+    step: Step,
+    field: Field,
+    fieldKey: string,
+    input: Schema.Json,
+  ) {
+    const blank =
+      (typeof input === "string" && input.trim() === "") ||
+      (Array.isArray(input) && input.length === 0);
+    const value = blank ? null : input;
+    let values = step.values;
+    const problem =
+      field.type === "file"
+        ? `${fieldKey} is a file field: attach a file with this field's key instead.`
+        : value !== null || field.type === "group"
+          ? fieldValueProblem(field, fieldKey, value ?? [])
+          : null;
+    if (problem !== null)
+      return yield* new WorkflowRefused({ reason: "invalid_field_value", detail: problem });
+    if (field.type === "records") yield* requireRecords(caller, field, recordKeys(value));
+    if (field.type === "group") {
+      const before = rowIds(step.values[fieldKey]);
+      const added = rowIds(value).filter((rowId) => !before.includes(rowId));
+      values = {
+        ...(yield* withoutRemovedRows(step, fieldKey, rowIds(value))),
+        ...Object.fromEntries(
+          added.flatMap((rowId) =>
+            Object.entries(defaultValues(field.fields, `${fieldKey}.${rowId}`)),
+          ),
+        ),
+      };
+    }
+    const others = Object.fromEntries(Object.entries(values).filter(([key]) => key !== fieldKey));
+    putStep(
+      work,
+      withEditedStepValues(
+        definitionOf(work, step).fields,
+        step,
+        value === null ? others : { ...others, [fieldKey]: value },
+      ),
+    );
+  });
+
   const setStepField = Effect.fnUntraced(function* (
     caller: Caller,
     input: Payload<"setStepField">,
@@ -1165,51 +1246,109 @@ const make = Effect.gen(function* () {
     const { work, step } = yield* loadStepFor(caller, input.stepId);
     yield* requireWorkingStep(work, step);
     const field = yield* resolveField(work, step, input.fieldKey);
-    const blank =
-      (typeof input.value === "string" && input.value.trim() === "") ||
-      (Array.isArray(input.value) && input.value.length === 0);
-    const value = blank ? null : input.value;
-    let values = step.values;
-    const problem =
-      field.type === "file"
-        ? `${input.fieldKey} is a file field: attach a file with this field's key instead.`
-        : value !== null || field.type === "group"
-          ? fieldValueProblem(field, input.fieldKey, value ?? [])
-          : null;
-    if (problem !== null)
-      return yield* new WorkflowRefused({ reason: "invalid_field_value", detail: problem });
-    if (field.type === "records") {
-      yield* collectionAccess.requireReadable(caller, field.collectionId);
-      for (const key of recordKeys(value)) {
-        if ((yield* collectionRecords.get(field.collectionId, key)) === null)
-          return yield* new WorkflowRefused({
-            reason: "invalid_field_value",
-            detail: `Collection ${field.collectionId} has no record ${key}: save it with the collection tools first.`,
-          });
-      }
-    }
-    if (field.type === "group") {
-      const before = rowIds(step.values[input.fieldKey]);
-      const added = rowIds(value).filter((rowId) => !before.includes(rowId));
-      values = {
-        ...(yield* withoutRemovedRows(step, input.fieldKey, rowIds(value))),
-        ...Object.fromEntries(
-          added.flatMap((rowId) =>
-            Object.entries(defaultValues(field.fields, `${input.fieldKey}.${rowId}`)),
-          ),
-        ),
-      };
-    }
-    const others = Object.fromEntries(
-      Object.entries(values).filter(([key]) => key !== input.fieldKey),
-    );
-    putStep(work, {
-      ...step,
-      values: value === null ? others : { ...others, [input.fieldKey]: value },
-    });
+    if (typeof caller !== "string" && isReviewedField(field))
+      return yield* new WorkflowRefused({ reason: "field_reviewed" });
+    yield* writeField(caller, work, step, field, input.fieldKey, input.value);
     yield* save(work);
     yield* record("workflows.setStepField", caller, targetOf(work, step), {
       fieldKey: input.fieldKey,
+    });
+  }, transaction);
+
+  const proposeStepField = Effect.fnUntraced(function* (
+    caller: Caller,
+    input: Payload<"proposeStepField">,
+  ) {
+    const { work, step, actorId } = yield* loadStepFor(caller, input.stepId);
+    yield* requireWorkingStep(work, step);
+    const field = yield* resolveField(work, step, input.fieldKey);
+    const refusal = proposalRefusal(step, field, input.fieldKey, input.value);
+    if (refusal !== null)
+      return yield* new WorkflowRefused({ reason: "invalid_proposal", detail: refusal });
+    if (field.type === "records") yield* requireRecords(caller, field, [input.value as string]);
+    else {
+      const problem = fieldValueProblem(field, input.fieldKey, input.value);
+      if (problem !== null)
+        return yield* new WorkflowRefused({ reason: "invalid_field_value", detail: problem });
+    }
+    const { stepId: _, ...proposed } = input;
+    putStep(work, {
+      ...step,
+      proposals: [
+        ...(step.proposals ?? []),
+        {
+          ...proposed,
+          id: generateId(),
+          author: typeof caller === "string" ? actorId : caller.agentId,
+          isDiscarded: false,
+          createdAt: yield* DateTime.now,
+        },
+      ],
+    });
+    yield* save(work);
+    yield* record("workflows.proposeStepField", caller, targetOf(work, step), {
+      fieldKey: input.fieldKey,
+    });
+  }, transaction);
+
+  /** A member's open proposal on a step they work on, and the field it is for. */
+  const loadProposal = Effect.fnUntraced(function* (actorId: string, stepId: string, id: string) {
+    const { work, step } = yield* loadForCommand(actorId, stepId);
+    yield* requireActionable(step);
+    const proposal = step.proposals?.find((each) => each.id === id && !each.isDiscarded);
+    if (proposal === undefined) return yield* new NotFound();
+    const field = yield* resolveField(work, step, proposal.fieldKey);
+    return { work, step, proposal, field };
+  });
+
+  const approveProposal = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"approveProposal">,
+  ) {
+    const { work, step, proposal, field } = yield* loadProposal(
+      actorId,
+      input.stepId,
+      input.proposalId,
+    );
+    const value = approvedValue(field, step.values[proposal.fieldKey], proposal);
+    const rest = step.proposals!.filter((each) => each.id !== proposal.id);
+    yield* writeField(actorId, work, { ...step, proposals: rest }, field, proposal.fieldKey, value);
+    yield* save(work);
+    yield* record("workflows.approveProposal", actorId, targetOf(work, step), {
+      fieldKey: proposal.fieldKey,
+    });
+  }, transaction);
+
+  const discardProposal = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"discardProposal">,
+  ) {
+    const { work, step, proposal } = yield* loadProposal(actorId, input.stepId, input.proposalId);
+    putStep(work, {
+      ...step,
+      proposals: step.proposals!.map((each) =>
+        each.id === proposal.id ? { ...each, isDiscarded: true } : each,
+      ),
+    });
+    yield* save(work);
+    yield* record("workflows.discardProposal", actorId, targetOf(work, step), {
+      fieldKey: proposal.fieldKey,
+    });
+  }, transaction);
+
+  const confirmRecordEntry = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"confirmRecordEntry">,
+  ) {
+    const { work, step } = yield* loadForCommand(actorId, input.stepId);
+    yield* requireActionable(step);
+    const reviewed = withConfirmedRecordEntry(definitionOf(work, step).fields, step, input);
+    if (typeof reviewed === "string")
+      return yield* new WorkflowRefused({ reason: "invalid_record_review", detail: reviewed });
+    putStep(work, reviewed);
+    yield* save(work);
+    yield* record("workflows.confirmRecordEntry", actorId, targetOf(work, step), {
+      fieldKey: `${input.groupFieldId}.${input.rowId}`,
     });
   }, transaction);
 
@@ -1606,6 +1745,10 @@ const make = Effect.gen(function* () {
         ),
       ).pipe(Stream.changesWith(sameStepView)),
     setStepField,
+    proposeStepField,
+    approveProposal,
+    confirmRecordEntry,
+    discardProposal,
     markStepDone,
     setStepAssignee,
     blockStep,

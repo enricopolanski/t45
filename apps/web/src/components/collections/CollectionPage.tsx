@@ -1,9 +1,10 @@
 import type { Collection } from "@t45/contracts/models/Collection";
-import { defaultValues, type FieldValues } from "@t45/contracts/models/Field";
+import { defaultValues } from "@t45/contracts/models/Field";
+import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
 import { api } from "../../rpc/api";
@@ -12,25 +13,46 @@ import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
+import { Tabs, TabsList, TabsTab } from "../ui/tabs";
 import { WorkFrame } from "../work/WorkFrame";
+import { RecordCards } from "./RecordDisplay";
+import { RecordCount, RecordFilterBar, RecordPager, useRecordSearch } from "./RecordSearch";
 import { RecordDialog, RecordTable } from "./Records";
 
-/** A collection's records: found by their text, opened to edit, and added. */
-export function CollectionPage({ collectionId }: { readonly collectionId: string }) {
+/**
+ * A collection's records as a table or cards: found by their words and filters, counted, shown
+ * `page` by page, opened on their own page, and added. A new search starts on the first page.
+ */
+export function CollectionPage({
+  collectionId,
+  page,
+  onPage,
+}: {
+  readonly collectionId: string;
+  readonly page: number;
+  readonly onPage: (page: number) => void;
+}) {
   const isAdmin = useIsAdmin();
+  const navigate = useNavigate();
   const [collection, setCollection] = useState<Collection | null>(null);
-  const [text, setText] = useState("");
-  const [found, setFound] = useState<{
-    readonly records: ReadonlyArray<CollectionRecordView>;
-    readonly hasMore: boolean;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { text, filters, found, filterChoices, refresh, ...search } = useRecordSearch(
+    collection,
+    page,
+  );
+  const setText = (next: string) => {
+    search.setText(next);
+    onPage(1);
+  };
+  const setFilters = (next: typeof filters) => {
+    search.setFilters(next);
+    onPage(1);
+  };
+  const [failure, setError] = useState<string | null>(null);
+  const error = failure ?? search.error;
   const [isReordering, setIsReordering] = useState(false);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
-  const [open, setOpen] = useState<{
-    readonly values: FieldValues;
-    readonly files: CollectionRecordView["files"];
-  } | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
+  const [view, setView] = useState<"table" | "cards" | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -42,32 +64,6 @@ export function CollectionPage({ collectionId }: { readonly collectionId: string
       current = false;
     };
   }, [collectionId]);
-
-  const search = useCallback(
-    (offset: number) => api("collections.searchRecords", { collectionId, text, offset }),
-    [collectionId, text],
-  );
-
-  useEffect(() => {
-    let current = true;
-    void search(0).then(
-      (loaded) => current && setFound(loaded),
-      (cause: unknown) => current && setError(describeFailure(cause)),
-    );
-    return () => {
-      current = false;
-    };
-  }, [search]);
-
-  const loadMore = () =>
-    void search(found?.records.length ?? 0).then(
-      (more) =>
-        setFound((shown) => ({
-          records: [...(shown?.records ?? []), ...more.records],
-          hasMore: more.hasMore,
-        })),
-      (cause: unknown) => setError(describeFailure(cause)),
-    );
 
   const reorderColumns = (columnOrder: ReadonlyArray<string>) => {
     setIsSavingOrder(true);
@@ -92,6 +88,12 @@ export function CollectionPage({ collectionId }: { readonly collectionId: string
         </p>
       </WorkFrame>
     );
+  const shownView = view ?? resolveRecordDisplay(collection).defaultView;
+  const openRecord = (record: CollectionRecordView) =>
+    void navigate({
+      to: "/settings/collections/$collectionId/records/$recordKey",
+      params: { collectionId, recordKey: record.key },
+    });
   return (
     <WorkFrame
       title={collection.title}
@@ -109,10 +111,7 @@ export function CollectionPage({ collectionId }: { readonly collectionId: string
               Edit collection
             </Button>
           ) : null}
-          <Button
-            size="sm"
-            onClick={() => setOpen({ values: defaultValues(collection.fields), files: [] })}
-          >
+          <Button size="sm" onClick={() => setIsAdding(true)}>
             <PlusIcon />
             New record
           </Button>
@@ -127,26 +126,51 @@ export function CollectionPage({ collectionId }: { readonly collectionId: string
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
+        <Tabs
+          value={shownView}
+          onValueChange={(next) => setView(next === "cards" ? "cards" : "table")}
+        >
+          <TabsList aria-label="Show records as">
+            <TabsTab value="table">Table</TabsTab>
+            <TabsTab value="cards">Grid</TabsTab>
+          </TabsList>
+        </Tabs>
         {/* A layout's columns replace the column order, so it reorders only without them. */}
-        {isAdmin && collection.layout?.table?.columns === undefined ? (
+        {isAdmin && shownView === "table" && collection.layout?.table?.columns === undefined ? (
           <label className="flex shrink-0 items-center gap-2 text-sm">
             <Switch size="sm" checked={isReordering} onCheckedChange={setIsReordering} />
             Reorder
           </label>
         ) : null}
       </div>
+      <RecordFilterBar
+        collection={collection}
+        filters={filters}
+        filterChoices={filterChoices}
+        onChange={setFilters}
+      />
       {error && <ErrorText text={error} />}
-      {found !== null && found.records.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {text.trim() === "" ? "No records yet." : "No record matches."}
-        </p>
+      {found === null ? null : found.totalCount === 0 ? (
+        <p className="text-sm text-muted-foreground">No records yet.</p>
+      ) : found.matchCount === 0 ? (
+        <p className="text-sm text-muted-foreground">No record matches.</p>
+      ) : (
+        <RecordCount matchCount={found.matchCount} totalCount={found.totalCount} />
+      )}
+      {found !== null && found.records.length > 0 && shownView === "cards" ? (
+        <RecordCards
+          label="Records"
+          collection={collection}
+          records={found.records}
+          onOpen={openRecord}
+        />
       ) : null}
-      {found !== null && (found.records.length > 0 || isReordering) ? (
+      {found !== null && (found.records.length > 0 || isReordering) && shownView === "table" ? (
         <RecordTable
           label="Records"
           collection={collection}
           records={found.records}
-          onOpen={(record) => setOpen({ values: record.values, files: record.files })}
+          onOpen={openRecord}
           reorder={
             isAdmin && isReordering
               ? { disabled: isSavingOrder, onChange: reorderColumns }
@@ -154,24 +178,20 @@ export function CollectionPage({ collectionId }: { readonly collectionId: string
           }
         />
       ) : null}
-      {found?.hasMore ? (
-        <div>
-          <Button size="sm" variant="outline" onClick={loadMore}>
-            Show more
-          </Button>
-        </div>
-      ) : null}
-      {open === null ? null : (
+      {found === null ? null : (
+        <RecordPager page={page} matchCount={found.matchCount} onPage={onPage} />
+      )}
+      {isAdding ? (
         <RecordDialog
           collection={collection}
-          record={open}
-          onClose={() => setOpen(null)}
+          record={{ values: defaultValues(collection.fields), files: [] }}
+          onClose={() => setIsAdding(false)}
           onSaved={() => {
-            setOpen(null);
-            void search(0).then(setFound, (cause: unknown) => setError(describeFailure(cause)));
+            setIsAdding(false);
+            refresh();
           }}
         />
-      )}
+      ) : null}
     </WorkFrame>
   );
 }

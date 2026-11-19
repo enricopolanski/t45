@@ -109,7 +109,7 @@ export async function startAgentApp() {
   const runtime = ManagedRuntime.make(
     HttpRouter.serve(routes, { disableLogger: true }).pipe(
       Layer.provide(handlers),
-      Layer.provide(RpcSerialization.layerNdjsonWith({ maxBufferSize: "unbounded" })),
+      Layer.provide(RpcSerialization.layerSchemaBinary({ maxFrameSize: "unbounded" })),
       Layer.provideMerge(
         NodeHttpServer.layer(() => NodeHttp.createServer(), { host: "127.0.0.1", port: 0 }),
       ),
@@ -219,6 +219,9 @@ export async function startAgentApp() {
     report: (execution: Execution, message: string) =>
       callTool(execution, "report-tools.mjs", "report", { message }),
     callTool,
+    /** Writes a file into the working folder the tools run in, as an agent would. */
+    writeFile: (name: string, contents: string) =>
+      NodeFSP.writeFile(NodePath.join(directory, name), contents),
   };
 
   /**
@@ -242,6 +245,8 @@ export async function startAgentApp() {
         T45_SERVER_URL: url,
         T45_TOOL_TOKEN: Redacted.value(execution.request.toolToken),
         T45_TOOL_INSTANCE: "",
+        // Bound by the runner from the execution's context, as for a step's automation.
+        T45_STEP_ID: execution.request.context.stepId ?? "",
       },
       stdio: ["pipe", "pipe", "pipe"],
     });

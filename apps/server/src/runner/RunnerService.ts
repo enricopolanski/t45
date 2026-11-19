@@ -29,7 +29,8 @@ const layer = Layer.unwrap(
           transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(token)),
         }),
       ),
-      Layer.provide(RpcSerialization.layerNdjsonWith({ maxBufferSize: "unbounded" })),
+      // As the runner's: VM disks travel as bytes.
+      Layer.provide(RpcSerialization.layerSchemaBinary({ maxFrameSize: "unbounded" })),
     );
   }),
 );

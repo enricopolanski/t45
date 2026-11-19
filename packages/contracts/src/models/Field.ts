@@ -30,6 +30,12 @@ const FieldBase = {
         "Shown only in an entry's or record's details, not as a column of the table listing them.",
     }),
   ),
+  isReviewed: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "On a step, agents only propose this field's value, saying why it fits and why not, and a member approves or discards each proposal. Not for groups or files.",
+    }),
+  ),
 };
 
 const DefaultValue = Schema.optionalKey(
@@ -113,6 +119,66 @@ const SelectField = Schema.Struct({
   tones: Schema.optionalKey(FieldTones),
 });
 
+const comparisonFieldId = String.raw`[A-Za-z0-9_-]+`;
+const minimumGroupField = (id: string) => String.raw`minBy\(\s*${id}\s*,\s*${id}\s*\)\.${id}`;
+const comparisonValue = `(?:${comparisonFieldId}|${minimumGroupField(comparisonFieldId)})`;
+
+/** A reference to a field in the row with the lowest value of a numeric group field. */
+export const comparisonGroupReference = new RegExp(
+  `^${minimumGroupField(`(${comparisonFieldId})`)}$`,
+  "u",
+);
+
+/** Inside a template, a field value or a quotient of two numeric field values. */
+export const comparisonFieldReference = new RegExp(
+  String.raw`\$\{\s*(${comparisonValue})\s*(?:/\s*(${comparisonValue})\s*)?\}`,
+  "gu",
+);
+
+const ComparisonTemplate = TrimmedNonEmptyString.check(
+  Schema.makeFilter(
+    (template) => {
+      const text = template.replaceAll(comparisonFieldReference, "");
+      return text.length < template.length && !text.includes("${");
+    },
+    { expected: "a template with at least one ${field_id} or field expression" },
+  ),
+);
+
+export const DerivedComparisonField = Schema.Struct({
+  id: FieldPathSegment,
+  label: TrimmedNonEmptyString,
+  template: ComparisonTemplate,
+  /** A different template for the proposed record when the source's template doesn't apply. */
+  proposedTemplate: Schema.optionalKey(ComparisonTemplate),
+});
+export type DerivedComparisonField = typeof DerivedComparisonField.Type;
+
+const ComparisonFieldOrder = Schema.UniqueArray(FieldPathSegment);
+const DerivedComparisonFields = Schema.Array(DerivedComparisonField).check(
+  Schema.makeFilter((fields) => hasDistinctIds(fields.map(({ id }) => id)), {
+    expected: "distinct derived field ids",
+  }),
+);
+
+/** The properties shown in a record comparison, by field ID on either side. */
+export const ComparisonFields = Schema.Union([
+  ComparisonFieldOrder,
+  Schema.Struct({
+    hidden: ComparisonFieldOrder,
+    order: Schema.optionalKey(ComparisonFieldOrder),
+    derived: Schema.optionalKey(DerivedComparisonFields),
+  }),
+  Schema.Struct({
+    shown: ComparisonFieldOrder,
+    derived: DerivedComparisonFields,
+  }),
+]).annotate({
+  description:
+    "Properties to show in order, or the exclusions and optional order of the automatic comparison.",
+});
+export type ComparisonFields = typeof ComparisonFields.Type;
+
 /**
  * Records of a collection that belong here, as the list of their keys: the records stay in the
  * collection, shared with every step and ticket that links them.
@@ -121,6 +187,7 @@ const RecordsField = Schema.Struct({
   ...FieldBase,
   type: Schema.Literal("records"),
   collectionId: StringId.annotate({ description: "The collection whose records it links." }),
+  comparisonFields: Schema.optionalKey(ComparisonFields),
 });
 
 /** Short text in place of a field's label, described on the string as sent, as `FieldUnit` is. */
@@ -129,7 +196,7 @@ const LayoutHeader = Schema.String.annotate({
     "Short header text shown in place of the field's label; its description stays the header's tooltip.",
 }).pipe(Schema.decodeTo(TrimmedNonEmptyString));
 
-const LayoutFieldId = FieldPathSegment.annotate({
+export const LayoutFieldId = FieldPathSegment.annotate({
   description: "Id of one of the fields; ids of fields that are gone are ignored.",
 });
 
@@ -215,6 +282,17 @@ export const Layout = Schema.Struct({
 });
 export type Layout = typeof Layout.Type;
 
+export const RecordEntryReview = Schema.Struct({
+  recordsFieldId: FieldPathSegment,
+  recordKeyFieldId: FieldPathSegment,
+  message: Schema.optionalKey(
+    TrimmedNonEmptyString.annotate({
+      description: "An optional message shown to the reviewer before confirmation.",
+    }),
+  ),
+});
+export type RecordEntryReview = typeof RecordEntryReview.Type;
+
 class GroupField extends Schema.Class<GroupField>("GroupField")({
   ...FieldBase,
   type: Schema.Literal("group"),
@@ -222,6 +300,12 @@ class GroupField extends Schema.Class<GroupField>("GroupField")({
   fields: Schema.Array(Schema.suspend((): Schema.Codec<Field> => Field)),
   layout: Schema.optionalKey(
     Layout.annotate({ description: "How a repeatable group's entries are shown." }),
+  ),
+  recordReview: Schema.optionalKey(
+    RecordEntryReview.annotate({
+      description:
+        "On a step, require a member to confirm one entry per linked record. A text field of the entry holds the linked record's key.",
+    }),
   ),
 }) {}
 
