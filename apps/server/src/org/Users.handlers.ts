@@ -30,6 +30,11 @@ export const layer = Users.middleware(Authorization).toLayer(
           const upload = yield* avatarUpload(avatar);
           return yield* service.updateProfile(userId, { displayName, avatar }, upload);
         }),
+      "users.setLocale": ({ locale }) =>
+        Effect.gen(function* () {
+          const { userId } = yield* CurrentUser;
+          yield* users.setLocale(userId, locale);
+        }),
       "users.approve": (request) => service.approve(request),
       "users.decline": (request) => service.decline(request),
       "users.changeRole": (request) => service.changeRole(request),

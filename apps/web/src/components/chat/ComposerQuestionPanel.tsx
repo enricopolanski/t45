@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon } from "lucide-react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -7,6 +8,7 @@ import type { ComposerQuestion } from "./useChatQuestions";
 
 /** The question the agent is waiting on, one field at a time. Key it by the question's key. */
 export function ComposerQuestionPanel({ question }: { question: ComposerQuestion }) {
+  const t = useTranslation();
   const { asked, progress, responding: isResponding, onToggleOption, onAdvance } = question;
   const field = progress.field;
   const autoAdvanceTimerRef = useRef<number | null>(null);
@@ -84,7 +86,9 @@ export function ComposerQuestionPanel({ question }: { question: ComposerQuestion
       <CollapsibleTrigger
         render={<ComposerBanner.Row render={<button type="button" />} />}
         title={
-          isCollapsed ? "Show the question and its options" : "Hide the question and its options"
+          isCollapsed
+            ? t("Show the question and its options")
+            : t("Hide the question and its options")
         }
       >
         <ComposerBanner.Icon />
@@ -108,7 +112,9 @@ export function ComposerQuestionPanel({ question }: { question: ComposerQuestion
           <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
             <p className="text-sm text-foreground/85">{field.question}</p>
             {field.multiSelect ? (
-              <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
+              <p className="mt-1 text-secondary-label text-xs">
+                {t("Select one or more options.")}
+              </p>
             ) : null}
             <div className="mt-2 space-y-0.5">
               {field.options.map((option, index) => {
@@ -144,7 +150,7 @@ export function ComposerQuestionPanel({ question }: { question: ComposerQuestion
               // A question that needs a step outside the chat can only be dismissed.
               <div className="mt-1 flex justify-end">
                 <Button size="xs" variant="ghost-muted" onClick={question.onDismiss}>
-                  Dismiss
+                  {t("Dismiss")}
                 </Button>
               </div>
             )}

@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { Role, User } from "@t45/contracts/models/User";
 import { useState, useTransition } from "react";
 
@@ -29,31 +30,37 @@ export function OrganizationSettings() {
  * controls. Role changes and deactivation end the member's sessions.
  */
 export function PeopleSettings() {
+  const t = useTranslation();
   const users = useUsers();
   return (
     <SettingsPageContainer>
       <SettingsSection
-        title="Requests"
-        description="Review requests to join your organization."
+        title={t("Requests")}
+        description={t("Review requests to join your organization.")}
         action={
           users.pending.length === 0 ? null : (
-            <span className="text-xs text-muted-foreground">{users.pending.length} waiting</span>
+            <span className="text-xs text-muted-foreground">
+              {users.pending.length} {t("waiting")}
+            </span>
           )
         }
       >
         {users.pending.length === 0 ? (
-          <SettingsEmpty>No one is waiting for approval.</SettingsEmpty>
+          <SettingsEmpty>{t("No one is waiting for approval.")}</SettingsEmpty>
         ) : (
           users.pending.map((user) => <UserRow key={user.id} user={user} />)
         )}
       </SettingsSection>
-      <SettingsSection title="Members" description="Manage member roles and access.">
+      <SettingsSection title={t("Members")} description={t("Manage member roles and access.")}>
         {users.active.map((user) => (
           <UserRow key={user.id} user={user} />
         ))}
       </SettingsSection>
       {users.deactivated.length > 0 ? (
-        <SettingsSection title="Deactivated" description="People who no longer have access.">
+        <SettingsSection
+          title={t("Deactivated")}
+          description={t("People who no longer have access.")}
+        >
           {users.deactivated.map((user) => (
             <UserRow key={user.id} user={user} />
           ))}
@@ -65,11 +72,12 @@ export function PeopleSettings() {
 
 /** The organization's name and logo, shown in the sidebar, the tab and the splash screen. */
 function OrganizationProfile() {
+  const t = useTranslation();
   const organization = useOrganization();
   return (
     <Section
-      title="Organization"
-      description="Your organization's name and logo, shown across the app."
+      title={t("Organization")}
+      description={t("Your organization's name and logo, shown across the app.")}
       card
     >
       <AvatarEditor
@@ -93,15 +101,16 @@ function RoleSelect({
   readonly disabled: boolean;
   readonly onChange: (role: Role) => void;
 }) {
+  const t = useTranslation();
   return (
     <Select value={value} disabled={disabled} onValueChange={(next) => next && onChange(next)}>
       <SelectTrigger size="sm" aria-label={label}>
-        <SelectValue>{(role: Role) => ROLE_LABELS[role]}</SelectValue>
+        <SelectValue>{(role: Role) => t(ROLE_LABELS[role])}</SelectValue>
       </SelectTrigger>
       <SelectPopup align="end" alignItemWithTrigger={false}>
         {Object.entries(ROLE_LABELS).map(([role, text]) => (
           <SelectItem key={role} value={role}>
-            {text}
+            {t(text)}
           </SelectItem>
         ))}
       </SelectPopup>
@@ -110,6 +119,7 @@ function RoleSelect({
 }
 
 function UserRow({ user }: { readonly user: User }) {
+  const t = useTranslation();
   const isViewer = useSession()?.userId === user.id;
   const [approveAs, setApproveAs] = useState<Role>("member");
   const [busy, startTransition] = useTransition();
@@ -118,12 +128,12 @@ function UserRow({ user }: { readonly user: User }) {
       return (
         <SettingsRow
           title={user.displayName}
-          description={`${user.email} · requested access`}
+          description={t("{0} · requested access", user.email)}
           control={
             <>
               <RoleSelect
                 value={approveAs}
-                label={`Approve ${user.displayName} as`}
+                label={t("Approve {0} as", user.displayName)}
                 disabled={busy}
                 onChange={setApproveAs}
               />
@@ -132,7 +142,7 @@ function UserRow({ user }: { readonly user: User }) {
                 disabled={busy}
                 onClick={() => startTransition(() => userActions.approve(user.id, approveAs))}
               >
-                Approve
+                {t("Approve")}
               </Button>
               <Button
                 size="sm"
@@ -140,7 +150,7 @@ function UserRow({ user }: { readonly user: User }) {
                 disabled={busy}
                 onClick={() => startTransition(() => userActions.decline(user.id))}
               >
-                Decline
+                {t("Decline")}
               </Button>
             </>
           }
@@ -149,13 +159,13 @@ function UserRow({ user }: { readonly user: User }) {
     case "active":
       return (
         <SettingsRow
-          title={isViewer ? `${user.displayName} · You` : user.displayName}
+          title={isViewer ? t("{0} · You", user.displayName) : user.displayName}
           description={user.email}
           control={
             <>
               <RoleSelect
                 value={user.role}
-                label={`Role for ${user.displayName}`}
+                label={t("Role for {0}", user.displayName)}
                 disabled={busy}
                 onChange={(role) => startTransition(() => userActions.changeRole(user.id, role))}
               />
@@ -165,7 +175,7 @@ function UserRow({ user }: { readonly user: User }) {
                 disabled={busy}
                 onClick={() => startTransition(() => userActions.deactivate(user.id))}
               >
-                Deactivate
+                {t("Deactivate")}
               </Button>
             </>
           }
@@ -175,7 +185,7 @@ function UserRow({ user }: { readonly user: User }) {
       return (
         <SettingsRow
           title={user.displayName}
-          description={`${user.email} · ${ROLE_LABELS[user.role]}`}
+          description={`${user.email} · ${t(ROLE_LABELS[user.role])}`}
           control={
             <Button
               size="sm"
@@ -183,7 +193,7 @@ function UserRow({ user }: { readonly user: User }) {
               disabled={busy}
               onClick={() => startTransition(() => userActions.reactivate(user.id))}
             >
-              Reactivate
+              {t("Reactivate")}
             </Button>
           }
         />

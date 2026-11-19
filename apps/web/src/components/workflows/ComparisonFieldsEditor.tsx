@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { Collection } from "@t45/contracts/models/Collection";
 import type { ComparisonFields, DerivedComparisonField } from "@t45/contracts/models/Field";
 import { PencilIcon } from "lucide-react";
@@ -30,6 +31,7 @@ export function ComparisonFieldsEditor({
   readonly onChange: (fields: ComparisonFields | undefined) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   const id = useId();
   const [editing, setEditing] = useState<DerivedComparisonField | null>(null);
   const { shown, hidden, order, derived } = resolveComparisonFields(comparisonFields);
@@ -82,13 +84,14 @@ export function ComparisonFieldsEditor({
           onCheckedChange={(enabled) => onChange(enabled ? { hidden: [] } : undefined)}
           disabled={disabled}
         />
-        Customize comparison fields
+        {t("Customize comparison fields")}
       </label>
       {fields === undefined ? null : (
         <fieldset className="flex flex-col gap-1.5" disabled={disabled}>
           <legend className="text-xs text-muted-foreground">
-            Show and order properties in the comparison. Empty properties and values already shown
-            in the headings are skipped.
+            {t(
+              "Show and order properties in the comparison. Empty properties and values already shown in the headings are skipped.",
+            )}
           </legend>
           <ol className="max-h-72 divide-y overflow-y-auto rounded-lg border">
             {[...fields, ...[...available.keys()].filter((key) => !fields.includes(key))].map(
@@ -115,7 +118,7 @@ export function ComparisonFieldsEditor({
                         type="button"
                         size="icon-xs"
                         variant="ghost"
-                        aria-label={`Edit derived field ${label}`}
+                        aria-label={t("Edit derived field {0}", label)}
                         disabled={disabled}
                         onClick={() => setEditing(definition)}
                       >
@@ -136,7 +139,7 @@ export function ComparisonFieldsEditor({
             )}
           </ol>
           <AddButton
-            label="Add derived field"
+            label={t("Add derived field")}
             onClick={() => setEditing({ id: `derived-${randomUUID()}`, label: "", template: "" })}
             disabled={disabled}
           />

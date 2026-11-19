@@ -1,7 +1,10 @@
+import { deDE } from "@clerk/localizations/de-DE";
+import { itIT } from "@clerk/localizations/it-IT";
 import { ClerkProvider, SignIn, useAuth, useClerk } from "@clerk/react";
 import * as Schema from "effect/Schema";
 import { useEffect, useRef, useState } from "react";
 
+import { translate, useLocale, useTranslation } from "~/i18n/locale";
 import {
   AuthRequestError,
   isAuthRequestError,
@@ -19,6 +22,7 @@ import { StandalonePage, StandalonePageHeader } from "../StandalonePage";
 
 /** A failed exchange can be retried this many times before the user must switch accounts. */
 const MAX_RETRY_ATTEMPTS = 3;
+const clerkLocalizations = { en: undefined, de: deDE, it: itIT };
 
 interface ExchangeAttempt {
   readonly attempt: number;
@@ -43,6 +47,8 @@ export function Login({
   readonly signOutFirst?: boolean;
   readonly onAuthenticated: () => void;
 }) {
+  const t = useTranslation();
+  const localization = clerkLocalizations[useLocale()];
   // Loopback servers trust an email as the identity token; deployments use Clerk.
   const isEmailTrusting = ["localhost", "127.0.0.1"].includes(window.location.hostname);
   const [email, setEmail] = useState("");
@@ -52,11 +58,11 @@ export function Login({
   return (
     <StandalonePage>
       <StandalonePageHeader
-        title="Sign in to this server"
+        title={t("Sign in to this server")}
         description={
           isEmailTrusting
-            ? "Development servers sign you in as any email you enter."
-            : "Sign in with your account to continue."
+            ? t("Development servers sign you in as any email you enter.")
+            : t("Sign in with your account to continue.")
         }
       />
       {isEmailTrusting ? (
@@ -76,17 +82,18 @@ export function Login({
             }
           }}
         >
-          <Field label="Email">
+          <Field label={t("Email")}>
             <Input value={email} onChange={(event) => setEmail(event.target.value)} required />
           </Field>
           <Button type="submit" disabled={isSubmitting}>
-            Sign in
+            {t("Sign in")}
           </Button>
           {errorMessage && <ErrorText text={errorMessage} />}
         </form>
       ) : (
         <ClerkProvider
           appearance={clerkAppearance}
+          {...(localization === undefined ? {} : { localization })}
           publishableKey={process.env.AUTH_CLERK_PUBLISHABLE_KEY ?? ""}
         >
           <ClerkLogin signOutFirst={signOutFirst} onAuthenticated={onAuthenticated} />
@@ -104,6 +111,7 @@ function ClerkLogin({
   readonly signOutFirst: boolean;
   readonly onAuthenticated: () => void;
 }) {
+  const t = useTranslation();
   const { getToken, isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const { signOut } = useClerk();
   const [errorMessage, setErrorMessage] = useState("");
@@ -169,7 +177,7 @@ function ClerkLogin({
         if (signOutAttemptRef.current !== signOutAttempt) {
           return;
         }
-        setErrorMessage(describeFailure(error, "Sign-out failed."));
+        setErrorMessage(describeFailure(error, translate("Sign-out failed.")));
       },
     );
   }, [isLoaded, isSignedIn, shouldSignOut, signOut, signOutAttemptNumber]);
@@ -247,7 +255,7 @@ function ClerkLogin({
       {shouldSignOut ? (
         errorMessage ? null : (
           <p role="status" className="text-sm text-muted-foreground">
-            Signing you out…
+            {t("Signing you out…")}
           </p>
         )
       ) : (
@@ -255,7 +263,7 @@ function ClerkLogin({
           {isSignedIn ? null : <SignIn fallbackRedirectUrl="/login" />}
           {isSignedIn && !errorMessage ? (
             <p role="status" className="text-sm text-muted-foreground">
-              Preparing your session…
+              {t("Preparing your session…")}
             </p>
           ) : null}
         </>
@@ -270,11 +278,11 @@ function ClerkLogin({
               size="sm"
               onClick={hasSignOutFailed ? retrySignOut : retry}
             >
-              Try again
+              {t("Try again")}
             </Button>
           ) : null}
           <Button type="button" variant="secondary" size="sm" onClick={switchAccount}>
-            Use another account
+            {t("Use another account")}
           </Button>
         </div>
       ) : null}

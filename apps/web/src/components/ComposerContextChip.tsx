@@ -1,3 +1,4 @@
+import { translate, useTranslation } from "~/i18n/locale";
 import { createContext, use } from "react";
 
 import { formatAttachmentSize } from "~/lib/attachmentFiles";
@@ -44,7 +45,7 @@ export function composerContextRecordsFromDraft(input: {
 
 function uploadStatusSuffix(upload: AttachmentUploadState | undefined): string | null {
   if (upload?.status === "uploading") return formatAttachmentUploadProgress(upload.progress);
-  if (upload?.status === "failed") return "upload failed";
+  if (upload?.status === "failed") return translate("upload failed");
   return null;
 }
 
@@ -61,12 +62,13 @@ function ImageContextChip(props: {
   attachment: ComposerImageAttachment;
   upload: AttachmentUploadState | undefined;
 }) {
+  const t = useTranslation();
   const { expandImage } = use(ComposerChipsContext);
   if (composerAttachmentNeedsReattach(props.attachment))
     return (
       <UnresolvedChip
         label={props.attachment.name}
-        tooltip="Attach this image again or remove it to send."
+        tooltip={t("Attach this image again or remove it to send.")}
       />
     );
   return (
@@ -86,6 +88,7 @@ function FileContextChip(props: {
   attachment: ComposerFileAttachment;
   upload: AttachmentUploadState | undefined;
 }) {
+  const t = useTranslation();
   const needsReattach = composerAttachmentNeedsReattach(props.attachment);
   return (
     <FileChip
@@ -93,10 +96,13 @@ function FileContextChip(props: {
       size={formatAttachmentSize(props.attachment.sizeBytes)}
       error={props.upload?.status === "failed"}
       unresolved={needsReattach}
-      suffix={needsReattach ? "attach again" : uploadStatusSuffix(props.upload)}
+      suffix={needsReattach ? t("attach again") : uploadStatusSuffix(props.upload)}
       tooltip={
         needsReattach
-          ? `${props.attachment.name} was not saved with this draft. Attach it again to send it.`
+          ? t(
+              "{0} was not saved with this draft. Attach it again to send it.",
+              props.attachment.name,
+            )
           : attachmentTooltip(props.attachment, props.upload)
       }
     />
@@ -105,6 +111,7 @@ function FileContextChip(props: {
 
 /** Compact chip for one prompt reference, resolved against the draft's records. */
 export function ComposerContextReferenceChip(props: { contextId: string; label: string }) {
+  const t = useTranslation();
   const entry = use(ComposerChipsContext).records.get(props.contextId);
   if (entry?.attachment.type === "image")
     return <ImageContextChip attachment={entry.attachment} upload={entry.upload} />;
@@ -113,7 +120,7 @@ export function ComposerContextReferenceChip(props: { contextId: string; label: 
   return (
     <UnresolvedChip
       label={props.label}
-      tooltip="This context is no longer available. Remove it or attach it again."
+      tooltip={t("This context is no longer available. Remove it or attach it again.")}
     />
   );
 }

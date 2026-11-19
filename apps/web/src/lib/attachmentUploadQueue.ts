@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import { ATTACHMENT_IMAGE_MIME_TYPES, type ChatAttachment } from "@t45/contracts/models/Attachment";
 import { create } from "zustand";
 
@@ -76,7 +77,10 @@ async function verifyPersistedAttachmentUpload(
     const response = await fetch(url, { method: "HEAD", cache: "no-store" });
     if (response.ok) return { status: "verified" };
     if (response.status === 404) return { status: "missing" };
-    return { status: "failed", error: new Error(`Attachment check failed (${response.status}).`) };
+    return {
+      status: "failed",
+      error: new Error(translate("Attachment check failed ({0}).", response.status)),
+    };
   } catch (error) {
     return { status: "failed", error };
   }
@@ -104,15 +108,15 @@ function uploadBytes(input: {
         try {
           resolve(decodeUploadResult(xhr.responseText).attachmentId);
         } catch {
-          reject(new Error("Upload returned no attachment id"));
+          reject(new Error(translate("Upload returned no attachment id")));
         }
       } else {
         reject(new Error(describeUploadRefusal(xhr.status)));
       }
     });
-    xhr.addEventListener("error", () => reject(new Error("Upload failed")));
-    xhr.addEventListener("timeout", () => reject(new Error("Upload timed out")));
-    xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+    xhr.addEventListener("error", () => reject(new Error(translate("Upload failed"))));
+    xhr.addEventListener("timeout", () => reject(new Error(translate("Upload timed out"))));
+    xhr.addEventListener("abort", () => reject(new Error(translate("Upload cancelled"))));
     xhr.send(input.file);
   });
 
@@ -152,8 +156,8 @@ async function runUpload(job: UploadJob): Promise<void> {
         status: "failed",
         reason:
           verification.status === "missing"
-            ? "Uploaded file expired. Remove it and attach it again."
-            : "Uploaded file could not be verified. Retry when the server reconnects.",
+            ? translate("Uploaded file expired. Remove it and attach it again.")
+            : translate("Uploaded file could not be verified. Retry when the server reconnects."),
       });
       return;
     }
@@ -166,14 +170,17 @@ async function runUpload(job: UploadJob): Promise<void> {
           (supportedMimeType) => supportedMimeType === job.attachment.mimeType.toLowerCase(),
         );
   if (!mimeType) {
-    setUploadState(job.attachment.id, { status: "failed", reason: "Unsupported image type" });
+    setUploadState(job.attachment.id, {
+      status: "failed",
+      reason: translate("Unsupported image type"),
+    });
     return;
   }
   const file = job.attachment.file;
   if (!file) {
     setUploadState(job.attachment.id, {
       status: "failed",
-      reason: "Original file is no longer available",
+      reason: translate("Original file is no longer available"),
     });
     return;
   }
@@ -209,7 +216,7 @@ async function runUpload(job: UploadJob): Promise<void> {
     }
     setUploadState(job.attachment.id, {
       status: "failed",
-      reason: error instanceof Error ? error.message : "Upload failed",
+      reason: error instanceof Error ? error.message : translate("Upload failed"),
     });
     return;
   }
@@ -232,7 +239,10 @@ function pumpUploads(): void {
     void runUpload(job)
       .catch(() => {
         if (!job.cancelled) {
-          setUploadState(job.attachment.id, { status: "failed", reason: "Upload failed" });
+          setUploadState(job.attachment.id, {
+            status: "failed",
+            reason: translate("Upload failed"),
+          });
         }
       })
       .finally(() => {

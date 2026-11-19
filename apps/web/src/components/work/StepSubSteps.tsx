@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { StepView } from "@t45/contracts/resources/Workflows";
 import { Link } from "@tanstack/react-router";
 
@@ -10,11 +11,12 @@ import { actorName, STEP_STATE_LABELS } from "./workLogic";
  * every one is completed. Shown only when the step has sub-steps.
  */
 export function StepSubSteps({ view }: { readonly view: StepView }) {
+  const t = useTranslation();
   const directory = useWorkDirectory();
   if (view.subSteps.length === 0) return null;
   return (
-    <section aria-label="Sub-steps" className="flex flex-col gap-2.5">
-      <h2 className="text-sm font-semibold">Sub-steps</h2>
+    <section aria-label={t("Sub-steps")} className="flex flex-col gap-2.5">
+      <h2 className="text-sm font-semibold">{t("Sub-steps")}</h2>
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
         {view.subSteps.map((step) => (
           <div key={step.id} className="flex items-center gap-3">
@@ -36,7 +38,7 @@ export function StepSubSteps({ view }: { readonly view: StepView }) {
                 {actorName(directory, step.assignee)}
               </p>
             </Link>
-            <Badge variant="outline">{STEP_STATE_LABELS[step.status.type]}</Badge>
+            <Badge variant="outline">{t(STEP_STATE_LABELS[step.status.type])}</Badge>
           </div>
         ))}
       </div>

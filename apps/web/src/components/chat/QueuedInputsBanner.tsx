@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { PendingInput } from "@t45/contracts/resources/Chats";
 import { replaceComposerContextReferences } from "@t45/core/composerContextReferences";
 import { ListOrderedIcon } from "lucide-react";
@@ -19,25 +20,31 @@ export function QueuedInputsBanner(props: {
   readonly inputs: ReadonlyArray<PendingInput>;
   readonly onCancel: CancelInput;
 }) {
+  const t = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const { inputs } = props;
   return (
     <ComposerBanner.Root
       role="region"
-      aria-label={`${inputs.length} queued message${inputs.length === 1 ? "" : "s"}`}
+      aria-label={t(
+        inputs.length === 1 ? "{0} queued message" : "{0} queued messages",
+        inputs.length,
+      )}
       aria-live="polite"
       data-chat-composer-collapsed-controls="true"
     >
       <Collapsible open={expanded} onOpenChange={setExpanded}>
         <CollapsibleTrigger
           render={<ComposerBanner.Row render={<button type="button" />} />}
-          aria-label={expanded ? "Collapse queued messages" : "Expand queued messages"}
+          aria-label={expanded ? t("Collapse queued messages") : t("Expand queued messages")}
           onPointerDown={keepComposerFocus}
         >
           <ComposerBanner.Icon>
             <ListOrderedIcon />
           </ComposerBanner.Icon>
-          <ComposerBanner.Content className="text-muted-foreground">Queued</ComposerBanner.Content>
+          <ComposerBanner.Content className="text-muted-foreground">
+            {t("Queued")}
+          </ComposerBanner.Content>
           <ComposerBanner.Actions>
             <ComposerBanner.Count>{inputs.length}</ComposerBanner.Count>
             <ComposerBanner.ToggleIcon expanded={expanded} />
@@ -58,6 +65,7 @@ export function QueuedInputsBanner(props: {
 }
 
 function QueuedInputRow({ input, onCancel }: { input: PendingInput; onCancel: CancelInput }) {
+  const t = useTranslation();
   const [cancelling, startCancel] = useTransition();
   const images = input.attachments.filter((attachment) => attachment.type === "image");
   const previewText = replaceComposerContextReferences(input.text, (reference) =>
@@ -97,7 +105,7 @@ function QueuedInputRow({ input, onCancel }: { input: PendingInput; onCancel: Ca
           <TooltipTrigger
             render={
               <ComposerBanner.Dismiss
-                aria-label="Cancel queued message"
+                aria-label={t("Cancel queued message")}
                 disabled={cancelling}
                 onClick={() =>
                   startCancel(async () => {
@@ -107,7 +115,7 @@ function QueuedInputRow({ input, onCancel }: { input: PendingInput; onCancel: Ca
               />
             }
           />
-          <TooltipPopup>Cancel</TooltipPopup>
+          <TooltipPopup>{t("Cancel")}</TooltipPopup>
         </Tooltip>
       </ComposerBanner.Actions>
     </ComposerBanner.Row>

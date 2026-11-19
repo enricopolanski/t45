@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Link } from "@tanstack/react-router";
 
 import { api } from "../../rpc/api";
@@ -12,28 +13,30 @@ const loadProjects = () => api("workflows.listProjects", undefined);
 
 /** The projects I manage. Organization admins manage every project. */
 export function ProjectList() {
+  const t = useTranslation();
   const { detail: projects, error } = useWorkflowData(loadProjects);
   return (
     <WorkFrame
-      title="Projects"
+      title={t("Projects")}
       actions={
         <>
           <WorkflowNavigation />
           <Button size="sm" render={<Link to="/settings/projects/new" />}>
-            New project
+            {t("New project")}
           </Button>
         </>
       }
     >
       <p className="text-sm text-muted-foreground">
-        Projects use a workflow and configure who does the work. Each ticket is one run of that
-        project.
+        {t(
+          "Projects use a workflow and configure who does the work. Each ticket is one run of that project.",
+        )}
       </p>
-      <section aria-label="Projects" className="flex flex-col gap-3">
+      <section aria-label={t("Projects")} className="flex flex-col gap-3">
         {error && <ErrorText text={error} />}
         {projects !== null && projects.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No projects yet. Choose a workflow to configure a project for your team.
+            {t("No projects yet. Choose a workflow to configure a project for your team.")}
           </p>
         ) : null}
         {projects?.map(({ project, workflow }) => (
@@ -43,9 +46,11 @@ export function ProjectList() {
           >
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{project.name}</p>
-              <p className="text-xs text-muted-foreground">Workflow: {workflow.name}</p>
+              <p className="text-xs text-muted-foreground">
+                {t("Workflow:")} {workflow.name}
+              </p>
             </div>
-            {project.isArchived ? <Badge variant="secondary">Archived</Badge> : null}
+            {project.isArchived ? <Badge variant="secondary">{t("Archived")}</Badge> : null}
             <Button
               size="sm"
               variant="ghost"
@@ -53,7 +58,7 @@ export function ProjectList() {
                 <Link to="/settings/projects/$projectId/edit" params={{ projectId: project.id }} />
               }
             >
-              Edit
+              {t("Edit")}
             </Button>
           </div>
         ))}

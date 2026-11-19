@@ -8,11 +8,11 @@ import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 import { ChatRepository } from "../chats/ChatRepository.ts";
 import { ChatEvents } from "../chats/ChatEvents.ts";
-import type { ChatId } from "@t45/contracts/models/Chat";
+import type { ChatId, Refusal as ChatRefusal } from "@t45/contracts/models/Chat";
 import { type AutomationOrigin, effectiveUserIdOf } from "@t45/contracts/models/ChatOrigin";
 import { canUse } from "@t45/contracts/models/Agent";
 import { canWorkSteps } from "@t45/contracts/models/Workflow";
-import type { Attachment } from "@t45/contracts/models/Attachment";
+import type { Attachment, AttachmentId } from "@t45/contracts/models/Attachment";
 import type { CollectionRecord } from "@t45/contracts/models/Collection";
 import {
   type Notification,
@@ -22,6 +22,8 @@ import {
 import { generateId } from "@t45/contracts/models/primitives";
 import { Refused as UserRefused } from "@t45/contracts/models/User";
 import {
+  type AutomationSkipReason,
+  automationTriggerOf,
   stepInTicket,
   childSteps,
   ancestorSteps,
@@ -45,6 +47,8 @@ import {
   isProjectAdmin,
   ticketAccess,
   canSeeStep,
+  canReadStepHistory,
+  isPreviousStep,
   topLevelStep,
   stepsAssignedUnder,
   stepInputFields,
@@ -73,7 +77,10 @@ import {
 import {
   defaultValues,
   type Field,
+  type FieldValues,
   fieldValueProblem,
+  fileKeys,
+  groupRows,
   missingRow,
   resolveFieldPath,
   recordKeys,
@@ -83,7 +90,12 @@ import type { AssignmentView } from "@t45/contracts/resources/Assignments";
 import { buildFieldViews } from "@t45/core/fieldViews";
 import { NotFound } from "@t45/contracts/resources/errors";
 import type { NotificationView } from "@t45/contracts/resources/Notifications";
-import type { FieldView, TicketSummaryView } from "@t45/contracts/resources/Workflows";
+import type {
+  FieldView,
+  StepFieldSelection,
+  StepSnapshot,
+  TicketSummaryView,
+} from "@t45/contracts/resources/Workflows";
 import { StepView } from "@t45/contracts/resources/Workflows";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -137,6 +149,15 @@ const stepFileForChat = (file: Attachment) => ({
 });
 
 const sameStepView = Schema.toEquivalence(StepView);
+const encodeCompactJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+/** Why a chat refuses to start a step's automation; it refuses a new automation chat for nothing else. */
+const SKIP_REASON_OF_CHAT_REFUSAL: Partial<Record<ChatRefusal, AutomationSkipReason>> = {
+  agent_unavailable: "automation_unavailable",
+  input_too_long: "step_too_large",
+  too_many_files: "step_too_large",
+  images_too_large: "step_too_large",
+  file_unavailable: "file_unavailable",
+};
 const isAutomationId = Schema.is(AutomationId);
 
 /** A ticket with its project and the version of the workflow it runs on. */
@@ -161,11 +182,20 @@ const make = Effect.gen(function* () {
   const collectionRecords = yield* CollectionRecordRepository;
   const collectionAccess = yield* CollectionService;
   /** A record with the files its values hold. */
-  const recordView = (record: CollectionRecord) =>
-    Effect.map(files.forIds(Object.values(record.values).filter(isAttachmentId)), (held) => ({
-      ...record,
-      files: held.map(({ id, name }) => ({ id, name })),
-    }));
+  const recordView = (record: CollectionRecord, fields: ReadonlyArray<Field>) =>
+    Effect.map(
+      files.forIds(
+        fileKeys(fields, record.values)
+          .map((key) => record.values[key])
+          .filter(isAttachmentId),
+      ),
+      (held) => ({
+        ...record,
+        files: held
+          .filter((file) => file.collectionId === record.collectionId)
+          .map(({ id, name }) => ({ id, name })),
+      }),
+    );
   /** The views of `fields` with the records their records fields link, as long as those exist. */
   const linkRecords = (
     fields: ReadonlyArray<Field>,
@@ -202,7 +232,7 @@ const make = Effect.gen(function* () {
           ]),
           records: yield* Effect.forEach(
             linked.filter((record) => record !== null),
-            recordView,
+            (record) => recordView(record, collection.fields),
           ),
         };
       }),
@@ -484,7 +514,7 @@ const make = Effect.gen(function* () {
         name: nameOf(work, parent),
         instructions: definitionOf(work, parent).instructions,
       })),
-      inputs: yield* buildInputViews(work, step),
+      inputs: (yield* buildInputs(work, step)).inputs,
       fields: yield* buildStepFieldViews(work, step),
       comments: (yield* tickets.comments(step.id)).map(({ author, body, createdAt }) => ({
         author,
@@ -507,11 +537,36 @@ const make = Effect.gen(function* () {
   const formatAutomationContext = (brief: unknown) =>
     ["```json", JSON.stringify(brief, null, 2), "```"].join("\n");
 
+  const describeField = ({ id: key, label, type }: Field) => ({ key, label, type });
+  const listAutomationFields = (work: Work, step: Step) => ({
+    inputs: stepInputFields(work.version.steps, work.ticket, definitionOf(work, step)).map(
+      ({ source, field }) => ({ ...describeField(field), sourceStepId: source.stepDefinitionId }),
+    ),
+    fields: definitionOf(work, step).fields.map((field) => ({
+      ...describeField(field),
+      ...(isReviewedField(field) ? { isReviewed: true } : {}),
+    })),
+  });
+
   const buildAutomationInput = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
     automation: Automation,
   ) {
+    if (automation.stepContext === "on_demand") {
+      const definition = definitionOf(work, step);
+      return {
+        text: [
+          `You are working on "${definition.name}" of "${work.ticket.title}" in "${work.project.name}".`,
+          automation.prompt,
+          "Use step_get_fields to read the input and output values you need. The list below identifies the input and output fields available to you. Use step_propose_value for reviewed fields and step_set_field for other fields.",
+          encodeCompactJson(listAutomationFields(work, step)),
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        attachments: [],
+      };
+    }
     const brief = yield* buildAutomationContext(work, step);
     const instructions = brief.instructions.trim();
     const subject =
@@ -552,6 +607,90 @@ const make = Effect.gen(function* () {
       actorId,
     });
   });
+  /** Whoever runs a step's automation must be able to use its agent. */
+  const requireStepAutomation = Effect.fnUntraced(function* (id: AutomationId, userId: string) {
+    const automation = yield* automations.get(id);
+    const agent = automation === null ? null : yield* agents.get(automation.agentId);
+    if (
+      automation === null ||
+      agent === null ||
+      !canWorkSteps(agent, yield* capabilities.listForAgent(agent.id)) ||
+      !canUse(agent, userId)
+    )
+      return yield* refuse("invalid_automations");
+    return automation;
+  });
+  /** Starts the automation on the step in a new chat; execution begins once the caller commits. */
+  const startStepRun = Effect.fnUntraced(function* (
+    work: Work,
+    step: Step,
+    automation: Automation,
+    trigger: { readonly effectiveUserId: string; readonly isAutomatic: boolean },
+  ) {
+    yield* chats.startAutomation(
+      {
+        type: "step",
+        ticketId: work.ticket.id,
+        stepId: step.id,
+        automationId: automation.id,
+        ...trigger,
+      },
+      automation.agentId,
+      {
+        title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
+        input: yield* buildAutomationInput(work, step, automation),
+      },
+    );
+  });
+  /**
+   * Starts the automations the project runs when a ticket enters the step, with its assignee's
+   * permissions. Each that can't start leaves the step entered and keeps why on the step; it runs
+   * in the same transaction as the entry, so the step's runs start once, with it.
+   */
+  const startEntryAutomations = Effect.fnUntraced(function* (work: Work, step: Step) {
+    const at = yield* DateTime.now;
+    const skipped = yield* Effect.forEach(
+      definitionOf(work, step).automationIds.filter(
+        (id) => automationTriggerOf(work.project, step.stepDefinitionId, id) === "step_entry",
+      ),
+      (automationId) =>
+        Effect.gen(function* () {
+          if (step.assignee === null) return "no_assignee" as const;
+          const automation = yield* Effect.option(
+            requireStepAutomation(automationId, step.assignee),
+          );
+          if (Option.isNone(automation)) return "automation_unavailable" as const;
+          yield* startStepRun(work, step, automation.value, {
+            effectiveUserId: step.assignee,
+            isAutomatic: true,
+          });
+          yield* record("workflows.runStepAutomation", step.assignee, targetOf(work, step), {
+            automationId,
+            isAutomatic: true,
+          });
+          return null;
+        }).pipe(
+          Effect.catchTags({
+            ChatRefused: (refused) => {
+              const reason = SKIP_REASON_OF_CHAT_REFUSAL[refused.reason];
+              return reason === undefined ? Effect.die(refused) : Effect.succeed(reason);
+            },
+          }),
+          // A new chat's id is never taken.
+          Effect.orDie,
+          Effect.map((reason) => (reason === null ? null : { automationId, reason, at })),
+        ),
+    );
+    const skippedAutomations = skipped.filter((entry) => entry !== null);
+    if (skippedAutomations.length > 0) putStep(work, { ...step, skippedAutomations });
+  });
+  /** Starts the entry automations of the step and of the sub-steps entered with it, parents first. */
+  const startEnteredAutomations = (work: Work, step: Step) =>
+    Effect.forEach(
+      work.ticket.steps.filter((entered) => topLevelStep(work.ticket, entered).id === step.id),
+      (entered) => startEntryAutomations(work, entered),
+      { discard: true },
+    );
   const isStepMember = (work: Work, step: Step, userId: string) =>
     Effect.map(memberOf(userId, work.project.id), (steps) =>
       steps.has(topLevelStep(work.ticket, step).stepDefinitionId),
@@ -621,8 +760,61 @@ const make = Effect.gen(function* () {
 
   const buildStepFieldViews = (work: Work, step: Step) =>
     buildCurrentStepFieldViews(definitionOf(work, step).fields, step.values);
+
+  /** A field's data without the options and layout used to display it in the app. */
+  const readFieldValue = (
+    field: Field,
+    values: FieldValues,
+    path: string,
+    selection?: StepFieldSelection,
+  ): Effect.Effect<Schema.Json> =>
+    Effect.gen(function* () {
+      const value = values[path] ?? null;
+      if (field.type === "group") {
+        const rows = yield* Effect.forEach(groupRows(field, value), (id) => {
+          const prefix = id === null ? path : `${path}.${id}`;
+          return Effect.forEach(field.fields, (child) =>
+            Effect.map(
+              readFieldValue(child, values, `${prefix}.${child.id}`),
+              (value) => [child.id, value] as const,
+            ),
+          ).pipe(Effect.map((entries) => ({ id, values: Object.fromEntries(entries) })));
+        });
+        return { fields: field.fields.map(describeField), rows };
+      }
+      if (field.type === "records") {
+        const requested = selection?.recordKeys;
+        const columns = selection?.recordFields;
+        const keys = recordKeys(value).filter(
+          (key) => requested === undefined || requested.includes(key),
+        );
+        const records = yield* Effect.forEach(keys, (key) => {
+          if (columns?.length === 0) return Effect.succeed({ key, values: {} });
+          return Effect.map(collectionRecords.get(field.collectionId, key), (record) => {
+            if (record === null) return null;
+            return {
+              key,
+              values:
+                columns === undefined
+                  ? record.values
+                  : Object.fromEntries(
+                      Object.entries(record.values).filter(([path]) =>
+                        columns.some((column) => path === column || path.startsWith(`${column}.`)),
+                      ),
+                    ),
+            };
+          });
+        });
+        return {
+          collectionId: field.collectionId,
+          records: records.filter((record) => record !== null),
+        };
+      }
+      return value;
+    });
+
   /** The fields of earlier steps the step declares as inputs: all it gets of them. */
-  const buildInputViews = (work: Work, step: Step) =>
+  const buildInputs = (work: Work, step: Step, includeReviews = false) =>
     Effect.gen(function* () {
       const inputs = stepInputFields(work.version.steps, work.ticket, definitionOf(work, step));
       const bySource = new Map<Step, Array<Field>>();
@@ -637,7 +829,30 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
-      return inputs.flatMap(({ source, field }) => views.get(source.id)?.get(field.id) ?? []);
+      const shown = inputs.flatMap(({ source, field }) => {
+        const view = views.get(source.id)?.get(field.id);
+        return view === undefined ? [] : [{ source, field, view }];
+      });
+      const inputViews = shown.map(({ view }) => view);
+      if (!includeReviews) return { inputs: inputViews };
+      const inputRecordReviews = [...bySource].flatMap(([source, fields]) => {
+        const indexOf = (id: string) =>
+          shown.findIndex((input) => input.source.id === source.id && input.field.id === id);
+        return recordReviewsOf(fields, source).flatMap((review) => {
+          const recordsIndex = indexOf(review.recordsFieldId);
+          const groupIndex = indexOf(review.groupFieldId);
+          if (recordsIndex < 0 || groupIndex < 0) return [];
+          return [
+            {
+              recordsIndex,
+              groupIndex,
+              recordKeyFieldId: review.recordKeyFieldId,
+              entries: review.entries,
+            },
+          ];
+        });
+      });
+      return { inputs: inputViews, inputRecordReviews };
     });
 
   const listProjects = Effect.fnUntraced(function* (actorId: string) {
@@ -911,6 +1126,15 @@ const make = Effect.gen(function* () {
     { projectId, ...changes }: Payload<"updateProject">,
   ) {
     const project = yield* loadManaged(actorId, projectId);
+    if (changes.stepHistoryAccess !== undefined) {
+      const versions = yield* versionsOf(project.workflowId);
+      if (
+        changes.stepHistoryAccess.some(
+          (entry) => !versions.some(({ steps }) => isPreviousStep(steps, entry)),
+        )
+      )
+        return yield* refuse("invalid_step_history");
+    }
     for (const assignee of Object.values(changes.defaultAssignees ?? {}))
       yield* requireValidPerson(assignee);
     const adminUserIds = [...new Set(changes.adminUserIds ?? project.adminUserIds)];
@@ -1034,8 +1258,10 @@ const make = Effect.gen(function* () {
     };
     yield* tickets.insert(work.ticket);
     const step = yield* enterStep(work, first, null, null, actorId);
-    yield* save(work);
+    // Logged first, so the step's history starts with the ticket's creation.
     yield* record("workflows.startTicket", caller, targetOf(work, step));
+    yield* startEnteredAutomations(work, step);
+    yield* save(work);
     return { ticketId: work.ticket.id, stepId: step.id };
   }, transaction);
 
@@ -1063,26 +1289,112 @@ const make = Effect.gen(function* () {
     );
   }, transaction);
 
-  /** One read of a step's view: an automation reads its own step with its starter's access. */
-  const readStep = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
+  /** An automation reads its own step with the access of the person it runs for. */
+  const loadStepReader = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
     if (typeof caller !== "string" && caller.origin.kind === "automation") {
       const { work, step } = yield* loadAutomationStep(caller.origin);
       if (step.id !== stepId) return yield* new NotFound();
-      return yield* getStep(caller.origin.trigger.effectiveUserId, work.ticket.id, stepId);
+      return { work, step, actorId: caller.origin.trigger.effectiveUserId };
     }
-    const { work } = yield* loadStep(stepId);
-    return yield* getStep(yield* resolvePerson(caller, work.project.id), work.ticket.id, stepId);
+    const { work, step } = yield* loadStep(stepId);
+    return { work, step, actorId: yield* resolvePerson(caller, work.project.id) };
   });
 
-  const getStep = Effect.fnUntraced(function* (actorId: string, ticketId: string, stepId: string) {
+  const readStep = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
+    const { work, actorId } = yield* loadStepReader(caller, stepId);
+    return yield* getStep(actorId, work.ticket.id, stepId);
+  });
+
+  const readStepFields = Effect.fnUntraced(function* (
+    caller: Caller,
+    query: Payload<"getStepFields">,
+  ) {
+    const { work, step, actorId } = yield* loadStepReader(caller, query.stepId);
+    yield* requireSees(work, step, actorId);
+    const definition = definitionOf(work, step);
+    const inputs = yield* Effect.forEach(
+      stepInputFields(work.version.steps, work.ticket, definition),
+      ({ source, field }) => {
+        const selection = query.inputs?.find(
+          ({ key, sourceStepId }) =>
+            key === field.id &&
+            (sourceStepId === undefined || sourceStepId === source.stepDefinitionId),
+        );
+        return selection === undefined
+          ? Effect.succeed(null)
+          : Effect.map(readFieldValue(field, source.values, field.id, selection), (value) => ({
+              ...describeField(field),
+              sourceStepId: source.stepDefinitionId,
+              value,
+            }));
+      },
+    );
+    const fields = yield* Effect.forEach(definition.fields, (field) => {
+      const selection = query.fields?.find(({ key }) => key === field.id);
+      return selection === undefined
+        ? Effect.succeed(null)
+        : Effect.map(readFieldValue(field, step.values, field.id, selection), (value) => ({
+            ...describeField(field),
+            value,
+          }));
+    });
+    const selected = fields.filter((field) => field !== null);
+    return {
+      inputs: inputs.filter((input) => input !== null),
+      fields: selected,
+      proposals: (step.proposals ?? []).flatMap(({ fieldKey, value, isDiscarded }) =>
+        selected.some(({ key }) => key === fieldKey || fieldKey.startsWith(`${key}.`))
+          ? [{ fieldKey, value, isDiscarded }]
+          : [],
+      ),
+    };
+  });
+
+  const stepContents = Effect.fnUntraced(function* (work: Work, step: Step, forPage: boolean) {
+    const definition = definitionOf(work, step);
+    return {
+      definition,
+      assignee: step.assignee,
+      ...(yield* buildInputs(work, step, forPage)),
+      fields: yield* buildStepFieldViews(work, step),
+      recordReviews: recordReviewsOf(definition.fields, step),
+      subSteps: childSteps(work.ticket, work.version.steps, step).map((child) => ({
+        ...child,
+        name: nameOf(work, child),
+      })),
+      comments: yield* tickets.comments(step.id),
+      files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
+    } satisfies StepSnapshot;
+  });
+
+  const canBrowseHistory = (work: Work, access: TicketAccess, step: Step) =>
+    canReadStepHistory(access, work.project, work.version, work.ticket, step);
+
+  const getStep = Effect.fnUntraced(function* (
+    actorId: string,
+    ticketId: string,
+    stepId: string,
+    forPage = false,
+  ) {
     const work = yield* loadTicket(ticketId);
     const step = stepIn(work, stepId);
     const access = yield* accessOf(work, actorId);
-    if (step === null || access === null || !canSeeStep(access, work.ticket, step))
-      return yield* new NotFound();
+    if (step === null || access === null) return yield* new NotFound();
+    const canSee = canSeeStep(access, work.ticket, step);
+    if (!canSee && !(forPage && canBrowseHistory(work, access, step))) return yield* new NotFound();
     const parents = ancestorSteps(work.ticket, step).toReversed();
     const root = parents[0] ?? step;
     const isOpen = work.ticket.status.type === "open";
+    const isCompleted = forPage && step.status.type === "completed";
+    const snapshot = isCompleted ? yield* tickets.completedSteps.get(step.id) : null;
+    const { assignee, ...contents } = snapshot ?? (yield* stepContents(work, step, forPage));
+    const stepNavigation = work.ticket.steps
+      .filter(
+        (other) =>
+          other.parentStepId === null &&
+          (canSeeStep(access, work.ticket, other) || canBrowseHistory(work, access, other)),
+      )
+      .map((other) => ({ id: other.id, name: nameOf(work, other), status: other.status.type }));
     const history = yield* commandLog.listForStep(work.ticket.id, step.id);
     const historyAutomations = yield* automations.listByIds([
       ...new Set(
@@ -1092,9 +1404,13 @@ const make = Effect.gen(function* () {
       ),
     ]);
     return {
+      ...contents,
       ticket: work.ticket,
       projectName: work.project.name,
-      // Someone who sees one step gets no other step, not even its name.
+      ...(forPage ? { stepNavigation } : {}),
+      ...(isCompleted
+        ? { completedStep: snapshot === null ? ("legacy" as const) : ("snapshot" as const) }
+        : {}),
       otherSteps: yield* Effect.forEach(
         access.type === "all"
           ? work.ticket.steps.filter((other) => other.parentStepId === null)
@@ -1108,72 +1424,85 @@ const make = Effect.gen(function* () {
             };
           }),
       ),
-      inputs: yield* buildInputViews(work, step),
-      assignableUserIds: yield* Effect.filter(
-        (yield* projects.members.listForProject(work.project.id))
-          .filter((member) => member.stepId === root.stepDefinitionId)
-          .map((member) => member.userId),
-        isActivePerson,
-      ),
+      assignableUserIds: isCompleted
+        ? []
+        : yield* Effect.filter(
+            (yield* projects.members.listForProject(work.project.id))
+              .filter((member) => member.stepId === root.stepDefinitionId)
+              .map((member) => member.userId),
+            isActivePerson,
+          ),
       history: history.map(({ details, ...entry }) => {
         const automation = historyAutomations.find(({ id }) => id === details.automationId);
         return {
           ...entry,
           fieldKey: typeof details.fieldKey === "string" ? details.fieldKey : null,
+          isAutomatic: details.isAutomatic === true,
           automation:
             automation === undefined ? null : { id: automation.id, title: automation.title },
         };
       }),
-      canCancelTicket: isOpen && isProjectAdmin(yield* actorOf(actorId), work.project),
-      step,
-      definition: definitionOf(work, step),
+      canCancelTicket:
+        !isCompleted && isOpen && isProjectAdmin(yield* actorOf(actorId), work.project),
+      step: { ...step, assignee },
       parents: parents.map((parent) => ({ id: parent.id, name: nameOf(work, parent) })),
-      fields: yield* buildStepFieldViews(work, step),
-      recordReviews: recordReviewsOf(definitionOf(work, step).fields, step),
-      subSteps: childSteps(work.ticket, work.version.steps, step).map((child) => ({
-        ...child,
-        name: nameOf(work, child),
-      })),
-      comments: yield* tickets.comments(step.id),
-      proposals: yield* Effect.forEach(step.proposals ?? [], (proposal) =>
-        Effect.gen(function* () {
-          const resolved = resolveFieldPath(definitionOf(work, step).fields, proposal.fieldKey);
-          const record =
-            typeof resolved !== "string" &&
-            resolved.field.type === "records" &&
-            typeof proposal.value === "string"
-              ? yield* collectionRecords.get(resolved.field.collectionId, proposal.value)
-              : null;
-          return { ...proposal, record: record === null ? null : yield* recordView(record) };
-        }),
-      ),
-      files: (yield* files.forStep(step.id)).filter((file) => file.fieldKey === null).map(toFile),
-      automations: yield* Effect.gen(function* () {
-        const attempts = yield* stepRuns(work, step);
-        const isRunnable = isOpen && isActionable(step);
-        const attached = definitionOf(work, step).automationIds;
-        // An archived automation starts no new run.
-        const live = yield* Effect.filter(attached, (id) =>
-          Effect.map(automations.get(id), (automation) => automation !== null),
-        );
-        return attached.map((id) => {
-          const canRun = isRunnable && live.includes(id);
-          const runs = attempts
-            .filter((run) => run.trigger.automationId === id)
-            .map(({ trigger, ...run }) => ({ ...run, ranBy: trigger.effectiveUserId }))
-            .toReversed();
-          return {
-            id,
-            runs,
-            runLabel: canRun
-              ? runs.length === 0
-                ? ("Run" as const)
-                : ("Run again" as const)
-              : null,
-            canStop: canRun && runs[0]?.status === "running",
-          };
-        });
-      }),
+      proposals: isCompleted
+        ? []
+        : yield* Effect.forEach(step.proposals ?? [], (proposal) =>
+            Effect.gen(function* () {
+              const resolved = resolveFieldPath(definitionOf(work, step).fields, proposal.fieldKey);
+              if (
+                typeof resolved === "string" ||
+                resolved.field.type !== "records" ||
+                typeof proposal.value !== "string"
+              )
+                return { ...proposal, record: null };
+              const collection = yield* collections.get(resolved.field.collectionId);
+              const record =
+                collection === null
+                  ? null
+                  : yield* collectionRecords.get(collection.id, proposal.value);
+              return {
+                ...proposal,
+                record:
+                  record === null || collection === null
+                    ? null
+                    : yield* recordView(record, collection.fields),
+              };
+            }),
+          ),
+      automations: !canSee
+        ? []
+        : yield* Effect.gen(function* () {
+            const attempts = yield* stepRuns(work, step);
+            const isRunnable = isOpen && isActionable(step);
+            const attached = definitionOf(work, step).automationIds;
+            // An archived automation starts no new run.
+            const live = yield* Effect.filter(attached, (id) =>
+              Effect.map(automations.get(id), (automation) => automation !== null),
+            );
+            return attached.map((id) => {
+              const canRun = isRunnable && live.includes(id);
+              const runs = attempts
+                .filter((run) => run.trigger.automationId === id)
+                .map(({ trigger, ...run }) => ({
+                  ...run,
+                  ranBy: trigger.effectiveUserId,
+                  isAutomatic: trigger.type === "step" && trigger.isAutomatic,
+                }))
+                .toReversed();
+              return {
+                id,
+                runs,
+                runLabel: canRun
+                  ? runs.length === 0
+                    ? ("Run" as const)
+                    : ("Run again" as const)
+                  : null,
+                canStop: canRun && runs[0]?.status === "running",
+              };
+            });
+          }),
     };
   });
 
@@ -1370,9 +1699,25 @@ const make = Effect.gen(function* () {
         : stepEntryRefusal(work.version.steps, completed.ticket, completed.next);
     if (entryRefusal !== null) return yield* refuse(entryRefusal);
     yield* stopStepRuns(work, step);
+    const snapshot = yield* stepContents(work, step, true);
+    const linkedFileIds = (fields: ReadonlyArray<FieldView>): ReadonlyArray<AttachmentId> =>
+      fields.flatMap((field) => [
+        ...field.records.flatMap((record) => record.files.map(({ id }) => id)),
+        ...field.rows.flatMap((row) => linkedFileIds(row.fields)),
+      ]);
+    const fields = [...snapshot.fields, ...snapshot.inputs];
+    const attachments = new Set([
+      ...snapshot.files.map(({ id }) => id),
+      ...buildFieldFileIds(fields).filter(isAttachmentId),
+      ...linkedFileIds(fields),
+    ]);
+    yield* tickets.completedSteps.save(work.ticket.id, step.id, snapshot, [...attachments]);
     work.ticket = completed.ticket;
     if (completed.next !== null)
-      yield* enterStep(work, completed.next, null, step.assignee, actorId);
+      yield* startEnteredAutomations(
+        work,
+        yield* enterStep(work, completed.next, null, step.assignee, actorId),
+      );
     yield* save(work);
     yield* record("workflows.markStepDone", actorId, targetOf(work, step));
   }, transaction);
@@ -1579,19 +1924,6 @@ const make = Effect.gen(function* () {
     }
   });
 
-  /** Whoever runs a step's automation must be able to use its agent. */
-  const requireStepAutomation = Effect.fnUntraced(function* (id: AutomationId, userId: string) {
-    const automation = yield* automations.get(id);
-    const agent = automation === null ? null : yield* agents.get(automation.agentId);
-    if (
-      automation === null ||
-      agent === null ||
-      !canWorkSteps(agent, yield* capabilities.listForAgent(agent.id)) ||
-      !canUse(agent, userId)
-    )
-      return yield* refuse("invalid_automations");
-    return automation;
-  });
   const loadAutomation = Effect.fnUntraced(function* (
     actorId: string,
     input: Payload<"runStepAutomation">,
@@ -1609,20 +1941,7 @@ const make = Effect.gen(function* () {
     const { work, step } = yield* loadAutomation(actorId, input);
     const automation = yield* requireStepAutomation(input.automationId, actorId);
     yield* stopStepRuns(work, step, (id) => id === automation.id);
-    yield* chats.startAutomation(
-      {
-        type: "step",
-        ticketId: work.ticket.id,
-        stepId: step.id,
-        automationId: automation.id,
-        effectiveUserId: actorId,
-      },
-      automation.agentId,
-      {
-        title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
-        input: yield* buildAutomationInput(work, step, automation),
-      },
-    );
+    yield* startStepRun(work, step, automation, { effectiveUserId: actorId, isAutomatic: false });
     yield* record("workflows.runStepAutomation", actorId, targetOf(work, step), {
       automationId: automation.id,
     });
@@ -1683,6 +2002,8 @@ const make = Effect.gen(function* () {
     const { work, step } = loaded.value;
     const access = yield* accessOf(work, userId);
     if (canSeeStep(access, work.ticket, step)) return true;
+    if (canBrowseHistory(work, access, step) && !(yield* tickets.completedSteps.has(step.id)))
+      return true;
     const isInput = isSameInput({
       stepId: step.stepDefinitionId,
       fieldId: file.fieldKey?.split(".")[0] ?? "",
@@ -1692,6 +2013,20 @@ const make = Effect.gen(function* () {
         canSeeStep(access, work.ticket, reader) && definitionOf(work, reader).inputs.some(isInput),
     );
   });
+  const completedStepFileAccess = Effect.fnUntraced(function* (userId: string, id: AttachmentId) {
+    const holders = yield* tickets.completedSteps.holdingFile(id);
+    if (holders.length === 0) return null;
+    for (const holder of holders) {
+      const work = yield* loadTicket(holder.ticketId).pipe(Effect.option);
+      if (Option.isNone(work)) continue;
+      const step = stepIn(work.value, holder.stepId);
+      if (step === null) continue;
+      const access = yield* accessOf(work.value, userId);
+      if (canSeeStep(access, work.value.ticket, step) || canBrowseHistory(work.value, access, step))
+        return true;
+    }
+    return false;
+  });
   yield* chats.onEnd((chatId) => automationEnded(chatId, null));
 
   return {
@@ -1699,6 +2034,7 @@ const make = Effect.gen(function* () {
     listTickets,
     getTicket,
     canReadStepFile,
+    completedStepFileAccess,
     memberDeactivated,
     runStepAutomation,
     stopStepAutomation,
@@ -1738,10 +2074,11 @@ const make = Effect.gen(function* () {
     startTicket,
     cancelTicket,
     readStep,
+    readStepFields,
     watchStep: (actorId: string, stepId: string) =>
       Stream.unwrap(
         Effect.map(found(tickets.getByStepId(stepId)), (ticket) =>
-          tickets.watch(ticket, getStep(actorId, ticket.id, stepId)),
+          tickets.watch(ticket, getStep(actorId, ticket.id, stepId, true)),
         ),
       ).pipe(Stream.changesWith(sameStepView)),
     setStepField,

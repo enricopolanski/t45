@@ -9,7 +9,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 const Row = Schema.Struct({ ...Automation.fields, isArchived: Schema.BooleanFromBit });
 const encodeAutomation = Schema.encodeEffect(Row);
 const decodeAutomations = Schema.decodeUnknownEffect(Schema.Array(Row));
-const COLUMNS = `id, title, prompt, agent_id AS "agentId", is_archived AS "isArchived",
+const COLUMNS = `id, title, prompt, step_context AS "stepContext",
+  agent_id AS "agentId", is_archived AS "isArchived",
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 const make = Effect.gen(function* () {
@@ -32,11 +33,11 @@ const make = Effect.gen(function* () {
   const save = (automation: Automation) =>
     Effect.gen(function* () {
       const row = yield* encodeAutomation(automation);
-      yield* sql`INSERT INTO automations (id, title, prompt, agent_id, created_at, updated_at)
-          VALUES (${row.id}, ${row.title}, ${row.prompt}, ${row.agentId}, ${row.createdAt},
+      yield* sql`INSERT INTO automations (id, title, prompt, step_context, agent_id, created_at, updated_at)
+          VALUES (${row.id}, ${row.title}, ${row.prompt}, ${row.stepContext ?? "included"}, ${row.agentId}, ${row.createdAt},
             ${row.updatedAt})
           ON CONFLICT (id) DO UPDATE SET title = excluded.title, prompt = excluded.prompt,
-            agent_id = excluded.agent_id, updated_at = excluded.updated_at`;
+            step_context = excluded.step_context, agent_id = excluded.agent_id, updated_at = excluded.updated_at`;
     }).pipe(Effect.orDie);
 
   return {

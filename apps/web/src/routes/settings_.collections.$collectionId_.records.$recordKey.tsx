@@ -8,6 +8,7 @@ function RecordRouteView() {
     <RecordPage
       key={`${collectionId}/${recordKey}`}
       collectionId={collectionId}
+      isInSettings
       recordKey={recordKey}
     />
   );

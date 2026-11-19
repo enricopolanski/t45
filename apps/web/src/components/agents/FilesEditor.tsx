@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Fragment, type ReactNode } from "react";
 
 import { useRowKeys } from "../../hooks/useRowKeys";
@@ -22,6 +23,7 @@ function RowsEditor<Row>({
     remove: ReactNode,
   ) => ReactNode;
 }) {
+  const t = useTranslation();
   const keys = useRowKeys(rows.length);
   return (
     <div className="flex flex-col gap-2">
@@ -42,7 +44,7 @@ function RowsEditor<Row>({
                 onChange(rows.filter((_, at) => at !== index));
               }}
             >
-              Remove
+              {t("Remove")}
             </Button>,
           )}
         </Fragment>
@@ -80,19 +82,20 @@ export function FilesEditor({
   readonly files: ReadonlyArray<FileRow>;
   readonly onChange: (files: ReadonlyArray<FileRow>) => void;
 }) {
+  const t = useTranslation();
   return (
     <RowsEditor
       rows={files}
       onChange={onChange}
       blank={{ path: "", content: "" }}
-      addLabel="Add file"
+      addLabel={t("Add file")}
     >
       {(file, edit, remove) => (
         <div className="flex flex-col gap-1 rounded-md border border-border p-2">
           <div className="flex gap-2">
             <Input
-              aria-label="File path"
-              placeholder="Path, such as scripts/extract.py"
+              aria-label={t("File path")}
+              placeholder={t("Path, such as scripts/extract.py")}
               required
               value={file.path}
               onChange={(event) => edit({ path: event.target.value })}
@@ -100,7 +103,7 @@ export function FilesEditor({
             {remove}
           </div>
           <Textarea
-            aria-label={`Contents of ${file.path || "new file"}`}
+            aria-label={t("Contents of {0}", file.path || t("new file"))}
             rows={6}
             value={file.content}
             onChange={(event) => edit({ content: event.target.value })}

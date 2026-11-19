@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { StepView } from "@t45/contracts/resources/Workflows";
 import { ChevronDownIcon } from "lucide-react";
 import { Fragment, useState } from "react";
@@ -24,7 +25,7 @@ const REASONS = {
     send: (view: StepView, reason: string) =>
       api("workflows.cancelTicket", { ticketId: view.ticket.id, reason }),
   },
-};
+} as const;
 
 /**
  * The open step's status, like a ticket's: a button naming where it stands that opens the moves
@@ -44,6 +45,7 @@ export function StepStatus({
   readonly act: StepAct;
   readonly onMarkDone: () => void;
 }) {
+  const t = useTranslation();
   const stepId = view.step.id;
   const { ticket: item } = view;
   const status =
@@ -58,14 +60,14 @@ export function StepStatus({
     [
       actions.canMarkDone && (
         <MenuItem key="done" onClick={onMarkDone}>
-          Mark done
+          {t("Mark done")}
         </MenuItem>
       ),
     ],
     [
       actions.canBlock && (
         <MenuItem key="block" onClick={() => ask("block")}>
-          Block
+          {t("Block")}
         </MenuItem>
       ),
       actions.canUnblock && (
@@ -73,14 +75,14 @@ export function StepStatus({
           key="unblock"
           onClick={() => void act(() => api("workflows.unblockStep", { stepId }))}
         >
-          Unblock
+          {t("Unblock")}
         </MenuItem>
       ),
     ],
     [
       actions.canCancelTicket && (
         <MenuItem key="cancel" variant="destructive" onClick={() => ask("cancel")}>
-          Cancel item
+          {t("Cancel item")}
         </MenuItem>
       ),
     ],
@@ -90,7 +92,7 @@ export function StepStatus({
   if (groups.length === 0) {
     return (
       <div>
-        <Badge variant={status.variant}>{status.label}</Badge>
+        <Badge variant={status.variant}>{t(status.label)}</Badge>
       </div>
     );
   }
@@ -100,10 +102,10 @@ export function StepStatus({
       <Menu>
         <MenuTrigger
           disabled={busy}
-          aria-label={`Status: ${status.label}. Change`}
+          aria-label={t("Status: {0}. Change", t(status.label))}
           render={<Button size="sm" />}
         >
-          {status.label}
+          {t(status.label)}
           <ChevronDownIcon />
         </MenuTrigger>
         <MenuPopup align="start">
@@ -119,9 +121,9 @@ export function StepStatus({
         key={asking.reason}
         open={asking.open}
         onOpenChange={(open) => setAsking({ ...asking, open })}
-        title={reason.title}
-        placeholder={reason.placeholder}
-        confirmLabel={reason.confirmLabel}
+        title={t(reason.title)}
+        placeholder={t(reason.placeholder)}
+        confirmLabel={t(reason.confirmLabel)}
         isReasonOptional={asking.reason === "cancel"}
         onConfirm={(text) => act(() => reason.send(view, text), true)}
       />

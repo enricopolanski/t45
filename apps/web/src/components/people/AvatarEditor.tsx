@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { AVATAR_COLORS, type Avatar } from "@t45/contracts/models/Avatar";
 import { CameraIcon, Trash2Icon } from "lucide-react";
 import { useRef, useState } from "react";
@@ -32,9 +33,10 @@ export function AvatarEditor({
   readonly className?: string;
   readonly onSave: (name: string, avatar: Avatar) => void;
 }) {
+  const t = useTranslation();
   const fileInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(savedName);
-  const pictureLabel = logo ? "Change the logo" : "Change your picture";
+  const pictureLabel = logo ? t("Change the logo") : t("Change your picture");
 
   // Every save carries the typed name, so an avatar change can't undo a name still saving.
   const save = (next: Avatar) => onSave(name.trim() || savedName, next);
@@ -51,7 +53,7 @@ export function AvatarEditor({
       (cause: unknown) =>
         toastManager.add({
           type: "error",
-          title: "Couldn't use that image",
+          title: t("Couldn't use that image"),
           description: cause instanceof Error ? cause.message : undefined,
         }),
     );
@@ -108,7 +110,7 @@ export function AvatarEditor({
             event.currentTarget.value = "";
           }}
         />
-        <Field label={logo ? "Organization name" : "Your name"} className="min-w-0 flex-1">
+        <Field label={logo ? t("Organization name") : t("Your name")} className="min-w-0 flex-1">
           <Input
             autoFocus={autoFocus}
             autoComplete="off"
@@ -131,12 +133,12 @@ export function AvatarEditor({
             onClick={() => save({ kind: "initial", color: "slate" })}
           >
             <Trash2Icon />
-            Remove picture
+            {t("Remove picture")}
           </Button>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <Label>{logo ? "Its initial on a color" : "Your initial on a color"}</Label>
+          <Label>{logo ? t("Its initial on a color") : t("Your initial on a color")}</Label>
           <div className="flex flex-wrap gap-2">
             {AVATAR_COLORS.map((option) => (
               <button

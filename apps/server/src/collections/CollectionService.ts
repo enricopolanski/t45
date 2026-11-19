@@ -2,6 +2,7 @@ import type { CurrentActor } from "@t45/contracts/Authorization";
 import type { Attachment } from "@t45/contracts/models/Attachment";
 import {
   canEditRecords,
+  canReadRecords,
   type Collection,
   type CollectionRecord,
   fieldsChangeRefusal,
@@ -75,10 +76,10 @@ const make = Effect.gen(function* () {
    * chat by the access of the person chatting, and an automation by its capability.
    */
   const canRead = Effect.fnUntraced(function* (caller: Caller, collection: Collection) {
-    if ("userId" in caller) return canEditRecords({ ...caller, id: caller.userId }, collection);
+    if ("userId" in caller) return canReadRecords({ ...caller, id: caller.userId }, collection);
     if (caller.origin.kind === "automation") return true;
     const owner = yield* users.get(caller.origin.ownerUserId);
-    return owner !== null && canEditRecords(owner, collection);
+    return owner !== null && canReadRecords(owner, collection);
   });
 
   /** Whether the caller creates collections: an admin, or an agent in an admin's chat. */
@@ -96,7 +97,7 @@ const make = Effect.gen(function* () {
       yield* requireCapability(caller);
       return all;
     }
-    return all.filter((collection) => canEditRecords({ ...caller, id: caller.userId }, collection));
+    return all.filter((collection) => canReadRecords({ ...caller, id: caller.userId }, collection));
   });
 
   const find = Effect.fnUntraced(function* (caller: Caller, collectionId: string) {
@@ -178,6 +179,7 @@ const make = Effect.gen(function* () {
       const collection = {
         id: yield* crypto.randomUUIDv4().pipe(Effect.orDie),
         ...input,
+        isPublished: input.isPublished ?? false,
         createdAt: now,
         updatedAt: now,
       };
@@ -255,6 +257,8 @@ const make = Effect.gen(function* () {
     /** Adds the record or replaces the one with its key; agents with the capability always may. */
     saveRecord: Effect.fnUntraced(function* (caller: Caller, input: Payload<"saveRecord">) {
       const collection = yield* find(caller, input.collectionId);
+      if ("userId" in caller && !canEditRecords({ ...caller, id: caller.userId }, collection))
+        return yield* new AccessDenied({ message: "You can only read this collection's records." });
       const values = Object.fromEntries(
         Object.entries(input.values).flatMap(([key, value]) =>
           holdsData(value)
@@ -303,7 +307,7 @@ const make = Effect.gen(function* () {
       if (typeof actor !== "string") return yield* findReadable(actor, collectionId);
       const user = yield* users.get(actor);
       const collection = yield* collections.get(collectionId);
-      if (user !== null && collection !== null && canEditRecords(user, collection))
+      if (user !== null && collection !== null && canReadRecords(user, collection))
         return collection;
       return yield* new NotFound();
     }),
@@ -313,7 +317,7 @@ const make = Effect.gen(function* () {
       const collection =
         file.collectionId === null ? null : yield* collections.get(file.collectionId);
       const user = yield* users.get(userId);
-      return collection !== null && user !== null && canEditRecords(user, collection);
+      return collection !== null && user !== null && canReadRecords(user, collection);
     }),
   };
 });

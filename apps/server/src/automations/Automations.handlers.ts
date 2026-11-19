@@ -63,6 +63,7 @@ export const layer = Automations.middleware(Authorization).toLayer(
             ...run,
             stepId: trigger.type === "step" ? trigger.stepId : null,
             ranBy: trigger.effectiveUserId,
+            isAutomatic: trigger.type === "step" && trigger.isAutomatic,
           })),
       }));
     });

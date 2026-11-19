@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import { useAtomValue } from "@effect/atom-react";
 import { NotFound } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
@@ -46,9 +47,9 @@ export const chatTargets = apiQuery("chats.listTargets")(undefined);
 
 export const agentActions = {
   archive: (agentId: string) =>
-    mutate(api("agents.archive", { agentId }), agentsList, "Couldn't archive the agent"),
+    mutate(api("agents.archive", { agentId }), agentsList, translate("Couldn't archive the agent")),
   publish: (agentId: string) =>
-    mutate(api("agents.publish", { agentId }), agentsList, "Couldn't publish the agent"),
+    mutate(api("agents.publish", { agentId }), agentsList, translate("Couldn't publish the agent")),
 };
 
 export const saveAgent = (agentId: string | null, draft: ApiInput<"agents.create">) =>

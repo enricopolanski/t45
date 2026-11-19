@@ -210,6 +210,8 @@ export class Collection extends Schema.Opaque<Collection>()(
     ),
     /** The members, besides admins, who see and edit its records. */
     memberUserIds: Schema.UniqueArray(StringId),
+    /** Whether every active member can see the collection in the main menu and read its records. */
+    isPublished: Schema.Boolean,
     createdAt: Schema.DateTimeUtcFromString,
     updatedAt: Schema.DateTimeUtcFromString,
   }).check(
@@ -236,6 +238,11 @@ export const canEditRecords = (
   collection: Pick<Collection, "memberUserIds">,
 ) =>
   user.state === "active" && (user.role === "admin" || collection.memberUserIds.includes(user.id));
+
+export const canReadRecords = (
+  user: Parameters<typeof canEditRecords>[0],
+  collection: Pick<Collection, "memberUserIds" | "isPublished">,
+) => user.state === "active" && (collection.isPublished || canEditRecords(user, collection));
 
 /** A record's key: its primary key's value, trimmed; null when it has none. */
 export const recordKeyOf = (

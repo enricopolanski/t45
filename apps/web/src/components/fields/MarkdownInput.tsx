@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { PencilIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -24,6 +25,7 @@ export function MarkdownInput({
   readonly "aria-describedby"?: string | undefined;
   readonly "aria-invalid"?: true | undefined;
 }) {
+  const t = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   if (isEditing || value === "")
     return (
@@ -33,7 +35,7 @@ export function MarkdownInput({
         aria-label={label}
         autoFocus={isEditing}
         defaultValue={value}
-        placeholder="Write Markdown…"
+        placeholder={t("Write Markdown…")}
         className="[&_textarea]:max-h-none [&_textarea]:min-h-8"
         onBlur={(event) => {
           const typed = event.currentTarget.value.trim();
@@ -62,7 +64,7 @@ export function MarkdownInput({
         type="button"
         size="icon-xs"
         variant="ghost-muted"
-        aria-label={`Edit ${label}`}
+        aria-label={t("Edit {0}", label)}
         className="absolute top-1 right-1"
         onClick={() => setIsEditing(true)}
       >

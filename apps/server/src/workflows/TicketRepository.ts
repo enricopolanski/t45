@@ -1,4 +1,6 @@
 import { Comment, Ticket } from "@t45/contracts/models/Workflow";
+import type { AttachmentId } from "@t45/contracts/models/Attachment";
+import { StepSnapshot } from "@t45/contracts/resources/Workflows";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,6 +18,9 @@ const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
 const encodeRow = Schema.encodeEffect(Row);
 const decodeComments = Schema.decodeUnknownEffect(Schema.Array(Comment));
 const encodeComment = Schema.encodeEffect(Comment);
+const SnapshotJson = Schema.fromJsonString(StepSnapshot);
+const encodeSnapshot = Schema.encodeEffect(SnapshotJson);
+const decodeSnapshot = Schema.decodeUnknownEffect(SnapshotJson);
 
 const COLUMNS = `t.id, t.project_id AS "projectId", t.workflow_version_id AS "workflowVersionId",
   t.title, t.description, t.status, t.steps, t.created_at AS "createdAt"`;
@@ -126,6 +131,40 @@ const make = Effect.gen(function* () {
               ${row.createdAt})`;
         yield* publishChange(ticketId);
       }).pipe(Effect.orDie),
+    completedSteps: {
+      has: (stepId: string) =>
+        sql`SELECT 1 FROM completed_steps WHERE step_id = ${stepId}`.pipe(
+          Effect.map((rows) => rows.length > 0),
+          Effect.orDie,
+        ),
+      get: (stepId: string) =>
+        sql<{ readonly snapshot: string }>`SELECT snapshot FROM completed_steps
+          WHERE step_id = ${stepId}`.pipe(
+          Effect.flatMap(([row]) =>
+            row === undefined ? Effect.succeed(null) : decodeSnapshot(row.snapshot),
+          ),
+          Effect.orDie,
+        ),
+      save: (
+        ticketId: string,
+        stepId: string,
+        snapshot: StepSnapshot,
+        attachmentIds: ReadonlyArray<AttachmentId>,
+      ) =>
+        Effect.gen(function* () {
+          const encoded = yield* encodeSnapshot(snapshot);
+          yield* sql`INSERT INTO completed_steps (step_id, ticket_id, snapshot)
+            VALUES (${stepId}, ${ticketId}, ${encoded})`;
+          if (attachmentIds.length > 0)
+            yield* sql`INSERT INTO completed_step_files (step_id, attachment_id)
+              SELECT ${stepId}, id FROM attachments WHERE ${sql.in("id", attachmentIds)}`;
+        }).pipe(Effect.orDie),
+      holdingFile: (attachmentId: AttachmentId) =>
+        sql<{ readonly stepId: string; readonly ticketId: string }>`
+          SELECT c.step_id AS "stepId", c.ticket_id AS "ticketId"
+          FROM completed_step_files cf JOIN completed_steps c ON c.step_id = cf.step_id
+          WHERE cf.attachment_id = ${attachmentId}`.pipe(Effect.orDie),
+    },
   };
 });
 

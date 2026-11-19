@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { ReactNode } from "react";
 import { useLocation } from "@tanstack/react-router";
 
@@ -12,6 +13,7 @@ import { Sidebar, SidebarProvider, SidebarTrigger, useSidebar } from "./ui/sideb
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 function SidebarControl() {
+  const t = useTranslation();
   const { isMobile, openMobile } = useSidebar();
 
   if (!isMobile) return null;
@@ -26,16 +28,17 @@ function SidebarControl() {
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarTrigger className="pointer-events-auto" aria-label="Toggle main sidebar" />
+            <SidebarTrigger className="pointer-events-auto" aria-label={t("Toggle main sidebar")} />
           }
         />
-        <TooltipPopup side="bottom">Toggle main sidebar</TooltipPopup>
+        <TooltipPopup side="bottom">{t("Toggle main sidebar")}</TooltipPopup>
       </Tooltip>
     </div>
   );
 }
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
+  const t = useTranslation();
   const pathname = useLocation({ select: (location) => location.pathname });
   const isAdmin = useIsAdmin();
   useTrackMainAppLocation();
@@ -46,7 +49,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider>
-      <Sidebar role="navigation" aria-label={showSettingsSidebar ? "Settings" : "Main"}>
+      <Sidebar role="navigation" aria-label={showSettingsSidebar ? t("Settings") : t("Main")}>
         {showSettingsSidebar ? (
           <>
             <SidebarChromeHeader />

@@ -1,6 +1,8 @@
+import { useTranslation } from "~/i18n/locale";
 import { createLink, useLocation } from "@tanstack/react-router";
 import type { ComponentProps, ReactNode } from "react";
 
+import { useTabTitle } from "../hooks/useTabTitle";
 import { cn } from "../lib/utils";
 
 /** The app's sections whose pages have pages below them, by path prefix. */
@@ -21,26 +23,30 @@ const SECTIONS = [
  */
 export function PageBreadcrumb({
   title,
+  tabTitle,
   parent,
   className,
   currentClassName,
 }: {
   readonly title: ReactNode;
+  readonly tabTitle?: string | undefined;
   readonly parent?: ReactNode;
   readonly className?: string;
   readonly currentClassName?: string;
 }) {
+  const t = useTranslation();
+  useTabTitle(tabTitle ?? (typeof title === "string" ? title : ""));
   const pathname = useLocation({ select: (location) => location.pathname });
   const section = SECTIONS.find(({ to }) => pathname.startsWith(`${to}/`));
   return (
-    <nav aria-label="Page breadcrumb" className={cn("min-w-0", className)}>
+    <nav aria-label={t("Page breadcrumb")} className={cn("min-w-0", className)}>
       <ol className="m-0 flex min-w-0 list-none items-center gap-2 p-0 text-sm sm:gap-3">
         {pathname.startsWith("/settings/") ? (
-          <PageBreadcrumbParent>Settings</PageBreadcrumbParent>
+          <PageBreadcrumbParent>{t("Settings")}</PageBreadcrumbParent>
         ) : null}
         {section === undefined ? null : (
           <PageBreadcrumbParent>
-            <PageBreadcrumbLink to={section.to}>{section.label}</PageBreadcrumbLink>
+            <PageBreadcrumbLink to={section.to}>{t(section.label)}</PageBreadcrumbLink>
           </PageBreadcrumbParent>
         )}
         {parent === undefined ? null : <PageBreadcrumbParent>{parent}</PageBreadcrumbParent>}

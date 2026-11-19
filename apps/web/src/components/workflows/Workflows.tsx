@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { WorkflowView } from "@t45/contracts/resources/Workflows";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
@@ -13,7 +14,7 @@ import { Label } from "../ui/label";
 import { PersonPicker } from "../work/PersonPicker";
 import { useWorkDirectory } from "../work/useWorkDirectory";
 import { WorkFrame } from "../work/WorkFrame";
-import { actorName, plural } from "../work/workLogic";
+import { actorName } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
 import { useWorkflowData } from "./useWorkflowData";
 import { WorkflowNavigation } from "./WorkflowNavigation";
@@ -21,30 +22,32 @@ import { WorkflowNavigation } from "./WorkflowNavigation";
 const loadWorkflows = () => api("workflows.listWorkflows", undefined);
 
 export function WorkflowList() {
+  const t = useTranslation();
   const { detail: workflows, error } = useWorkflowData(loadWorkflows);
   return (
     <WorkFrame
-      title="Workflows"
+      title={t("Workflows")}
       actions={
         <>
           <WorkflowNavigation />
           <Button size="sm" render={<Link to="/settings/workflows/new" />}>
-            New workflow
+            {t("New workflow")}
           </Button>
         </>
       }
     >
       <p className="text-sm text-muted-foreground">
-        Workflows define the process: steps, fields and rules. Create projects from them to assign
-        people and run tickets.
+        {t(
+          "Workflows define the process: steps, fields and rules. Create projects from them to assign people and run tickets.",
+        )}
       </p>
       {error && <ErrorText text={error} />}
       {workflows?.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No workflows yet. Create a workflow to get started.
+          {t("No workflows yet. Create a workflow to get started.")}
         </p>
       ) : null}
-      <section aria-label="Workflows" className="flex flex-col gap-3">
+      <section aria-label={t("Workflows")} className="flex flex-col gap-3">
         {workflows?.map(({ workflow, version }) => (
           <div
             key={workflow.id}
@@ -53,18 +56,19 @@ export function WorkflowList() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{workflow.name}</p>
               <p className="text-xs text-muted-foreground">
-                {plural(version.steps.length, "step", "steps")} · Version {version.number}
+                {t(version.steps.length === 1 ? "{0} step" : "{0} steps", version.steps.length)}{" "}
+                {t("· Version")} {version.number}
               </p>
             </div>
             {workflow.isArchived ? (
-              <Badge variant="secondary">Archived</Badge>
+              <Badge variant="secondary">{t("Archived")}</Badge>
             ) : (
               <Button
                 size="sm"
                 variant="outline"
                 render={<Link to="/settings/projects/new" search={{ workflowId: workflow.id }} />}
               >
-                Create project
+                {t("Create project")}
               </Button>
             )}
             <Button
@@ -74,7 +78,7 @@ export function WorkflowList() {
                 <Link to="/settings/workflows/$workflowId" params={{ workflowId: workflow.id }} />
               }
             >
-              Open workflow
+              {t("Open workflow")}
             </Button>
           </div>
         ))}
@@ -84,6 +88,7 @@ export function WorkflowList() {
 }
 
 export function NewWorkflow() {
+  const t = useTranslation();
   const id = useId();
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -91,13 +96,14 @@ export function NewWorkflow() {
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
   return (
-    <WorkFrame title="New workflow">
+    <WorkFrame title={t("New workflow")}>
       <p className="text-sm text-muted-foreground">
-        Define the process once. Each project using it will have its own people and assignments. You
-        are its creator: you choose who else edits it.
+        {t(
+          "Define the process once. Each project using it will have its own people and assignments. You are its creator: you choose who else edits it.",
+        )}
       </p>
       <form
-        aria-label="New workflow"
+        aria-label={t("New workflow")}
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"
         onSubmit={(event) => {
           event.preventDefault();
@@ -120,11 +126,11 @@ export function NewWorkflow() {
         }}
       >
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-name`}>Workflow name</Label>
+          <Label htmlFor={`${id}-name`}>{t("Workflow name")}</Label>
           <Input
             id={`${id}-name`}
             value={name}
-            placeholder="Hiring process"
+            placeholder={t("Hiring process")}
             onChange={(event) => setName(event.target.value)}
             disabled={busy}
           />
@@ -132,7 +138,7 @@ export function NewWorkflow() {
         {error && <ErrorText text={error} />}
         <div>
           <Button type="submit" disabled={busy || !name.trim()}>
-            Create workflow
+            {t("Create workflow")}
           </Button>
         </div>
       </form>
@@ -141,6 +147,7 @@ export function NewWorkflow() {
 }
 
 export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) {
+  const t = useTranslation();
   const id = useId();
   const [name, setName] = useState("");
   const directory = useWorkDirectory();
@@ -151,9 +158,9 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
   );
   if (detail === null)
     return (
-      <WorkFrame title="Workflow">
+      <WorkFrame title={t("Workflow")}>
         <p role={error === null ? undefined : "alert"} className="text-sm text-muted-foreground">
-          {error ?? "Loading…"}
+          {error ?? t("Loading…")}
         </p>
       </WorkFrame>
     );
@@ -167,27 +174,28 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
       actions={
         !workflow.isArchived ? (
           <Button size="sm" render={<Link to="/settings/projects/new" search={{ workflowId }} />}>
-            Create project
+            {t("Create project")}
           </Button>
         ) : null
       }
     >
       <p className="text-sm text-muted-foreground">
-        This is a shared workflow. Each project adopts a version of its steps and fields, and
-        tickets keep the version they started on. People are assigned separately in each project.
+        {t(
+          "This is a shared workflow. Each project adopts a version of its steps and fields, and tickets keep the version they started on. People are assigned separately in each project.",
+        )}
       </p>
       {!canEdit ? (
         <p className="text-sm text-muted-foreground">
-          Only this workflow's creator, its editors and organization admins can edit it.
+          {t("Only this workflow's creator, its editors and organization admins can edit it.")}
         </p>
       ) : null}
       {error && <ErrorText text={error} />}
       <section
-        aria-label="Workflow"
+        aria-label={t("Workflow")}
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"
       >
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-name`}>Workflow name</Label>
+          <Label htmlFor={`${id}-name`}>{t("Workflow name")}</Label>
           <Input
             id={`${id}-name`}
             value={name}
@@ -203,11 +211,15 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
           />
         </div>
         <ActionRow
-          title={`Version ${version.number} · ${plural(version.steps.length, "step", "steps")}`}
+          title={t(
+            "Version {0} · {1}",
+            version.number,
+            t(version.steps.length === 1 ? "{0} step" : "{0} steps", version.steps.length),
+          )}
           description={
             version.isFrozen
-              ? "In use by a project. Saving its steps starts the next version."
-              : "A draft until a project adopts it."
+              ? t("In use by a project. Saving its steps starts the next version.")
+              : t("A draft until a project adopts it.")
           }
           action={
             <Button
@@ -215,19 +227,19 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
               variant="outline"
               render={<Link to="/settings/workflows/$workflowId/steps" params={{ workflowId }} />}
             >
-              {canChange ? "Edit steps" : "View steps"}
+              {canChange ? t("Edit steps") : t("View steps")}
             </Button>
           }
         />
       </section>
       <section
-        aria-label="Editors"
+        aria-label={t("Editors")}
         className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-5"
       >
-        <span className="text-sm font-medium">Editors</span>
+        <span className="text-sm font-medium">{t("Editors")}</span>
         <p className="text-xs text-muted-foreground">
-          {actorName(directory, workflow.creatorUserId)} created this workflow. Editors change it
-          too, as do organization admins.
+          {actorName(directory, workflow.creatorUserId)}{" "}
+          {t("created this workflow. Editors change it too, as do organization admins.")}
         </p>
         <ul className="flex flex-col gap-1">
           {workflow.editorUserIds.map((userId) => {
@@ -239,7 +251,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
                   <Button
                     size="icon-xs"
                     variant="ghost"
-                    aria-label={`Remove editor ${editor}`}
+                    aria-label={t("Remove editor {0}", editor)}
                     disabled={busy}
                     onClick={() => setEditors(workflow.editorUserIds.filter((id) => id !== userId))}
                   >
@@ -252,24 +264,26 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
         </ul>
         {canSetEditors && canChange ? (
           <PersonPicker
-            aria-label="New editor"
+            aria-label={t("New editor")}
             value={null}
             onChange={(editor) => setEditors([...workflow.editorUserIds, editor])}
-            placeholder="Add an editor"
+            placeholder={t("Add an editor")}
             disabled={busy}
           />
         ) : null}
       </section>
       <section
-        aria-label="Workflow availability"
+        aria-label={t("Workflow availability")}
         className="rounded-xl border border-border bg-card"
       >
         <ActionRow
-          title={!workflow.isArchived ? "Archive workflow" : "Archived workflow"}
-          description="An archived workflow no longer changes, starts no new project and has no version adopted. Existing projects keep running. There's no going back."
+          title={!workflow.isArchived ? t("Archive workflow") : t("Archived workflow")}
+          description={t(
+            "An archived workflow no longer changes, starts no new project and has no version adopted. Existing projects keep running. There's no going back.",
+          )}
           action={
             workflow.isArchived ? (
-              <Badge variant="secondary">Archived</Badge>
+              <Badge variant="secondary">{t("Archived")}</Badge>
             ) : (
               <Button
                 size="sm"
@@ -277,7 +291,7 @@ export function WorkflowEditor({ workflowId }: { readonly workflowId: string }) 
                 disabled={busy || !canEdit}
                 onClick={() => void run(() => api("workflows.archiveWorkflow", { workflowId }))}
               >
-                Archive workflow
+                {t("Archive workflow")}
               </Button>
             )
           }

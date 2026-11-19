@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useRouter } from "@tanstack/react-router";
 import { Button } from "../ui/button";
 import type { ChatId } from "@t45/contracts/models/Chat";
@@ -47,6 +48,7 @@ function errorToast(title: string, error: unknown) {
 }
 
 export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
+  const t = useTranslation();
   // Inline rename, keyed by chat: navigating away drops an in-progress
   // rename instead of committing stale text. Cleared on chat change (not
   // just hidden) so returning to the chat doesn't revive the old draft.
@@ -69,12 +71,12 @@ export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
     setRenaming(null);
     const title = input.trim();
     if (title.length === 0) {
-      toastManager.add({ type: "warning", title: "Chat title cannot be empty" });
+      toastManager.add({ type: "warning", title: t("Chat title cannot be empty") });
       return;
     }
     if (title === activeChatTitle) return;
     void api("chats.rename", { chatId: activeChatId, title }).catch((error: unknown) =>
-      errorToast("Failed to rename chat", error),
+      errorToast(t("Failed to rename chat"), error),
     );
   };
   // T45 stops the chat's agent and removes its attachments itself. Deleting the open chat lands on
@@ -85,7 +87,7 @@ export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
     } catch (error) {
       // A chat already gone was deleted elsewhere meanwhile, so "Failed to delete chat" would
       // be a lie.
-      if (!isNotFound(error)) errorToast("Failed to delete chat", error);
+      if (!isNotFound(error)) errorToast(t("Failed to delete chat"), error);
       return;
     }
     forgetChatDrafts(chatId);
@@ -94,7 +96,7 @@ export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
     await router
       .navigate({ to: "/chats", replace: true })
       .catch(() =>
-        toastManager.add({ type: "error", title: "Chat deleted, but navigation failed" }),
+        toastManager.add({ type: "error", title: t("Chat deleted, but navigation failed") }),
       );
   };
   const handleTitleDoubleClick = (event: ReactMouseEvent) => {
@@ -119,12 +121,12 @@ export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
     <MenuPopup align="start">
       <MenuItem onClick={startRename}>
         <PencilIcon />
-        Rename chat
+        {t("Rename chat")}
       </MenuItem>
       <MenuSeparator />
       <MenuItem variant="destructive" onClick={() => setConfirmingDelete(true)}>
         <Trash2Icon />
-        Delete chat
+        {t("Delete chat")}
       </MenuItem>
     </MenuPopup>
   );
@@ -134,14 +136,15 @@ export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
         <ContextMenu disabled={renamingTitle !== null}>
           <ContextMenuTrigger className="flex min-w-0 flex-1">
             <PageBreadcrumb
-              parent={<PageBreadcrumbLink to="/chats">Chat</PageBreadcrumbLink>}
+              tabTitle={activeChatTitle || t("Chat")}
+              parent={<PageBreadcrumbLink to="/chats">{t("Chat")}</PageBreadcrumbLink>}
               className="flex-1 overflow-clip [overflow-clip-margin:2px]"
               currentClassName="min-w-10 flex-1"
               title={
                 renamingTitle !== null ? (
                   <input
                     autoFocus
-                    aria-label="Chat title"
+                    aria-label={t("Chat title")}
                     className="min-w-0 flex-1 rounded-sm bg-transparent text-sm font-medium text-foreground outline-none ring-1 ring-ring/50 focus:ring-ring"
                     defaultValue={renamingTitle}
                     onBlur={(event) => {
@@ -157,7 +160,7 @@ export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
                       <TooltipTrigger
                         render={
                           <MenuTrigger
-                            aria-label={`Chat actions for ${activeChatTitle}`}
+                            aria-label={t("Chat actions for {0}", activeChatTitle)}
                             onDoubleClick={handleTitleDoubleClick}
                             render={
                               <button
@@ -191,13 +194,13 @@ export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
       <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
         <DialogPopup closeButton={false}>
           <DialogHeader>
-            <DialogTitle>{`Delete chat "${activeChatTitle}"?`}</DialogTitle>
+            <DialogTitle>{t('Delete chat "{0}"?', activeChatTitle)}</DialogTitle>
             <DialogDescription>
-              This permanently clears conversation history for this chat.
+              {t("This permanently clears conversation history for this chat.")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <DialogClose render={<Button variant="outline" />}>{t("Cancel")}</DialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -205,7 +208,7 @@ export function ChatHeader({ activeChatId, activeChatTitle }: ChatHeaderProps) {
                 void deleteChat(activeChatId);
               }}
             >
-              Delete
+              {t("Delete")}
             </Button>
           </DialogFooter>
         </DialogPopup>

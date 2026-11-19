@@ -3,7 +3,7 @@
  * lifecycle state and profile. The repository stores them; it does not verify identity tokens or
  * mint sessions.
  */
-import { User } from "@t45/contracts/models/User";
+import { type Locale, User } from "@t45/contracts/models/User";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -39,6 +39,7 @@ export class UserRepository extends Context.Service<
     }) => Effect.Effect<User>;
     /** Writes the user, with `upload` as its new avatar image. */
     readonly update: (user: User, upload?: Uint8Array | null) => Effect.Effect<void>;
+    readonly setLocale: (userId: string, locale: Locale | null) => Effect.Effect<void>;
     /** Removes a declined registration after its sessions have been revoked. */
     readonly remove: (userId: string) => Effect.Effect<void>;
     /** The user's avatar image, a PNG. */
@@ -81,6 +82,11 @@ export const layer = Layer.effect(
             display_name = ${row.displayName}, ${setAvatar(sql, user.avatar, upload)},
             updated_at = ${row.updatedAt} WHERE id = ${row.id}`;
         }).pipe(Effect.orDie),
+      setLocale: (userId, locale) =>
+        sql`UPDATE users SET locale = ${locale} WHERE id = ${userId}`.pipe(
+          Effect.asVoid,
+          Effect.orDie,
+        ),
       remove: (userId) =>
         sql`DELETE FROM users WHERE id = ${userId}`.pipe(Effect.asVoid, Effect.orDie),
       avatarImage: (userId) =>

@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { LegendListRef } from "@legendapp/list/react";
 import { TokenUsage } from "@opencode/schema/token-usage";
 import type { ChatId } from "@t45/contracts/models/Chat";
@@ -51,6 +52,7 @@ const ignore = () => {};
  * depths: what it reported, the tools it called, and its whole session.
  */
 export function RunPage({ stepId, chatId }: { readonly stepId: string; readonly chatId: ChatId }) {
+  const t = useTranslation();
   const { data: view, error } = useApiQuery(isStepId(stepId) ? stepViews({ stepId }) : null);
   const titles = useApiQuery(stepAutomationList);
   const automation = view?.automations.find(({ runs }) =>
@@ -60,11 +62,11 @@ export function RunPage({ stepId, chatId }: { readonly stepId: string; readonly 
   const run = automation?.runs[at];
   if (view === null || error !== null || automation === undefined || run === undefined) {
     return (
-      <WorkFrame title="Run">
+      <WorkFrame title={t("Run")}>
         {view === null && error === null && isStepId(stepId) ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t("Loading…")}</p>
         ) : (
-          <ErrorText text={error ?? "This run could not be found."} />
+          <ErrorText text={error ?? t("This run could not be found.")} />
         )}
       </WorkFrame>
     );
@@ -72,16 +74,19 @@ export function RunPage({ stepId, chatId }: { readonly stepId: string; readonly 
   // Runs are listed newest first, and numbered from the automation's first on the step.
   const number = automation.runs.length - at;
   const title =
-    titles.data?.find(({ id }) => id === automation.id)?.title ?? "Unavailable automation";
+    titles.data?.find(({ id }) => id === automation.id)?.title ?? t("Unavailable automation");
   const { label, Icon, tone } = RUN_STATUSES[run.status];
   return (
-    <WorkFrame title={`${title} #${number}`}>
+    <WorkFrame
+      title={`${title} #${number}`}
+      tabTitle={`${title} #${number} · ${view.ticket.title}`}
+    >
       <header className="flex flex-col gap-3">
         <BackLink to="/my-work/$stepId" params={{ stepId }}>
           {view.ticket.title}
         </BackLink>
         <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <span role="img" aria-label={label} className="flex shrink-0">
+          <span role="img" aria-label={t(label)} className="flex shrink-0">
             <Icon aria-hidden className={`size-6 ${tone}`} />
           </span>
           {title}
@@ -96,24 +101,25 @@ export function RunPage({ stepId, chatId }: { readonly stepId: string; readonly 
 
 /** The run at a glance: who started it and when, how it stands, and what it used. */
 function RunSummary({ run }: { readonly run: StepView["automations"][number]["runs"][number] }) {
+  const t = useTranslation();
   const directory = useWorkDirectory();
   const now = useNowMinute();
   // Every token the run counted: input, output, reasoning, and cache reads and writes.
   const used = TokenUsage.total(run.tokens);
   return (
     <section
-      aria-label="Summary"
+      aria-label={t("Summary")}
       className="grid grid-cols-2 gap-4 rounded-xl border bg-card p-4 text-sm sm:grid-cols-[2fr_repeat(4,1fr)]"
     >
-      <Fact label={`Manually triggered ${formatRelativeTimeLabel(run.startedAt, now)}`}>
+      <Fact label={t("Manually triggered {0}", formatRelativeTimeLabel(run.startedAt, now))}>
         {actorName(directory, run.ranBy)}
       </Fact>
-      <Fact label="Status">{RUN_STATUSES[run.status].label}</Fact>
-      <Fact label="Total duration">
-        {run.endedAt === null ? "In progress" : formatDurationLabel(run.startedAt, run.endedAt)}
+      <Fact label={t("Status")}>{t(RUN_STATUSES[run.status].label)}</Fact>
+      <Fact label={t("Total duration")}>
+        {run.endedAt === null ? t("In progress") : formatDurationLabel(run.startedAt, run.endedAt)}
       </Fact>
-      <Fact label="Tokens">{used === 0 ? "–" : tokenCount.format(used)}</Fact>
-      <Fact label="Cost">{used === 0 ? "–" : usd.format(run.cost)}</Fact>
+      <Fact label={t("Tokens")}>{used === 0 ? "–" : tokenCount.format(used)}</Fact>
+      <Fact label={t("Cost")}>{used === 0 ? "–" : usd.format(run.cost)}</Fact>
     </section>
   );
 }
@@ -129,24 +135,25 @@ function Fact({ label, children }: { readonly label: string; readonly children: 
 
 /** The run's history, as one of three views of its chat. */
 function RunHistory({ chatId }: { readonly chatId: ChatId }) {
+  const t = useTranslation();
   const session = useChatSessionSummary(chatSessionKey(chatId));
   if (session.status === "loading") {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return <p className="text-sm text-muted-foreground">{t("Loading…")}</p>;
   }
   if (session.status === "failed") return <ErrorText text={describeFailure(session.error)} />;
   const reports = session.chat.reports ?? [];
   return (
     <Tabs defaultValue="Reports">
       <TabsList className="self-start">
-        {["Reports", "Tool calls", "Session"].map((name) => (
+        {(["Reports", "Tool calls", "Session"] as const).map((name) => (
           <TabsTab key={name} value={name} className="flex-none">
-            {name}
+            {t(name)}
           </TabsTab>
         ))}
       </TabsList>
       <TabsPanel value="Reports">
         {reports.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No reports.</p>
+          <p className="text-sm text-muted-foreground">{t("No reports.")}</p>
         ) : (
           <ol className="overflow-hidden rounded-xl border bg-card text-sm">
             {reports.map((report, at) => (
@@ -176,6 +183,7 @@ function RunHistory({ chatId }: { readonly chatId: ChatId }) {
 
 /** Every tool the run's session called, oldest first: the session loads whole to list them all. */
 function RunToolCalls({ chatId }: { readonly chatId: ChatId }) {
+  const t = useTranslation();
   const session = useChatSessionView(chatSessionKey(chatId));
   const hasEarlierToLoad =
     session.status === "ready" && session.hasEarlier && session.earlierError === null;
@@ -194,9 +202,11 @@ function RunToolCalls({ chatId }: { readonly chatId: ChatId }) {
   return (
     <div className="flex flex-col gap-2 text-sm">
       {session.earlierError !== null && <ErrorText text={session.earlierError} />}
-      {hasEarlierToLoad && <p className="text-muted-foreground">Loading earlier tool calls…</p>}
+      {hasEarlierToLoad && (
+        <p className="text-muted-foreground">{t("Loading earlier tool calls…")}</p>
+      )}
       {calls.length === 0 ? (
-        <p className="text-muted-foreground">No tool calls.</p>
+        <p className="text-muted-foreground">{t("No tool calls.")}</p>
       ) : (
         <ol className="overflow-hidden rounded-xl border bg-card">
           {calls.map(({ key, name, state, time }) => (
@@ -213,7 +223,7 @@ function RunToolCalls({ chatId }: { readonly chatId: ChatId }) {
               </span>
               {state.status === "error" && (
                 <Badge variant="error" size="sm">
-                  Failed
+                  {t("Failed")}
                 </Badge>
               )}
             </li>

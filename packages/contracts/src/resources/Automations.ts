@@ -10,7 +10,7 @@ import { Refused as AutomationRefused, Automation, AutomationId } from "../model
 import { AdminOnly } from "../Authorization.ts";
 import { AccessDenied, NotFound } from "./errors.ts";
 
-const Settings = Struct.pick(Automation.fields, ["title", "prompt", "agentId"]);
+const Settings = Struct.pick(Automation.fields, ["title", "prompt", "agentId", "stepContext"]);
 const Errors = Schema.Union([AutomationRefused, NotFound, AccessDenied]);
 
 export const AutomationRun = Schema.Struct({
@@ -19,6 +19,8 @@ export const AutomationRun = Schema.Struct({
   /** The step it ran on; null for a run started from settings. */
   stepId: Schema.NullOr(StringId),
   ranBy: StringId,
+  /** Whether entering its step started it, rather than a member. */
+  isAutomatic: Schema.Boolean,
   startedAt: Schema.DateTimeUtcFromString,
   /** Null while it runs. */
   endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),

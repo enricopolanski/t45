@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useAtomValue } from "@effect/atom-react";
 import { WifiOffIcon } from "lucide-react";
 
@@ -6,6 +7,7 @@ import { reachableAtom } from "../../rpc/api";
 import { ComposerBanner } from "./ComposerBanner";
 
 export function ConnectionNotice() {
+  const t = useTranslation();
   const unreachable = !useAtomValue(reachableAtom);
   if (!useDelayedTrue(unreachable, 2_000)) return null;
   return (
@@ -21,7 +23,7 @@ export function ConnectionNotice() {
         </ComposerBanner.Icon>
         <ComposerBanner.Content className="whitespace-nowrap">
           <span className="min-w-0 truncate font-medium leading-7 sm:leading-6">
-            Server is reconnecting
+            {t("Server is reconnecting")}
           </span>
         </ComposerBanner.Content>
       </ComposerBanner.Row>

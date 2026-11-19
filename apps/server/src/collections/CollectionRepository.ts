@@ -18,6 +18,7 @@ const encodeCollection = Schema.encodeEffect(
     ...Collection.fields,
     fields: Schema.fromJsonString(Collection.fields.fields),
     memberUserIds: Schema.fromJsonString(Collection.fields.memberUserIds),
+    isPublished: Schema.BooleanFromBit,
     columnOrder: Schema.optionalKey(Schema.fromJsonString(CollectionColumnOrder)),
     layout: Schema.optionalKey(Schema.fromJsonString(CollectionLayout)),
   }),
@@ -40,6 +41,7 @@ export const layer = Layer.effect(
       sql<{ readonly collection: string }>`SELECT json_object(
           'id', id, 'title', title, 'fields', json(fields),
           'primaryKeyFieldId', primary_key_field_id, 'memberUserIds', json(member_user_ids),
+          'isPublished', json(CASE WHEN is_published THEN 'true' ELSE 'false' END),
           'columnOrder', json(column_order), 'layout', json(layout),
           'createdAt', created_at, 'updatedAt', updated_at) AS collection
         FROM collections WHERE ${where} ORDER BY title COLLATE NOCASE`.pipe(
@@ -55,13 +57,14 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           const row = yield* encodeCollection(collection);
           yield* sql`INSERT INTO collections (id, title, fields, primary_key_field_id,
-              member_user_ids, column_order, layout, created_at, updated_at)
+              member_user_ids, is_published, column_order, layout, created_at, updated_at)
             VALUES (${row.id}, ${row.title}, ${row.fields}, ${row.primaryKeyFieldId},
-              ${row.memberUserIds}, ${row.columnOrder ?? "[]"}, ${row.layout ?? "{}"},
+              ${row.memberUserIds}, ${row.isPublished}, ${row.columnOrder ?? "[]"}, ${row.layout ?? "{}"},
               ${row.createdAt}, ${row.updatedAt})
             ON CONFLICT (id) DO UPDATE SET title = excluded.title, fields = excluded.fields,
               primary_key_field_id = excluded.primary_key_field_id,
               member_user_ids = excluded.member_user_ids, column_order = excluded.column_order,
+              is_published = excluded.is_published,
               layout = excluded.layout,
               updated_at = excluded.updated_at`;
         }).pipe(Effect.orDie),

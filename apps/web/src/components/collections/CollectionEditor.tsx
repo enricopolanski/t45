@@ -1,3 +1,4 @@
+import { translate, useTranslation } from "~/i18n/locale";
 import type { Collection } from "@t45/contracts/models/Collection";
 import { Fields } from "@t45/contracts/models/Field";
 import { useNavigate } from "@tanstack/react-router";
@@ -17,6 +18,7 @@ import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { PersonPicker } from "../work/PersonPicker";
 import { useWorkDirectory } from "../work/useWorkDirectory";
 import { WorkFrame } from "../work/WorkFrame";
@@ -33,12 +35,19 @@ interface Draft {
   readonly fields: ReadonlyArray<DraftField>;
   readonly primaryKeyFieldId: string;
   readonly memberUserIds: ReadonlyArray<string>;
+  readonly isPublished: boolean;
 }
 
 /** A new collection starts with one text field as its primary key. */
 const newDraft = (): Draft => {
-  const key = { ...blankField(), label: "Key" };
-  return { title: "", fields: [key], primaryKeyFieldId: key.id, memberUserIds: [] };
+  const key = { ...blankField(), label: translate("Key") };
+  return {
+    title: "",
+    fields: [key],
+    primaryKeyFieldId: key.id,
+    memberUserIds: [],
+    isPublished: false,
+  };
 };
 
 /** A field the collection's records hold: only its display settings can change. */
@@ -55,11 +64,12 @@ function LockedField({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium">{field.label}</span>
-        <span className="text-xs text-muted-foreground">{FIELD_TYPES[field.type]}</span>
+        <span className="text-xs text-muted-foreground">{t(FIELD_TYPES[field.type])}</span>
         <LinkDisplaySelect field={field} fields={fields} onChange={onChange} disabled={disabled} />
         <MarkdownSwitch field={field} onChange={onChange} disabled={disabled} />
         {isColumn ? (
@@ -91,6 +101,7 @@ function LockedField({
  * records. Once it has records, its fields only grow.
  */
 export function CollectionEditor({ collectionId }: { readonly collectionId: string | null }) {
+  const t = useTranslation();
   const id = useId();
   const navigate = useNavigate();
   const directory = useWorkDirectory();
@@ -115,16 +126,17 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
             fields: encodeFields(collection.fields),
             primaryKeyFieldId: collection.primaryKeyFieldId,
             memberUserIds: collection.memberUserIds,
+            isPublished: collection.isPublished,
           },
     );
   }, []);
   const { detail, busy, error, run } = useWorkflowData(load, onLoad);
-  const title = collectionId === null ? "New collection" : "Edit collection";
+  const title = collectionId === null ? t("New collection") : t("Edit collection");
   if (detail === null || draft === null)
     return (
       <WorkFrame title={title}>
         <p role={error === null ? undefined : "alert"} className="text-sm text-muted-foreground">
-          {error ?? "Loading…"}
+          {error ?? t("Loading…")}
         </p>
       </WorkFrame>
     );
@@ -151,14 +163,14 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
     <WorkFrame title={title}>
       {error && <ErrorText text={error} />}
       <section
-        aria-label="Collection"
+        aria-label={t("Collection")}
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"
       >
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-title`}>Title</Label>
+          <Label htmlFor={`${id}-title`}>{t("Title")}</Label>
           <Input
             id={`${id}-title`}
-            placeholder="Amazon listings"
+            placeholder={t("Amazon listings")}
             value={draft.title}
             onChange={(event) => setDraft({ ...draft, title: event.target.value })}
             disabled={busy}
@@ -166,7 +178,7 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
         </div>
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium">Fields</span>
+            <span className="text-sm font-medium">{t("Fields")}</span>
             {detail.collection === null ? null : (
               <CollectionLayoutButton
                 collection={{ ...detail.collection, layout }}
@@ -178,8 +190,9 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
           {hasRecords ? (
             <>
               <p className="text-xs text-muted-foreground">
-                This collection has records: add fields, but its fields and primary key stay as they
-                are. You can change which show in the table and where links are displayed.
+                {t(
+                  "This collection has records: add fields, but its fields and primary key stay as they are. You can change which show in the table and where links are displayed.",
+                )}
               </p>
               <ul className="flex flex-col gap-1">
                 {locked.map((field, at) => {
@@ -211,10 +224,11 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${id}-key`}>Primary key</Label>
+          <Label htmlFor={`${id}-key`}>{t("Primary key")}</Label>
           <p className="text-xs text-muted-foreground">
-            The text field whose value identifies a record: saving a record with a key the
-            collection holds replaces that record.
+            {t(
+              "The text field whose value identifies a record: saving a record with a key the collection holds replaces that record.",
+            )}
           </p>
           <Select
             value={
@@ -228,16 +242,16 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
             disabled={busy || hasRecords}
           >
             <SelectTrigger id={`${id}-key`}>
-              <SelectValue placeholder="Choose a text field">
+              <SelectValue placeholder={t("Choose a text field")}>
                 {(fieldId: string) =>
-                  keyChoices.find((field) => field.id === fieldId)?.label || "Untitled field"
+                  keyChoices.find((field) => field.id === fieldId)?.label || t("Untitled field")
                 }
               </SelectValue>
             </SelectTrigger>
             <SelectPopup>
               {keyChoices.map((field) => (
                 <SelectItem key={field.id} value={field.id}>
-                  {field.label || "Untitled field"}
+                  {field.label || t("Untitled field")}
                 </SelectItem>
               ))}
             </SelectPopup>
@@ -245,12 +259,25 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
         </div>
       </section>
       <section
-        aria-label="People"
+        aria-label={t("People")}
         className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-5"
       >
-        <span className="text-sm font-medium">People</span>
-        <p className="text-xs text-muted-foreground">
-          Admins and these members see and edit its records.
+        <span className="text-sm font-medium">{t("People")}</span>
+        <label className="mt-1 flex w-fit items-center gap-2 text-sm">
+          <Switch
+            size="sm"
+            checked={draft.isPublished}
+            onCheckedChange={(isPublished) => setDraft({ ...draft, isPublished })}
+            aria-describedby={`${id}-publication`}
+            disabled={busy}
+          />
+          {t("Publish to the organization")}
+        </label>
+        <p id={`${id}-publication`} className="text-xs text-muted-foreground">
+          {t("Everyone in the organization can open published collections from the main menu.")}
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {t("Admins and the people below can edit records.")}
         </p>
         <ul className="flex flex-col gap-1">
           {draft.memberUserIds.map((userId) => {
@@ -261,7 +288,7 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
                 <Button
                   size="icon-xs"
                   variant="ghost"
-                  aria-label={`Remove ${name}`}
+                  aria-label={t("Remove {0}", name)}
                   disabled={busy}
                   onClick={() =>
                     setDraft({
@@ -277,20 +304,20 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
           })}
         </ul>
         <PersonPicker
-          aria-label="New member"
+          aria-label={t("New member")}
           value={null}
           onChange={(userId) =>
             draft.memberUserIds.includes(userId)
               ? undefined
               : setDraft({ ...draft, memberUserIds: [...draft.memberUserIds, userId] })
           }
-          placeholder="Add a member"
+          placeholder={t("Add a member")}
           disabled={busy}
         />
       </section>
       <div className="flex justify-end">
         <Button onClick={save} disabled={busy}>
-          {collectionId === null ? "Create collection" : "Save collection"}
+          {collectionId === null ? t("Create collection") : t("Save collection")}
         </Button>
       </div>
     </WorkFrame>

@@ -129,6 +129,7 @@ describe("attachment routes", () => {
             userId: token === "other" ? "user-2" : token === "admin" ? "admin01" : "user-1",
             role: token === "admin" ? "admin" : "member",
             state: token === "pending" ? "pending" : "active",
+            locale: null,
             expiresAt: DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"),
           })
         : Effect.fail(new SessionInvalidError({})),

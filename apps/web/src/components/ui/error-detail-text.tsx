@@ -1,4 +1,5 @@
 "use client";
+import { useTranslation } from "~/i18n/locale";
 
 import { CheckIcon, CopyIcon } from "lucide-react";
 
@@ -9,8 +10,9 @@ import { Button } from "./button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./tooltip";
 
 export function ErrorDetailCopyButton({ text, className }: { text: string; className?: string }) {
+  const t = useTranslation();
   const { copyToClipboard, isCopied } = useCopyToClipboard();
-  const label = isCopied ? "Copied error" : "Copy error";
+  const label = isCopied ? t("Copied error") : t("Copy error");
 
   return (
     <Tooltip>

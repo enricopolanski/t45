@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
+    "@clerk/localizations": "catalog:",
     "@clerk/react": "catalog:",
     "@effect/atom-react": "catalog:",
     "@legendapp/list": "catalog:",

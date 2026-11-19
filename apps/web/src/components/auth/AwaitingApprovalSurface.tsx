@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useEffect } from "react";
 
 import { useSessionState } from "../../state/session";
@@ -12,6 +13,7 @@ const POLL_INTERVAL_MS = 5_000;
  * page once the session's state stops being pending.
  */
 export function AwaitingApprovalSurface() {
+  const t = useTranslation();
   const { data, refresh } = useSessionState();
 
   useEffect(() => {
@@ -30,12 +32,14 @@ export function AwaitingApprovalSurface() {
   return (
     <StandalonePage>
       <StandalonePageHeader
-        title="Awaiting approval"
-        description="Your registration was received. An admin has to approve you before you can open the organization."
+        title={t("Awaiting approval")}
+        description={t(
+          "Your registration was received. An admin has to approve you before you can open the organization.",
+        )}
       />
       <div className="mt-6 flex flex-col items-center gap-4">
         <p className="text-sm text-muted-foreground">
-          This page checks again automatically. You can leave it open.
+          {t("This page checks again automatically. You can leave it open.")}
         </p>
         <UseAnotherAccountButton />
       </div>

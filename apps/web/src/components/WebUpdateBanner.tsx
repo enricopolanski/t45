@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useEffect } from "react";
 
 import { BUILD_SHA } from "../lib/buildSha";
@@ -7,6 +8,7 @@ import { Button } from "./ui/button";
 const POLL_MS = 60_000;
 
 export function WebUpdateBanner() {
+  const t = useTranslation();
   const { data, refresh } = useSessionState();
 
   useEffect(() => {
@@ -24,9 +26,11 @@ export function WebUpdateBanner() {
       className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border bg-background/95 px-4 py-2 text-sm shadow-lg backdrop-blur-sm"
       role="status"
     >
-      <span className="text-muted-foreground">A new version of the application is available.</span>
+      <span className="text-muted-foreground">
+        {t("A new version of the application is available.")}
+      </span>
       <Button size="xs" onClick={() => window.location.reload()}>
-        Reload
+        {t("Reload")}
       </Button>
     </div>
   );

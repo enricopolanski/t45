@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import type { UpdateOrganizationRequest } from "@t45/contracts/resources/Organization";
 
 import { api } from "../rpc/api";
@@ -13,4 +14,8 @@ export const useOrganizationIfLoaded = () => useApiQuery(organization).data;
 
 /** Saves the organization's name and avatar and reloads it everywhere it shows. */
 export const updateOrganization = (request: UpdateOrganizationRequest) =>
-  mutate(api("organization.update", request), organization, "Couldn't update the organization");
+  mutate(
+    api("organization.update", request),
+    organization,
+    translate("Couldn't update the organization"),
+  );

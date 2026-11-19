@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
@@ -48,6 +49,7 @@ function SidebarProvider({ children }: { children: React.ReactNode }) {
  * sheet's layer (--z-sheet) sits under dialogs that open from inside it.
  */
 function Sidebar({ children, ...props }: React.ComponentProps<"div">) {
+  const t = useTranslation();
   const { isMobile, openMobile, setOpenMobile } = useSidebar();
 
   if (isMobile) {
@@ -57,7 +59,7 @@ function Sidebar({ children, ...props }: React.ComponentProps<"div">) {
           <SheetPrimitive.Backdrop className="fixed inset-0 z-(--z-sheet) bg-background/60 backdrop-blur-xs transition-all duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0" />
           <SheetPrimitive.Viewport className="fixed inset-0 z-(--z-sheet) flex justify-start">
             <SheetPrimitive.Popup
-              aria-label="Sidebar"
+              aria-label={t("Sidebar")}
               className="relative flex max-h-full min-h-0 w-[calc(100vw-(--spacing(3)))] min-w-0 flex-col border-e bg-sidebar surface-grain bg-clip-padding text-sidebar-foreground shadow-lg/5 transition-[opacity,translate] duration-200 ease-in-out will-change-transform data-ending-style:-translate-x-8 data-starting-style:-translate-x-8 data-ending-style:opacity-0 data-starting-style:opacity-0"
               data-mobile="true"
               data-slot="sidebar"
@@ -93,6 +95,7 @@ function Sidebar({ children, ...props }: React.ComponentProps<"div">) {
 }
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
+  const t = useTranslation();
   const { openMobile, setOpenMobile } = useSidebar();
 
   return (
@@ -109,7 +112,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       {...props}
     >
       <MorphIcon className="size-4" icon={openMobile ? PanelLeftClose : PanelLeft} />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">{t("Toggle Sidebar")}</span>
     </Button>
   );
 }

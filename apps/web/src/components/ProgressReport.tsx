@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { Report } from "@t45/contracts/models/Chat";
 import * as DateTime from "effect/DateTime";
 
@@ -11,11 +12,12 @@ export function ProgressReport({
   readonly report: Report | null;
   readonly isRunning?: boolean;
 }) {
+  const t = useTranslation();
   const now = useNowSecond();
   if (report === null) return null;
   const updated = (
     <time dateTime={DateTime.formatIso(report.at)} className="text-muted-foreground">
-      Updated{" "}
+      {t("Updated")}{" "}
       {isRunning
         ? formatRelativeSecondsLabel(report.at, now)
         : formatRelativeTimeLabel(report.at, now)}
