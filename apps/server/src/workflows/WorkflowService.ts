@@ -8,7 +8,7 @@ import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 import { ChatRepository } from "../chats/ChatRepository.ts";
 import { ChatEvents } from "../chats/ChatEvents.ts";
-import type { ChatId } from "@t45/contracts/models/Chat";
+import type { ChatId, Refusal as ChatRefusal } from "@t45/contracts/models/Chat";
 import { type AutomationOrigin, effectiveUserIdOf } from "@t45/contracts/models/ChatOrigin";
 import { canUse } from "@t45/contracts/models/Agent";
 import { canWorkSteps } from "@t45/contracts/models/Workflow";
@@ -22,6 +22,7 @@ import {
 import { generateId } from "@t45/contracts/models/primitives";
 import { Refused as UserRefused } from "@t45/contracts/models/User";
 import {
+  type AutomationSkipReason,
   automationTriggerOf,
   stepInTicket,
   childSteps,
@@ -145,6 +146,14 @@ const stepFileForChat = (file: Attachment) => ({
 });
 
 const sameStepView = Schema.toEquivalence(StepView);
+/** Why a chat refuses to start a step's automation; it refuses a new automation chat for nothing else. */
+const SKIP_REASON_OF_CHAT_REFUSAL: Partial<Record<ChatRefusal, AutomationSkipReason>> = {
+  agent_unavailable: "automation_unavailable",
+  input_too_long: "step_too_large",
+  too_many_files: "step_too_large",
+  images_too_large: "step_too_large",
+  file_unavailable: "file_unavailable",
+};
 const isAutomationId = Schema.is(AutomationId);
 
 /** A ticket with its project and the version of the workflow it runs on. */
@@ -611,17 +620,18 @@ const make = Effect.gen(function* () {
    */
   const startEntryAutomations = Effect.fnUntraced(function* (work: Work, step: Step) {
     const at = yield* DateTime.now;
-    const skip = (automationId: AutomationId) => (refusal: { readonly message: string }) =>
-      Effect.succeed({ automationId, reason: refusal.message, at });
     const skipped = yield* Effect.forEach(
       definitionOf(work, step).automationIds.filter(
         (id) => automationTriggerOf(work.project, step.stepDefinitionId, id) === "step_entry",
       ),
       (automationId) =>
         Effect.gen(function* () {
-          if (step.assignee === null) return yield* refuse("no_assignee");
-          const automation = yield* requireStepAutomation(automationId, step.assignee);
-          yield* startStepRun(work, step, automation, {
+          if (step.assignee === null) return "no_assignee" as const;
+          const automation = yield* Effect.option(
+            requireStepAutomation(automationId, step.assignee),
+          );
+          if (Option.isNone(automation)) return "automation_unavailable" as const;
+          yield* startStepRun(work, step, automation.value, {
             effectiveUserId: step.assignee,
             isAutomatic: true,
           });
@@ -632,16 +642,26 @@ const make = Effect.gen(function* () {
           return null;
         }).pipe(
           Effect.catchTags({
-            WorkflowRefused: skip(automationId),
-            ChatRefused: skip(automationId),
+            ChatRefused: (refused) => {
+              const reason = SKIP_REASON_OF_CHAT_REFUSAL[refused.reason];
+              return reason === undefined ? Effect.die(refused) : Effect.succeed(reason);
+            },
           }),
           // A new chat's id is never taken.
           Effect.orDie,
+          Effect.map((reason) => (reason === null ? null : { automationId, reason, at })),
         ),
     );
     const skippedAutomations = skipped.filter((entry) => entry !== null);
     if (skippedAutomations.length > 0) putStep(work, { ...step, skippedAutomations });
   });
+  /** Starts the entry automations of the step and of the sub-steps entered with it, parents first. */
+  const startEnteredAutomations = (work: Work, step: Step) =>
+    Effect.forEach(
+      work.ticket.steps.filter((entered) => topLevelStep(work.ticket, entered).id === step.id),
+      (entered) => startEntryAutomations(work, entered),
+      { discard: true },
+    );
   const isStepMember = (work: Work, step: Step, userId: string) =>
     Effect.map(memberOf(userId, work.project.id), (steps) =>
       steps.has(topLevelStep(work.ticket, step).stepDefinitionId),
@@ -671,7 +691,6 @@ const make = Effect.gen(function* () {
     });
     putStep(work, step);
     yield* notify({ kind: "to_do", to: step.assignee, project: work.project, step, actorId });
-    yield* startEntryAutomations(work, step);
     for (const child of definition.subSteps) {
       yield* enterStep(work, child, step, step.assignee, actorId);
     }
@@ -1157,8 +1176,10 @@ const make = Effect.gen(function* () {
     };
     yield* tickets.insert(work.ticket);
     const step = yield* enterStep(work, first, null, null, actorId);
-    yield* save(work);
+    // Logged first, so the step's history starts with the ticket's creation.
     yield* record("workflows.startTicket", caller, targetOf(work, step));
+    yield* startEnteredAutomations(work, step);
+    yield* save(work);
     return { ticketId: work.ticket.id, stepId: step.id };
   }, transaction);
 
@@ -1561,7 +1582,10 @@ const make = Effect.gen(function* () {
     yield* tickets.completedSteps.save(work.ticket.id, step.id, snapshot, [...attachments]);
     work.ticket = completed.ticket;
     if (completed.next !== null)
-      yield* enterStep(work, completed.next, null, step.assignee, actorId);
+      yield* startEnteredAutomations(
+        work,
+        yield* enterStep(work, completed.next, null, step.assignee, actorId),
+      );
     yield* save(work);
     yield* record("workflows.markStepDone", actorId, targetOf(work, step));
   }, transaction);

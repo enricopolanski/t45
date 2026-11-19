@@ -62,6 +62,8 @@ export const de = {
   "⅔ row": "⅔ Zeile",
   "A draft until a project adopts it.": "Ein Entwurf, bis ein Projekt ihn übernimmt.",
   "A field that no earlier step has": "Ein Feld, das in keinem früheren Schritt vorkommt",
+  "A file on this step is no longer available, so the automation couldn't receive it.":
+    "Eine Datei dieses Schritts ist nicht mehr verfügbar, daher konnte die Automatisierung sie nicht erhalten.",
   "A new version of the application is available.":
     "Eine neue Version der Anwendung ist verfügbar.",
   "a number": "einer Zahl",
@@ -593,6 +595,8 @@ export const de = {
   "Nobody matches.": "Keine passende Person.",
   None: "Keine",
   Normal: "Normal",
+  "Nobody was assigned when the step started, and automatic runs use the assignee's permissions. Assign someone, then run it here.":
+    "Beim Schrittbeginn war niemand zuständig, und automatische Ausführungen nutzen die Berechtigungen der zuständigen Person. Weise jemanden zu und starte sie dann hier.",
   "Not filled in": "Nicht ausgefüllt",
   "Not provided": "Nicht angegeben",
   Note: "Hinweis",
@@ -896,6 +900,8 @@ export const de = {
   "The agent stopped on an error": "Der Agent wurde durch einen Fehler gestoppt",
   "The agent's sandbox failed. Send a message to try again.":
     "Die Arbeitsumgebung des Agenten ist fehlgeschlagen. Sende eine Nachricht, um es erneut zu versuchen.",
+  "The automation is archived, or the step's assignee can't use its agent.":
+    "Die Automatisierung ist archiviert, oder die zuständige Person des Schritts kann ihren Agenten nicht verwenden.",
   "The clipboard isn't available here.": "Die Zwischenablage ist hier nicht verfügbar.",
   "The diagram could not be rendered.": "Das Diagramm konnte nicht angezeigt werden.",
   "The file is too large to upload.": "Die Datei ist zu groß zum Hochladen.",
@@ -942,6 +948,8 @@ export const de = {
   "This step could not be found.": "Dieser Schritt wurde nicht gefunden.",
   "This step was completed before snapshots were available. Linked records show current collection data.":
     "Dieser Schritt wurde abgeschlossen, bevor Momentaufnahmen verfügbar waren. Verknüpfte Datensätze zeigen die aktuellen Daten der Sammlung.",
+  "This step's text or files are too large to send to the automation.":
+    "Text oder Dateien dieses Schritts sind zu groß, um sie an die Automatisierung zu senden.",
   "This ticket has no entries in this group yet.":
     "Dieses Ticket hat noch keine Einträge in dieser Gruppe.",
   "Ticket “{0}”": "Ticket „{0}“",

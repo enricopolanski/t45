@@ -221,7 +221,11 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
                     void setAutomationTrigger(step.id, automationId, trigger);
                 }}
               >
-                <SelectTrigger size="sm" aria-label={t("When to run {0} in {1}", title, stepPath)}>
+                <SelectTrigger
+                  size="sm"
+                  className="w-auto shrink-0"
+                  aria-label={t("When to run {0} in {1}", title, stepPath)}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectPopup>

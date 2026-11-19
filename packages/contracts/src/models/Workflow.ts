@@ -207,6 +207,15 @@ export const StepAutomationTrigger = Schema.Struct({
   trigger: AutomationTrigger,
 });
 
+/** Why entering a step didn't start one of the automations the project runs on its entry. */
+export const AutomationSkipReason = Schema.Literals([
+  "no_assignee",
+  "automation_unavailable",
+  "step_too_large",
+  "file_unavailable",
+]);
+export type AutomationSkipReason = typeof AutomationSkipReason.Type;
+
 /** A team's use of a workflow, with its own people, settings and board. */
 export class Project extends Schema.Opaque<Project>()(
   Schema.Struct({
@@ -288,6 +297,7 @@ export class Step extends Schema.Opaque<Step>()(
       Schema.Array(
         Schema.Struct({
           automationId: AutomationId,
+          // Existing skips stored their display message before reason codes were introduced.
           reason: TrimmedNonEmptyString,
           at: Schema.DateTimeUtcFromString,
         }),
@@ -446,7 +456,6 @@ const REFUSALS = {
   invalid_attachment: "That file can't be attached here.",
   invalid_automations:
     "An automation is archived, or its agent can't work on steps or is private to someone other than you and this workflow's creator. Choose another.",
-  no_assignee: "The step has no assignee for the automation to run with.",
 };
 
 export class Refused extends Schema.TaggedError<Refused>()("WorkflowRefused", {

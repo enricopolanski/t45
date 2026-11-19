@@ -1,7 +1,7 @@
 import { type Message, type Translate, translate } from "~/i18n/locale";
 import { type Agent } from "@t45/contracts/models/Agent";
 import type { User } from "@t45/contracts/models/User";
-import type { Step, Ticket } from "@t45/contracts/models/Workflow";
+import type { AutomationSkipReason, Step, Ticket } from "@t45/contracts/models/Workflow";
 import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
 
 /** "27 Oct", with the year when it isn't this year's. `date` starts with `YYYY-MM-DD`. */
@@ -182,6 +182,16 @@ export const summarizeHistory = (history: StepView["history"], t: Translate = tr
     return { ...entry, label: historyLabel(entry, count, t) };
   });
 };
+
+/** Why entering the step didn't start an automation, told to whoever views the step. */
+export const AUTOMATION_SKIP_REASONS = {
+  no_assignee:
+    "Nobody was assigned when the step started, and automatic runs use the assignee's permissions. Assign someone, then run it here.",
+  automation_unavailable: "The automation is archived, or the step's assignee can't use its agent.",
+  step_too_large: "This step's text or files are too large to send to the automation.",
+  file_unavailable:
+    "A file on this step is no longer available, so the automation couldn't receive it.",
+} as const satisfies Record<AutomationSkipReason, Message>;
 
 export const STEP_STATE_LABELS = {
   working: "To do",

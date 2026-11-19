@@ -65,6 +65,8 @@ export const it = {
   "⅔ row": "⅔ di riga",
   "A draft until a project adopts it.": "Bozza finché un progetto non la adotta.",
   "A field that no earlier step has": "Un campo assente nei passaggi precedenti",
+  "A file on this step is no longer available, so the automation couldn't receive it.":
+    "Un file di questo passaggio non è più disponibile, quindi l’automazione non ha potuto riceverlo.",
   "A new version of the application is available.":
     "È disponibile una nuova versione dell’applicazione.",
   "a number": "un numero",
@@ -594,6 +596,8 @@ export const it = {
   "Nobody matches.": "Nessuna persona corrispondente.",
   None: "Nessuno",
   Normal: "Normale",
+  "Nobody was assigned when the step started, and automatic runs use the assignee's permissions. Assign someone, then run it here.":
+    "All’avvio del passaggio non c’era nessun assegnatario, e le esecuzioni automatiche usano i permessi dell’assegnatario. Assegna qualcuno, poi avviala da qui.",
   "Not filled in": "Non compilato",
   "Not provided": "Non disponibile",
   Note: "Nota",
@@ -899,6 +903,8 @@ export const it = {
   "The agent stopped on an error": "L’agente si è fermato a causa di un errore",
   "The agent's sandbox failed. Send a message to try again.":
     "L’ambiente isolato dell’agente ha avuto un errore. Invia un messaggio per riprovare.",
+  "The automation is archived, or the step's assignee can't use its agent.":
+    "L’automazione è archiviata, oppure l’assegnatario del passaggio non può usarne l’agente.",
   "The clipboard isn't available here.": "Gli appunti non sono disponibili qui.",
   "The diagram could not be rendered.": "Impossibile visualizzare il diagramma.",
   "The file is too large to upload.": "Il file è troppo grande per essere caricato.",
@@ -945,6 +951,8 @@ export const it = {
   "This step could not be found.": "Passaggio non trovato.",
   "This step was completed before snapshots were available. Linked records show current collection data.":
     "Questo passaggio è stato completato prima che fossero disponibili le istantanee. I record collegati mostrano i dati attuali della collezione.",
+  "This step's text or files are too large to send to the automation.":
+    "Il testo o i file di questo passaggio sono troppo grandi per essere inviati all’automazione.",
   "This ticket has no entries in this group yet.":
     "Questo ticket non ha ancora voci in questo gruppo.",
   "Ticket “{0}”": "Ticket «{0}»",

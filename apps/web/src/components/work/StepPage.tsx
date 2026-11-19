@@ -1,5 +1,6 @@
 import { useTranslation } from "~/i18n/locale";
 import type { AutomationId } from "@t45/contracts/models/Automation";
+import { AutomationSkipReason } from "@t45/contracts/models/Workflow";
 import { StringId } from "@t45/contracts/models/primitives";
 import type { FieldView, StepNameView, StepView } from "@t45/contracts/resources/Workflows";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -57,6 +58,7 @@ import { useWorkDirectory } from "./useWorkDirectory";
 import { BackLink, WorkFrame } from "./WorkFrame";
 import {
   actorName,
+  AUTOMATION_SKIP_REASONS,
   summarizeHistory,
   missingFields,
   type StepAct,
@@ -72,6 +74,7 @@ import { useNowMinute } from "../../hooks/useNowMinute";
 import { stepViews, workChanged } from "../../state/work";
 
 const isStepId = Schema.is(StringId);
+const isAutomationSkipReason = Schema.is(AutomationSkipReason);
 
 /**
  * An item, opened on one of its steps, like an issue: the item's title and details, what
@@ -623,7 +626,11 @@ function StepAutomations({
               </div>
               <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                 <p className="pl-6">{t("Didn't start automatically on step entry")}</p>
-                <p className="pl-6 wrap-break-word text-foreground">{entry.reason}</p>
+                <p className="pl-6 wrap-break-word text-foreground">
+                  {isAutomationSkipReason(entry.reason)
+                    ? t(AUTOMATION_SKIP_REASONS[entry.reason])
+                    : entry.reason}
+                </p>
                 <RunDetail Icon={CalendarIcon}>{formatRelativeTimeLabel(entry.at, now)}</RunDetail>
               </div>
             </li>
