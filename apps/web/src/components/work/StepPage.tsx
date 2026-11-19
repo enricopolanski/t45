@@ -494,7 +494,9 @@ function StepAutomations({
       })),
     )
     .toSorted((a, b) => DateTime.toEpochMillis(b.startedAt) - DateTime.toEpochMillis(a.startedAt));
-  if (runs.length === 0 && runnable.length === 0) return null;
+  // Entering the step tried them, so they are older than its runs.
+  const skipped = view.step.skippedAutomations ?? [];
+  if (runs.length === 0 && skipped.length === 0 && runnable.length === 0) return null;
   const titleOf = (id: AutomationId) =>
     titles.data?.find((automation) => automation.id === id)?.title ?? t("Unavailable automation");
   const call = (
@@ -516,7 +518,7 @@ function StepAutomations({
         )}
       </div>
       {titles.error && <ErrorText text={titles.error} />}
-      {runs.length === 0 ? (
+      {runs.length === 0 && skipped.length === 0 ? (
         <p className="text-muted-foreground">{t("No automation has run on this item yet.")}</p>
       ) : (
         <ol className="flex flex-col gap-2">
@@ -581,7 +583,8 @@ function StepAutomations({
                     >
                       #{number}
                     </Link>{" "}
-                    {t("· Manually run by")} {actorName(directory, run.ranBy)}
+                    {run.isAutomatic ? t("· Automatically run for") : t("· Manually run by")}{" "}
+                    {actorName(directory, run.ranBy)}
                   </p>
                   {run.status !== "running" && run.latestReport !== null && (
                     <p className="pl-6 wrap-break-word text-foreground">
@@ -607,6 +610,24 @@ function StepAutomations({
               </li>
             );
           })}
+          {skipped.map((entry) => (
+            <li
+              key={`${entry.automationId}-skipped`}
+              className="flex flex-col gap-1 rounded-lg border p-3"
+            >
+              <div className="flex min-h-6 items-center gap-2">
+                <span role="img" aria-label={t("Not started")} className="flex size-4 shrink-0">
+                  <CircleXIcon aria-hidden className="size-4 text-destructive-foreground" />
+                </span>
+                <span className="min-w-0 flex-1 font-semibold">{titleOf(entry.automationId)}</span>
+              </div>
+              <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <p className="pl-6">{t("Didn't start automatically on step entry")}</p>
+                <p className="pl-6 wrap-break-word text-foreground">{entry.reason}</p>
+                <RunDetail Icon={CalendarIcon}>{formatRelativeTimeLabel(entry.at, now)}</RunDetail>
+              </div>
+            </li>
+          ))}
         </ol>
       )}
       {runnable.length > 0 && (

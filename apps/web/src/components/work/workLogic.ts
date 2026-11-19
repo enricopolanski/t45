@@ -141,7 +141,11 @@ const historyLabel = (entry: HistoryEntry, count: number, t: Translate) => {
     (entry.command === "workflows.runStepAutomation" ||
       entry.command === "workflows.stopStepAutomation")
       ? t(
-          entry.command === "workflows.runStepAutomation" ? "ran “{0}”" : "stopped “{0}”",
+          entry.command === "workflows.stopStepAutomation"
+            ? "stopped “{0}”"
+            : entry.isAutomatic
+              ? "ran “{0}” automatically on step entry"
+              : "ran “{0}”",
           entry.automation.title,
         )
       : message === undefined
@@ -161,6 +165,7 @@ export const summarizeHistory = (history: StepView["history"], t: Translate = tr
       previous?.command === entry.command &&
       previous.userId === entry.userId &&
       previous.agentId === entry.agentId &&
+      previous.isAutomatic === entry.isAutomatic &&
       previous.automation?.id === entry.automation?.id
     ) {
       group.push(entry);

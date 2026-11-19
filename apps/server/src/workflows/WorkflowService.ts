@@ -22,6 +22,7 @@ import {
 import { generateId } from "@t45/contracts/models/primitives";
 import { Refused as UserRefused } from "@t45/contracts/models/User";
 import {
+  automationTriggerOf,
   stepInTicket,
   childSteps,
   ancestorSteps,
@@ -568,6 +569,79 @@ const make = Effect.gen(function* () {
       actorId,
     });
   });
+  /** Whoever runs a step's automation must be able to use its agent. */
+  const requireStepAutomation = Effect.fnUntraced(function* (id: AutomationId, userId: string) {
+    const automation = yield* automations.get(id);
+    const agent = automation === null ? null : yield* agents.get(automation.agentId);
+    if (
+      automation === null ||
+      agent === null ||
+      !canWorkSteps(agent, yield* capabilities.listForAgent(agent.id)) ||
+      !canUse(agent, userId)
+    )
+      return yield* refuse("invalid_automations");
+    return automation;
+  });
+  /** Starts the automation on the step in a new chat; execution begins once the caller commits. */
+  const startStepRun = Effect.fnUntraced(function* (
+    work: Work,
+    step: Step,
+    automation: Automation,
+    trigger: { readonly effectiveUserId: string; readonly isAutomatic: boolean },
+  ) {
+    yield* chats.startAutomation(
+      {
+        type: "step",
+        ticketId: work.ticket.id,
+        stepId: step.id,
+        automationId: automation.id,
+        ...trigger,
+      },
+      automation.agentId,
+      {
+        title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
+        input: yield* buildAutomationInput(work, step, automation),
+      },
+    );
+  });
+  /**
+   * Starts the automations the project runs when a ticket enters the step, with its assignee's
+   * permissions. Each that can't start leaves the step entered and keeps why on the step; it runs
+   * in the same transaction as the entry, so the step's runs start once, with it.
+   */
+  const startEntryAutomations = Effect.fnUntraced(function* (work: Work, step: Step) {
+    const at = yield* DateTime.now;
+    const skip = (automationId: AutomationId) => (refusal: { readonly message: string }) =>
+      Effect.succeed({ automationId, reason: refusal.message, at });
+    const skipped = yield* Effect.forEach(
+      definitionOf(work, step).automationIds.filter(
+        (id) => automationTriggerOf(work.project, step.stepDefinitionId, id) === "step_entry",
+      ),
+      (automationId) =>
+        Effect.gen(function* () {
+          if (step.assignee === null) return yield* refuse("no_assignee");
+          const automation = yield* requireStepAutomation(automationId, step.assignee);
+          yield* startStepRun(work, step, automation, {
+            effectiveUserId: step.assignee,
+            isAutomatic: true,
+          });
+          yield* record("workflows.runStepAutomation", step.assignee, targetOf(work, step), {
+            automationId,
+            isAutomatic: true,
+          });
+          return null;
+        }).pipe(
+          Effect.catchTags({
+            WorkflowRefused: skip(automationId),
+            ChatRefused: skip(automationId),
+          }),
+          // A new chat's id is never taken.
+          Effect.orDie,
+        ),
+    );
+    const skippedAutomations = skipped.filter((entry) => entry !== null);
+    if (skippedAutomations.length > 0) putStep(work, { ...step, skippedAutomations });
+  });
   const isStepMember = (work: Work, step: Step, userId: string) =>
     Effect.map(memberOf(userId, work.project.id), (steps) =>
       steps.has(topLevelStep(work.ticket, step).stepDefinitionId),
@@ -597,6 +671,7 @@ const make = Effect.gen(function* () {
     });
     putStep(work, step);
     yield* notify({ kind: "to_do", to: step.assignee, project: work.project, step, actorId });
+    yield* startEntryAutomations(work, step);
     for (const child of definition.subSteps) {
       yield* enterStep(work, child, step, step.assignee, actorId);
     }
@@ -1209,6 +1284,7 @@ const make = Effect.gen(function* () {
         return {
           ...entry,
           fieldKey: typeof details.fieldKey === "string" ? details.fieldKey : null,
+          isAutomatic: details.isAutomatic === true,
           automation:
             automation === undefined ? null : { id: automation.id, title: automation.title },
         };
@@ -1256,7 +1332,11 @@ const make = Effect.gen(function* () {
               const canRun = isRunnable && live.includes(id);
               const runs = attempts
                 .filter((run) => run.trigger.automationId === id)
-                .map(({ trigger, ...run }) => ({ ...run, ranBy: trigger.effectiveUserId }))
+                .map(({ trigger, ...run }) => ({
+                  ...run,
+                  ranBy: trigger.effectiveUserId,
+                  isAutomatic: trigger.type === "step" && trigger.isAutomatic,
+                }))
                 .toReversed();
               return {
                 id,
@@ -1688,19 +1768,6 @@ const make = Effect.gen(function* () {
     }
   });
 
-  /** Whoever runs a step's automation must be able to use its agent. */
-  const requireStepAutomation = Effect.fnUntraced(function* (id: AutomationId, userId: string) {
-    const automation = yield* automations.get(id);
-    const agent = automation === null ? null : yield* agents.get(automation.agentId);
-    if (
-      automation === null ||
-      agent === null ||
-      !canWorkSteps(agent, yield* capabilities.listForAgent(agent.id)) ||
-      !canUse(agent, userId)
-    )
-      return yield* refuse("invalid_automations");
-    return automation;
-  });
   const loadAutomation = Effect.fnUntraced(function* (
     actorId: string,
     input: Payload<"runStepAutomation">,
@@ -1718,20 +1785,7 @@ const make = Effect.gen(function* () {
     const { work, step } = yield* loadAutomation(actorId, input);
     const automation = yield* requireStepAutomation(input.automationId, actorId);
     yield* stopStepRuns(work, step, (id) => id === automation.id);
-    yield* chats.startAutomation(
-      {
-        type: "step",
-        ticketId: work.ticket.id,
-        stepId: step.id,
-        automationId: automation.id,
-        effectiveUserId: actorId,
-      },
-      automation.agentId,
-      {
-        title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
-        input: yield* buildAutomationInput(work, step, automation),
-      },
-    );
+    yield* startStepRun(work, step, automation, { effectiveUserId: actorId, isAutomatic: false });
     yield* record("workflows.runStepAutomation", actorId, targetOf(work, step), {
       automationId: automation.id,
     });

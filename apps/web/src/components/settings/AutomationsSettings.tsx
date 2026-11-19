@@ -332,7 +332,8 @@ function AutomationRunRow({
           ) : (
             `#${number}`
           )}{" "}
-          {t("· Manually run by")} {actorName(directory, run.ranBy)}
+          {run.isAutomatic ? t("· Automatically run for") : t("· Manually run by")}{" "}
+          {actorName(directory, run.ranBy)}
         </p>
         {run.status === "running" ? (
           <ProgressReport report={run.latestReport} isRunning />

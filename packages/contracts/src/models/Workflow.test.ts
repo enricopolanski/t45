@@ -13,6 +13,7 @@ import {
   type WorkflowVersion,
   applyWorkflowEdits,
   approvedValue,
+  automationTriggerOf,
   canAttachAgent,
   canSeeStep,
   changedLayouts,
@@ -304,6 +305,23 @@ describe("editing a version's steps", () => {
     assert.equal(apply([attach, attach]), null);
     assert.equal(apply([detach]), null);
     assert.deepEqual(apply([attach, detach])?.[1]?.automationIds, []);
+  });
+});
+
+describe("starting a step's automations", () => {
+  it("runs one on demand unless the project starts it on that step's entry", () => {
+    const automationId = AutomationId.make("automation01");
+    const starting = {
+      ...project,
+      automationTriggers: [{ stepId: root.id, automationId, trigger: "step_entry" as const }],
+    };
+    assert.equal(automationTriggerOf(project, root.id, automationId), "on_demand");
+    assert.equal(automationTriggerOf(starting, root.id, automationId), "step_entry");
+    assert.equal(automationTriggerOf(starting, "next001", automationId), "on_demand");
+    assert.equal(
+      automationTriggerOf(starting, root.id, AutomationId.make("automation02")),
+      "on_demand",
+    );
   });
 });
 

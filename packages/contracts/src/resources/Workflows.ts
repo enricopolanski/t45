@@ -264,6 +264,8 @@ export const StepView = Schema.Struct({
       userId: Schema.NullOr(StringId),
       agentId: Schema.NullOr(StringId),
       fieldKey: Schema.NullOr(TrimmedNonEmptyString),
+      /** Whether entering the step ran it, on the authority of its assignee. */
+      isAutomatic: Schema.Boolean,
       automation: Schema.NullOr(Schema.Struct({ id: AutomationId, title: TrimmedNonEmptyString })),
       createdAt: Schema.DateTimeUtcFromString,
     }),
@@ -301,6 +303,8 @@ export const StepView = Schema.Struct({
           /** The chat it runs in. */
           chatId: ChatId,
           ranBy: StringId,
+          /** Whether entering the step started it, rather than a member. */
+          isAutomatic: Schema.Boolean,
           startedAt: Schema.DateTimeUtcFromString,
           /** Null while it runs. */
           endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
@@ -430,6 +434,7 @@ export const Workflows = RpcGroup.make(
       slug: Schema.optionalKey(Schema.NullOr(Slug)),
       defaultAssignees: Schema.optionalKey(Project.fields.defaultAssignees),
       stepHistoryAccess: Project.fields.stepHistoryAccess,
+      automationTriggers: Project.fields.automationTriggers,
       /** Refused with `last_admin` when it leaves no active admin. */
       adminUserIds: Schema.optionalKey(Project.fields.adminUserIds),
     },

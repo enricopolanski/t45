@@ -1,5 +1,10 @@
 import { useTranslation } from "~/i18n/locale";
-import type { StepDefinition } from "@t45/contracts/models/Workflow";
+import type { AutomationId } from "@t45/contracts/models/Automation";
+import {
+  type AutomationTrigger,
+  automationTriggerOf,
+  type StepDefinition,
+} from "@t45/contracts/models/Workflow";
 import { StringId } from "@t45/contracts/models/primitives";
 
 import type { ProjectView } from "@t45/contracts/resources/Workflows";
@@ -8,6 +13,8 @@ import { XIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { api, type ApiSuccess } from "../../rpc/api";
+import { stepAutomationList } from "../../state/agents";
+import { useApiQuery } from "../../state/rpc";
 import { describeFailure } from "../../lib/failures";
 import { useIsAdmin, useSession } from "../../state/session";
 import { Badge } from "../ui/badge";
@@ -139,6 +146,7 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
   const t = useTranslation();
   const { project, adopted, latest, members } = detail;
   const directory = useWorkDirectory();
+  const automations = useApiQuery(stepAutomationList);
   const [blocked, setBlocked] = useState<Blocked | null>(null);
   const steps = [
     ...latest.steps,
@@ -174,6 +182,61 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
     const stepHistoryAccess = checked ? [...access, { stepId, previousStepId }] : access;
     return run(() => api("workflows.updateProject", { projectId: project.id, stepHistoryAccess }));
   };
+  const setAutomationTrigger = (
+    stepId: string,
+    automationId: AutomationId,
+    trigger: AutomationTrigger,
+  ) => {
+    const others = (project.automationTriggers ?? []).filter(
+      (entry) => entry.stepId !== stepId || entry.automationId !== automationId,
+    );
+    const automationTriggers =
+      trigger === "on_demand" ? others : [...others, { stepId, automationId, trigger }];
+    return run(() => api("workflows.updateProject", { projectId: project.id, automationTriggers }));
+  };
+  const triggerItems = [
+    { value: "on_demand", label: t("On demand") },
+    { value: "step_entry", label: t("On step entry") },
+  ] as const;
+  const renderAutomations = (step: StepDefinition, stepPath: string) =>
+    step.automationIds.length === 0 ? null : (
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-xs font-medium text-muted-foreground">
+          {t("When to run")}
+        </legend>
+        {automations.error && <ErrorText text={automations.error} />}
+        {step.automationIds.map((automationId) => {
+          const title =
+            automations.data?.find(({ id }) => id === automationId)?.title ??
+            t("Unavailable automation");
+          return (
+            <div key={automationId} className="flex items-center gap-2 text-sm">
+              <span className="min-w-0 flex-1 truncate">{title}</span>
+              <Select
+                value={automationTriggerOf(project, step.id, automationId)}
+                items={triggerItems}
+                disabled={busy}
+                onValueChange={(trigger) => {
+                  if (trigger === "on_demand" || trigger === "step_entry")
+                    void setAutomationTrigger(step.id, automationId, trigger);
+                }}
+              >
+                <SelectTrigger size="sm" aria-label={t("When to run {0} in {1}", title, stepPath)}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  {triggerItems.map(({ value, label }) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
+          );
+        })}
+      </fieldset>
+    );
   const renderDefault = (step: StepDefinition, stepPath: string, inherited: string) => (
     <div className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-muted-foreground">{t("Assignee on entry")}</span>
@@ -200,6 +263,7 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
             <div key={step.id} className="flex flex-col gap-3">
               <span className="text-sm font-medium">{step.name}</span>
               {renderDefault(step, stepPath, t("Whoever has {0}", parentPath))}
+              {renderAutomations(step, stepPath)}
               {renderSubSteps(step.subSteps, stepPath)}
             </div>
           );
@@ -326,6 +390,7 @@ export function ProjectStepPeople({ detail, busy, run }: Editing) {
                 step.name,
                 at === 0 ? t("Unassigned") : t("Whoever did the step before"),
               )}
+              {renderAutomations(step, step.name)}
               {previousSteps.size > 0 ? (
                 <fieldset className="flex flex-col gap-2">
                   <legend className="mb-1 text-xs font-medium text-muted-foreground">

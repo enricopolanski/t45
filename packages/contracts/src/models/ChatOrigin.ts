@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { AutomationId } from "./Automation.ts";
@@ -17,8 +18,10 @@ export const Trigger = Schema.Union([
     ticketId: StringId,
     stepId: StringId,
     automationId: AutomationId,
-    /** The member who ran the automation on the step. */
+    /** The member who ran the automation on the step, or its assignee when entering it did. */
     effectiveUserId: StringId,
+    /** Whether entering the step started it, rather than a member. */
+    isAutomatic: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   }),
 ]);
 export type Trigger = typeof Trigger.Type;

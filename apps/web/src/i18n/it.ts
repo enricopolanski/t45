@@ -2,6 +2,7 @@ import type { Message } from "./de";
 
 export const it = {
   " · {0} postponed": " · {0} rinviati",
+  "· Automatically run for": "· Avviato automaticamente per",
   "· Completed": "· Completato",
   "· keyed by": "· chiave",
   "· Manually run by": "· Avviato manualmente da",
@@ -333,6 +334,8 @@ export const it = {
   "Development servers sign you in as any email you enter.":
     "Sui server di sviluppo puoi accedere con qualsiasi indirizzo email.",
   "Dialog width": "Larghezza della finestra",
+  "Didn't start automatically on step entry":
+    "Non avviata automaticamente all’ingresso nel passaggio",
   "Disable line wrap": "Disattiva a capo automatico",
   Discard: "Scarta",
   "discarded {0} proposals": "ha scartato {0} proposte",
@@ -594,6 +597,7 @@ export const it = {
   "Not filled in": "Non compilato",
   "Not provided": "Non disponibile",
   Note: "Nota",
+  "Not started": "Non avviata",
   "Nothing against it.": "Nessuna obiezione.",
   "Nothing needs you right now.": "Al momento non hai attività da svolgere.",
   "Nothing new.": "Nessuna nuova notifica.",
@@ -603,6 +607,8 @@ export const it = {
   Now: "Attuale",
   Number: "Numero",
   of: "di",
+  "On demand": "Su richiesta",
+  "On step entry": "All’ingresso nel passaggio",
   "Once the workflow is saved, every ticket shows the new layout, without a new version.":
     "Salvando il flusso, il nuovo layout appare in tutti i ticket senza creare una nuova versione.",
   "Only the project's admins cancel tickets.":
@@ -680,6 +686,8 @@ export const it = {
   "Queue message": "Metti messaggio in coda",
   Queued: "In coda",
   "ran “{0}”": "ha eseguito «{0}»",
+  "ran “{0}” automatically on step entry":
+    "ha eseguito «{0}» automaticamente all’ingresso nel passaggio",
   "ran an automation": "ha eseguito un’automazione",
   "Reaches only its provider": "Accede solo al provider del modello",
   "Reaches the internet": "Accesso a Internet",
@@ -1013,6 +1021,8 @@ export const it = {
     "Cosa fa l’agente, come lavora e quali risultati consegna",
   "What this item is about, for everyone who works on it":
     "Di cosa si occupa il ticket, per chi ci lavora",
+  "When to run": "Quando eseguire",
+  "When to run {0} in {1}": "Quando eseguire {0} in {1}",
   "When to use it, e.g. Extracts tables from .xlsx files":
     "Quando usarla, ad es. Estrae tabelle dai file XLSX",
   "Which field each part of a card and a record's page shows.":

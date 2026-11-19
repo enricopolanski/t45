@@ -1,5 +1,6 @@
 export const de = {
   " · {0} postponed": " · {0} zurückgestellt",
+  "· Automatically run for": "· Automatisch gestartet für",
   "· Completed": "· Abgeschlossen",
   "· keyed by": "· Schlüssel",
   "· Manually run by": "· Manuell gestartet von",
@@ -332,6 +333,7 @@ export const de = {
   "Development servers sign you in as any email you enter.":
     "Auf Entwicklungsservern kannst du dich mit jeder eingegebenen E-Mail-Adresse anmelden.",
   "Dialog width": "Dialogbreite",
+  "Didn't start automatically on step entry": "Bei Schrittbeginn nicht automatisch gestartet",
   "Disable line wrap": "Zeilenumbruch deaktivieren",
   Discard: "Verwerfen",
   "discarded {0} proposals": "hat {0} Vorschläge verworfen",
@@ -594,6 +596,7 @@ export const de = {
   "Not filled in": "Nicht ausgefüllt",
   "Not provided": "Nicht angegeben",
   Note: "Hinweis",
+  "Not started": "Nicht gestartet",
   "Nothing against it.": "Keine Einwände.",
   "Nothing needs you right now.": "Zurzeit steht nichts für dich an.",
   "Nothing new.": "Keine neuen Benachrichtigungen.",
@@ -603,6 +606,8 @@ export const de = {
   Now: "Aktuell",
   Number: "Zahl",
   of: "von",
+  "On demand": "Bei Bedarf",
+  "On step entry": "Bei Schrittbeginn",
   "Once the workflow is saved, every ticket shows the new layout, without a new version.":
     "Nach dem Speichern des Workflows zeigen alle Tickets das neue Layout. Eine neue Version ist dafür nicht nötig.",
   "Only the project's admins cancel tickets.": "Die Projektadmins können Tickets abbrechen.",
@@ -678,6 +683,7 @@ export const de = {
   "Queue message": "Nachricht in Warteschlange stellen",
   Queued: "In der Warteschlange",
   "ran “{0}”": "hat „{0}“ ausgeführt",
+  "ran “{0}” automatically on step entry": "hat „{0}“ bei Schrittbeginn automatisch ausgeführt",
   "ran an automation": "hat eine Automatisierung ausgeführt",
   "Reaches only its provider": "Nur der Modellanbieter ist erreichbar",
   "Reaches the internet": "Internetzugriff",
@@ -1011,6 +1017,8 @@ export const de = {
     "Was der Agent macht, wie er vorgeht und welche Ergebnisse er liefert",
   "What this item is about, for everyone who works on it":
     "Worum es in diesem Ticket geht, für alle Beteiligten",
+  "When to run": "Wann ausführen",
+  "When to run {0} in {1}": "Wann {0} in {1} ausführen",
   "When to use it, e.g. Extracts tables from .xlsx files":
     "Einsatzbereich, z. B. Extrahiert Tabellen aus XLSX-Dateien",
   "Which field each part of a card and a record's page shows.":

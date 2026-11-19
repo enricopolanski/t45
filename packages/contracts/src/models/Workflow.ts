@@ -196,6 +196,17 @@ export const isPreviousStep = (
   return previous >= 0 && previous < steps.findIndex(({ id }) => id === stepId);
 };
 
+/** What starts an automation attached to a step: a member on demand, or also each ticket entering the step. */
+export const AutomationTrigger = Schema.Literals(["on_demand", "step_entry"]);
+export type AutomationTrigger = typeof AutomationTrigger.Type;
+
+/** What starts one automation attached to a step of the workflow, by the step's definition id. */
+export const StepAutomationTrigger = Schema.Struct({
+  stepId: StringId,
+  automationId: AutomationId,
+  trigger: AutomationTrigger,
+});
+
 /** A team's use of a workflow, with its own people, settings and board. */
 export class Project extends Schema.Opaque<Project>()(
   Schema.Struct({
@@ -210,10 +221,22 @@ export class Project extends Schema.Opaque<Project>()(
       Schema.isPropertyNames(StringId),
     ),
     stepHistoryAccess: Schema.optionalKey(Schema.Array(StepHistoryAccess)),
+    /** What starts the automations its workflow's steps attach; those left out run on demand. */
+    automationTriggers: Schema.optionalKey(Schema.Array(StepAutomationTrigger)),
     slug: Schema.NullOr(Slug),
     isArchived: Schema.Boolean,
   }),
 ) {}
+
+/** What starts the automation attached to the step `stepId` in the project: on demand by default. */
+export const automationTriggerOf = (
+  project: Pick<Project, "automationTriggers">,
+  stepId: string,
+  automationId: string,
+): AutomationTrigger =>
+  project.automationTriggers?.find(
+    (entry) => entry.stepId === stepId && entry.automationId === automationId,
+  )?.trigger ?? "on_demand";
 
 const StepStatus = Schema.Union([
   Schema.Struct({
@@ -260,6 +283,16 @@ export class Step extends Schema.Opaque<Step>()(
     proposals: Schema.optionalKey(Schema.Array(Proposal)),
     /** Confirmed group entries, by group field and row id. */
     confirmedReviewRows: Schema.optionalKey(Schema.UniqueArray(TrimmedNonEmptyString)),
+    /** The automations entering the step was to start that didn't start, each with why. */
+    skippedAutomations: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          automationId: AutomationId,
+          reason: TrimmedNonEmptyString,
+          at: Schema.DateTimeUtcFromString,
+        }),
+      ),
+    ),
   }),
 ) {}
 
@@ -413,6 +446,7 @@ const REFUSALS = {
   invalid_attachment: "That file can't be attached here.",
   invalid_automations:
     "An automation is archived, or its agent can't work on steps or is private to someone other than you and this workflow's creator. Choose another.",
+  no_assignee: "The step has no assignee for the automation to run with.",
 };
 
 export class Refused extends Schema.TaggedError<Refused>()("WorkflowRefused", {

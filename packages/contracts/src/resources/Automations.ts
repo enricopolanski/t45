@@ -19,6 +19,8 @@ export const AutomationRun = Schema.Struct({
   /** The step it ran on; null for a run started from settings. */
   stepId: Schema.NullOr(StringId),
   ranBy: StringId,
+  /** Whether entering its step started it, rather than a member. */
+  isAutomatic: Schema.Boolean,
   startedAt: Schema.DateTimeUtcFromString,
   /** Null while it runs. */
   endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
