@@ -1,5 +1,6 @@
 import { useTranslation, translate } from "~/i18n/locale";
 import { Refused } from "@t45/contracts/models/Workflow";
+import type { Collection } from "@t45/contracts/models/Collection";
 import {
   defaultValues,
   type Field,
@@ -21,9 +22,10 @@ import { type ComponentProps, type ReactNode, useId, useRef, useState } from "re
 
 import { attachmentUploadUrl, attachmentUrl, decodeUploadResult } from "../../lib/attachmentUrl";
 import { api } from "../../rpc/api";
+import { describeFailure } from "../../lib/failures";
 import { cn } from "../../lib/utils";
 import { RecordShowcase } from "../collections/RecordDisplay";
-import { RecordDialog, RecordPicker, RecordTable } from "../collections/Records";
+import { RecordDialog, RecordLink, RecordPicker, RecordTable } from "../collections/Records";
 import { SavedInput, saveTyped } from "../SavedInput";
 import { ExternalUrl } from "../ExternalUrl";
 import {
@@ -94,6 +96,7 @@ export function AttachmentLink({
     <a
       href={attachmentUrl(attachment)}
       download={attachment.name}
+      onClick={(event) => event.stopPropagation()}
       className="inline-flex min-w-0 items-center gap-1.5 text-sm text-primary hover:underline"
     >
       <PaperclipIcon className="size-3.5 shrink-0" />
@@ -152,7 +155,7 @@ export function shownValue(field: FieldView) {
         ? formatNumber(field.value, field)
         : String(field.value);
     default:
-      return String(field.value);
+      return Array.isArray(field.value) ? field.value.join(", ") : String(field.value);
   }
 }
 
@@ -199,6 +202,8 @@ export function FieldValue({ field }: { readonly field: FieldView }) {
   if (field.type === "url" && isUrlFieldValue(field.value)) {
     return <ExternalUrl href={field.value}>{field.label}</ExternalUrl>;
   }
+  if (field.linkedCollectionId !== undefined && typeof field.value === "string")
+    return <RecordLink collectionId={field.linkedCollectionId} recordKey={field.value} />;
   if (field.type === "text" && field.isMarkdown && typeof field.value === "string")
     return <MarkdownText text={field.value} />;
   return (
@@ -310,6 +315,63 @@ const storedText = (field: FieldView) =>
 const typedValue = (field: FieldView, typed: string): StepFieldValue =>
   typed === "" ? null : field.type === "number" ? Number(typed) : typed;
 
+/** A link field's record, picked from its collection; another is picked once it is unlinked. */
+function RecordLinkInput({
+  field,
+  control,
+  onSave,
+}: {
+  readonly field: FieldView;
+  readonly control: ComponentProps<typeof Button>;
+  readonly onSave: (value: StepFieldValue) => void;
+}) {
+  const t = useTranslation();
+  const [collection, setCollection] = useState<Collection | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const collectionId = field.linkedCollectionId;
+  if (collectionId === undefined) return null;
+  const pick = () =>
+    void api("collections.get", { collectionId }).then(setCollection, (cause: unknown) =>
+      setError(describeFailure(cause)),
+    );
+  return (
+    <div className="flex min-h-9 flex-wrap items-center gap-2 sm:min-h-8">
+      {typeof field.value === "string" ? (
+        <>
+          <RecordLink collectionId={collectionId} recordKey={field.value} />
+          <Button
+            {...control}
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label={t("Unlink record {0}", field.value)}
+            onClick={() => onSave(null)}
+          >
+            <XIcon />
+          </Button>
+        </>
+      ) : (
+        <Button {...control} type="button" size="xs" variant="outline" onClick={pick}>
+          {t("Link a record")}
+        </Button>
+      )}
+      {error && <ErrorText text={error} />}
+      {collection === null ? null : (
+        <RecordPicker
+          label={field.label}
+          collection={collection}
+          linked={[]}
+          onClose={() => setCollection(null)}
+          onPick={(record) => {
+            setCollection(null);
+            onSave(record.key);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 /** A field's input, framed; a group has none. */
 function FieldControl({
   field,
@@ -385,6 +447,27 @@ function FieldControl({
         <SavedInput {...control} type={field.type} value={storedText(field)} onSave={saveText} />
       );
     case "select":
+      if (field.isMultiple)
+        return (
+          <Select
+            multiple
+            value={Array.isArray(field.value) ? field.value : []}
+            onValueChange={(options: Array<string>) => save(options)}
+          >
+            <SelectTrigger {...control} isWrapped={isStacked}>
+              <SelectValue placeholder={t("Choose some")}>
+                {(options: Array<string>) => options.join(", ")}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {field.options.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        );
       return (
         <Select value={typeof field.value === "string" ? field.value : null} onValueChange={save}>
           <SelectTrigger {...control} isWrapped={isStacked}>
@@ -420,6 +503,8 @@ function FieldControl({
           />
         </div>
       );
+    case "foreignKey":
+      return <RecordLinkInput field={field} control={control} onSave={save} />;
     case "records":
     case "group":
       return null;
@@ -1132,6 +1217,7 @@ function CellControl({
           />
         </div>
       );
+    case "foreignKey":
     case "records":
     case "group":
       return null;

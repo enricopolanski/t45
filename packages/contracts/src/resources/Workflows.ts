@@ -163,6 +163,8 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     unit: Schema.optionalKey(TrimmedNonEmptyString),
     /** A select field's tones by option, when it sets them. */
     tones: Schema.optionalKey(FieldTones),
+    /** Whether a select field holds a list of its options. */
+    isMultiple: Schema.optionalKey(Schema.Boolean),
     /** How a repeatable group's entries are shown, when it sets that. */
     layout: Schema.optionalKey(Layout),
     /** Whether the text is shown as Markdown; its value stays the original source. */
@@ -172,6 +174,8 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     comparisonFields: Schema.optionalKey(ComparisonFields),
     /** A sibling URL displayed on this field; its value is still kept in that URL field. */
     linkUrl: Schema.optionalKey(Schema.String),
+    /** A link field's collection, whose record its value keys. */
+    linkedCollectionId: Schema.optionalKey(StringId),
     repeatable: Schema.Boolean,
     file: Schema.NullOr(FieldFileView),
     /**
@@ -217,11 +221,24 @@ const StepFieldSelection = Schema.Struct({
 });
 export type StepFieldSelection = typeof StepFieldSelection.Type;
 
+const ComparisonSources = Schema.Struct({
+  recordsIndex: NonNegativeInt,
+  records: Schema.Array(
+    Schema.Struct({
+      recordKey: TrimmedNonEmptyString,
+      criteria: Schema.Array(
+        Schema.Struct({ id: FieldPathSegment, name: Schema.String, value: Schema.String }),
+      ),
+    }),
+  ),
+});
+
 const StepFieldData = Schema.Struct({
   key: FieldPathSegment,
   label: TrimmedNonEmptyString,
   type: FieldView.fields.type,
   value: Schema.Json,
+  comparisonSources: Schema.optionalKey(ComparisonSources),
 });
 
 const RecordReviewEntries = Schema.Array(
@@ -262,6 +279,7 @@ export const StepView = Schema.Struct({
   /** The fields of earlier steps this step reads. */
   inputs: Schema.Array(FieldView),
   /** Review information only when both fields are inputs from the same step. */
+  comparisonSources: Schema.optionalKey(Schema.Record(Schema.String, ComparisonSources)),
   inputRecordReviews: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
@@ -346,6 +364,7 @@ export const StepSnapshot = Schema.Struct({
     "fields",
     "inputs",
     "inputRecordReviews",
+    "comparisonSources",
     "recordReviews",
     "subSteps",
     "comments",
@@ -557,7 +576,7 @@ export const Workflows = RpcGroup.make(
       ...step,
       fieldKey: TrimmedNonEmptyString,
       value: FieldValue,
-      ...Struct.pick(Proposal.fields, ["whyYes", "whyNo", "score"]),
+      ...Struct.pick(Proposal.fields, ["whyYes", "whyNo", "score", "comparison"]),
     },
     error: WorkflowErrors,
   }),

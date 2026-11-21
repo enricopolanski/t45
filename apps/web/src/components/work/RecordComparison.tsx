@@ -8,7 +8,9 @@ import {
 } from "@t45/contracts/models/Field";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
-import type { FieldView } from "@t45/contracts/resources/Workflows";
+import type { Proposal } from "@t45/contracts/models/Workflow";
+import { ComparisonCriteriaTable } from "./ComparisonCriteriaTable";
+import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
 import { getFieldLink } from "@t45/core/fieldViews";
 import { useId, useState } from "react";
 
@@ -252,16 +254,23 @@ export function RecordComparison({
   collection,
   record,
   rationale,
+  comparison,
+  criteriaSources,
   comparisonFields,
 }: {
   readonly inputs: ReadonlyArray<FieldView>;
   readonly collection: RecordCollection;
   readonly record: CollectionRecordView;
   readonly rationale: string;
+  readonly comparison: Proposal["comparison"];
+  readonly criteriaSources: NonNullable<StepView["comparisonSources"]>[string] | undefined;
   readonly comparisonFields: ComparisonFields | undefined;
 }) {
   const t = useTranslation();
-  const sources = listSources(inputs);
+  const sourceInput = criteriaSources && inputs[criteriaSources.recordsIndex];
+  const sources = listSources(sourceInput ? [sourceInput] : inputs).filter(
+    (source) => !comparison || source.record.key === comparison.sourceRecordKey,
+  );
   const [selected, setSelected] = useState(() => {
     // Existing proposals name source keys in their rationale rather than a structured link.
     const references = rationale.split(/[\s`,;()]+/u);
@@ -277,6 +286,7 @@ export function RecordComparison({
   const sourceHeading =
     source === undefined ? undefined : getRecordHeading(source.collection, source.record);
   const proposedHeading = getRecordHeading(collection, record);
+  const confirmed = criteriaSources?.records.find((row) => row.recordKey === source?.record.key);
   const { shown, hidden, order, derived } = resolveComparisonFields(comparisonFields);
   const available = [
     ...new Map(
@@ -323,26 +333,44 @@ export function RecordComparison({
         <span className="text-xs font-medium text-muted-foreground">
           {t("Compare with step input")}
         </span>
-        <Select value={selected} onValueChange={setSelected}>
-          <SelectTrigger
-            aria-label={t("Compare with step input")}
-            className="w-full min-w-0"
-            isWrapped
-          >
-            <SelectValue placeholder={t("Choose the article to compare")}>
-              {source === undefined || sourceHeading === undefined
-                ? null
-                : `${source.label} · ${sourceHeading.text}`}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            {sources.map((candidate) => (
-              <SelectItem key={candidate.id} value={candidate.id}>
-                {candidate.label} · {getRecordHeading(candidate.collection, candidate.record).text}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        {comparison && sourceHeading ? (
+          <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 text-sm sm:grid-cols-2">
+            <span>
+              <span className="block text-xs text-muted-foreground">{source?.label}</span>
+              <strong>
+                <RecordHeading heading={sourceHeading} />
+              </strong>
+            </span>
+            <span>
+              <span className="block text-xs text-muted-foreground">{t("Proposed record")}</span>
+              <strong>
+                <RecordHeading heading={proposedHeading} />
+              </strong>
+            </span>
+          </div>
+        ) : (
+          <Select value={selected} onValueChange={setSelected}>
+            <SelectTrigger
+              aria-label={t("Compare with step input")}
+              className="w-full min-w-0"
+              isWrapped
+            >
+              <SelectValue placeholder={t("Choose the article to compare")}>
+                {source === undefined || sourceHeading === undefined
+                  ? null
+                  : `${source.label} · ${sourceHeading.text}`}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {sources.map((candidate) => (
+                <SelectItem key={candidate.id} value={candidate.id}>
+                  {candidate.label} ·{" "}
+                  {getRecordHeading(candidate.collection, candidate.record).text}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        )}
         {source === undefined ? (
           <p className="text-sm text-muted-foreground">
             {t(
@@ -351,6 +379,13 @@ export function RecordComparison({
           </p>
         ) : null}
       </div>
+      {confirmed && (
+        <ComparisonCriteriaTable
+          key={confirmed.recordKey}
+          source={confirmed}
+          assessments={comparison?.assessments ?? []}
+        />
+      )}
       <div className="overflow-x-auto rounded-lg border">
         <table
           aria-label={t("Record comparison")}
@@ -365,21 +400,25 @@ export function RecordComparison({
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
                   {source?.label ?? t("Step input")} {t("· Source record")}
                 </div>
-                <h3 className="wrap-anywhere font-semibold">
-                  {sourceHeading === undefined ? (
-                    t("Choose a source record")
-                  ) : (
-                    <RecordHeading heading={sourceHeading} />
-                  )}
-                </h3>
+                {!comparison && (
+                  <h3 className="wrap-anywhere font-semibold">
+                    {sourceHeading === undefined ? (
+                      t("Choose a source record")
+                    ) : (
+                      <RecordHeading heading={sourceHeading} />
+                    )}
+                  </h3>
+                )}
               </th>
               <th scope="col" className="w-5/12 border-l p-3">
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
                   {t("Proposed record")}
                 </div>
-                <h3 className="wrap-anywhere font-semibold">
-                  <RecordHeading heading={proposedHeading} />
-                </h3>
+                {!comparison && (
+                  <h3 className="wrap-anywhere font-semibold">
+                    <RecordHeading heading={proposedHeading} />
+                  </h3>
+                )}
               </th>
             </tr>
           </thead>

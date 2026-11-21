@@ -329,7 +329,12 @@ function ToneSelect({
       }}
       disabled={disabled}
     >
-      <SelectTrigger size="sm" aria-label={t("Tone of option {0}", option)} className="min-w-28">
+      {/* Capped, as the trigger fills its row and would leave the option's input no room. */}
+      <SelectTrigger
+        size="sm"
+        aria-label={t("Tone of option {0}", option)}
+        className="min-w-28 max-w-36"
+      >
         <SelectValue>
           {(choice: string) => {
             const message = TONE_LABELS[choice];
@@ -348,7 +353,97 @@ function ToneSelect({
   );
 }
 
-/** A collection a records field can link. */
+/** A select's options, each with its tone, typed into, added and removed. */
+export function OptionsEditor({
+  field,
+  onChange,
+  disabled,
+}: {
+  readonly field: Extract<DraftField, { type: "select" }>;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  const t = useTranslation();
+  const optionRows = useRowKeys(field.options.length);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs text-muted-foreground">{t("Options")}</span>
+      {listEntries(field.options, (options) => onChange(withOptions(field, options))).map(
+        (option) => (
+          <div key={optionRows.keys[option.index]} className="flex items-center gap-1.5">
+            <Input
+              aria-label={t("Option {0}", option.index + 1)}
+              placeholder={[t("Approved"), t("Declined")][option.index]}
+              value={option.entry}
+              onChange={(event) => option.replace(event.target.value)}
+              autoFocus={!option.first && option.last && !option.entry}
+              disabled={disabled}
+              className="min-w-0 flex-1"
+            />
+            <ToneSelect
+              field={field}
+              option={option.entry}
+              onChange={onChange}
+              disabled={disabled}
+            />
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label={t("Remove option {0}", option.entry)}
+              onClick={() => {
+                optionRows.remove(option.index);
+                option.remove();
+              }}
+              disabled={disabled}
+            >
+              <XIcon />
+            </Button>
+          </div>
+        ),
+      )}
+      <AddButton
+        label={t("Add option")}
+        onClick={() => onChange({ ...field, options: [...field.options, ""] })}
+        disabled={disabled}
+      />
+    </div>
+  );
+}
+
+/** Whether a collection's top-level select holds several of its options; it then has no default. */
+function MultipleSwitch({
+  field,
+  onChange,
+  disabled,
+}: {
+  readonly field: DraftField;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  const t = useTranslation();
+  if (field.type !== "select") return null;
+  const { isMultiple: _, defaultValue, ...rest } = field;
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <Switch
+        size="sm"
+        checked={field.isMultiple === true}
+        onCheckedChange={(checked) =>
+          onChange(
+            checked
+              ? { ...rest, isMultiple: true }
+              : { ...rest, ...(defaultValue === undefined ? {} : { defaultValue }) },
+          )
+        }
+        disabled={disabled}
+      />
+      {t("Multiple choices")}
+    </label>
+  );
+}
+
+/** A collection a records or link field can link. */
 export type LinkableCollection = { readonly id: string; readonly title: string };
 
 type ComparisonFieldsControl = (
@@ -365,8 +460,9 @@ type GroupLayoutControl = (
 /**
  * Fields as a step or a collection defines them, with a way to add one; `depth` counts the groups
  * around them. `areColumns` when a table lists them, each a column but `keyFieldId`'s, which
- * always is one. With `collections`, a field can link records of one of them. With
- * `groupLayout`, a repeatable group's layout is edited there. `areReviewable` on a step, whose
+ * always is one. With `collections`, a top-level field can link records of one of them: a
+ * step's records field, or with `areCollectionFields` a collection's link to one record, whose
+ * top-level selects can also hold several options. With `groupLayout`, a repeatable group's layout is edited there. `areReviewable` on a step, whose
  * fields agents can be made to only propose.
  */
 export function FieldsEditor({
@@ -376,6 +472,7 @@ export function FieldsEditor({
   areColumns,
   keyFieldId,
   collections,
+  areCollectionFields = false,
   groupLayout,
   comparisonFieldsEditor,
   areReviewable = false,
@@ -388,6 +485,7 @@ export function FieldsEditor({
   readonly areColumns: boolean;
   readonly keyFieldId?: string;
   readonly collections?: ReadonlyArray<LinkableCollection>;
+  readonly areCollectionFields?: boolean;
   readonly groupLayout?: GroupLayoutControl | undefined;
   readonly comparisonFieldsEditor?: ComparisonFieldsControl | undefined;
   readonly areReviewable?: boolean;
@@ -405,6 +503,7 @@ export function FieldsEditor({
           depth={depth}
           isColumn={areColumns && place.entry.id !== keyFieldId}
           collections={collections}
+          areCollectionFields={areCollectionFields}
           groupLayout={groupLayout}
           comparisonFieldsEditor={comparisonFieldsEditor}
           isReviewable={areReviewable}
@@ -436,7 +535,14 @@ function DefaultValueInput({
   readonly disabled: boolean;
 }) {
   const t = useTranslation();
-  if (field.type === "group" || field.type === "file" || field.type === "records") return null;
+  if (
+    field.type === "group" ||
+    field.type === "file" ||
+    field.type === "records" ||
+    field.type === "foreignKey" ||
+    (field.type === "select" && field.isMultiple === true)
+  )
+    return null;
   const { defaultValue, ...rest } = field;
   const set = (value: string | number | boolean | null) =>
     onChange(value === null ? rest : { ...rest, defaultValue: value });
@@ -523,6 +629,7 @@ function FieldCard({
   depth,
   isColumn,
   collections,
+  areCollectionFields,
   groupLayout,
   comparisonFieldsEditor,
   isReviewable,
@@ -533,6 +640,7 @@ function FieldCard({
   readonly depth: number;
   readonly isColumn: boolean;
   readonly collections: ReadonlyArray<LinkableCollection> | undefined;
+  readonly areCollectionFields: boolean;
   readonly groupLayout: GroupLayoutControl | undefined;
   readonly comparisonFieldsEditor: ComparisonFieldsControl | undefined;
   readonly isReviewable: boolean;
@@ -542,7 +650,6 @@ function FieldCard({
   const id = useId();
   const { entry: field, replace: setField } = place;
   const [startsOpen] = useState(field.label === "");
-  const optionRows = useRowKeys(field.type === "select" ? field.options.length : 0);
   return (
     <div className="rounded-lg border border-border">
       <Collapsible defaultOpen={startsOpen}>
@@ -588,7 +695,9 @@ function FieldCard({
                       .filter(
                         ([type]) =>
                           (type !== "group" || depth < 2) &&
-                          (type !== "records" || collections !== undefined),
+                          ((type !== "records" && type !== "foreignKey") ||
+                            (collections !== undefined &&
+                              type === (areCollectionFields ? "foreignKey" : "records"))),
                       )
                       .map(([type, label]) => (
                         <SelectItem key={type} value={type}>
@@ -606,50 +715,12 @@ function FieldCard({
               disabled={disabled}
             />
             {field.type === "select" ? (
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs text-muted-foreground">{t("Options")}</span>
-                {listEntries(field.options, (options) => setField(withOptions(field, options))).map(
-                  (option) => (
-                    <div key={optionRows.keys[option.index]} className="flex items-center gap-1.5">
-                      <Input
-                        aria-label={t("Option {0}", option.index + 1)}
-                        placeholder={[t("Approved"), t("Declined")][option.index]}
-                        value={option.entry}
-                        onChange={(event) => option.replace(event.target.value)}
-                        autoFocus={!option.first && option.last && !option.entry}
-                        disabled={disabled}
-                        className="min-w-0 flex-1"
-                      />
-                      <ToneSelect
-                        field={field}
-                        option={option.entry}
-                        onChange={setField}
-                        disabled={disabled}
-                      />
-                      <Button
-                        type="button"
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label={t("Remove option {0}", option.entry)}
-                        onClick={() => {
-                          optionRows.remove(option.index);
-                          option.remove();
-                        }}
-                        disabled={disabled}
-                      >
-                        <XIcon />
-                      </Button>
-                    </div>
-                  ),
-                )}
-                <AddButton
-                  label={t("Add option")}
-                  onClick={() => setField({ ...field, options: [...field.options, ""] })}
-                  disabled={disabled}
-                />
-              </div>
+              <OptionsEditor field={field} onChange={setField} disabled={disabled} />
             ) : null}
-            {field.type === "records" ? (
+            {areCollectionFields && depth === 0 ? (
+              <MultipleSwitch field={field} onChange={setField} disabled={disabled} />
+            ) : null}
+            {field.type === "records" || field.type === "foreignKey" ? (
               <Field label={t("Collection")} size="xs">
                 <Select
                   value={field.collectionId === "" ? null : field.collectionId}

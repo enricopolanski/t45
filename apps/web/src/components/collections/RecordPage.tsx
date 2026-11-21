@@ -11,6 +11,15 @@ import { api } from "../../rpc/api";
 import { useSession } from "../../state/session";
 import { PageBreadcrumbLink } from "../PageBreadcrumb";
 import { Button } from "../ui/button";
+import {
+  AlertDialog,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
 import { ErrorText } from "../ui/error-text";
 import { FormGrid, ReadOnlyFields } from "../work/StepFields";
 import { WorkFrame } from "../work/WorkFrame";
@@ -123,6 +132,53 @@ export function RecordPage({
   );
 }
 
+/** Deletes the record once confirmed; a record another collection links stays, saying which. */
+function DeleteRecordButton({
+  collectionId,
+  recordKey,
+  onDeleted,
+}: {
+  readonly collectionId: string;
+  readonly recordKey: string;
+  readonly onDeleted: () => void;
+}) {
+  const t = useTranslation();
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={() => setIsConfirming(true)}>
+        {t("Delete record")}
+      </Button>
+      <AlertDialog open={isConfirming} onOpenChange={setIsConfirming}>
+        <DialogPopup closeButton={false}>
+          <DialogHeader>
+            <DialogTitle>{t('Delete record "{0}"?', recordKey)}</DialogTitle>
+            <DialogDescription>
+              {t("The record and its files are removed for good, wherever they are shown.")}
+            </DialogDescription>
+          </DialogHeader>
+          {error && <ErrorText text={error} />}
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>{t("Cancel")}</DialogClose>
+            <Button
+              variant="destructive"
+              onClick={() =>
+                void api("collections.deleteRecord", { collectionId, key: recordKey }).then(
+                  onDeleted,
+                  (cause: unknown) => setError(describeFailure(cause)),
+                )
+              }
+            >
+              {t("Delete")}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </AlertDialog>
+    </>
+  );
+}
+
 /** The record's form, saved from the page's actions, which stay put while its fields change size. */
 function RecordForm({
   title,
@@ -148,9 +204,16 @@ function RecordForm({
       tabTitle={tabTitle}
       parent={parent}
       actions={
-        <Button type="submit" form={formId} size="sm" disabled={isBusy}>
-          {t("Save record")}
-        </Button>
+        <>
+          <DeleteRecordButton
+            collectionId={collection.id}
+            recordKey={record.key}
+            onDeleted={onSaved}
+          />
+          <Button type="submit" form={formId} size="sm" disabled={isBusy}>
+            {t("Save record")}
+          </Button>
+        </>
       }
     >
       <form

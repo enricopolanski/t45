@@ -129,6 +129,14 @@ export const CollectionOperations = RpcGroup.make(
     success: CollectionRecordView,
     error: CollectionErrors,
   }),
+  /** Removes the record, refused while another collection's record links it. */
+  Rpc.make("deleteRecord", {
+    payload: {
+      collectionId: StringId,
+      key: TrimmedNonEmptyString.annotate({ description: "The record's primary key value." }),
+    },
+    error: CollectionErrors,
+  }),
 ).prefix("collections.");
 
 export const Collections = RpcGroup.make(

@@ -62,6 +62,8 @@ import {
   isReviewedField,
   proposalRefusal,
   recordReviewsOf,
+  getComparisonSources,
+  getComparisonRefusal,
   withEditedStepValues,
   confirmRecordEntry as withConfirmedRecordEntry,
   Step,
@@ -159,6 +161,28 @@ const SKIP_REASON_OF_CHAT_REFUSAL: Partial<Record<ChatRefusal, AutomationSkipRea
   file_unavailable: "file_unavailable",
 };
 const isAutomationId = Schema.is(AutomationId);
+/** What an agent's answer holds, as its chat keeps it. */
+const decodeAnswer = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      type: Schema.Literal("assistant"),
+      content: Schema.Array(
+        Schema.Struct({ type: Schema.String, text: Schema.optionalKey(Schema.String) }),
+      ),
+    }),
+  ),
+);
+
+/** A phase's final answer, as the next phase of its automation reads it. */
+interface Handoff {
+  readonly title: string;
+  readonly phase: number;
+  readonly answer: string;
+}
+const handoffText = (handoff: Handoff | undefined) =>
+  handoff === undefined
+    ? ""
+    : `Phase ${handoff.phase} of the automation "${handoff.title}" ran on this step just before you, and answered:\n\n${handoff.answer}`;
 
 /** A ticket with its project and the version of the workflow it runs on. */
 interface Work {
@@ -488,14 +512,20 @@ const make = Effect.gen(function* () {
 
   const stepRuns = (work: Work, step: Step) =>
     chatRepository.origins.listByTrigger({ ticketId: work.ticket.id, stepId: step.id });
+  /** Stops the step's runs that `matches` names, but never `keep`, the run asking. */
   const stopStepRuns = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
     matches: (automationId: AutomationId) => boolean = () => true,
+    keep: ChatId | null = null,
   ) {
     const stopped: Array<ChatId> = [];
     for (const run of yield* stepRuns(work, step)) {
-      if (matches(run.trigger.automationId) && (yield* chats.requestStop(run.chatId)))
+      if (
+        run.chatId !== keep &&
+        matches(run.trigger.automationId) &&
+        (yield* chats.requestStop(run.chatId))
+      )
         stopped.push(run.chatId);
     }
     return stopped;
@@ -552,6 +582,7 @@ const make = Effect.gen(function* () {
     work: Work,
     step: Step,
     automation: Automation,
+    handoff?: Handoff,
   ) {
     if (automation.stepContext === "on_demand") {
       const definition = definitionOf(work, step);
@@ -561,6 +592,7 @@ const make = Effect.gen(function* () {
           automation.prompt,
           "Use step_get_fields to read the input and output values you need. The list below identifies the input and output fields available to you. Use step_propose_value for reviewed fields and step_set_field for other fields.",
           encodeCompactJson(listAutomationFields(work, step)),
+          handoffText(handoff),
         ]
           .filter(Boolean)
           .join("\n\n"),
@@ -582,6 +614,7 @@ const make = Effect.gen(function* () {
         instructions ? `Instructions for this step:\n${instructions}` : "",
         formatAutomationContext(brief),
         `Your automation: ${automation.prompt}. Other people and automations may work on this step at the same time. Do not wait for their work or unrelated fields and sub-steps to be complete.`,
+        handoffText(handoff),
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -599,6 +632,8 @@ const make = Effect.gen(function* () {
     const loaded = yield* loadAutomationStep(origin).pipe(Effect.option);
     if (Option.isNone(loaded)) return;
     const { work, step } = loaded.value;
+    // A run someone stopped hands nothing on; the assignee hears once its last phase ends.
+    if (actorId === null && (yield* startNextPhase(chatId, origin, work, step))) return;
     yield* notify({
       kind: "automation_ended",
       to: step.assignee,
@@ -607,16 +642,88 @@ const make = Effect.gen(function* () {
       actorId,
     });
   });
+  /** The text of the last answer in a chat's main conversation. */
+  const finalAnswer = Effect.fnUntraced(function* (chatId: ChatId) {
+    const root = (yield* chatRepository.sessions(chatId)).find(
+      (session) => session.parentSessionId === null,
+    );
+    if (root === undefined) return null;
+    const { rows } = yield* chatRepository.page(chatId, root.sessionId, null, 20);
+    for (const row of rows) {
+      const message = decodeAnswer(row.json);
+      if (Option.isNone(message)) continue;
+      const answer = message.value.content
+        .flatMap(({ type, text }) => (type === "text" && text ? [text] : []))
+        .join("\n\n")
+        .trim();
+      if (answer) return answer;
+    }
+    return null;
+  });
+  /**
+   * When a phase of an automation ends well on a step, starts its next phase there: that phase's
+   * agent, with the same permissions and the previous phase's final answer, as a run of the same
+   * automation. True when the automation goes on.
+   */
+  const startNextPhase = Effect.fnUntraced(function* (
+    chatId: ChatId,
+    origin: AutomationOrigin,
+    work: Work,
+    step: Step,
+  ) {
+    const { trigger } = origin;
+    if (trigger.type !== "step" || step.status.type !== "working") return false;
+    if ((yield* chatRepository.get(chatId))?.status !== null) return false;
+    const automation = yield* automations.get(trigger.automationId);
+    const ended = trigger.phase ?? 1;
+    // The phases after the first are numbered from 2.
+    const next = automation?.nextPhases?.[ended - 1];
+    if (automation === null || next === undefined) return false;
+    const { effectiveUserId } = trigger;
+    const answer = yield* finalAnswer(chatId);
+    const reason = yield* Effect.gen(function* () {
+      if (!(yield* canRunOnSteps(next.agentId, effectiveUserId)))
+        return "automation_unavailable" as const;
+      yield* startStepRun(
+        work,
+        step,
+        {
+          ...automation,
+          agentId: next.agentId,
+          prompt: next.prompt,
+          stepContext: next.stepContext ?? automation.stepContext ?? "included",
+        },
+        { effectiveUserId, isAutomatic: true, phase: ended + 1 },
+        answer === null ? undefined : { title: automation.title, phase: ended, answer },
+      );
+      return null;
+    }).pipe(
+      Effect.catchTags({
+        ChatRefused: (refused) =>
+          Effect.succeed(SKIP_REASON_OF_CHAT_REFUSAL[refused.reason] ?? "automation_unavailable"),
+      }),
+      // A new chat's id is never taken.
+      Effect.orDie,
+    );
+    if (reason === null) return true;
+    const skipped = { automationId: automation.id, reason, at: yield* DateTime.now };
+    putStep(work, { ...step, skippedAutomations: [...(step.skippedAutomations ?? []), skipped] });
+    yield* save(work);
+    return false;
+  });
+  /** Whether `userId` may run the agent on a step. */
+  const canRunOnSteps = Effect.fnUntraced(function* (agentId: string, userId: string) {
+    const agent = yield* agents.get(agentId);
+    return (
+      agent !== null &&
+      canWorkSteps(agent, yield* capabilities.listForAgent(agent.id)) &&
+      canUse(agent, userId)
+    );
+  });
   /** Whoever runs a step's automation must be able to use its agent. */
   const requireStepAutomation = Effect.fnUntraced(function* (id: AutomationId, userId: string) {
     const automation = yield* automations.get(id);
-    const agent = automation === null ? null : yield* agents.get(automation.agentId);
-    if (
-      automation === null ||
-      agent === null ||
-      !canWorkSteps(agent, yield* capabilities.listForAgent(agent.id)) ||
-      !canUse(agent, userId)
-    )
+    if (automation === null || !(yield* canRunOnSteps(automation.agentId, userId)))
       return yield* refuse("invalid_automations");
     return automation;
   });
@@ -625,7 +732,12 @@ const make = Effect.gen(function* () {
     work: Work,
     step: Step,
     automation: Automation,
-    trigger: { readonly effectiveUserId: string; readonly isAutomatic: boolean },
+    trigger: {
+      readonly effectiveUserId: string;
+      readonly isAutomatic: boolean;
+      readonly phase?: number;
+    },
+    handoff?: Handoff,
   ) {
     yield* chats.startAutomation(
       {
@@ -638,7 +750,7 @@ const make = Effect.gen(function* () {
       automation.agentId,
       {
         title: `${work.ticket.title} · ${nameOf(work, step)}`.slice(0, 200).trim(),
-        input: yield* buildAutomationInput(work, step, automation),
+        input: yield* buildAutomationInput(work, step, automation, handoff),
       },
     );
   });
@@ -695,7 +807,10 @@ const make = Effect.gen(function* () {
     Effect.map(memberOf(userId, work.project.id), (steps) =>
       steps.has(topLevelStep(work.ticket, step).stepDefinitionId),
     );
-  /** The step goes to its default assignee, else to `inherited`: the first who is a member of it. */
+  /**
+   * The step goes to its default assignee, else to whoever started the ticket, else to
+   * `inherited`: the first who is a member of it.
+   */
   const enterStep = Effect.fnUntraced(function* (
     work: Work,
     definition: StepDefinition,
@@ -705,9 +820,11 @@ const make = Effect.gen(function* () {
   ): Effect.fn.Return<Step> {
     const stepDefinitionId =
       parent === null ? definition.id : topLevelStep(work.ticket, parent).stepDefinitionId;
-    const candidates = [work.project.defaultAssignees[definition.id], inherited].flatMap(
-      (userId) => userId ?? [],
-    );
+    const candidates = [
+      work.project.defaultAssignees[definition.id],
+      work.ticket.creatorUserId,
+      inherited,
+    ].flatMap((userId) => userId ?? []);
     const assignee = yield* Effect.findFirst(candidates, (userId) =>
       Effect.map(memberOf(userId, work.project.id), (steps) => steps.has(stepDefinitionId)),
     );
@@ -1252,6 +1369,7 @@ const make = Effect.gen(function* () {
         title: input.title,
         description: (input.description ?? "").trim(),
         status: { type: "open" },
+        creatorUserId: actorId,
         steps: [],
         createdAt: at,
       },
@@ -1312,29 +1430,32 @@ const make = Effect.gen(function* () {
     const { work, step, actorId } = yield* loadStepReader(caller, query.stepId);
     yield* requireSees(work, step, actorId);
     const definition = definitionOf(work, step);
-    const inputs = yield* Effect.forEach(
-      stepInputFields(work.version.steps, work.ticket, definition),
-      ({ source, field }) => {
-        const selection = query.inputs?.find(
-          ({ key, sourceStepId }) =>
-            key === field.id &&
-            (sourceStepId === undefined || sourceStepId === source.stepDefinitionId),
-        );
-        return selection === undefined
-          ? Effect.succeed(null)
-          : Effect.map(readFieldValue(field, source.values, field.id, selection), (value) => ({
-              ...describeField(field),
-              sourceStepId: source.stepDefinitionId,
-              value,
-            }));
-      },
-    );
+    const inputFields = stepInputFields(work.version.steps, work.ticket, definition);
+    const inputs = yield* Effect.forEach(inputFields, ({ source, field }) => {
+      const selection = query.inputs?.find(
+        ({ key, sourceStepId }) =>
+          key === field.id &&
+          (sourceStepId === undefined || sourceStepId === source.stepDefinitionId),
+      );
+      return selection === undefined
+        ? Effect.succeed(null)
+        : Effect.map(readFieldValue(field, source.values, field.id, selection), (value) => ({
+            ...describeField(field),
+            sourceStepId: source.stepDefinitionId,
+            value,
+          }));
+    });
     const fields = yield* Effect.forEach(definition.fields, (field) => {
       const selection = query.fields?.find(({ key }) => key === field.id);
+      const comparisonSources =
+        selection && field.type === "records" && field.comparisonCriteria
+          ? getComparisonSources(field.comparisonCriteria, inputFields)
+          : undefined;
       return selection === undefined
         ? Effect.succeed(null)
         : Effect.map(readFieldValue(field, step.values, field.id, selection), (value) => ({
             ...describeField(field),
+            ...(comparisonSources ? { comparisonSources } : {}),
             value,
           }));
     });
@@ -1352,9 +1473,18 @@ const make = Effect.gen(function* () {
 
   const stepContents = Effect.fnUntraced(function* (work: Work, step: Step, forPage: boolean) {
     const definition = definitionOf(work, step);
+    const inputs = stepInputFields(work.version.steps, work.ticket, definition);
+    const comparisonSources = Object.fromEntries(
+      definition.fields.flatMap((field) => {
+        if (field.type !== "records" || !field.comparisonCriteria) return [];
+        const sources = getComparisonSources(field.comparisonCriteria, inputs);
+        return sources ? [[field.id, sources] as const] : [];
+      }),
+    );
     return {
       definition,
       assignee: step.assignee,
+      comparisonSources,
       ...(yield* buildInputs(work, step, forPage)),
       fields: yield* buildStepFieldViews(work, step),
       recordReviews: recordReviewsOf(definition.fields, step),
@@ -1591,7 +1721,14 @@ const make = Effect.gen(function* () {
     const { work, step, actorId } = yield* loadStepFor(caller, input.stepId);
     yield* requireWorkingStep(work, step);
     const field = yield* resolveField(work, step, input.fieldKey);
-    const refusal = proposalRefusal(step, field, input.fieldKey, input.value);
+    const refusal =
+      proposalRefusal(step, field, input.fieldKey, input.value) ??
+      getComparisonRefusal(
+        field,
+        stepInputFields(work.version.steps, work.ticket, definitionOf(work, step)),
+        input.comparison,
+      );
+
     if (refusal !== null)
       return yield* new WorkflowRefused({ reason: "invalid_proposal", detail: refusal });
     if (field.type === "records") yield* requireRecords(caller, field, [input.value as string]);
@@ -1665,13 +1802,19 @@ const make = Effect.gen(function* () {
     });
   }, transaction);
 
+  /**
+   * A member, or an automation's run on its step, confirms an entry. A step done once approved
+   * completes itself with the confirmation that leaves none pending.
+   */
   const confirmRecordEntry = Effect.fnUntraced(function* (
-    actorId: string,
+    caller: Caller,
     input: Payload<"confirmRecordEntry">,
   ) {
-    const { work, step } = yield* loadForCommand(actorId, input.stepId);
+    const { work, step, actorId } = yield* loadStepFor(caller, input.stepId);
     yield* requireActionable(step);
-    const reviewed = withConfirmedRecordEntry(definitionOf(work, step).fields, step, input);
+    const chatId = typeof caller === "string" ? null : caller.chatId;
+    const definition = definitionOf(work, step);
+    const reviewed = withConfirmedRecordEntry(definition.fields, step, input);
     if (typeof reviewed === "string")
       return yield* new WorkflowRefused({ reason: "invalid_record_review", detail: reviewed });
     putStep(work, reviewed);
@@ -1679,11 +1822,26 @@ const make = Effect.gen(function* () {
     yield* record("workflows.confirmRecordEntry", actorId, targetOf(work, step), {
       fieldKey: `${input.groupFieldId}.${input.rowId}`,
     });
+    if (
+      definition.isDoneWhenApproved === true &&
+      stepCompletionRefusal(definition, work.ticket, reviewed) === null
+    )
+      // One that can't complete yet, such as when the next step can't start, stays open.
+      yield* completeStep(work, reviewed, actorId, chatId).pipe(
+        Effect.catchTags({ WorkflowRefused: () => Effect.void }),
+      );
   }, transaction);
 
-  const markStepDone = Effect.fnUntraced(function* (actorId: string, stepId: string) {
-    const { work, step } = yield* loadForCommand(actorId, stepId);
-    yield* requireActionable(step);
+  /**
+   * Completes the step and enters the next one, stopping the step's runs but `chatId`, the run
+   * asking, which goes on to its end.
+   */
+  const completeStep = Effect.fnUntraced(function* (
+    work: Work,
+    step: Step,
+    actorId: string,
+    chatId: ChatId | null,
+  ) {
     const refusal = stepCompletionRefusal(definitionOf(work, step), work.ticket, step);
     if (refusal !== null) return yield* new WorkflowRefused({ reason: refusal });
     const completed = completeTicketStep(
@@ -1698,7 +1856,7 @@ const make = Effect.gen(function* () {
         ? null
         : stepEntryRefusal(work.version.steps, completed.ticket, completed.next);
     if (entryRefusal !== null) return yield* refuse(entryRefusal);
-    yield* stopStepRuns(work, step);
+    yield* stopStepRuns(work, step, undefined, chatId);
     const snapshot = yield* stepContents(work, step, true);
     const linkedFileIds = (fields: ReadonlyArray<FieldView>): ReadonlyArray<AttachmentId> =>
       fields.flatMap((field) => [
@@ -1720,6 +1878,11 @@ const make = Effect.gen(function* () {
       );
     yield* save(work);
     yield* record("workflows.markStepDone", actorId, targetOf(work, step));
+  });
+  const markStepDone = Effect.fnUntraced(function* (actorId: string, stepId: string) {
+    const { work, step } = yield* loadForCommand(actorId, stepId);
+    yield* requireActionable(step);
+    yield* completeStep(work, step, actorId, null);
   }, transaction);
 
   const setStepAssignee = Effect.fnUntraced(function* (

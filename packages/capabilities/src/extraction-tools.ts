@@ -1,7 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off - Runs inside the agent VM.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeUtil from "node:util";
 import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
-import { recordProblem } from "@t45/contracts/models/Collection";
+import { type Collection, recordProblem } from "@t45/contracts/models/Collection";
 import {
   type Field,
   FieldPathSegment,
@@ -49,18 +51,33 @@ const Article = Schema.Struct({
 });
 const Batch = Schema.Struct({
   recordsFieldId: FieldPathSegment,
-  groups: Schema.NonEmptyArray(
+  /** Empty when every article is left out. */
+  groups: Schema.Array(
     Schema.Struct({
       sharedValues: Schema.optionalKey(ExtractedValues),
       sharedReview: Schema.optionalKey(ExtractedValues),
       articles: Schema.NonEmptyArray(Article),
     }),
   ),
+  skipped: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        sourceId: TrimmedNonEmptyString,
+        title: TrimmedNonEmptyString,
+        reason: TrimmedNonEmptyString,
+      }),
+    ).annotate({
+      description:
+        "The articles the instructions leave out of the analysis, each with why, in the instructions' language. They are not saved; a comment on the step lists them.",
+    }),
+  ),
 });
 const decodeBatch = Schema.decodeUnknownSync(Batch);
 const document = Schema.toJsonSchemaDocument(Batch);
 const decodeUpload = Schema.decodeUnknownSync(AttachmentUploadResult);
-const imageReference = /^pdf-image:(document-[1-9]\d*)\/(image-\d{3,}\.png)$/u;
+/** An image embedded in one of the step's PDFs, by the PDF's attachment ID. */
+const imageReference = /^pdf-image:([a-f0-9-]{36}\.[a-z0-9]{1,10})\/(image-\d{3,}\.png)$/u;
+const run = NodeUtil.promisify(NodeChildProcess.execFile);
 const readSettings = async () => {
   const schema = Schema.fromJsonString(
     Schema.Struct({
@@ -83,6 +100,80 @@ const request = async (...args: Parameters<typeof callOperation>) => {
 };
 
 const getStep = async () => (await request("workflows.getStep", step)) as StepView;
+
+/**
+ * The collection listing product categories by name, each with a description. A category's name
+ * is the title of the collection holding its specifications.
+ */
+const CATEGORIES = "Categories";
+const CategoryName = Schema.Struct({
+  name: TrimmedNonEmptyString.annotate({
+    description: "A category's Name, as categories lists it.",
+  }),
+});
+const decodeCategoryName = Schema.decodeUnknownSync(CategoryName);
+const categoryNameDocument = Schema.toJsonSchemaDocument(CategoryName);
+
+const collectionNamed = async (title: string) => {
+  const collections = (await request("collections.list", undefined)) as ReadonlyArray<Collection>;
+  const named = collections.filter((collection) => collection.title === title);
+  if (named.length === 0) return refuse(`There is no collection named ${title}.`);
+  if (named.length > 1)
+    return refuse(`Several collections are named ${title}: an admin must rename all but one.`);
+  return named[0]!;
+};
+
+/** Each category's values by field label. */
+const listCategories = async () => {
+  const categories = await collectionNamed(CATEGORIES);
+  const rows: Array<Record<string, Schema.Json>> = [];
+  for (let hasMore = true; hasMore;) {
+    const page = (await request("collections.searchRecords", {
+      collectionId: categories.id,
+      offset: rows.length,
+      limit: 100,
+    })) as { records: ReadonlyArray<{ values: Record<string, Schema.Json> }>; hasMore: boolean };
+    for (const { values } of page.records)
+      rows.push(
+        Object.fromEntries(
+          categories.fields.flatMap(({ id, label }) =>
+            values[id] === undefined ? [] : [[label, values[id]]],
+          ),
+        ),
+      );
+    hasMore = page.hasMore && page.records.length > 0;
+  }
+  return JSON.stringify(rows);
+};
+
+/** The fields of a category's specifications collection, without its links to products. */
+const categorySchema = async ({ name }: typeof CategoryName.Type) => {
+  const categories = await collectionNamed(CATEGORIES);
+  const category = await request("collections.getRecord", {
+    collectionId: categories.id,
+    key: name,
+  });
+  if (category === null) return refuse(`There is no category ${name}: choose one from categories.`);
+  const { fields } = await collectionNamed(name);
+  const describe = (fields: ReadonlyArray<Field>): Schema.Json =>
+    fields
+      .filter((field) => field.type !== "foreignKey" && field.type !== "records")
+      .map((field) => ({
+        label: field.label,
+        type: field.type,
+        ...(field.description ? { description: field.description } : {}),
+        ...(field.type === "number" && field.unit !== undefined ? { unit: field.unit } : {}),
+        ...(field.type === "select"
+          ? { options: field.options, ...(field.isMultiple ? { isMultiple: true } : {}) }
+          : {}),
+        ...(field.type === "group" ? { fields: describe(field.fields) } : {}),
+      }));
+  return JSON.stringify({
+    category: name,
+    rule: "An article of this category is described by exactly these fields, in this order. Its characteristics table in its review entry holds one row per field: the field's label as the characteristic, and the article's value as the value: a number followed by the field's unit, such as \"48 mm\", one or more of its options, or text. Give a row for each field the sources state and leave out the others, since a review entry with an empty value can't be confirmed; no other rows. Give the whole table in each article rather than in shared values, so its rows keep this order.",
+    fields: describe(fields),
+  });
+};
 
 /** Only the extraction destinations go into the prompt. The saved records stay with the tool. */
 const extractionSchema = async () => {
@@ -134,8 +225,23 @@ const extractionSchema = async () => {
   return targets;
 };
 
+/**
+ * Where the reading of the PDF left the image, or, when another run read it, the image taken out of
+ * the step's PDF again.
+ */
 const readImage = async (reference: RegExpExecArray) => {
-  const path = `/work/.t45-document-pages/${reference[1]}/${reference[2]}`;
+  const directory = `/work/.t45-document-pages/${reference[1]}`;
+  const path = `${directory}/${reference[2]}`;
+  const isTaken = await NodeFSP.access(path).then(
+    () => true,
+    () => false,
+  );
+  if (!isTaken) {
+    await NodeFSP.mkdir(directory, { recursive: true });
+    await run("pdfimages", ["-png", `attachments/${reference[1]}`, `${directory}/image`]).catch(
+      () => refuse(`There is no PDF image ${reference[0]}.`),
+    );
+  }
   const info = await NodeFSP.stat(path).catch(() =>
     refuse(`There is no PDF image ${reference[0]}.`),
   );
@@ -144,14 +250,37 @@ const readImage = async (reference: RegExpExecArray) => {
   return NodeFSP.readFile(path);
 };
 
-const uploadImage = async (name: string, bytes: Uint8Array<ArrayBuffer>) => {
-  const params = new URLSearchParams({ type: "image", name, mimeType: "image/png" });
+/** A PDF of the step, which the runner put in the attachments folder. */
+const readStepFile = async (id: string) => {
+  const info = await NodeFSP.stat(`attachments/${id}`).catch(() =>
+    refuse(`The step's file ${id} isn't available.`),
+  );
+  if (!info.isFile() || info.size === 0 || info.size > ATTACHMENT_MAX_FILE_BYTES)
+    return refuse(`The size of the step's file ${id} is invalid.`);
+  return NodeFSP.readFile(`attachments/${id}`);
+};
+
+interface FileUpload {
+  readonly fieldKey: string;
+  readonly bytes: Uint8Array<ArrayBuffer>;
+  readonly name: string;
+  readonly type: "image" | "file";
+  readonly mimeType: string;
+}
+
+const upload = async (
+  name: string,
+  bytes: Uint8Array<ArrayBuffer>,
+  type: "image" | "file",
+  mimeType: string,
+) => {
+  const params = new URLSearchParams({ type, name, mimeType });
   const response = await fetch(apiUrl(`/api/attachments?${params}`), {
     method: "POST",
     headers: apiHeaders,
     body: bytes,
   });
-  if (!response.ok) return refuse(`The PDF image ${name} could not be attached.`);
+  if (!response.ok) return refuse(`${name} could not be attached.`);
   return decodeUpload(await response.json()).attachmentId;
 };
 
@@ -182,7 +311,12 @@ const flatten = (
   Object.entries(values).flatMap(([id, value]) => {
     const field = fields.find((item) => item.id === id);
     const key = prefix + id;
-    if (field === undefined) return refuse(`Unknown field ${key}.`);
+    if (field === undefined)
+      return refuse(
+        id === "review"
+          ? "Give review beside an article's values, not inside them."
+          : `Unknown field ${key}: use the field IDs the extraction fields list.`,
+      );
     if (field.type !== "group" || value === null) return [[key, value] as const];
     if (!field.repeatable) {
       if (!isObject(value)) return refuse(`${key} takes an object.`);
@@ -225,7 +359,13 @@ const discrepancyComment = (
   return blocks.join("\n\n");
 };
 
-const saveRecords = async ({ recordsFieldId, groups }: typeof Batch.Type) => {
+/** The articles left out, one line each, for a comment on the step. */
+const skippedComment = (skipped: NonNullable<typeof Batch.Type.skipped>) =>
+  skipped
+    .map(({ sourceId, title, reason }) => `- **${sourceId}** · ${title}: ${reason}`)
+    .join("\n");
+
+const saveRecords = async ({ recordsFieldId, groups, skipped = [] }: typeof Batch.Type) => {
   const records = groups.flatMap(({ sharedValues, sharedReview, articles }) =>
     articles.map((article) => ({
       ...article,
@@ -236,6 +376,8 @@ const saveRecords = async ({ recordsFieldId, groups }: typeof Batch.Type) => {
           : withSharedValues(sharedReview, article.review),
     })),
   );
+  if (records.length === 0 && skipped.length === 0)
+    return refuse("Give the articles in groups, or those left out in skipped.");
   const view = await getStep();
   const target = view.fields.find(({ key }) => key === recordsFieldId);
   if (target?.type !== "records" || target.isReviewed || target.collection === null)
@@ -280,12 +422,33 @@ const saveRecords = async ({ recordsFieldId, groups }: typeof Batch.Type) => {
         : { [sourceIdField]: record.sourceId }),
       [primaryKeyFieldId]: key,
     };
+    // A file field takes a PDF page image, or a copy of one of the step's PDFs.
     const files = await Promise.all(
-      fileKeys(fields, values).flatMap((fieldKey) => {
+      fileKeys(fields, values).flatMap((fieldKey): ReadonlyArray<Promise<FileUpload>> => {
         const value = values[fieldKey];
-        const reference = typeof value === "string" ? imageReference.exec(value) : null;
-        if (reference === null) return [];
-        return [readImage(reference).then((bytes) => ({ fieldKey, bytes, name: reference[2]! }))];
+        if (typeof value !== "string") return [];
+        const reference = imageReference.exec(value);
+        if (reference !== null)
+          return [
+            readImage(reference).then((bytes) => ({
+              fieldKey,
+              bytes,
+              name: reference[2]!,
+              type: "image",
+              mimeType: "image/png",
+            })),
+          ];
+        const stepFile = view.files.find(({ id }) => id === value);
+        if (stepFile === undefined) return [];
+        return [
+          readStepFile(stepFile.id).then((bytes) => ({
+            fieldKey,
+            bytes,
+            name: stepFile.name,
+            type: "file",
+            mimeType: "application/pdf",
+          })),
+        ];
       }),
     );
     // Resolve image references before validation using the shape of the attachment IDs they become.
@@ -324,7 +487,8 @@ const saveRecords = async ({ recordsFieldId, groups }: typeof Batch.Type) => {
   for (const record of prepared) {
     const attachments = await Promise.all(
       record.files.map(
-        async ({ fieldKey, bytes, name }) => [fieldKey, await uploadImage(name, bytes)] as const,
+        async ({ fieldKey, bytes, name, type, mimeType }) =>
+          [fieldKey, await upload(name, bytes, type, mimeType)] as const,
       ),
     );
     await request("collections.saveRecord", {
@@ -343,10 +507,14 @@ const saveRecords = async ({ recordsFieldId, groups }: typeof Batch.Type) => {
         await set(`${group.key}.${entry.rowId}.${fieldKey}`, value);
     }
   }
+  const leftOut = skippedComment(skipped);
+  if (leftOut !== "" && !view.comments.some(({ body }) => body === leftOut))
+    await request("workflows.commentOnStep", { ...step, body: leftOut });
   if (comment !== "" && !view.comments.some(({ body }) => body === comment))
     await request("workflows.commentOnStep", { ...step, body: comment });
+  await NodeFSP.mkdir(".t45-document-pages", { recursive: true });
   await NodeFSP.writeFile(".t45-document-pages/saved", "");
-  return `Saved ${keys.length} articles. Extraction is complete.`;
+  return `Saved ${keys.length} articles${skipped.length > 0 ? `, left out ${skipped.length}` : ""}. Extraction is complete.`;
 };
 
 if (process.argv[2] === "--schema") {
@@ -358,9 +526,30 @@ if (process.argv[2] === "--schema") {
       {
         name: "save_records",
         description:
-          'Save all articles once. Put identical family facts in sharedValues and sharedReview, and variant-specific facts in each article. Article values override shared scalar values, and repeatable rows are combined. Give sourceId as the printed article code. Use field IDs in values and review. A repeatable group takes an array of objects, e.g. {"images":[{"image_file":"pdf-image:document-1/image-000.png"}]}. A review entry takes an object of child fields, including its Brief and characteristics when configured. The tool assigns all row IDs, record keys and configured ticket references. Omit unsupported facts. Finish after the tool reports success.',
+          'Save all articles once. Put identical family facts in sharedValues and sharedReview, and variant-specific facts in each article. Article values override shared scalar values, and repeatable rows are combined. Give sourceId as the printed article code. Use field IDs in values and review. A repeatable group takes an array of objects, e.g. {"images":[{"image_file":"pdf-image:<attachment ID>/image-000.png"}]}. A file field takes a pdf-image reference, or the attachment ID of one of the source PDFs to keep a copy of it. A review entry takes an object of child fields, including its Brief and characteristics when configured. The tool assigns all row IDs, record keys and configured ticket references. Omit unsupported facts. Finish after the tool reports success.',
         inputSchema: { ...document.schema, $defs: document.definitions },
         call: async (input) => saveRecords(decodeBatch(input)),
+      },
+      {
+        name: "fields",
+        description:
+          "The fields of the articles and of their review entries, by ID, as save_records takes them in values and review.",
+        inputSchema: { type: "object", properties: {} },
+        call: async () => JSON.stringify(await extractionSchema()),
+      },
+      {
+        name: "categories",
+        description:
+          "List the product categories, each with its Name and a Description of the products it holds. Choose by its Description the category whose fields describe an article, then read those fields with category_schema. This choice fills no field of the article: its own category field keeps the kind of article it is, such as Kreppband.",
+        inputSchema: { type: "object", properties: {} },
+        call: listCategories,
+      },
+      {
+        name: "category_schema",
+        description:
+          "The specification fields of one category, by its Name from categories: each field's label, type, unit, options and description. These are the characteristics an article of that category is described by.",
+        inputSchema: { ...categoryNameDocument.schema, $defs: categoryNameDocument.definitions },
+        call: async (input) => categorySchema(decodeCategoryName(input)),
       },
     ],
     failure: "The document extraction tool failed.",

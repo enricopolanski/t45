@@ -8,7 +8,7 @@ import {
   sortRows,
 } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
-import { getFieldLink } from "@t45/core/fieldViews";
+import { buildFieldViews, getFieldLink } from "@t45/core/fieldViews";
 import { ImageIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -18,6 +18,8 @@ import { webUrlHost } from "../../lib/webUrl";
 import { Favicon } from "../ExternalUrl";
 import { MarkdownText } from "../markdown/MarkdownText";
 import { Badge } from "../ui/badge";
+import { sortEntries } from "../work/StepFields";
+import { EntryTable } from "../work/StepInputs";
 import { formatRecordValue, renderRecordValue } from "./Records";
 
 type RecordShape = Pick<Collection, "fields" | "primaryKeyFieldId" | "layout">;
@@ -65,9 +67,14 @@ function RecordBadges({
 }) {
   const host = linkHost(collection, record);
   const badges = fields.flatMap((field) => {
-    const option = record.values[field.id];
-    return field.type === "select" && typeof option === "string"
-      ? [{ id: field.id, option, tone: field.tones?.[option] ?? "neutral" }]
+    const value = record.values[field.id];
+    const options = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+    return field.type === "select"
+      ? options.flatMap((option) =>
+          typeof option === "string"
+            ? [{ id: `${field.id}.${option}`, option, tone: field.tones?.[option] ?? "neutral" }]
+            : [],
+        )
       : [];
   });
   if (badges.length === 0 && host === null) return null;
@@ -179,7 +186,7 @@ const isLongText = (field: Field) => field.type === "text" && field.isMarkdown =
 
 /**
  * A record as a showcase: its images as a gallery beside its title, highlight, badges and other
- * values, and its long text below. Groups other than the images show only in its form.
+ * values, with long text and repeatable groups with configured tables below.
  */
 export function RecordShowcase({
   collection,
@@ -215,6 +222,18 @@ export function RecordShowcase({
     (field) => field.type === "text" && field.id === collection.layout?.page?.description,
   );
   const properties = shown.filter((field) => field !== description && !isLongText(field));
+  const tables = buildFieldViews(
+    visible.fields.filter(
+      (field) =>
+        field.type === "group" &&
+        field.repeatable &&
+        field.layout?.table &&
+        field !== display.image &&
+        holdsData(record.values[field.id]),
+    ),
+    record.values,
+    (id) => record.files.find((file) => file.id === id) ?? null,
+  );
   const title = showValue(display.title, record);
   return (
     <div
@@ -292,6 +311,12 @@ export function RecordShowcase({
             <MarkdownText text={String(record.values[field.id])} />
           </section>
         ))}
+      {tables.map((field) => (
+        <details key={field.key} className="min-w-0 rounded-lg border md:col-span-2">
+          <summary className="cursor-pointer px-4 py-3 font-semibold">{field.label}</summary>
+          <EntryTable field={field} entries={sortEntries(field)} />
+        </details>
+      ))}
     </div>
   );
 }

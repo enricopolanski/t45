@@ -1,9 +1,36 @@
 import type { Message } from "./de";
 
 export const it = {
+  Source: "Fonte",
+  Equal: "Uguale",
+  Different: "Diverso",
+  "Less similar": "Poco simile",
+  "Very similar": "Molto simile",
+  "Missing evidence": "Da verificare",
+  "Evidence for {0}": "Evidenza per {0}",
+  "Confirmed input table": "Tabella di input confermata",
+  Characteristic: "Caratteristica",
+  "Confirmed value": "Valore confermato",
+  "Comparison criteria": "Criteri di confronto",
+  "Key characteristics": "Caratteristiche chiave",
+  "Show equal values": "Mostra valori uguali",
+  "Hide equal values": "Nascondi valori uguali",
+  "All confirmed values match.": "Tutti i valori confermati coincidono.",
+  Evidence: "Evidenza",
+  Comparison: "Confronto",
   "Step context": "Contesto del passaggio",
   "Include in the initial message": "Includi nel messaggio iniziale",
   "Read on demand": "Leggi su richiesta",
+  "Phase {0}": "Fase {0}",
+  "Add a phase": "Aggiungi una fase",
+  "Remove phase {0}": "Rimuovi la fase {0}",
+  "What should this agent do with what the phase before found?":
+    "Cosa deve fare questo agente con quello che ha trovato la fase precedente?",
+  "Give every next phase an agent and a prompt, or remove it.":
+    "Dai a ogni fase successiva un agente e un prompt, oppure toglila.",
+  "Done once every review is confirmed": "Completato appena ogni review è confermata",
+  "The step marks itself done and the ticket moves on as soon as its fields are complete and every record review is confirmed, by a person or an automation.":
+    "Lo step si completa da solo e il ticket va avanti appena i suoi campi sono completi e ogni review è confermata, da una persona o da un'automazione.",
   " · {0} postponed": " · {0} rinviati",
   "· Automatically run for": "· Avviato automaticamente per",
   "· Completed": "· Completato",
@@ -217,12 +244,13 @@ export const it = {
   "Choose a shared workflow, then choose this project's people and adopt a version of it.":
     "Scegli un flusso condiviso, poi definisci i membri del progetto e adotta una versione.",
   "Choose a source record": "Scegli un record di origine",
-  "Choose a text field": "Scegli un campo di testo",
+  "Choose a text or link field": "Scegli un campo di testo o link",
   "Choose a workflow": "Scegli un flusso di lavoro",
   "Choose an assignee": "Scegli un assegnatario",
   "Choose an option above": "Scegli un’opzione qui sopra",
   "Choose linked records": "Scegli i record collegati",
   "Choose one": "Scegli",
+  "Choose some": "Scegli una o più",
   "Choose the article to compare": "Scegli l’articolo da confrontare",
   "Choose the capabilities this agent can use together.":
     "Scegli le funzionalità che questo agente può usare insieme.",
@@ -328,6 +356,8 @@ export const it = {
   "Delete {0}?\nEvery agent that uses it loses it.":
     "Eliminare {0}?\nTutti gli agenti che la usano perderanno l’accesso alla skill.",
   "Delete chat": "Elimina chat",
+  "Delete record": "Elimina record",
+  'Delete record "{0}"?': "Eliminare il record «{0}»?",
   'Delete chat "{0}"?': "Eliminare la chat «{0}»?",
   "Delete skill": "Elimina skill",
   Density: "Densità",
@@ -479,6 +509,7 @@ export const it = {
   Left: "Uscito",
   "Lines under the title": "Righe sotto al titolo",
   Link: "Link",
+  "Link a record": "Collega un record",
   "Link a record to {0}": "Collega un record a {0}",
   "Link at least one record": "Collega almeno un record",
   "Link record": "Collega record",
@@ -516,6 +547,7 @@ export const it = {
   "Move {0} left": "Sposta {0} a sinistra",
   "Move {0} right": "Sposta {0} a destra",
   "Move {0} up": "Sposta {0} verso l’alto",
+  "Multiple choices": "Scelta multipla",
   "Multiple entries": "Più voci",
   "My work": "Il mio lavoro",
   Name: "Nome",
@@ -914,8 +946,8 @@ export const it = {
   "The proposal does not identify a source record. Choose one to compare; no match is assumed.":
     "La proposta non indica un record di origine. Scegline uno per il confronto.",
   "The record is gone.": "Il record non è più disponibile.",
-  "The text field whose value identifies a record: saving a record with a key the collection holds replaces that record.":
-    "Il campo di testo che identifica il record. Salvando un record con una chiave esistente, sostituisci il record corrispondente.",
+  "The text or link field whose value identifies a record: saving a record with a key the collection holds replaces that record.":
+    "Il campo di testo o link che identifica il record. Salvando un record con una chiave esistente, sostituisci il record corrispondente.",
   "Then by": "Poi per",
   "Then sort by": "Poi ordina per",
   "There's no going back.": "L’operazione è definitiva.",
@@ -925,8 +957,8 @@ export const it = {
   "Thinking…": "Sta ragionando…",
   "This browser can't prepare the image.": "Questo browser non riesce a preparare l’immagine.",
   "This collection has no records yet.": "Questa collezione non contiene ancora record.",
-  "This collection has records: add fields, but its fields and primary key stay as they are. You can change which show in the table and where links are displayed.":
-    "Questa collezione contiene record. Puoi aggiungere campi e scegliere quali appaiono in tabella e dove mostrare i link. I campi esistenti e la chiave primaria restano invariati.",
+  "This collection has records: add fields, but its fields and primary key stay as they are. You can change which show in the table and where links are displayed, and remove fields or select options that no record holds.":
+    "Questa collezione contiene record. Puoi aggiungere campi, scegliere quali appaiono in tabella e dove mostrare i link, e rimuovere campi o opzioni delle select che nessun record usa. Per il resto i campi esistenti e la chiave primaria restano invariati.",
   "This collection holds no record with this key.":
     "La collezione non contiene record con questa chiave.",
   "This context is no longer available.": "Questo contesto non è più disponibile.",
@@ -1090,4 +1122,6 @@ export const it = {
   "Your registration was received. An admin has to approve you before you can open the organization.":
     "La registrazione è stata ricevuta. Un amministratore deve approvarla prima che tu possa accedere all’organizzazione.",
   "Your session ended. Sign in again.": "La sessione è terminata. Accedi di nuovo.",
+  "The record and its files are removed for good, wherever they are shown.":
+    "Il record e i suoi file vengono eliminati definitivamente, ovunque siano mostrati.",
 } satisfies Record<Message, string>;

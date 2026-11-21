@@ -39,10 +39,12 @@ function ProposedValue({
   field,
   proposal,
   inputs,
+  criteriaSources,
 }: {
   readonly field: FieldView;
   readonly proposal: Proposal;
   readonly inputs: ReadonlyArray<FieldView>;
+  readonly criteriaSources: NonNullable<StepView["comparisonSources"]>[string] | undefined;
 }) {
   const t = useTranslation();
   if (field.type === "records") {
@@ -55,6 +57,8 @@ function ProposedValue({
         collection={field.collection}
         record={proposal.record}
         rationale={proposal.whyYes}
+        comparison={proposal.comparison}
+        criteriaSources={criteriaSources}
         comparisonFields={field.comparisonFields}
       />
     );
@@ -122,6 +126,8 @@ export function ProposalReview({
   const proposal = remaining[0];
   if (open.length === 0 && !isOpen) return null;
   const field = proposal === undefined ? null : findField(view.fields, proposal.fieldKey);
+  const criteriaSources = field && view.comparisonSources?.[field.key];
+  const hasScopedRationale = !criteriaSources || proposal?.comparison !== undefined;
   const review = (isApproved: boolean) => {
     if (proposal === undefined) return;
     setIsBusy(true);
@@ -164,13 +170,18 @@ export function ProposalReview({
             <DialogPanel>
               <div className="flex flex-col gap-4">
                 <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  {proposal.score === undefined ? null : (
+                  {!hasScopedRationale || proposal.score === undefined ? null : (
                     <Badge variant="outline">{t("Fit {0}%", proposal.score)}</Badge>
                   )}
                   {t("Proposed by {0}", actorName(directory, proposal.author))}
                 </p>
-                <ProposedValue field={field} proposal={proposal} inputs={view.inputs} />
-                <ProposalComment key={proposal.id} proposal={proposal} />
+                <ProposedValue
+                  field={field}
+                  proposal={proposal}
+                  inputs={view.inputs}
+                  criteriaSources={criteriaSources ?? undefined}
+                />
+                {hasScopedRationale && <ProposalComment key={proposal.id} proposal={proposal} />}
                 {error && <ErrorText text={error} />}
               </div>
             </DialogPanel>

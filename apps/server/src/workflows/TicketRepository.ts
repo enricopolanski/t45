@@ -23,7 +23,8 @@ const encodeSnapshot = Schema.encodeEffect(SnapshotJson);
 const decodeSnapshot = Schema.decodeUnknownEffect(SnapshotJson);
 
 const COLUMNS = `t.id, t.project_id AS "projectId", t.workflow_version_id AS "workflowVersionId",
-  t.title, t.description, t.status, t.steps, t.created_at AS "createdAt"`;
+  t.title, t.description, t.status, t.creator_user_id AS "creatorUserId", t.steps,
+  t.created_at AS "createdAt"`;
 
 const IS_OPEN = `json_extract(t.status, '$.type') = 'open'`;
 
@@ -102,9 +103,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const row = yield* encodeRow(ticket);
         yield* sql`INSERT INTO tickets (id, project_id, workflow_version_id, title, description,
-              status, steps, created_at)
+              status, creator_user_id, steps, created_at)
             VALUES (${row.id}, ${row.projectId}, ${row.workflowVersionId}, ${row.title},
-              ${row.description}, ${row.status}, ${row.steps}, ${row.createdAt})`;
+              ${row.description}, ${row.status}, ${row.creatorUserId}, ${row.steps}, ${row.createdAt})`;
         yield* publishChange(ticket.id);
       }).pipe(Effect.orDie),
     update: (ticket: Ticket) =>
@@ -120,6 +121,21 @@ const make = Effect.gen(function* () {
             step_id AS "stepId"
           FROM workflow_comments WHERE step_id = ${stepId} ORDER BY created_at, rowid`.pipe(
         Effect.flatMap(decodeComments),
+        Effect.orDie,
+      ),
+    /**
+     * How many tickets hold the record's key in a list of their steps' values, on a version with a
+     * records field of its collection. Completed steps keep their own copy of the records.
+     */
+    countLinking: (collectionId: string, key: string) =>
+      sql<{ readonly count: number }>`SELECT count(*) AS count FROM tickets t
+          JOIN workflow_versions v ON v.id = t.workflow_version_id
+        WHERE EXISTS (SELECT 1 FROM json_tree(v.steps) field WHERE field.type = 'object'
+            AND json_extract(field.value, '$.type') = 'records'
+            AND json_extract(field.value, '$.collectionId') = ${collectionId})
+          AND EXISTS (SELECT 1 FROM json_tree(t.steps) item WHERE item.atom = ${key}
+            AND typeof(item.key) = 'integer' AND item.path LIKE '$[%].values%')`.pipe(
+        Effect.map(([row]) => row!.count),
         Effect.orDie,
       ),
     insertComment: (ticketId: string, comment: Comment) =>

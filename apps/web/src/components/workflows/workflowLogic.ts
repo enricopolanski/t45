@@ -83,6 +83,15 @@ export function editsBetween(
       ...((old?.instructions ?? "") !== step.instructions
         ? [{ type: "set_step_instructions" as const, stepId, instructions: step.instructions }]
         : []),
+      ...((old?.isDoneWhenApproved ?? false) !== (step.isDoneWhenApproved ?? false)
+        ? [
+            {
+              type: "set_step_done_when_approved" as const,
+              stepId,
+              isDoneWhenApproved: step.isDoneWhenApproved ?? false,
+            },
+          ]
+        : []),
       ...fields
         .filter((field) => !step.fields.some((kept) => kept.id === field.id))
         .map((field) => ({ type: "remove_field" as const, stepId, fieldId: field.id })),
@@ -123,6 +132,7 @@ export const FIELD_TYPES = {
   file: "File",
   select: "Select",
   records: "Collection records",
+  foreignKey: "Link",
   group: "Group",
 } as const satisfies Record<FieldType, Message>;
 
@@ -140,7 +150,8 @@ export function blankField(): DraftField {
 
 /**
  * The field as `type`: a select starts with one blank option, a group with one blank field and a
- * records field with no collection chosen; options and fields go when the type no longer has them.
+ * records or link field with no collection chosen; options and fields go when the type no longer
+ * has them.
  */
 export function retypeField(field: DraftField, type: FieldType): DraftField {
   const base = {
@@ -155,8 +166,9 @@ export function retypeField(field: DraftField, type: FieldType): DraftField {
     return field.type === "group"
       ? field
       : { ...base, type, fields: [blankField()], repeatable: false };
-  if (type === "records")
-    return { ...base, type, collectionId: field.type === "records" ? field.collectionId : "" };
+  const collectionId =
+    field.type === "records" || field.type === "foreignKey" ? field.collectionId : "";
+  if (type === "records" || type === "foreignKey") return { ...base, type, collectionId };
   return { ...base, type };
 }
 

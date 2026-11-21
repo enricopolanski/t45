@@ -19,6 +19,10 @@ import Migration0009 from "./Migrations/009_CompletedStepHistory.ts";
 import Migration0010 from "./Migrations/010_UserLocale.ts";
 import Migration0011 from "./Migrations/011_AutomationTriggers.ts";
 import Migration0012 from "./Migrations/012_AutomationStepContext.ts";
+import Migration0013 from "./Migrations/013_AutomationNext.ts";
+import Migration0014 from "./Migrations/014_AutomationFollowUp.ts";
+import Migration0015 from "./Migrations/015_TicketCreator.ts";
+import Migration0016 from "./Migrations/016_AutomationPhases.ts";
 
 /**
  * Append only. The migrator skips every id up to the highest a database has recorded, so a
@@ -37,6 +41,10 @@ const migrations = [
   [10, "UserLocale", Migration0010],
   [11, "AutomationTriggers", Migration0011],
   [12, "AutomationStepContext", Migration0012],
+  [13, "AutomationNext", Migration0013],
+  [14, "AutomationFollowUp", Migration0014],
+  [15, "TicketCreator", Migration0015],
+  [16, "AutomationPhases", Migration0016],
 ] as const;
 
 class PremigrationDatabaseError extends Schema.TaggedError<PremigrationDatabaseError>()(

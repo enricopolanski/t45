@@ -24,11 +24,18 @@ export interface RecordSearch {
   readonly fields: ReadonlyArray<string> | null;
   /** Values top-level fields hold exactly, or ranges they lie within, by field id. */
   readonly filters: typeof RecordFilters.Type;
+  /** The top-level fields holding lists: a filter matches one of their items. */
+  readonly listFieldIds: ReadonlyArray<string>;
 }
 
 type Filters = RecordSearch["filters"];
 type RecordPage = RecordSearch & { readonly offset: number; readonly limit: number };
-type ValueField = { readonly fieldId: string; readonly linkFieldId?: string };
+type ValueField = {
+  readonly fieldId: string;
+  readonly linkFieldId?: string;
+  /** Whether the field holds a list, whose items are counted. */
+  readonly isList?: boolean;
+};
 type CountedValue = { readonly value: string | number; readonly count: number };
 type FilterChoice = CountedValue & { readonly link?: string };
 type ValueCountRow = CountedValue & { readonly link: string | null };
@@ -43,6 +50,8 @@ export class CollectionRecordRepository extends Context.Service<
   {
     readonly get: (collectionId: string, key: string) => Effect.Effect<CollectionRecord | null>;
     readonly hasAny: (collectionId: string) => Effect.Effect<boolean>;
+    /** Whether any record holds a value of the top-level field, or within it for a group. */
+    readonly holdsField: (collectionId: string, fieldId: string) => Effect.Effect<boolean>;
     /** A page of matches in key order, with counts and choices for the requested filters. */
     readonly searchPage: (
       search: RecordPage,
@@ -53,13 +62,14 @@ export class CollectionRecordRepository extends Context.Service<
       readonly totalCount: number;
       readonly filterChoices: Readonly<Record<string, ReadonlyArray<FilterChoice>>>;
     }>;
-    /** The distinct values a top-level field holds across the collection, up to 500. */
+    /** The distinct values a top-level field holds across the collection, up to 500; a list's items. */
     readonly listValues: (
       collectionId: string,
       field: ValueField,
     ) => Effect.Effect<ReadonlyArray<FilterChoice>>;
     /** Adds the record, or replaces the values of the one with its key, keeping its creation. */
     readonly save: (record: CollectionRecord) => Effect.Effect<CollectionRecord>;
+    readonly remove: (collectionId: string, key: string) => Effect.Effect<void>;
     /** Reads from one snapshot and commits any writes together. */
     readonly transaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
   }
@@ -81,17 +91,29 @@ export const layer = Layer.effect(
     const valueOf = (fieldId: string) => sql`json_extract(field_values, ${`$."${fieldId}"`})`;
     const contains = (value: Fragment, word: string) =>
       sql`instr(lower(CAST(${value} AS TEXT)), lower(${word})) > 0`;
-    const matchFilters = (filters: Filters, value: (fieldId: string) => Fragment) =>
+    const matchFilters = (
+      filters: Filters,
+      value: (fieldId: string) => Fragment,
+      listFieldIds: ReadonlyArray<string>,
+    ) =>
       sql.and(
-        Object.entries(filters).flatMap(([fieldId, filter]) =>
-          typeof filter === "object"
-            ? [
-                ...(filter.min === undefined ? [] : [sql`${value(fieldId)} >= ${filter.min}`]),
-                ...(filter.max === undefined ? [] : [sql`${value(fieldId)} <= ${filter.max}`]),
-              ]
-            : [sql`${value(fieldId)} IS json_extract(${JSON.stringify(filter)}, '$')`],
-        ),
+        Object.entries(filters).flatMap(([fieldId, filter]) => {
+          if (typeof filter === "object")
+            return [
+              ...(filter.min === undefined ? [] : [sql`${value(fieldId)} >= ${filter.min}`]),
+              ...(filter.max === undefined ? [] : [sql`${value(fieldId)} <= ${filter.max}`]),
+            ];
+          const wanted = sql`json_extract(${JSON.stringify(filter)}, '$')`;
+          return listFieldIds.includes(fieldId)
+            ? [sql`EXISTS (SELECT 1 FROM json_each(${value(fieldId)}) WHERE value IS ${wanted})`]
+            : [sql`${value(fieldId)} IS ${wanted}`];
+        }),
       );
+    /** Where a field's values are counted from: a list's items, each its own value. */
+    const countedValues = (source: Fragment, value: Fragment, isList: boolean) =>
+      isList
+        ? { source: sql`${source}, json_each(${value}) AS item`, value: sql`item.value` }
+        : { source, value };
     const matchText = ({ collectionId, words, fields }: RecordSearch) =>
       sql.and([
         sql`collection_id = ${collectionId}`,
@@ -134,7 +156,7 @@ export const layer = Layer.effect(
       search: RecordPage,
       choiceFields: ReadonlyArray<ValueField>,
     ) {
-      const { collectionId, filters, limit, offset } = search;
+      const { collectionId, filters, listFieldIds, limit, offset } = search;
       const fields = [...new Map(choiceFields.map((field) => [field.fieldId, field])).values()];
       const projectedFields = new Set(Object.keys(filters));
       for (const { fieldId, linkFieldId } of fields) {
@@ -151,10 +173,15 @@ export const layer = Layer.effect(
       const choices = fields.map(({ fieldId, linkFieldId }) => {
         // A menu offers replacement values under the other filters.
         const { [fieldId]: selected, ...otherFilters } = filters;
-        const counts = queryValueCounts(
+        const counted = countedValues(
           sql`projected`,
-          matchFilters(otherFilters, projectedValue),
           projectedValue(fieldId),
+          listFieldIds.includes(fieldId),
+        );
+        const counts = queryValueCounts(
+          counted.source,
+          matchFilters(otherFilters, projectedValue, listFieldIds),
+          counted.value,
           linkFieldId === undefined ? undefined : projectedValue(linkFieldId),
           selected,
         );
@@ -165,7 +192,7 @@ export const layer = Layer.effect(
       const rows = yield* sql<SearchRow>`WITH projected AS MATERIALIZED (
           SELECT key, ${sql.csv(projection)} FROM collection_records WHERE ${matchText(search)}
         ), matching_keys AS MATERIALIZED (
-          SELECT key FROM projected WHERE ${matchFilters(filters, projectedValue)}
+          SELECT key FROM projected WHERE ${matchFilters(filters, projectedValue, listFieldIds)}
         )
         SELECT 'key' AS kind, NULL AS fieldId, key AS value, NULL AS count, NULL AS link
         FROM (SELECT key FROM matching_keys ORDER BY key LIMIT ${limit} OFFSET ${offset})
@@ -220,12 +247,21 @@ export const layer = Layer.effect(
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
         ),
+      // A group's values sit under dotted keys: "group.child", "group.row.child".
+      holdsField: (collectionId, fieldId) =>
+        sql`SELECT 1 FROM collection_records, json_each(field_values) AS entry
+            WHERE collection_id = ${collectionId}
+              AND (entry.key = ${fieldId} OR instr(entry.key, ${`${fieldId}.`}) = 1)
+            LIMIT 1`.pipe(
+          Effect.map((rows) => rows.length > 0),
+          Effect.orDie,
+        ),
       searchPage: (search, choiceFields) =>
         transaction(
           Effect.gen(function* () {
             if (choiceFields.length > 0) return yield* searchWithChoices(search, choiceFields);
-            const { collectionId, filters, limit, offset } = search;
-            const matching = sql`${matchText(search)} AND ${matchFilters(filters, valueOf)}`;
+            const { collectionId, filters, listFieldIds, limit, offset } = search;
+            const matching = sql`${matchText(search)} AND ${matchFilters(filters, valueOf, listFieldIds)}`;
             const records = yield* read(matching, sql`LIMIT ${limit} OFFSET ${offset}`);
             const matchCount = yield* count(matching);
             const totalCount =
@@ -235,14 +271,21 @@ export const layer = Layer.effect(
             return { records, matchCount, totalCount, filterChoices: {} };
           }),
         ),
-      listValues: (collectionId, { fieldId, linkFieldId }) =>
-        queryValueCounts(
-          sql`collection_records`,
+      listValues: (collectionId, { fieldId, linkFieldId, isList = false }) => {
+        const counted = countedValues(sql`collection_records`, valueOf(fieldId), isList);
+        return queryValueCounts(
+          counted.source,
           sql`collection_id = ${collectionId}`,
-          valueOf(fieldId),
+          counted.value,
           linkFieldId === undefined ? undefined : valueOf(linkFieldId),
         ).pipe(
           Effect.map((rows) => rows.map(asChoice)),
+          Effect.orDie,
+        );
+      },
+      remove: (collectionId, key) =>
+        sql`DELETE FROM collection_records WHERE collection_id = ${collectionId} AND key = ${key}`.pipe(
+          Effect.asVoid,
           Effect.orDie,
         ),
       save: (record) =>

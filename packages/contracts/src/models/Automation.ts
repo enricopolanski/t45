@@ -11,6 +11,18 @@ export type AutomationId = typeof AutomationId.Type;
 const StepContext = Schema.Literals(["included", "on_demand"]);
 export type StepContext = typeof StepContext.Type;
 
+/**
+ * A phase after an automation's first: another agent continues on the same step, in a new chat,
+ * with this prompt and the previous phase's final answer.
+ */
+export const Phase = Schema.Struct({
+  agentId: StringId,
+  prompt: TrimmedNonEmptyString,
+  /** How the phase gets the step; the automation's when absent. */
+  stepContext: Schema.optionalKey(StepContext),
+});
+export type Phase = typeof Phase.Type;
+
 export class Automation extends Schema.Opaque<Automation>()(
   Schema.Struct({
     id: AutomationId,
@@ -20,6 +32,8 @@ export class Automation extends Schema.Opaque<Automation>()(
     stepContext: Schema.optionalKey(StepContext),
     /** The agent each run talks to, in a new chat per run. */
     agentId: StringId,
+    /** The phases that follow a step run, in order, each once the one before ends well. */
+    nextPhases: Schema.optionalKey(Schema.Array(Phase)),
     /** Archived for good: it runs no more, by hand or on a step. */
     isArchived: Schema.Boolean,
     createdAt: Schema.DateTimeUtcFromString,

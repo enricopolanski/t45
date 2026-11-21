@@ -17,9 +17,11 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collaps
 import { Field } from "../ui/field";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { FoldChevron } from "../work/CardFold";
 import { StepAutomationsEditor } from "../work/StepAutomationsEditor";
+import { ComparisonCriteriaEditor } from "./ComparisonCriteriaEditor";
 import { ComparisonFieldsEditor } from "./ComparisonFieldsEditor";
 import { GroupLayoutButton } from "./GroupLayout";
 import { RecordReviewSettings } from "./RecordReviewSettings";
@@ -179,18 +181,33 @@ export function WorkflowStepEditor({
                 const collection = collections.find(({ id }) => id === field.collectionId);
                 if (collection === undefined) return null;
                 return (
-                  <ComparisonFieldsEditor
-                    collection={collection}
-                    inputCollections={inputCollections}
-                    fields={field.comparisonFields}
-                    onChange={(comparisonFields) => {
-                      const { comparisonFields: _, ...rest } = field;
-                      setField(
-                        comparisonFields === undefined ? rest : { ...rest, comparisonFields },
-                      );
-                    }}
-                    disabled={disabled}
-                  />
+                  <div className="flex flex-wrap gap-2">
+                    <ComparisonFieldsEditor
+                      collection={collection}
+                      inputCollections={inputCollections}
+                      fields={field.comparisonFields}
+                      onChange={(comparisonFields) => {
+                        const { comparisonFields: _, ...rest } = field;
+                        setField(
+                          comparisonFields === undefined ? rest : { ...rest, comparisonFields },
+                        );
+                      }}
+                      disabled={disabled}
+                    />
+                    {step.fields.some((f) => f.id === field.id) && field.isReviewed && (
+                      <ComparisonCriteriaEditor
+                        sources={inputSources.filter((source) =>
+                          inputs.some(isSameInput(source.input)),
+                        )}
+                        mapping={field.comparisonCriteria}
+                        disabled={disabled}
+                        onChange={(mapping) => {
+                          const { comparisonCriteria: _, ...rest } = field;
+                          setField(mapping ? { ...rest, comparisonCriteria: mapping } : rest);
+                        }}
+                      />
+                    )}
+                  </div>
                 );
               }}
               groupLayout={(group, setGroup) => (
@@ -285,6 +302,20 @@ export function WorkflowStepEditor({
               disabled={disabled}
               onChange={(automationIds) => onChange({ ...step, automationIds })}
             />
+            <label className="mt-1 flex w-fit items-center gap-2 text-sm">
+              <Switch
+                size="sm"
+                checked={step.isDoneWhenApproved ?? false}
+                onCheckedChange={(isDoneWhenApproved) => onChange({ ...step, isDoneWhenApproved })}
+                disabled={disabled}
+              />
+              {t("Done once every review is confirmed")}
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "The step marks itself done and the ticket moves on as soon as its fields are complete and every record review is confirmed, by a person or an automation.",
+              )}
+            </p>
           </div>
           <hr />
           <div className="flex flex-col gap-2">

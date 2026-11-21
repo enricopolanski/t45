@@ -9,6 +9,7 @@ import {
 import { isTableColumn, resolveTableLayout, sortRows } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
 import { buildFieldViews, getFieldLink } from "@t45/core/fieldViews";
+import { Link } from "@tanstack/react-router";
 import { ArrowLeftIcon, ArrowRightIcon, EyeIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
@@ -32,7 +33,7 @@ import {
 } from "../ui/dialog";
 import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
-import { FormGrid, layOutForm, uploadFile } from "../work/StepFields";
+import { AttachmentLink, FormGrid, layOutForm, uploadFile } from "../work/StepFields";
 import { formatDay, formatNumber } from "../work/workLogic";
 
 type RecordFiles = CollectionRecordView["files"];
@@ -62,8 +63,28 @@ export function formatRecordValue(
     case "file":
       return files.find((file) => file.id === value)?.name ?? "";
     default:
-      return String(value);
+      return Array.isArray(value) ? value.join(", ") : String(value);
   }
+}
+
+/** A link field's record, by its key, opening on its own page. */
+export function RecordLink({
+  collectionId,
+  recordKey,
+}: {
+  readonly collectionId: string;
+  readonly recordKey: string;
+}) {
+  return (
+    <Link
+      to="/collections/$collectionId/records/$recordKey"
+      params={{ collectionId, recordKey }}
+      className="underline"
+      onClick={(event) => event.stopPropagation()}
+    >
+      {recordKey}
+    </Link>
+  );
 }
 
 /** What a record's cell shows, with a sibling URL when one is displayed on it. */
@@ -82,6 +103,10 @@ export function renderRecordValue(
       </ExternalUrl>
     );
   switch (field.type) {
+    case "file": {
+      const attachment = files.find((file) => file.id === value);
+      return attachment ? <AttachmentLink attachment={attachment} /> : "";
+    }
     case "url":
       return isUrlFieldValue(value) ? (
         <ExternalUrl href={value} onClick={(event) => event.stopPropagation()}>
@@ -108,7 +133,17 @@ export function renderRecordValue(
         formatRecordValue(field, value, files)
       );
     case "select":
-      return typeof value === "string" ? <OptionValue option={value} tones={field.tones} /> : "";
+      return typeof value === "string" ? (
+        <OptionValue option={value} tones={field.tones} />
+      ) : (
+        formatRecordValue(field, value, files)
+      );
+    case "foreignKey":
+      return typeof value === "string" ? (
+        <RecordLink collectionId={field.collectionId} recordKey={value} />
+      ) : (
+        ""
+      );
     default:
       return formatRecordValue(field, value, files);
   }

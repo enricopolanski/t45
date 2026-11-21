@@ -75,6 +75,7 @@ export const seedStep = (ticketId: string, assignee: string) =>
       title: "Return",
       description: "",
       status: { type: "open" },
+      creatorUserId: assignee,
       steps: [
         {
           id: stepId,

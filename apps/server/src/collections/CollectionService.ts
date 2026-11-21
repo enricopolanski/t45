@@ -11,11 +11,17 @@ import {
   recordKeyOf,
   recordProblem,
   Refused,
+  relinkProblem,
+  removedFields,
+  removedOptions,
 } from "@t45/contracts/models/Collection";
-import { fileKeys, type FieldValues, holdsData } from "@t45/contracts/models/Field";
+import { fileKeys, type FieldValues, foreignKeys, holdsData } from "@t45/contracts/models/Field";
 import { resolveRecordSearch } from "@t45/contracts/models/Layout";
 import { AttachmentId } from "@t45/contracts/models/Attachment";
-import { COLLECTIONS_CAPABILITY_ID } from "@t45/contracts/resources/AgentTools";
+import {
+  COLLECTIONS_CAPABILITY_ID,
+  EXTRACTION_SAVING_CAPABILITY_ID,
+} from "@t45/contracts/resources/AgentTools";
 import type { Collections } from "@t45/contracts/resources/Collections";
 import { AccessDenied, NotFound } from "@t45/contracts/resources/errors";
 import * as Context from "effect/Context";
@@ -30,6 +36,7 @@ import type * as RpcGroup from "effect/rpc/RpcGroup";
 import { AgentRepository } from "../agents/AgentRepository.ts";
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
 import { UserRepository } from "../org/UserRepository.ts";
+import { TicketRepository } from "../workflows/TicketRepository.ts";
 import { CollectionRecordRepository } from "./CollectionRecordRepository.ts";
 import { CollectionRepository } from "./CollectionRepository.ts";
 
@@ -41,6 +48,11 @@ type Payload<Tag extends string> = Rpc.Payload<
 
 const SEARCH_LIMIT = 25;
 const isAttachmentId = Schema.is(AttachmentId);
+/** The top-level fields holding lists: multiple-choice selects. */
+const listFieldIdsOf = (collection: Collection) =>
+  collection.fields.flatMap((field) =>
+    field.type === "select" && field.isMultiple === true ? [field.id] : [],
+  );
 const requireFieldValueQuery = Effect.fnUntraced(function* (
   collection: Collection,
   { fieldId, linkFieldId }: Omit<Payload<"listFieldValues">, "collectionId">,
@@ -63,10 +75,15 @@ const make = Effect.gen(function* () {
   const files = yield* AttachmentRepository;
   const users = yield* UserRepository;
   const agents = yield* AgentRepository;
+  const tickets = yield* TicketRepository;
   const crypto = yield* Crypto.Crypto;
 
   const requireCapability = Effect.fnUntraced(function* (agent: Agent) {
-    if ((yield* agents.get(agent.agentId))?.capabilities.includes(COLLECTIONS_CAPABILITY_ID))
+    const capabilities = (yield* agents.get(agent.agentId))?.capabilities ?? [];
+    if (
+      capabilities.includes(COLLECTIONS_CAPABILITY_ID) ||
+      capabilities.includes(EXTRACTION_SAVING_CAPABILITY_ID)
+    )
       return;
     return yield* new AccessDenied({ message: "This agent can't use collections." });
   });
@@ -120,10 +137,18 @@ const make = Effect.gen(function* () {
         Effect.map((held) => ({ ...record, files: held.map(({ id, name }) => ({ id, name })) })),
       );
 
-  const requireDraft = (draft: Pick<Collection, "fields" | "primaryKeyFieldId">) => {
+  const requireDraft = Effect.fnUntraced(function* (
+    draft: Pick<Collection, "fields" | "primaryKeyFieldId">,
+  ) {
     const reason = primaryKeyRefusal(draft);
-    return reason === null ? Effect.void : Effect.fail(new Refused({ reason }));
-  };
+    if (reason !== null) return yield* new Refused({ reason });
+    for (const field of draft.fields)
+      if (field.type === "foreignKey" && (yield* collections.get(field.collectionId)) === null)
+        return yield* new Refused({
+          reason: "invalid_link",
+          detail: `${field.id} links collection ${field.collectionId}, which doesn't exist.`,
+        });
+  });
 
   /** Hands the record's new files to the collection and lets go of those it no longer holds. */
   const settleFiles = Effect.fnUntraced(function* (
@@ -191,10 +216,27 @@ const make = Effect.gen(function* () {
       const before = yield* collections.get(collectionId);
       if (before === null) return yield* new NotFound();
       yield* requireDraft(draft);
-      const reason = (yield* records.hasAny(collectionId))
-        ? fieldsChangeRefusal(before, draft)
-        : null;
-      if (reason !== null) return yield* new Refused({ reason });
+      if (yield* records.hasAny(collectionId)) {
+        const reason = fieldsChangeRefusal(before, draft);
+        if (reason !== null) return yield* new Refused({ reason });
+        for (const field of removedFields(before.fields, draft.fields))
+          if (yield* records.holdsField(collectionId, field.id))
+            return yield* new Refused({
+              reason: "fields_locked",
+              detail: `Records hold ${field.label}.`,
+            });
+        for (const { field, option } of removedOptions(before.fields, draft.fields)) {
+          const held = yield* records.listValues(collectionId, {
+            fieldId: field.id,
+            isList: field.isMultiple === true,
+          });
+          if (held.some(({ value }) => value === option))
+            return yield* new Refused({
+              reason: "fields_locked",
+              detail: `Records hold ${option} in ${field.label}.`,
+            });
+        }
+      }
       const collection = { ...before, ...draft, updatedAt: yield* DateTime.now };
       yield* collections.save(collection);
       return collection;
@@ -226,6 +268,7 @@ const make = Effect.gen(function* () {
         words: (input.text ?? "").split(/\s+/u).filter((word) => word !== ""),
         fields: searched?.map((field) => field.id) ?? null,
         filters,
+        listFieldIds: listFieldIdsOf(collection),
       };
       const {
         records: found,
@@ -251,7 +294,10 @@ const make = Effect.gen(function* () {
     ) {
       const collection = yield* findReadable(caller, input.collectionId);
       yield* requireFieldValueQuery(collection, input);
-      return yield* records.listValues(collection.id, input);
+      return yield* records.listValues(collection.id, {
+        ...input,
+        isList: listFieldIdsOf(collection).includes(input.fieldId),
+      });
     }),
 
     /** Adds the record or replaces the one with its key; agents with the capability always may. */
@@ -276,10 +322,21 @@ const make = Effect.gen(function* () {
       const problem = recordProblem(collection, values);
       if (problem !== null)
         return yield* new Refused({ reason: "invalid_record", detail: problem });
+      for (const { field, recordKey } of foreignKeys(collection.fields, values)) {
+        yield* findReadable(caller, field.collectionId);
+        if ((yield* records.get(field.collectionId, recordKey)) === null)
+          return yield* new Refused({
+            reason: "invalid_link",
+            detail: `${field.id}: collection ${field.collectionId} holds no record ${recordKey}.`,
+          });
+      }
       const key = recordKeyOf(collection, values)!;
       const saved = yield* records.transaction(
         Effect.gen(function* () {
           const before = yield* records.get(collection.id, key);
+          const relinked = relinkProblem(collection.fields, before?.values ?? {}, values);
+          if (relinked !== null)
+            return yield* new Refused({ reason: "invalid_link", detail: relinked });
           yield* settleFiles(
             collection,
             "userId" in caller ? caller.userId : caller.agentId,
@@ -297,6 +354,56 @@ const make = Effect.gen(function* () {
         }),
       );
       return yield* viewOf(saved);
+    }),
+
+    /**
+     * Removes the record and lets go of its files, as saving it does; refused while a record of a
+     * collection or a ticket's step links it, so no link is left without its record.
+     */
+    deleteRecord: Effect.fnUntraced(function* (caller: Caller, input: Payload<"deleteRecord">) {
+      const collection = yield* find(caller, input.collectionId);
+      if ("userId" in caller && !canEditRecords({ ...caller, id: caller.userId }, collection))
+        return yield* new AccessDenied({ message: "You can only read this collection's records." });
+      yield* records.transaction(
+        Effect.gen(function* () {
+          const record = yield* records.get(collection.id, input.key);
+          if (record === null) return yield* new NotFound();
+          for (const linking of yield* collections.list)
+            for (const field of linking.fields) {
+              if (field.type !== "foreignKey" || field.collectionId !== collection.id) continue;
+              const { matchCount } = yield* records.searchPage(
+                {
+                  collectionId: linking.id,
+                  words: [],
+                  fields: null,
+                  filters: { [field.id]: input.key },
+                  listFieldIds: [],
+                  offset: 0,
+                  limit: 1,
+                },
+                [],
+              );
+              if (matchCount > 0)
+                return yield* new Refused({
+                  reason: "linked",
+                  detail: `${matchCount} in ${linking.title} through ${field.label}.`,
+                });
+            }
+          const linkingTickets = yield* tickets.countLinking(collection.id, input.key);
+          if (linkingTickets > 0)
+            return yield* new Refused({
+              reason: "linked",
+              detail: `${linkingTickets} ticket${linkingTickets === 1 ? "" : "s"} in a step.`,
+            });
+          yield* settleFiles(
+            collection,
+            "userId" in caller ? caller.userId : caller.agentId,
+            record.values,
+            {},
+          );
+          yield* records.remove(collection.id, input.key);
+        }),
+      );
     }),
 
     /**

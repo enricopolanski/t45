@@ -1,7 +1,7 @@
 /**
  * A `Collection` is a durable, shared set of records that people and agents reuse across tasks,
- * such as Amazon listings by ASIN. An admin defines its fields; one top-level text field is its
- * primary key, whose value identifies a record within the collection.
+ * such as Amazon listings by ASIN. An admin defines its fields; one top-level text or link field is
+ * its primary key, whose value identifies a record within the collection.
  */
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
@@ -11,6 +11,7 @@ import {
   FieldPathSegment,
   Fields,
   FieldValues,
+  foreignKeys,
   Layout,
   fieldValueProblem,
   LayoutFieldId,
@@ -25,13 +26,15 @@ export const CollectionColumnOrder = Schema.UniqueArray(
   Schema.Union([FieldPathSegment, Schema.Literal(UPDATED_AT_COLUMN)]),
 );
 
-/** A collection's primary key is one of its own top-level text fields. */
+/** A collection's primary key is one of its own top-level text or link fields. */
 export const primaryKeyRefusal = (collection: {
   readonly fields: ReadonlyArray<Field>;
   readonly primaryKeyFieldId: string;
 }) =>
   collection.fields.some(
-    (field) => field.id === collection.primaryKeyFieldId && field.type === "text",
+    (field) =>
+      field.id === collection.primaryKeyFieldId &&
+      (field.type === "text" || field.type === "foreignKey"),
   )
     ? null
     : ("invalid_primary_key" as const);
@@ -178,7 +181,12 @@ export const filtersProblem = (
     if (field === undefined || ["group", "file", "records"].includes(field.type))
       return `${fieldId} isn't one.`;
     if (typeof filter !== "object") {
-      const problem = fieldValueProblem(field, fieldId, filter);
+      // A multiple-choice select matches records whose list holds the option.
+      const problem = fieldValueProblem(
+        field.type === "select" ? { ...field, isMultiple: false } : field,
+        fieldId,
+        filter,
+      );
       if (problem !== null) return problem;
       continue;
     }
@@ -216,7 +224,7 @@ export class Collection extends Schema.Opaque<Collection>()(
     updatedAt: Schema.DateTimeUtcFromString,
   }).check(
     Schema.makeFilter((collection) => primaryKeyRefusal(collection) === null, {
-      expected: "a primary key that is one of the collection's own text fields",
+      expected: "a primary key that is one of the collection's own text or link fields",
     }),
   ),
 ) {}
@@ -263,6 +271,20 @@ export const recordProblem = (
     ? `Give ${collection.primaryKeyFieldId}, the record's primary key.`
     : null);
 
+/** Why saving `after` over `before` points a link to another record, or null: it is cleared first. */
+export const relinkProblem = (
+  fields: ReadonlyArray<Field>,
+  before: FieldValues,
+  after: FieldValues,
+) => {
+  const relinked = foreignKeys(fields, before).find(
+    ({ field, recordKey }) => after[field.id] !== undefined && after[field.id] !== recordKey,
+  );
+  return relinked === undefined
+    ? null
+    : `${relinked.field.id} links ${relinked.recordKey}: clear it and save before linking another record.`;
+};
+
 const isSameField = Schema.toEquivalence(Field);
 const encodeField = Schema.encodeSync(Field);
 const decodeField = Schema.decodeSync(Field);
@@ -289,7 +311,9 @@ const asHeld = (field: Field): Field =>
 
 /**
  * Once a collection has records, its fields only grow: every field it had stays as it was, save
- * its display settings, and its primary key stays the same.
+ * its display settings and a top-level select's options, and its primary key stays the same.
+ * Fields and options can go only while no record holds them: see `removedFields` and
+ * `removedOptions`.
  */
 export const fieldsChangeRefusal = (
   before: Pick<Collection, "fields" | "primaryKeyFieldId">,
@@ -298,17 +322,45 @@ export const fieldsChangeRefusal = (
   after.primaryKeyFieldId === before.primaryKeyFieldId &&
   before.fields.every((field) => {
     const kept = after.fields.find((candidate) => candidate.id === field.id);
-    return kept !== undefined && isSameField(asHeld(field), asHeld(kept));
+    return kept === undefined
+      ? field.id !== before.primaryKeyFieldId
+      : isSameField(
+          asHeld(field),
+          asHeld(
+            kept.type === "select" && field.type === "select"
+              ? { ...kept, options: field.options }
+              : kept,
+          ),
+        );
   })
     ? null
     : ("fields_locked" as const);
 
+/** The top-level fields of `before` that `after` no longer has. */
+export const removedFields = (before: ReadonlyArray<Field>, after: ReadonlyArray<Field>) =>
+  before.filter((field) => !after.some(({ id }) => id === field.id));
+
+/** The options each top-level select of `before` no longer offers in `after`. */
+export const removedOptions = (before: ReadonlyArray<Field>, after: ReadonlyArray<Field>) =>
+  before.flatMap((field) => {
+    const kept = after.find(({ id }) => id === field.id);
+    return field.type === "select" && kept?.type === "select"
+      ? field.options
+          .filter((option) => !kept.options.includes(option))
+          .map((option) => ({ field, option }))
+      : [];
+  });
+
 const REFUSALS = {
   invalid_primary_key:
-    "Choose one of the collection's own top-level text fields as its primary key.",
+    "Choose one of the collection's own top-level text or link fields as its primary key.",
   invalid_record: "Those values don't fit the collection's fields.",
-  fields_locked: "This collection has records: you can only add new fields.",
+  fields_locked:
+    "This collection has records: you can only add new fields, and remove fields or change options no record holds.",
   invalid_attachment: "That file can't be attached here.",
+  linked: "Other records or tickets link this record: remove those links first.",
+  invalid_link:
+    "A link names one existing record of its collection, and changes to another only once cleared.",
   invalid_filter:
     "Filter on one of the collection's top-level text, URL, number, yes/no, date or select fields, with a range only on numbers and dates.",
 };

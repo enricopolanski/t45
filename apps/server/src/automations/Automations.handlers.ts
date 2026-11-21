@@ -1,4 +1,10 @@
-import { canRun, Refused, type Automation, AutomationId } from "@t45/contracts/models/Automation";
+import {
+  canRun,
+  Refused,
+  type Automation,
+  AutomationId,
+  type Phase,
+} from "@t45/contracts/models/Automation";
 import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
 import { NotFound } from "@t45/contracts/resources/errors";
 import { Automations } from "@t45/contracts/resources/Automations";
@@ -45,6 +51,16 @@ export const layer = Automations.middleware(Authorization).toLayer(
           ? Effect.void
           : Effect.fail(new Refused({ reason: "agent_unavailable" })),
       );
+    /** Each next phase talks to an active agent the caller can use, as the first does. */
+    const requirePhases = Effect.fnUntraced(function* (phases: ReadonlyArray<Phase> = []) {
+      const phaseAgents = [];
+      for (const { agentId } of phases) {
+        const agent = yield* requireActiveAgent(agentId);
+        yield* requireUse(agent);
+        phaseAgents.push(agent);
+      }
+      return phaseAgents;
+    });
     /** Finds the automation the caller may run now. */
     const findRunnable = Effect.fnUntraced(function* (id: AutomationId) {
       const automation = yield* found(yield* automations.get(id));
@@ -110,6 +126,7 @@ export const layer = Automations.middleware(Authorization).toLayer(
       "automations.create": (settings) =>
         Effect.gen(function* () {
           yield* requireUse(yield* requireActiveAgent(settings.agentId));
+          yield* requirePhases(settings.nextPhases);
           const now = yield* DateTime.now;
           const automation: Automation = {
             ...settings,
@@ -129,23 +146,30 @@ export const layer = Automations.middleware(Authorization).toLayer(
             id,
             Effect.fnUntraced(function* (saved) {
               const agent = yield* requireActiveAgent(settings.agentId);
-              if (settings.agentId !== saved.agentId) {
-                yield* requireUse(agent);
-                // A step's automation keeps to the rule its attachment was held to.
-                const { userId } = yield* CurrentUser;
-                for (const workflow of yield* workflows.listAttaching(id)) {
+              const savedAgentIds = new Set((saved.nextPhases ?? []).map(({ agentId }) => agentId));
+              const phaseAgents = yield* requirePhases(
+                (settings.nextPhases ?? []).filter(({ agentId }) => !savedAgentIds.has(agentId)),
+              );
+              // A step's automation keeps to the rule its attachment was held to, in every phase.
+              const changed = [
+                ...(settings.agentId === saved.agentId ? [] : [agent]),
+                ...phaseAgents,
+              ];
+              if (settings.agentId !== saved.agentId) yield* requireUse(agent);
+              const { userId } = yield* CurrentUser;
+              for (const workflow of changed.length > 0 ? yield* workflows.listAttaching(id) : [])
+                for (const each of changed) {
                   if (
-                    agent === null ||
+                    each === null ||
                     !canAttachAgent(
-                      agent,
+                      each,
                       workflow,
                       userId,
-                      yield* capabilities.listForAgent(agent.id),
+                      yield* capabilities.listForAgent(each.id),
                     )
                   )
                     return yield* new Refused({ reason: "attached_agent_unfit" });
                 }
-              }
               return { ...saved, ...settings, updatedAt: yield* DateTime.now };
             }),
           )

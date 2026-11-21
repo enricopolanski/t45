@@ -15,6 +15,7 @@ import {
   PlusIcon,
   SquareIcon,
   TimerIcon,
+  XIcon,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
@@ -49,7 +50,13 @@ import { toastManager } from "../ui/toast";
 import { RUN_STATUSES, RunDetail } from "../work/StepPage";
 import { useWorkDirectory } from "../work/useWorkDirectory";
 import { actorName } from "../work/workLogic";
-import { EMPTY_DRAFT, settingsFromDraft, type DraftState } from "./automationsSettings.logic";
+import {
+  draftOf,
+  type DraftPhase,
+  EMPTY_DRAFT,
+  settingsFromDraft,
+  type DraftState,
+} from "./automationsSettings.logic";
 
 const automationList = apiWatch("automations.watch", { idleTtlMs: 0 })(undefined);
 
@@ -419,7 +426,9 @@ function AutomationEditorDialog({
     agentsQuery.data?.filter(
       (agent) => agent.status === "active" && userId !== undefined && canUse(agent, userId),
     ) ?? null;
-  const [draft, setDraft] = useState<DraftState>(automation ?? EMPTY_DRAFT);
+  const [draft, setDraft] = useState<DraftState>(
+    automation === null ? EMPTY_DRAFT : draftOf(automation),
+  );
   const patch = (change: Partial<DraftState>) => setDraft((current) => ({ ...current, ...change }));
   const [saving, setSaving] = useState(false);
   const stepContextItems = [
@@ -533,6 +542,92 @@ function AutomationEditorDialog({
                 </SelectPopup>
               </Select>
             </Field>
+
+            {(draft.nextPhases ?? []).map((phase, index) => {
+              const number = index + 2;
+              const change = (changed: Partial<DraftPhase>) =>
+                patch({
+                  nextPhases: (draft.nextPhases ?? []).with(index, { ...phase, ...changed }),
+                });
+              return (
+                <Field key={index} label={t("Phase {0}", number)}>
+                  <div className="flex w-full items-center gap-2">
+                    <Select
+                      value={phase.agentId}
+                      onValueChange={(value) =>
+                        change({
+                          agentId: activeAgents?.find((agent) => agent.id === value)?.id ?? null,
+                        })
+                      }
+                    >
+                      <SelectTrigger size="sm">
+                        <SelectValue>
+                          {activeAgents?.find((agent) => agent.id === phase.agentId)?.name ??
+                            (phase.agentId ? t("An archived or private agent") : t("Agent"))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup>
+                        {(activeAgents ?? []).map((agent) => (
+                          <SelectItem key={agent.id} value={agent.id}>
+                            {agent.name}
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t("Remove phase {0}", number)}
+                      onClick={() =>
+                        patch({
+                          nextPhases: (draft.nextPhases ?? []).filter((_, at) => at !== index),
+                        })
+                      }
+                    >
+                      <XIcon />
+                    </Button>
+                  </div>
+                  <Textarea
+                    className="max-h-64 overflow-y-auto"
+                    placeholder={t("What should this agent do with what the phase before found?")}
+                    value={phase.prompt}
+                    onChange={(event) => change({ prompt: event.target.value })}
+                  />
+                  <Select
+                    value={phase.stepContext ?? draft.stepContext ?? "included"}
+                    items={stepContextItems}
+                    onValueChange={(value) => {
+                      if (value === "included" || value === "on_demand")
+                        change({ stepContext: value });
+                    }}
+                  >
+                    <SelectTrigger size="sm" aria-label={t("Step context")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {stepContextItems.map(({ value, label }) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </Field>
+              );
+            })}
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="w-fit"
+              onClick={() =>
+                patch({ nextPhases: [...(draft.nextPhases ?? []), { agentId: null, prompt: "" }] })
+              }
+            >
+              <PlusIcon />
+              {t("Add a phase")}
+            </Button>
           </Fieldset>
         </DialogPanel>
 

@@ -10,11 +10,14 @@ import { AutomationId } from "./Automation.ts";
 import {
   Field,
   FieldPathSegment,
+  type ComparisonCriteria,
   Fields,
   FieldValues,
   groupRows,
   hasDistinctIds,
   holdsData,
+  isCollectionOnly,
+  isUrlFieldValue,
   type Layout,
   recordKeys,
   rowIds,
@@ -40,6 +43,7 @@ export interface StepDefinitionEncoded {
   readonly subSteps: ReadonlyArray<StepDefinitionEncoded>;
   readonly inputs?: ReadonlyArray<StepInput>;
   readonly automationIds?: ReadonlyArray<string>;
+  readonly isDoneWhenApproved?: boolean;
 }
 
 export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition")({
@@ -63,6 +67,12 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
   /** The automations people run on this step, the same in every project; none when left out. */
   automationIds: Schema.UniqueArray(AutomationId).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
+  isDoneWhenApproved: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "Whether the step marks itself done, moving the ticket on, once every record review is confirmed and its fields are complete.",
+    }),
   ),
 }) {}
 
@@ -149,6 +159,10 @@ const Steps = Schema.Array(StepDefinition).check(
     {
       expected: "top-level repeatable record reviews with a linked records field and a text key",
     },
+  ),
+  Schema.makeFilter(
+    (steps) => stepNodes(steps).every(({ step }) => !step.fields.some(isCollectionOnly)),
+    { expected: "no link or multiple-choice fields, which only collections hold" },
   ),
 );
 
@@ -259,12 +273,31 @@ const StepStatus = Schema.Union([
   }),
 ]);
 
+const CriterionAssessment = Schema.Struct({
+  criterionId: FieldPathSegment,
+  status: Schema.Literals(["equal", "very_similar", "less_similar", "different", "missing"]),
+  value: Schema.optionalKey(TrimmedNonEmptyString),
+  evidence: TrimmedNonEmptyString,
+  sourceUrl: Schema.optionalKey(
+    Schema.String.check(
+      Schema.makeFilter(isUrlFieldValue, { expected: "an HTTP or HTTPS source URL" }),
+    ),
+  ),
+  isImportant: Schema.optionalKey(Schema.Boolean),
+});
+
+const RecordComparison = Schema.Struct({
+  sourceRecordKey: TrimmedNonEmptyString,
+  assessments: Schema.Array(CriterionAssessment),
+});
+
 /** A value proposed for a reviewed field of a step, kept until a member approves or discards it. */
 export const Proposal = Schema.Struct({
   id: StringId,
   fieldKey: TrimmedNonEmptyString,
   /** The field's value; for a records field, the key of one more record to link. */
   value: Schema.Json,
+  comparison: Schema.optionalKey(RecordComparison),
   whyYes: TrimmedNonEmptyString,
   whyNo: Schema.String,
   /** How well it fits, from 0 to 100; the best are reviewed first. */
@@ -388,6 +421,8 @@ export class Ticket extends Schema.Opaque<Ticket>()(
     title: TrimmedNonEmptyString,
     description: Schema.String,
     status: TicketStatus,
+    /** Who started it, the default assignee of its steps; null when started before this was kept. */
+    creatorUserId: Schema.NullOr(StringId),
     steps: Schema.Array(Step).check(
       Schema.makeFilter(hasValidStepReferences, {
         expected: "unique steps following their parents",
@@ -523,6 +558,74 @@ export const recordReviewsOf = (fields: ReadonlyArray<Field>, step: Step) =>
       },
     ];
   });
+
+/** Only confirmed entries for records and review fields explicitly passed into this step. */
+export const getComparisonSources = (
+  mapping: ComparisonCriteria,
+  inputs: ReturnType<typeof stepInputFields>,
+) => {
+  const fromStep = inputs.filter(({ source }) => source.stepDefinitionId === mapping.stepId);
+  const input = fromStep.find(({ field }) => field.id === mapping.reviewId);
+  if (input?.field.type !== "group" || !input.field.recordReview) return undefined;
+  const { recordsFieldId } = input.field.recordReview;
+  const recordsIndex = inputs.findIndex(
+    ({ source, field }) =>
+      source.id === input.source.id && field.type === "records" && field.id === recordsFieldId,
+  );
+  const table = input.field.fields.find(({ id }) => id === mapping.tableId);
+  if (
+    recordsIndex < 0 ||
+    table?.type !== "group" ||
+    !table.repeatable ||
+    mapping.nameId === mapping.valueId ||
+    ![mapping.nameId, mapping.valueId].every((id) =>
+      table.fields.some((field) => field.id === id && field.type === "text"),
+    )
+  )
+    return undefined;
+  const { source, field } = input;
+  const entries = recordReviewsOf([field], source)[0]!.entries;
+  return {
+    recordsIndex,
+    records: entries
+      .filter((entry) => entry.isConfirmed && entry.rowId !== null)
+      .map((entry) => {
+        const prefix = `${field.id}.${entry.rowId}.${table.id}`;
+        const criteria = rowIds(source.values[prefix]).flatMap((id) => {
+          const name = source.values[`${prefix}.${id}.${mapping.nameId}`];
+          const value = source.values[`${prefix}.${id}.${mapping.valueId}`];
+          return typeof name === "string" &&
+            name.trim() &&
+            typeof value === "string" &&
+            value.trim()
+            ? [{ id, name, value }]
+            : [];
+        });
+        return { recordKey: entry.recordKey, criteria };
+      }),
+  };
+};
+
+export const getComparisonRefusal = (
+  field: Field,
+  inputs: ReturnType<typeof stepInputFields>,
+  comparison: Proposal["comparison"],
+) => {
+  if (field.type !== "records" || !field.comparisonCriteria)
+    return comparison ? "This field has no comparison criteria." : null;
+  const sources = getComparisonSources(field.comparisonCriteria, inputs);
+  if (!sources?.records.some((record) => record.criteria.length))
+    return comparison ? "There are no confirmed comparison criteria." : null;
+  const source = sources.records.find((record) => record.recordKey === comparison?.sourceRecordKey);
+  if (!source?.criteria.length || !comparison)
+    return "Choose a sourceRecordKey with confirmed criteria from get_fields.";
+  const ids = comparison.assessments.map((item) => item.criterionId);
+  if (!hasDistinctIds(ids) || ids.some((id) => !source.criteria.some((row) => row.id === id)))
+    return "Use each criterion id from the selected source at most once.";
+  if (comparison.assessments.some((item) => item.status !== "missing" && !item.value))
+    return "Provide the candidate value and its evidence for each assessed criterion.";
+  return null;
+};
 
 /** An edit releases a confirmation when its entry or the record it belongs to changes. */
 export const withEditedStepValues = (
@@ -845,6 +948,11 @@ export const WorkflowEdit = Schema.Union([
     instructions: Schema.String,
   }),
   Schema.Struct({
+    type: Schema.Literal("set_step_done_when_approved"),
+    ...stepRef,
+    isDoneWhenApproved: Schema.Boolean,
+  }),
+  Schema.Struct({
     type: Schema.Literal("add_field"),
     ...stepRef,
     index: NonNegativeInt,
@@ -940,6 +1048,10 @@ const applyWorkflowEdit = (steps: StepList, edit: WorkflowEdit): StepList | null
       return changeStep(steps, edit.stepId, () => ({ name: edit.name }));
     case "set_step_instructions":
       return changeStep(steps, edit.stepId, () => ({ instructions: edit.instructions }));
+    case "set_step_done_when_approved":
+      return changeStep(steps, edit.stepId, () => ({
+        isDoneWhenApproved: edit.isDoneWhenApproved,
+      }));
     case "add_field":
       return changeStep(steps, edit.stepId, (step) =>
         withFields(placeAt(step.fields, edit.index, edit.field)),

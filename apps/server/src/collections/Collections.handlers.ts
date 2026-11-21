@@ -23,6 +23,8 @@ export const layer = Collections.middleware(Authorization).toLayer(
         Effect.flatMap(CurrentActor, (actor) => collections.listFieldValues(actor, input)),
       "collections.saveRecord": (input) =>
         Effect.flatMap(CurrentActor, (actor) => collections.saveRecord(actor, input)),
+      "collections.deleteRecord": (input) =>
+        Effect.flatMap(CurrentActor, (actor) => collections.deleteRecord(actor, input)),
     });
   }),
 );

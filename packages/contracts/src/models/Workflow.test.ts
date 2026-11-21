@@ -27,9 +27,12 @@ import {
   proposalRefusal,
   confirmRecordEntry,
   recordReviewsOf,
+  getComparisonSources,
+  getComparisonRefusal,
   reviewEntryValues,
   withEditedStepValues,
   putTicketStep,
+  stepCompletionRefusal,
   stepEntryRefusal,
   stepIds,
   stepsAssignedUnder,
@@ -88,6 +91,7 @@ const ticket: Ticket = {
   title: "Review",
   description: "",
   status: { type: "open" },
+  creatorUserId: null,
   steps: [step],
   createdAt: at,
 };
@@ -618,4 +622,104 @@ describe("proposing a value", () => {
       ["proposal3", "proposal1", "proposal4"],
     );
   });
+});
+
+it("compares only confirmed criteria from the selected article and declared inputs", () => {
+  const mapping = {
+    stepId: root.id,
+    reviewId: "reviews",
+    tableId: "criteria",
+    nameId: "trait-name",
+    valueId: "trait-value",
+  };
+  const records: Field = {
+    type: "records",
+    id: "articles",
+    label: "Articles",
+    collectionId: "catalog",
+  };
+  const review: Field = {
+    type: "group",
+    id: "reviews",
+    label: "Reviews",
+    repeatable: true,
+    recordReview: { recordsFieldId: "articles", recordKeyFieldId: "article" },
+    fields: [
+      { type: "text", id: "article", label: "Article" },
+      {
+        type: "group",
+        id: "criteria",
+        label: "Criteria",
+        repeatable: true,
+        fields: [
+          { type: "text", id: "trait-name", label: "Name" },
+          { type: "text", id: "trait-value", label: "Value" },
+        ],
+      },
+    ],
+  };
+  const source = {
+    ...step,
+    confirmedReviewRows: ["reviews.row-first"],
+    values: {
+      articles: ["article-one", "article-two"],
+      reviews: ["row-first", "row-second"],
+      "reviews.row-first.article": "article-one",
+      "reviews.row-second.article": "article-two",
+      "reviews.row-first.criteria": ["row-test"],
+      "reviews.row-first.criteria.row-test.trait-name": "UV",
+      "reviews.row-first.criteria.row-test.trait-value": "7 days",
+      "reviews.row-second.criteria": ["row-test"],
+      "reviews.row-second.criteria.row-test.trait-name": "Heat",
+      "reviews.row-second.criteria.row-test.trait-value": "100 °C",
+    },
+  };
+  const inputs = [
+    { source, field: review },
+    { source, field: records },
+  ];
+  const field = { ...records, comparisonCriteria: mapping };
+  const comparison = {
+    sourceRecordKey: "article-one",
+    assessments: [
+      {
+        criterionId: "row-test",
+        status: "different" as const,
+        value: "No",
+        evidence: "Technical sheet",
+      },
+    ],
+  };
+  assert.deepEqual(getComparisonSources(mapping, inputs), {
+    recordsIndex: 1,
+    records: [
+      { recordKey: "article-one", criteria: [{ id: "row-test", name: "UV", value: "7 days" }] },
+    ],
+  });
+  assert.isUndefined(getComparisonSources(mapping, inputs.slice(0, 1)));
+  assert.isNull(getComparisonRefusal(field, inputs, comparison));
+  assert.isNotNull(
+    getComparisonRefusal(field, inputs, { ...comparison, sourceRecordKey: "article-two" }),
+  );
+  assert.isNotNull(
+    getComparisonRefusal(field, inputs, {
+      ...comparison,
+      assessments: [...comparison.assessments, ...comparison.assessments],
+    }),
+  );
+
+  const reviewStep = definition(root.id, [], { fields: [records, review] });
+  assert.strictEqual(stepCompletionRefusal(reviewStep, ticket, source), "record_review_pending");
+  const confirmed = {
+    ...source,
+    confirmedReviewRows: [...source.confirmedReviewRows, "reviews.row-second"],
+  };
+  assert.isNull(stepCompletionRefusal(reviewStep, ticket, confirmed));
+  assert.deepEqual(
+    getComparisonSources(mapping, [
+      { source: confirmed, field: review },
+      { source: confirmed, field: records },
+    ])?.records.map(({ recordKey }) => recordKey),
+    ["article-one", "article-two"],
+  );
 });

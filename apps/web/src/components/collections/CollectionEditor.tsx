@@ -7,11 +7,13 @@ import { XIcon } from "lucide-react";
 import { useCallback, useId, useState } from "react";
 
 import { api } from "../../rpc/api";
+import { apiQuery, useApiQuery } from "../../state/rpc";
 import {
   ColumnSwitch,
   FieldsEditor,
   LinkDisplaySelect,
   MarkdownSwitch,
+  OptionsEditor,
 } from "../fields/FieldsEditor";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
@@ -38,6 +40,9 @@ interface Draft {
   readonly isPublished: boolean;
 }
 
+/** The collections whose records a link field can name. */
+const linkableCollections = apiQuery("collections.list")(undefined);
+
 /** A new collection starts with one text field as its primary key. */
 const newDraft = (): Draft => {
   const key = { ...blankField(), label: translate("Key") };
@@ -50,18 +55,26 @@ const newDraft = (): Draft => {
   };
 };
 
-/** A field the collection's records hold: only its display settings can change. */
+/**
+ * A field the collection's records hold: only its display settings can change, and a top-level
+ * select's options, as long as no record holds one it loses. A top-level field no record holds
+ * can go.
+ */
 function LockedField({
   field,
   fields,
   isColumn,
+  isTopLevel = false,
   onChange,
+  onRemove,
   disabled,
 }: {
   readonly field: DraftField;
   readonly fields: ReadonlyArray<DraftField>;
   readonly isColumn: boolean;
+  readonly isTopLevel?: boolean;
   readonly onChange: (field: DraftField) => void;
+  readonly onRemove?: (() => void) | undefined;
   readonly disabled: boolean;
 }) {
   const t = useTranslation();
@@ -72,12 +85,25 @@ function LockedField({
         <span className="text-xs text-muted-foreground">{t(FIELD_TYPES[field.type])}</span>
         <LinkDisplaySelect field={field} fields={fields} onChange={onChange} disabled={disabled} />
         <MarkdownSwitch field={field} onChange={onChange} disabled={disabled} />
-        {isColumn ? (
-          <span className="ml-auto">
-            <ColumnSwitch field={field} onChange={onChange} disabled={disabled} />
-          </span>
-        ) : null}
+        <span className="ml-auto flex items-center gap-1">
+          {isColumn ? <ColumnSwitch field={field} onChange={onChange} disabled={disabled} /> : null}
+          {onRemove === undefined ? null : (
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={t("Remove {0}", t("field {0}", field.label))}
+              onClick={onRemove}
+              disabled={disabled}
+            >
+              <XIcon />
+            </Button>
+          )}
+        </span>
       </div>
+      {isTopLevel && field.type === "select" ? (
+        <OptionsEditor field={field} onChange={onChange} disabled={disabled} />
+      ) : null}
       {field.type === "group" ? (
         <div className="flex flex-col gap-1 pl-4">
           {field.fields.map((child, at) => (
@@ -105,6 +131,7 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
   const id = useId();
   const navigate = useNavigate();
   const directory = useWorkDirectory();
+  const linkable = useApiQuery(linkableCollections).data ?? [];
   const [draft, setDraft] = useState<Draft | null>(null);
   // The layout saves on its own, apart from the draft.
   const [layout, setLayout] = useState<NonNullable<Collection["layout"]>>({});
@@ -143,10 +170,13 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
   const { hasRecords } = detail;
   // A layout's columns replace "Show in table".
   const hasLayoutColumns = layout.table?.columns !== undefined;
-  const lockedCount = hasRecords ? (detail.collection?.fields.length ?? 0) : 0;
-  const locked = draft.fields.slice(0, lockedCount);
-  const editable = draft.fields.slice(lockedCount);
-  const keyChoices = draft.fields.filter((field) => field.type === "text");
+  // Fields the records were saved with lead the draft; removing one leaves the rest in place.
+  const savedIds = hasRecords ? (detail.collection?.fields ?? []).map(({ id }) => id) : [];
+  const locked = draft.fields.filter(({ id }) => savedIds.includes(id));
+  const editable = draft.fields.filter(({ id }) => !savedIds.includes(id));
+  const keyChoices = draft.fields.filter(
+    (field) => field.type === "text" || field.type === "foreignKey",
+  );
   const save = () =>
     void run(async () => {
       const payload = { ...draft, fields: cleanFields(draft.fields) };
@@ -191,7 +221,7 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
             <>
               <p className="text-xs text-muted-foreground">
                 {t(
-                  "This collection has records: add fields, but its fields and primary key stay as they are. You can change which show in the table and where links are displayed.",
+                  "This collection has records: add fields, but its fields and primary key stay as they are. You can change which show in the table and where links are displayed, and remove fields or select options that no record holds.",
                 )}
               </p>
               <ul className="flex flex-col gap-1">
@@ -204,7 +234,17 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
                         field={field}
                         fields={draft.fields}
                         isColumn={!hasLayoutColumns && field.id !== draft.primaryKeyFieldId}
+                        isTopLevel
                         onChange={setField}
+                        onRemove={
+                          field.id === draft.primaryKeyFieldId
+                            ? undefined
+                            : () =>
+                                setDraft({
+                                  ...draft,
+                                  fields: draft.fields.filter((other) => other.id !== field.id),
+                                })
+                        }
                         disabled={busy}
                       />
                     </li>
@@ -219,6 +259,8 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
             depth={0}
             areColumns={!hasLayoutColumns}
             keyFieldId={draft.primaryKeyFieldId}
+            collections={linkable}
+            areCollectionFields
             onChange={(fields) => setDraft({ ...draft, fields: [...locked, ...fields] })}
             disabled={busy}
           />
@@ -227,7 +269,7 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
           <Label htmlFor={`${id}-key`}>{t("Primary key")}</Label>
           <p className="text-xs text-muted-foreground">
             {t(
-              "The text field whose value identifies a record: saving a record with a key the collection holds replaces that record.",
+              "The text or link field whose value identifies a record: saving a record with a key the collection holds replaces that record.",
             )}
           </p>
           <Select
@@ -242,7 +284,7 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
             disabled={busy || hasRecords}
           >
             <SelectTrigger id={`${id}-key`}>
-              <SelectValue placeholder={t("Choose a text field")}>
+              <SelectValue placeholder={t("Choose a text or link field")}>
                 {(fieldId: string) =>
                   keyChoices.find((field) => field.id === fieldId)?.label || t("Untitled field")
                 }

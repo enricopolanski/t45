@@ -1,7 +1,34 @@
 export const de = {
+  Source: "Quelle",
+  Equal: "Gleich",
+  Different: "Abweichend",
+  "Less similar": "Weniger ähnlich",
+  "Very similar": "Sehr ähnlich",
+  "Missing evidence": "Nachweis fehlt",
+  "Evidence for {0}": "Nachweis für {0}",
+  "Confirmed input table": "Bestätigte Eingabetabelle",
+  Characteristic: "Merkmal",
+  "Confirmed value": "Bestätigter Wert",
+  "Comparison criteria": "Vergleichskriterien",
+  "Key characteristics": "Schlüsselmerkmale",
+  "Show equal values": "Gleiche Werte anzeigen",
+  "Hide equal values": "Gleiche Werte ausblenden",
+  "All confirmed values match.": "Alle bestätigten Werte stimmen überein.",
+  Evidence: "Nachweis",
+  Comparison: "Vergleich",
   "Step context": "Schrittkontext",
   "Include in the initial message": "In der ersten Nachricht mitsenden",
   "Read on demand": "Bei Bedarf lesen",
+  "Phase {0}": "Phase {0}",
+  "Add a phase": "Phase hinzufügen",
+  "Remove phase {0}": "Phase {0} entfernen",
+  "What should this agent do with what the phase before found?":
+    "Was soll dieser Agent mit dem tun, was die vorige Phase gefunden hat?",
+  "Give every next phase an agent and a prompt, or remove it.":
+    "Gib jeder weiteren Phase einen Agenten und einen Prompt oder entferne sie.",
+  "Done once every review is confirmed": "Erledigt, sobald jede Prüfung bestätigt ist",
+  "The step marks itself done and the ticket moves on as soon as its fields are complete and every record review is confirmed, by a person or an automation.":
+    "Der Schritt erledigt sich selbst und das Ticket geht weiter, sobald seine Felder vollständig sind und jede Datensatzprüfung bestätigt ist, von einer Person oder einer Automatisierung.",
   " · {0} postponed": " · {0} zurückgestellt",
   "· Automatically run for": "· Automatisch gestartet für",
   "· Completed": "· Abgeschlossen",
@@ -215,12 +242,13 @@ export const de = {
   "Choose a shared workflow, then choose this project's people and adopt a version of it.":
     "Wähle einen gemeinsamen Workflow. Lege dann die Mitglieder des Projekts fest und übernimm eine Version.",
   "Choose a source record": "Quelldatensatz auswählen",
-  "Choose a text field": "Textfeld auswählen",
+  "Choose a text or link field": "Text- oder Linkfeld auswählen",
   "Choose a workflow": "Workflow auswählen",
   "Choose an assignee": "Zuständige Person auswählen",
   "Choose an option above": "Wähle oben eine Option aus",
   "Choose linked records": "Verknüpfte Datensätze auswählen",
   "Choose one": "Auswählen",
+  "Choose some": "Mehrere auswählen",
   "Choose the article to compare": "Vergleichsartikel auswählen",
   "Choose the capabilities this agent can use together.":
     "Wähle die Funktionen, die dieser Agent gemeinsam nutzen kann.",
@@ -327,6 +355,8 @@ export const de = {
   "Delete {0}?\nEvery agent that uses it loses it.":
     "{0} löschen?\nAlle Agenten, die den Skill verwenden, verlieren den Zugriff darauf.",
   "Delete chat": "Chat löschen",
+  "Delete record": "Datensatz löschen",
+  'Delete record "{0}"?': "Datensatz „{0}“ löschen?",
   'Delete chat "{0}"?': "Chat „{0}“ löschen?",
   "Delete skill": "Skill löschen",
   Density: "Dichte",
@@ -478,6 +508,7 @@ export const de = {
   Left: "Ausgetreten",
   "Lines under the title": "Zeilen unter dem Titel",
   Link: "Link",
+  "Link a record": "Datensatz verknüpfen",
   "Link a record to {0}": "Datensatz mit {0} verknüpfen",
   "Link at least one record": "Verknüpfe mindestens einen Datensatz",
   "Link record": "Datensatz verknüpfen",
@@ -515,6 +546,7 @@ export const de = {
   "Move {0} left": "{0} nach links verschieben",
   "Move {0} right": "{0} nach rechts verschieben",
   "Move {0} up": "{0} nach oben verschieben",
+  "Multiple choices": "Mehrfachauswahl",
   "Multiple entries": "Mehrere Einträge",
   "My work": "Meine Aufgaben",
   Name: "Name",
@@ -911,8 +943,8 @@ export const de = {
   "The proposal does not identify a source record. Choose one to compare; no match is assumed.":
     "Im Vorschlag ist kein Quelldatensatz angegeben. Wähle einen zum Vergleichen aus.",
   "The record is gone.": "Der Datensatz ist nicht mehr verfügbar.",
-  "The text field whose value identifies a record: saving a record with a key the collection holds replaces that record.":
-    "Dieses Textfeld identifiziert den Datensatz. Beim Speichern mit einem vorhandenen Schlüssel wird der zugehörige Datensatz ersetzt.",
+  "The text or link field whose value identifies a record: saving a record with a key the collection holds replaces that record.":
+    "Dieses Text- oder Linkfeld identifiziert den Datensatz. Beim Speichern mit einem vorhandenen Schlüssel wird der zugehörige Datensatz ersetzt.",
   "Then by": "Dann nach",
   "Then sort by": "Dann sortieren nach",
   "There's no going back.": "Dieser Vorgang ist endgültig.",
@@ -922,8 +954,8 @@ export const de = {
   "Thinking…": "Denkt nach…",
   "This browser can't prepare the image.": "Dieser Browser kann das Bild nicht vorbereiten.",
   "This collection has no records yet.": "Diese Sammlung enthält noch keine Datensätze.",
-  "This collection has records: add fields, but its fields and primary key stay as they are. You can change which show in the table and where links are displayed.":
-    "Diese Sammlung enthält Datensätze. Du kannst Felder hinzufügen und festlegen, welche in der Tabelle erscheinen und wo Links angezeigt werden. Bestehende Felder und der Primärschlüssel bleiben erhalten.",
+  "This collection has records: add fields, but its fields and primary key stay as they are. You can change which show in the table and where links are displayed, and remove fields or select options that no record holds.":
+    "Diese Sammlung enthält Datensätze. Du kannst Felder hinzufügen und festlegen, welche in der Tabelle erscheinen und wo Links angezeigt werden, und Felder oder Auswahloptionen entfernen, die kein Datensatz verwendet. Bestehende Felder und der Primärschlüssel bleiben sonst erhalten.",
   "This collection holds no record with this key.":
     "Diese Sammlung enthält keinen Datensatz mit diesem Schlüssel.",
   "This context is no longer available.": "Dieser Kontext ist nicht mehr verfügbar.",
@@ -1088,6 +1120,8 @@ export const de = {
   "Your registration was received. An admin has to approve you before you can open the organization.":
     "Deine Registrierung ist eingegangen. Ein Admin muss sie genehmigen, bevor du auf die Organisation zugreifen kannst.",
   "Your session ended. Sign in again.": "Deine Sitzung ist abgelaufen. Melde dich erneut an.",
+  "The record and its files are removed for good, wherever they are shown.":
+    "Der Datensatz und seine Dateien werden endgültig entfernt, überall wo sie angezeigt werden.",
 } as const;
 
 export type Message = keyof typeof de;
