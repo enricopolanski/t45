@@ -4,7 +4,8 @@ import { InboxIcon, KanbanSquareIcon, LibraryBigIcon, MessagesSquareIcon } from 
 import { useEffect, useState, type ReactNode } from "react";
 
 import { api, type ApiSuccess } from "../../rpc/api";
-import { useWorkflowData } from "../workflows/useWorkflowData";
+import { useApiQuery } from "../../state/rpc";
+import { collectionListQuery } from "../collections/collectionQueries";
 import {
   SidebarContent,
   SidebarGroup,
@@ -59,13 +60,13 @@ export function AppNavSidebar() {
   );
 }
 
-const loadCollections = () => api("collections.list", undefined);
-
 function PublishedCollections() {
   const t = useTranslation();
   const { setOpenMobile } = useSidebar();
-  const { detail } = useWorkflowData(loadCollections);
-  const collections = detail?.filter((collection) => collection.isPublished) ?? [];
+  const { data } = useApiQuery(collectionListQuery);
+  const collections =
+    data?.filter((collection) => collection.isPublished && collection.extension === undefined) ??
+    [];
   if (collections.length === 0) return null;
   return (
     <AppNavGroup label={t("Collections")}>

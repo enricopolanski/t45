@@ -1,13 +1,13 @@
 import { translate, useTranslation } from "~/i18n/locale";
 import type { Collection } from "@t45/contracts/models/Collection";
 import { Fields } from "@t45/contracts/models/Field";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, Navigate, useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 import { XIcon } from "lucide-react";
 import { useCallback, useId, useState } from "react";
 
 import { api } from "../../rpc/api";
-import { apiQuery, useApiQuery } from "../../state/rpc";
+import { useApiQuery } from "../../state/rpc";
 import {
   ColumnSwitch,
   FieldsEditor,
@@ -27,6 +27,8 @@ import { WorkFrame } from "../work/WorkFrame";
 import { actorName } from "../work/workLogic";
 import { useWorkflowData } from "../workflows/useWorkflowData";
 import { CollectionLayoutButton } from "./CollectionLayout";
+import { CollectionExtensions } from "./CollectionExtensions";
+import { collectionListQuery } from "./collectionQueries";
 import { blankField, type DraftField, FIELD_TYPES } from "../workflows/workflowLogic";
 
 const encodeFields = Schema.encodeSync(Fields);
@@ -39,9 +41,6 @@ interface Draft {
   readonly memberUserIds: ReadonlyArray<string>;
   readonly isPublished: boolean;
 }
-
-/** The collections whose records a link field can name. */
-const linkableCollections = apiQuery("collections.list")(undefined);
 
 /** A new collection starts with one text field as its primary key. */
 const newDraft = (): Draft => {
@@ -126,12 +125,19 @@ function LockedField({
  * Where an admin defines a collection: its title, fields, primary key and the members who use its
  * records. Once it has records, its fields only grow.
  */
-export function CollectionEditor({ collectionId }: { readonly collectionId: string | null }) {
+export function CollectionEditor({
+  collectionId,
+  parentCollectionId,
+}: {
+  readonly collectionId: string | null;
+  readonly parentCollectionId?: string;
+}) {
   const t = useTranslation();
   const id = useId();
   const navigate = useNavigate();
   const directory = useWorkDirectory();
-  const linkable = useApiQuery(linkableCollections).data ?? [];
+  const { data: collections, refresh } = useApiQuery(collectionListQuery);
+  const linkable = collections ?? [];
   const [draft, setDraft] = useState<Draft | null>(null);
   // The layout saves on its own, apart from the draft.
   const [layout, setLayout] = useState<NonNullable<Collection["layout"]>>({});
@@ -167,6 +173,24 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
         </p>
       </WorkFrame>
     );
+  const extension = detail.collection?.extension;
+  if (parentCollectionId !== undefined && extension?.parentCollectionId !== parentCollectionId)
+    return (
+      <Navigate
+        replace
+        to="/settings/collections/$collectionId/edit"
+        params={{ collectionId: parentCollectionId }}
+      />
+    );
+  if (parentCollectionId === undefined && extension !== undefined && collectionId !== null)
+    return (
+      <Navigate
+        replace
+        to="/settings/collections/$collectionId/edit"
+        params={{ collectionId: extension.parentCollectionId }}
+        search={{ subcollection: collectionId }}
+      />
+    );
   const { hasRecords } = detail;
   // A layout's columns replace "Show in table".
   const hasLayoutColumns = layout.table?.columns !== undefined;
@@ -184,13 +208,36 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
         collectionId === null
           ? await api("collections.create", payload)
           : await api("collections.update", { collectionId, ...payload });
-      await navigate({
-        to: "/settings/collections/$collectionId",
-        params: { collectionId: saved.id },
-      });
+      refresh();
+      await (extension === undefined
+        ? navigate({
+            to: "/settings/collections/$collectionId",
+            params: { collectionId: saved.id },
+          })
+        : navigate({
+            to: "/settings/collections/$collectionId/edit",
+            params: { collectionId: extension.parentCollectionId },
+          }));
     });
   return (
-    <WorkFrame title={title}>
+    <WorkFrame
+      title={title}
+      actions={
+        extension === undefined ? null : (
+          <Button
+            variant="outline"
+            render={
+              <Link
+                to="/settings/collections/$collectionId/edit"
+                params={{ collectionId: extension.parentCollectionId }}
+              />
+            }
+          >
+            {t("Subcollections")}
+          </Button>
+        )
+      }
+    >
       {error && <ErrorText text={error} />}
       <section
         aria-label={t("Collection")}
@@ -300,63 +347,68 @@ export function CollectionEditor({ collectionId }: { readonly collectionId: stri
           </Select>
         </div>
       </section>
-      <section
-        aria-label={t("People")}
-        className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-5"
-      >
-        <span className="text-sm font-medium">{t("People")}</span>
-        <label className="mt-1 flex w-fit items-center gap-2 text-sm">
-          <Switch
-            size="sm"
-            checked={draft.isPublished}
-            onCheckedChange={(isPublished) => setDraft({ ...draft, isPublished })}
-            aria-describedby={`${id}-publication`}
+      {extension === undefined ? (
+        <section
+          aria-label={t("People")}
+          className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-5"
+        >
+          <span className="text-sm font-medium">{t("People")}</span>
+          <label className="mt-1 flex w-fit items-center gap-2 text-sm">
+            <Switch
+              size="sm"
+              checked={draft.isPublished}
+              onCheckedChange={(isPublished) => setDraft({ ...draft, isPublished })}
+              aria-describedby={`${id}-publication`}
+              disabled={busy}
+            />
+            {t("Publish to the organization")}
+          </label>
+          <p id={`${id}-publication`} className="text-xs text-muted-foreground">
+            {t("Everyone in the organization can open published collections from the main menu.")}
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t("Admins and the people below can edit records.")}
+          </p>
+          <ul className="flex flex-col gap-1">
+            {draft.memberUserIds.map((userId) => {
+              const name = actorName(directory, userId);
+              return (
+                <li key={userId} className="flex items-center gap-2 text-sm">
+                  {name}
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={t("Remove {0}", name)}
+                    disabled={busy}
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        memberUserIds: draft.memberUserIds.filter((other) => other !== userId),
+                      })
+                    }
+                  >
+                    <XIcon />
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+          <PersonPicker
+            aria-label={t("New member")}
+            value={null}
+            onChange={(userId) =>
+              draft.memberUserIds.includes(userId)
+                ? undefined
+                : setDraft({ ...draft, memberUserIds: [...draft.memberUserIds, userId] })
+            }
+            placeholder={t("Add a member")}
             disabled={busy}
           />
-          {t("Publish to the organization")}
-        </label>
-        <p id={`${id}-publication`} className="text-xs text-muted-foreground">
-          {t("Everyone in the organization can open published collections from the main menu.")}
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {t("Admins and the people below can edit records.")}
-        </p>
-        <ul className="flex flex-col gap-1">
-          {draft.memberUserIds.map((userId) => {
-            const name = actorName(directory, userId);
-            return (
-              <li key={userId} className="flex items-center gap-2 text-sm">
-                {name}
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label={t("Remove {0}", name)}
-                  disabled={busy}
-                  onClick={() =>
-                    setDraft({
-                      ...draft,
-                      memberUserIds: draft.memberUserIds.filter((other) => other !== userId),
-                    })
-                  }
-                >
-                  <XIcon />
-                </Button>
-              </li>
-            );
-          })}
-        </ul>
-        <PersonPicker
-          aria-label={t("New member")}
-          value={null}
-          onChange={(userId) =>
-            draft.memberUserIds.includes(userId)
-              ? undefined
-              : setDraft({ ...draft, memberUserIds: [...draft.memberUserIds, userId] })
-          }
-          placeholder={t("Add a member")}
-          disabled={busy}
-        />
-      </section>
+        </section>
+      ) : null}
+      {extension === undefined && detail.collection !== null ? (
+        <CollectionExtensions parent={detail.collection} collections={linkable} onSaved={refresh} />
+      ) : null}
       <div className="flex justify-end">
         <Button onClick={save} disabled={busy}>
           {collectionId === null ? t("Create collection") : t("Save collection")}

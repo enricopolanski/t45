@@ -4,9 +4,13 @@ import {
   canEditRecords,
   canReadRecords,
   type Collection,
+  type CollectionExtension,
   type CollectionRecord,
   fieldsChangeRefusal,
   filtersProblem,
+  hasExtensionCategory,
+  linksParentByKey,
+  matchesExtensionCategory,
   primaryKeyRefusal,
   recordKeyOf,
   recordProblem,
@@ -48,6 +52,21 @@ type Payload<Tag extends string> = Rpc.Payload<
 
 const SEARCH_LIMIT = 25;
 const isAttachmentId = Schema.is(AttachmentId);
+
+const withCategoryFilter = (collection: Collection, { categoryFieldId }: CollectionExtension) => {
+  const search = collection.layout?.search;
+  const filters = search?.filters ?? [];
+  return filters.some(({ field }) => field === categoryFieldId)
+    ? collection
+    : {
+        ...collection,
+        layout: {
+          ...collection.layout,
+          search: { ...search, filters: [...filters, { field: categoryFieldId }] },
+        },
+      };
+};
+
 /** The top-level fields holding lists: multiple-choice selects. */
 const listFieldIdsOf = (collection: Collection) =>
   collection.fields.flatMap((field) =>
@@ -92,7 +111,14 @@ const make = Effect.gen(function* () {
    * Whether the caller reads the collection's records: a member by their access, an agent in a
    * chat by the access of the person chatting, and an automation by its capability.
    */
-  const canRead = Effect.fnUntraced(function* (caller: Caller, collection: Collection) {
+  const accessCollection = (collection: Collection) =>
+    collection.extension === undefined
+      ? Effect.succeed(collection)
+      : collections.get(collection.extension.parentCollectionId);
+
+  const canRead = Effect.fnUntraced(function* (caller: Caller, target: Collection) {
+    const collection = yield* accessCollection(target);
+    if (collection === null) return false;
     if ("userId" in caller) return canReadRecords({ ...caller, id: caller.userId }, collection);
     if (caller.origin.kind === "automation") return true;
     const owner = yield* users.get(caller.origin.ownerUserId);
@@ -114,20 +140,40 @@ const make = Effect.gen(function* () {
       yield* requireCapability(caller);
       return all;
     }
-    return all.filter((collection) => canReadRecords({ ...caller, id: caller.userId }, collection));
+    const byId = new Map(all.map((collection) => [collection.id, collection]));
+    return all.filter((collection) => {
+      const owner =
+        collection.extension === undefined
+          ? collection
+          : byId.get(collection.extension.parentCollectionId);
+      return owner !== undefined && canReadRecords({ ...caller, id: caller.userId }, owner);
+    });
   });
 
   const find = Effect.fnUntraced(function* (caller: Caller, collectionId: string) {
-    const collection = (yield* visible(caller)).find(({ id }) => id === collectionId);
-    return collection ?? (yield* new NotFound());
+    if (!("userId" in caller)) yield* requireCapability(caller);
+    const collection = yield* collections.get(collectionId);
+    if (collection === null || ("userId" in caller && !(yield* canRead(caller, collection))))
+      return yield* new NotFound();
+    return collection;
   });
 
   const findReadable = Effect.fnUntraced(function* (caller: Caller, collectionId: string) {
     const collection = yield* find(caller, collectionId);
-    if (yield* canRead(caller, collection)) return collection;
+    if ("userId" in caller || (yield* canRead(caller, collection))) return collection;
     return yield* new AccessDenied({
       message: "Reading this collection's records needs the access of the person you chat with.",
     });
+  });
+
+  const requireWritable = Effect.fnUntraced(function* (caller: Caller, collectionId: string) {
+    const collection = yield* find(caller, collectionId);
+    if ("userId" in caller) {
+      const owner = yield* accessCollection(collection);
+      if (owner === null || !canEditRecords({ ...caller, id: caller.userId }, owner))
+        return yield* new AccessDenied({ message: "You can only read this collection's records." });
+    }
+    return collection;
   });
 
   const viewOf = (record: CollectionRecord) =>
@@ -183,16 +229,16 @@ const make = Effect.gen(function* () {
     list: visible,
     get: find,
 
-    reorderColumns: Effect.fnUntraced(function* ({
-      collectionId,
-      columnOrder,
-    }: Payload<"reorderColumns">) {
-      const before = yield* collections.get(collectionId);
-      if (before === null) return yield* new NotFound();
-      const collection = { ...before, columnOrder, updatedAt: yield* DateTime.now };
-      yield* collections.save(collection);
-      return collection;
-    }),
+    reorderColumns: ({ collectionId, columnOrder }: Payload<"reorderColumns">) =>
+      records.transaction(
+        Effect.gen(function* () {
+          const before = yield* collections.get(collectionId);
+          if (before === null) return yield* new NotFound();
+          const collection = { ...before, columnOrder, updatedAt: yield* DateTime.now };
+          yield* collections.save(collection);
+          return collection;
+        }),
+      ),
 
     create: Effect.fnUntraced(function* (caller: Caller, input: Payload<"create">) {
       if (!(yield* canCreate(caller)))
@@ -212,40 +258,102 @@ const make = Effect.gen(function* () {
       return collection;
     }),
 
-    update: Effect.fnUntraced(function* ({ collectionId, ...draft }: Payload<"update">) {
-      const before = yield* collections.get(collectionId);
-      if (before === null) return yield* new NotFound();
-      yield* requireDraft(draft);
-      if (yield* records.hasAny(collectionId)) {
-        const reason = fieldsChangeRefusal(before, draft);
-        if (reason !== null) return yield* new Refused({ reason });
-        for (const field of removedFields(before.fields, draft.fields))
-          if (yield* records.holdsField(collectionId, field.id))
-            return yield* new Refused({
-              reason: "fields_locked",
-              detail: `Records hold ${field.label}.`,
-            });
-        for (const { field, option } of removedOptions(before.fields, draft.fields)) {
-          const held = yield* records.listValues(collectionId, {
-            fieldId: field.id,
-            isList: field.isMultiple === true,
-          });
-          if (held.some(({ value }) => value === option))
-            return yield* new Refused({
-              reason: "fields_locked",
-              detail: `Records hold ${option} in ${field.label}.`,
-            });
-        }
-      }
-      const collection = { ...before, ...draft, updatedAt: yield* DateTime.now };
-      yield* collections.save(collection);
-      return collection;
-    }),
+    setExtension: ({ collectionId, extension }: Payload<"setExtension">) =>
+      records.transaction(
+        Effect.gen(function* () {
+          const child = yield* collections.get(collectionId);
+          const parent = yield* collections.get(extension.parentCollectionId);
+          if (child === null || parent === null) return yield* new NotFound();
+          if (
+            child.id === parent.id ||
+            parent.extension !== undefined ||
+            (yield* collections.listExtensions(child.id)).length > 0 ||
+            !linksParentByKey(child, parent.id) ||
+            !hasExtensionCategory(parent, extension)
+          )
+            return yield* new Refused({ reason: "invalid_extension" });
+
+          const updatedAt = yield* DateTime.now;
+          const next = { ...child, extension, updatedAt };
+          yield* collections.save(next);
+          const withFilter = withCategoryFilter(parent, extension);
+          if (withFilter !== parent) yield* collections.save({ ...withFilter, updatedAt });
+          return next;
+        }),
+      ),
+
+    update: ({ collectionId, ...draft }: Payload<"update">) =>
+      records.transaction(
+        Effect.gen(function* () {
+          const before = yield* collections.get(collectionId);
+          if (before === null) return yield* new NotFound();
+          yield* requireDraft(draft);
+          if (
+            before.extension !== undefined &&
+            !linksParentByKey(draft, before.extension.parentCollectionId)
+          )
+            return yield* new Refused({ reason: "invalid_extension" });
+          const extensions = yield* collections.listExtensions(collectionId);
+          for (const { extension } of extensions)
+            if (extension !== undefined && !hasExtensionCategory(draft, extension))
+              return yield* new Refused({
+                reason: "invalid_extension",
+                detail: "A subcollection uses that category.",
+              });
+          if (yield* records.hasAny(collectionId)) {
+            const reason = fieldsChangeRefusal(before, draft);
+            if (reason !== null) return yield* new Refused({ reason });
+            for (const field of removedFields(before.fields, draft.fields))
+              if (yield* records.holdsField(collectionId, field.id))
+                return yield* new Refused({
+                  reason: "fields_locked",
+                  detail: `Records hold ${field.label}.`,
+                });
+            for (const { field, option } of removedOptions(before.fields, draft.fields)) {
+              const held = yield* records.listValues(collectionId, {
+                fieldId: field.id,
+                isList: field.isMultiple === true,
+              });
+              if (held.some(({ value }) => value === option))
+                return yield* new Refused({
+                  reason: "fields_locked",
+                  detail: `Records hold ${option} in ${field.label}.`,
+                });
+            }
+          }
+          const collection = extensions.reduce<Collection>(
+            (parent, { extension }) =>
+              extension === undefined ? parent : withCategoryFilter(parent, extension),
+            { ...before, ...draft, updatedAt: yield* DateTime.now },
+          );
+          yield* collections.save(collection);
+          return collection;
+        }),
+      ),
 
     getRecord: Effect.fnUntraced(function* (caller: Caller, input: Payload<"getRecord">) {
       yield* findReadable(caller, input.collectionId);
       const record = yield* records.get(input.collectionId, input.key);
       return record === null ? null : yield* viewOf(record);
+    }),
+
+    getRecordExtensions: Effect.fnUntraced(function* (
+      caller: Caller,
+      input: Payload<"getRecordExtensions">,
+    ) {
+      yield* findReadable(caller, input.collectionId);
+      const parent = yield* records.get(input.collectionId, input.key);
+      if (parent === null) return [];
+      const children = (yield* collections.listExtensions(input.collectionId)).filter(
+        ({ extension }) =>
+          extension !== undefined && matchesExtensionCategory(parent.values, extension),
+      );
+      return yield* Effect.forEach(children, (collection) =>
+        Effect.gen(function* () {
+          const record = yield* records.get(collection.id, input.key);
+          return { collection, record: record === null ? null : yield* viewOf(record) };
+        }),
+      );
     }),
 
     searchRecords: Effect.fnUntraced(function* (caller: Caller, input: Payload<"searchRecords">) {
@@ -302,9 +410,7 @@ const make = Effect.gen(function* () {
 
     /** Adds the record or replaces the one with its key; agents with the capability always may. */
     saveRecord: Effect.fnUntraced(function* (caller: Caller, input: Payload<"saveRecord">) {
-      const collection = yield* find(caller, input.collectionId);
-      if ("userId" in caller && !canEditRecords({ ...caller, id: caller.userId }, collection))
-        return yield* new AccessDenied({ message: "You can only read this collection's records." });
+      const collection = yield* requireWritable(caller, input.collectionId);
       const values = Object.fromEntries(
         Object.entries(input.values).flatMap(([key, value]) =>
           holdsData(value)
@@ -361,9 +467,7 @@ const make = Effect.gen(function* () {
      * collection or a ticket's step links it, so no link is left without its record.
      */
     deleteRecord: Effect.fnUntraced(function* (caller: Caller, input: Payload<"deleteRecord">) {
-      const collection = yield* find(caller, input.collectionId);
-      if ("userId" in caller && !canEditRecords({ ...caller, id: caller.userId }, collection))
-        return yield* new AccessDenied({ message: "You can only read this collection's records." });
+      const collection = yield* requireWritable(caller, input.collectionId);
       yield* records.transaction(
         Effect.gen(function* () {
           const record = yield* records.get(collection.id, input.key);
@@ -414,8 +518,10 @@ const make = Effect.gen(function* () {
       if (typeof actor !== "string") return yield* findReadable(actor, collectionId);
       const user = yield* users.get(actor);
       const collection = yield* collections.get(collectionId);
-      if (user !== null && collection !== null && canReadRecords(user, collection))
-        return collection;
+      if (user !== null && collection !== null) {
+        const owner = yield* accessCollection(collection);
+        if (owner !== null && canReadRecords(user, owner)) return collection;
+      }
       return yield* new NotFound();
     }),
 
@@ -424,7 +530,9 @@ const make = Effect.gen(function* () {
       const collection =
         file.collectionId === null ? null : yield* collections.get(file.collectionId);
       const user = yield* users.get(userId);
-      return collection !== null && user !== null && canReadRecords(user, collection);
+      if (collection === null || user === null) return false;
+      const owner = yield* accessCollection(collection);
+      return owner !== null && canReadRecords(user, owner);
     }),
   };
 });

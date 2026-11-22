@@ -159,6 +159,13 @@ export const CollectionLayout = Schema.Struct({
 });
 export type CollectionLayout = typeof CollectionLayout.Type;
 
+export const CollectionExtension = Schema.Struct({
+  parentCollectionId: StringId,
+  categoryFieldId: FieldPathSegment,
+  categoryValue: TrimmedNonEmptyString,
+});
+export type CollectionExtension = typeof CollectionExtension.Type;
+
 /** Bounds a number or date field's value lies within, both included; either can be left open. */
 const RecordFilterRange = Schema.Struct({
   min: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.String])),
@@ -216,6 +223,8 @@ export class Collection extends Schema.Opaque<Collection>()(
     layout: Schema.optionalKey(
       CollectionLayout.annotate({ description: "How the collection's records are shown." }),
     ),
+    /** Its records are technical details of the product keyed by their primary link. */
+    extension: Schema.optionalKey(CollectionExtension),
     /** The members, besides admins, who see and edit its records. */
     memberUserIds: Schema.UniqueArray(StringId),
     /** Whether every active member can see the collection in the main menu and read its records. */
@@ -228,6 +237,38 @@ export class Collection extends Schema.Opaque<Collection>()(
     }),
   ),
 ) {}
+
+/** The link that makes each detail record share the key of its parent record. */
+export const linksParentByKey = (
+  collection: Pick<Collection, "fields" | "primaryKeyFieldId">,
+  parentCollectionId: string,
+) =>
+  collection.fields.some(
+    (field) =>
+      field.id === collection.primaryKeyFieldId &&
+      field.type === "foreignKey" &&
+      field.collectionId === parentCollectionId,
+  );
+
+/** An extension applies to a category defined by a select on the parent. */
+export const hasExtensionCategory = (
+  parent: Pick<Collection, "fields">,
+  { categoryFieldId, categoryValue }: CollectionExtension,
+) =>
+  parent.fields.some(
+    (field) =>
+      field.id === categoryFieldId &&
+      field.type === "select" &&
+      field.options.includes(categoryValue),
+  );
+
+export const matchesExtensionCategory = (
+  values: FieldValues,
+  { categoryFieldId, categoryValue }: CollectionExtension,
+) => {
+  const value = values[categoryFieldId];
+  return Array.isArray(value) ? value.includes(categoryValue) : value === categoryValue;
+};
 
 /** One record of a collection, unique by its key, with its values by dotted field key. */
 export class CollectionRecord extends Schema.Opaque<CollectionRecord>()(
@@ -358,6 +399,7 @@ const REFUSALS = {
   fields_locked:
     "This collection has records: you can only add new fields, and remove fields or change options no record holds.",
   invalid_attachment: "That file can't be attached here.",
+  invalid_extension: "A subcollection needs a primary link to its parent and a valid category.",
   linked: "Other records or tickets link this record: remove those links first.",
   invalid_link:
     "A link names one existing record of its collection, and changes to another only once cleared.",

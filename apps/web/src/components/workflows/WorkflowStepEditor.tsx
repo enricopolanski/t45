@@ -4,7 +4,8 @@ import type { DraftField, DraftStep, inputSourcesFor } from "./workflowLogic";
 import { XIcon } from "lucide-react";
 import { useState } from "react";
 
-import { apiQuery, useApiQuery } from "../../state/rpc";
+import { useApiQuery } from "../../state/rpc";
+import { collectionListQuery } from "../collections/collectionQueries";
 import {
   AddButton,
   FieldsEditor,
@@ -66,9 +67,6 @@ function SubStepRow({
   );
 }
 
-/** The collections whose records a step's fields can link: those the editor uses. */
-const linkableCollections = apiQuery("collections.list")(undefined);
-
 /** Collection IDs linked by an input field, including inside a group. */
 function listInputCollectionIds(field: DraftField): ReadonlyArray<string> {
   if (field.type === "records") return [field.collectionId];
@@ -103,7 +101,7 @@ export function WorkflowStepEditor({
   const t = useTranslation();
   // A sub-step's own editor is always open; a step in the list starts open only when new.
   const [startsOpen] = useState(position === null || step.name === "");
-  const collections = useApiQuery(linkableCollections).data ?? [];
+  const collections = useApiQuery(collectionListQuery).data ?? [];
   const inputs = step.inputs ?? [];
   const inputKey = (input: (typeof inputs)[number]) => `${input.stepId}.${input.fieldId}`;
   const unboundSources = inputSources.filter(({ input }) => !inputs.some(isSameInput(input)));

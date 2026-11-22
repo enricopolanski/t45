@@ -1,6 +1,19 @@
 import type { Message } from "./de";
 
 export const it = {
+  Subcollections: "Sottocollezioni",
+  Subcollection: "Sottocollezione",
+  "Attach subcollection": "Collega sottocollezione",
+  "Category field": "Campo categoria",
+  "Category value": "Valore categoria",
+  "Add a category select and a collection keyed by a link to this one.":
+    "Aggiungi un campo a scelta per la categoria e una collezione che abbia come chiave un link a questa.",
+  "Subcollections use this collection's access settings.":
+    "Le sottocollezioni ereditano i permessi di questa collezione.",
+  "Technical details · {0}": "Scheda tecnica · {0}",
+  "Add technical details": "Aggiungi scheda tecnica",
+  "Edit technical details": "Modifica scheda tecnica",
+  "Technical details have yet to be added.": "La scheda tecnica è ancora da compilare.",
   Source: "Fonte",
   Equal: "Uguale",
   Different: "Diverso",

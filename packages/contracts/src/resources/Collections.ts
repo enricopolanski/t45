@@ -8,6 +8,7 @@ import { Attachment } from "../models/Attachment.ts";
 import {
   Collection,
   CollectionColumnOrder,
+  CollectionExtension,
   CollectionRecord,
   RecordFilters,
   Refused,
@@ -80,6 +81,13 @@ export const CollectionOperations = RpcGroup.make(
     success: Schema.NullOr(CollectionRecordView),
     error: CollectionErrors,
   }),
+  Rpc.make("getRecordExtensions", {
+    payload: { collectionId: StringId, key: TrimmedNonEmptyString },
+    success: Schema.Array(
+      Schema.Struct({ collection: Collection, record: Schema.NullOr(CollectionRecordView) }),
+    ),
+    error: CollectionErrors,
+  }),
   Rpc.make("searchRecords", {
     payload: {
       collectionId: StringId,
@@ -140,6 +148,11 @@ export const CollectionOperations = RpcGroup.make(
 ).prefix("collections.");
 
 export const Collections = RpcGroup.make(
+  Rpc.make("setExtension", {
+    payload: { collectionId: StringId, extension: CollectionExtension },
+    success: Collection,
+    error: CollectionErrors,
+  }),
   Rpc.make("update", {
     payload: { collectionId: StringId, ...CollectionDraft.fields },
     success: Collection,

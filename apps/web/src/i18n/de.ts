@@ -1,4 +1,17 @@
 export const de = {
+  Subcollections: "Untersammlungen",
+  Subcollection: "Untersammlung",
+  "Attach subcollection": "Untersammlung hinzufügen",
+  "Category field": "Kategoriefeld",
+  "Category value": "Kategoriewert",
+  "Add a category select and a collection keyed by a link to this one.":
+    "Füge ein Auswahlfeld für die Kategorie und eine Sammlung hinzu, deren Schlüssel auf diese Sammlung verweist.",
+  "Subcollections use this collection's access settings.":
+    "Untersammlungen übernehmen die Zugriffsrechte dieser Sammlung.",
+  "Technical details · {0}": "Technische Daten · {0}",
+  "Add technical details": "Technische Daten hinzufügen",
+  "Edit technical details": "Technische Daten bearbeiten",
+  "Technical details have yet to be added.": "Technische Daten wurden noch nicht hinzugefügt.",
   Source: "Quelle",
   Equal: "Gleich",
   Different: "Abweichend",

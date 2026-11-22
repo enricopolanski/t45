@@ -1,4 +1,5 @@
 import { type Message, type Translate, useTranslation } from "~/i18n/locale";
+import type { Collection } from "@t45/contracts/models/Collection";
 import { FieldTone } from "@t45/contracts/models/Field";
 import { isTableColumn } from "@t45/contracts/models/Layout";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XIcon } from "lucide-react";
@@ -444,7 +445,7 @@ function MultipleSwitch({
 }
 
 /** A collection a records or link field can link. */
-export type LinkableCollection = { readonly id: string; readonly title: string };
+export type LinkableCollection = Pick<Collection, "id" | "title" | "extension">;
 
 type ComparisonFieldsControl = (
   field: Extract<DraftField, { type: "records" }>,
@@ -740,11 +741,17 @@ function FieldCard({
                     </SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
-                    {collections?.map((collection) => (
-                      <SelectItem key={collection.id} value={collection.id}>
-                        {collection.title}
-                      </SelectItem>
-                    ))}
+                    {collections
+                      ?.filter(
+                        (collection) =>
+                          collection.extension === undefined ||
+                          collection.id === field.collectionId,
+                      )
+                      .map((collection) => (
+                        <SelectItem key={collection.id} value={collection.id}>
+                          {collection.title}
+                        </SelectItem>
+                      ))}
                   </SelectPopup>
                 </Select>
               </Field>

@@ -1,20 +1,19 @@
 import { useTranslation } from "~/i18n/locale";
 import { Link } from "@tanstack/react-router";
 
-import { api } from "../../rpc/api";
+import { useApiQuery } from "../../state/rpc";
 import { useIsAdmin } from "../../state/session";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { WorkFrame } from "../work/WorkFrame";
-import { useWorkflowData } from "../workflows/useWorkflowData";
-
-const loadCollections = () => api("collections.list", undefined);
+import { collectionListQuery } from "./collectionQueries";
 
 /** The collections the member uses; admins see and define every one. */
 export function CollectionList() {
   const t = useTranslation();
   const isAdmin = useIsAdmin();
-  const { detail: collections, error } = useWorkflowData(loadCollections);
+  const { data, error } = useApiQuery(collectionListQuery);
+  const collections = data?.filter(({ extension }) => extension === undefined) ?? null;
   return (
     <WorkFrame
       title={t("Collections")}

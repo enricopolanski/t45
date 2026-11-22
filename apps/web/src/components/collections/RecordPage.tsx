@@ -3,11 +3,11 @@ import { canEditRecords, type Collection } from "@t45/contracts/models/Collectio
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
 import { buildFieldViews } from "@t45/core/fieldViews";
-import { useNavigate } from "@tanstack/react-router";
+import { Navigate, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useId, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
-import { api } from "../../rpc/api";
+import { api, type ApiSuccess } from "../../rpc/api";
 import { useSession } from "../../state/session";
 import { PageBreadcrumbLink } from "../PageBreadcrumb";
 import { Button } from "../ui/button";
@@ -24,6 +24,7 @@ import { ErrorText } from "../ui/error-text";
 import { FormGrid, ReadOnlyFields } from "../work/StepFields";
 import { WorkFrame } from "../work/WorkFrame";
 import { RecordShowcase } from "./RecordDisplay";
+import { RecordExtension } from "./RecordExtension";
 import { formatRecordValue, useRecordForm } from "./Records";
 
 /**
@@ -48,6 +49,7 @@ export function RecordPage({
   const [loaded, setLoaded] = useState<{
     readonly collection: Collection;
     readonly record: CollectionRecordView | null;
+    readonly extensions: ApiSuccess<"collections.getRecordExtensions">;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -57,14 +59,29 @@ export function RecordPage({
     void Promise.all([
       api("collections.get", { collectionId }),
       api("collections.getRecord", { collectionId, key: recordKey }),
+      api("collections.getRecordExtensions", { collectionId, key: recordKey }),
     ]).then(
-      ([collection, record]) => current && setLoaded({ collection, record }),
+      ([collection, record, extensions]) =>
+        current && setLoaded({ collection, record, extensions }),
       (cause: unknown) => current && setError(describeFailure(cause)),
     );
     return () => {
       current = false;
     };
   }, [collectionId, recordKey]);
+
+  if (loaded?.collection.extension !== undefined)
+    return (
+      <Navigate
+        replace
+        to={
+          isInSettings
+            ? "/settings/collections/$collectionId/records/$recordKey"
+            : "/collections/$collectionId/records/$recordKey"
+        }
+        params={{ collectionId: loaded.collection.extension.parentCollectionId, recordKey }}
+      />
+    );
 
   const parent =
     loaded === null ? undefined : (
@@ -90,6 +107,15 @@ export function RecordPage({
       : formatRecordValue(titleField, record.values[titleField.id], record.files).trim() ||
         recordKey;
   const canEdit = viewer !== null && canEditRecords({ ...viewer, id: viewer.userId }, collection);
+  const sections = loaded.extensions.map(({ collection: child, record: detail }) => (
+    <RecordExtension
+      key={child.id}
+      collection={child}
+      record={detail}
+      recordKey={recordKey}
+      canEdit={canEdit}
+    />
+  ));
   if ((!isEditing || !canEdit) && display.template === "showcase")
     return (
       <WorkFrame
@@ -106,6 +132,7 @@ export function RecordPage({
         }
       >
         <RecordShowcase collection={collection} record={record} />
+        {sections}
       </WorkFrame>
     );
   if (!canEdit)
@@ -118,6 +145,7 @@ export function RecordPage({
             (id) => record.files.find((file) => file.id === id) ?? null,
           )}
         />
+        {sections}
       </WorkFrame>
     );
   return (
@@ -127,6 +155,7 @@ export function RecordPage({
       parent={parent}
       collection={collection}
       record={record}
+      sections={sections}
       onSaved={() => void navigate({ to: collectionRoute, params: { collectionId } })}
     />
   );
@@ -186,6 +215,7 @@ function RecordForm({
   parent,
   collection,
   record,
+  sections,
   onSaved,
 }: {
   readonly title: string;
@@ -193,6 +223,7 @@ function RecordForm({
   readonly parent: ReactNode;
   readonly collection: Collection;
   readonly record: CollectionRecordView;
+  readonly sections: ReactNode;
   readonly onSaved: () => void;
 }) {
   const t = useTranslation();
@@ -228,6 +259,7 @@ function RecordForm({
         <FormGrid {...editor} form={form} />
         {error && <ErrorText text={error} />}
       </form>
+      {sections}
     </WorkFrame>
   );
 }

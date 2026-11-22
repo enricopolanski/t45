@@ -3,7 +3,7 @@ import { canEditRecords, type Collection } from "@t45/contracts/models/Collectio
 import { defaultValues } from "@t45/contracts/models/Field";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, Navigate, useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -92,6 +92,14 @@ export function CollectionPage({
           {error ?? t("Loading…")}
         </p>
       </WorkFrame>
+    );
+  if (collection.extension !== undefined)
+    return (
+      <Navigate
+        replace
+        to={isInSettings ? "/settings/collections/$collectionId" : "/collections/$collectionId"}
+        params={{ collectionId: collection.extension.parentCollectionId }}
+      />
     );
   const shownView = view ?? resolveRecordDisplay(collection).defaultView;
   const canEdit = viewer !== null && canEditRecords({ ...viewer, id: viewer.userId }, collection);
