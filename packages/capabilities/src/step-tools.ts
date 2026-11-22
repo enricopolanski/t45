@@ -33,7 +33,7 @@ serve({
     rpcTool(
       "get_fields",
       "workflows.getStepFields",
-      "Read only the requested step fields and authorized inputs. Pass inputs and/or fields as lists of {key}. For a records field, give recordFields to select collection columns and recordKeys to select specific linked records. An empty recordFields list returns only linked record keys. Records include collectionId and their keys. Groups have rows with values by field key and a list of field labels. For configured comparison fields, comparisonSources lists the confirmed criteria (id, name, value) for each sourceRecordKey. Includes proposed and discarded values for the requested fields on this step.",
+      "Read only the requested step fields and authorized inputs. Pass inputs and/or fields as lists of {key}. For a records field, give recordFields to select collection columns and recordKeys to select specific linked records. An empty recordFields list returns only linked record keys. Records include collectionId and their keys. Groups have rows with values by field key and a list of field labels. For configured comparison fields, comparisonSources lists the available criteria (id, name, value) for each sourceRecordKey. Includes proposed and discarded values for the requested fields on this step.",
       step,
     ),
     rpcTool(

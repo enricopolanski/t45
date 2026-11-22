@@ -168,6 +168,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     view.recordReviews.some(
       (review) =>
         review.recordsFieldId === field.key &&
+        !review.isConfirmationOptional &&
         review.entries.some(({ isConfirmed }) => !isConfirmed),
     ),
   );

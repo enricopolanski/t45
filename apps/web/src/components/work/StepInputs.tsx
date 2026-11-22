@@ -637,6 +637,7 @@ export function ReadOnlyStepFieldCard({
   readonly reviews: ReadonlyArray<ReadOnlyRecordReview>;
   readonly defaultOpen: boolean;
 }) {
+  const t = useTranslation();
   if (fields.length === 0) return null;
   const shown = fields.filter((field) => {
     const review = reviews.find(({ group }) => group === field);
@@ -653,13 +654,17 @@ export function ReadOnlyStepFieldCard({
           const linked = reviews.filter(({ records }) => records === field);
           if (linked.length === 0) return undefined;
           return (record) =>
-            linked.map(({ group, entries }) =>
-              entries.some(
-                ({ recordKey, isConfirmed }) => record.key === recordKey && isConfirmed,
-              ) ? (
+            linked.map(({ group, entries }) => {
+              const entry = entries.find(({ recordKey }) => record.key === recordKey);
+              if (entry === undefined) return null;
+              return entry.isConfirmed ? (
                 <ConfirmedRecord key={group.key} />
-              ) : null,
-            );
+              ) : (
+                <span key={group.key} className="text-muted-foreground">
+                  {t("Unconfirmed")}
+                </span>
+              );
+            });
         }}
         recordReviewFields={(field, record) =>
           reviews.flatMap(({ group, records, entries, recordKeyFieldId }) => {

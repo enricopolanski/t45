@@ -315,6 +315,11 @@ export type Layout = typeof Layout.Type;
 export const RecordEntryReview = Schema.Struct({
   recordsFieldId: FieldPathSegment,
   recordKeyFieldId: FieldPathSegment,
+  isConfirmationOptional: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description: "Allow a complete entry to pass to the next step before it is confirmed.",
+    }),
+  ),
   message: Schema.optionalKey(
     TrimmedNonEmptyString.annotate({
       description: "An optional message shown to the reviewer before confirmation.",
@@ -334,7 +339,7 @@ class GroupField extends Schema.Class<GroupField>("GroupField")({
   recordReview: Schema.optionalKey(
     RecordEntryReview.annotate({
       description:
-        "On a step, require a member to confirm one entry per linked record. A text field of the entry holds the linked record's key.",
+        "On a step, review one entry per linked record. A text field of the entry holds the linked record's key.",
     }),
   ),
 }) {}

@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Field } from "../ui/field";
+import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import type { DraftField } from "./workflowLogic";
 
@@ -76,11 +77,6 @@ export function RecordReviewSettings({
               <DialogTitle>{t("Review by record")}</DialogTitle>
             </DialogHeader>
             <DialogPanel>
-              <p className="text-sm text-muted-foreground">
-                {t(
-                  "Require confirmation of one entry for each linked record before this step can finish.",
-                )}
-              </p>
               <Choice
                 label={t("Linked records")}
                 value={draft.recordsFieldId}
@@ -99,6 +95,16 @@ export function RecordReviewSettings({
                 }}
                 onChange={(recordKeyFieldId) => setDraft({ ...draft, recordKeyFieldId })}
               />
+              <label className="flex w-fit items-center gap-2 text-sm">
+                <Switch
+                  size="sm"
+                  checked={!draft.isConfirmationOptional}
+                  onCheckedChange={(checked) =>
+                    setDraft({ ...draft, isConfirmationOptional: !checked })
+                  }
+                />
+                {t("Require confirmation before completing the step")}
+              </label>
               <Field label={t("Review message")} size="xs">
                 <Textarea
                   placeholder={t("Optional message for the reviewer")}

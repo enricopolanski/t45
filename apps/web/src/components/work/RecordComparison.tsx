@@ -14,7 +14,7 @@ import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
 import { getFieldLink } from "@t45/core/fieldViews";
 import { useId, useState } from "react";
 
-import { RecordShowcase } from "../collections/RecordDisplay";
+import { listImageUrls, RecordShowcase } from "../collections/RecordDisplay";
 import { formatRecordValue, renderRecordValue } from "../collections/Records";
 import { ExternalUrl } from "../ExternalUrl";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -82,6 +82,25 @@ function RecordHeading({ heading }: { readonly heading: ReturnType<typeof getRec
     heading.text
   ) : (
     <ExternalUrl href={heading.url}>{heading.text}</ExternalUrl>
+  );
+}
+
+function RecordComparisonPhoto({
+  collection,
+  record,
+  title,
+}: {
+  readonly collection: RecordCollection;
+  readonly record: CollectionRecordView;
+  readonly title: string;
+}) {
+  const [image] = listImageUrls(resolveRecordDisplay(collection), record);
+  return image === undefined ? null : (
+    <img
+      src={image}
+      alt={title}
+      className="h-auto max-h-24 w-auto max-w-full rounded object-contain"
+    />
   );
 }
 
@@ -267,6 +286,7 @@ export function RecordComparison({
   readonly comparisonFields: ComparisonFields | undefined;
 }) {
   const t = useTranslation();
+  const comparisonLabel = t("Compare with step input");
   const sourceInput = criteriaSources && inputs[criteriaSources.recordsIndex];
   const sources = listSources(sourceInput ? [sourceInput] : inputs).filter(
     (source) => !comparison || source.record.key === comparison.sourceRecordKey,
@@ -329,48 +349,58 @@ export function RecordComparison({
   });
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground">
-          {t("Compare with step input")}
-        </span>
-        {comparison && sourceHeading ? (
-          <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 text-sm sm:grid-cols-2">
-            <span>
-              <span className="block text-xs text-muted-foreground">{source?.label}</span>
-              <strong>
-                <RecordHeading heading={sourceHeading} />
-              </strong>
-            </span>
-            <span>
+      <section aria-label={comparisonLabel} className="flex min-w-0 flex-col gap-1.5">
+        <span className="text-xs font-medium text-muted-foreground">{comparisonLabel}</span>
+        <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 text-sm sm:grid-cols-2">
+          <div className="flex min-w-0 flex-col items-start gap-2">
+            {comparison && sourceHeading ? (
+              <div>
+                <span className="block text-xs text-muted-foreground">{source?.label}</span>
+                <strong className="wrap-anywhere">
+                  <RecordHeading heading={sourceHeading} />
+                </strong>
+              </div>
+            ) : (
+              <Select value={selected} onValueChange={setSelected}>
+                <SelectTrigger aria-label={comparisonLabel} className="w-full min-w-0" isWrapped>
+                  <SelectValue placeholder={t("Choose the article to compare")}>
+                    {source === undefined || sourceHeading === undefined
+                      ? null
+                      : `${source.label} · ${sourceHeading.text}`}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {sources.map((candidate) => (
+                    <SelectItem key={candidate.id} value={candidate.id}>
+                      {candidate.label} ·{" "}
+                      {getRecordHeading(candidate.collection, candidate.record).text}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            )}
+            {source && sourceHeading && (
+              <RecordComparisonPhoto
+                collection={source.collection}
+                record={source.record}
+                title={sourceHeading.text}
+              />
+            )}
+          </div>
+          <div className="flex min-w-0 flex-col items-start gap-2">
+            <div>
               <span className="block text-xs text-muted-foreground">{t("Proposed record")}</span>
-              <strong>
+              <strong className="wrap-anywhere">
                 <RecordHeading heading={proposedHeading} />
               </strong>
-            </span>
+            </div>
+            <RecordComparisonPhoto
+              collection={collection}
+              record={record}
+              title={proposedHeading.text}
+            />
           </div>
-        ) : (
-          <Select value={selected} onValueChange={setSelected}>
-            <SelectTrigger
-              aria-label={t("Compare with step input")}
-              className="w-full min-w-0"
-              isWrapped
-            >
-              <SelectValue placeholder={t("Choose the article to compare")}>
-                {source === undefined || sourceHeading === undefined
-                  ? null
-                  : `${source.label} · ${sourceHeading.text}`}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup>
-              {sources.map((candidate) => (
-                <SelectItem key={candidate.id} value={candidate.id}>
-                  {candidate.label} ·{" "}
-                  {getRecordHeading(candidate.collection, candidate.record).text}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        )}
+        </div>
         {source === undefined ? (
           <p className="text-sm text-muted-foreground">
             {t(
@@ -378,7 +408,7 @@ export function RecordComparison({
             )}
           </p>
         ) : null}
-      </div>
+      </section>
       {confirmed && (
         <ComparisonCriteriaTable
           key={confirmed.recordKey}
