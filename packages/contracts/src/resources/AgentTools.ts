@@ -14,6 +14,8 @@ export const REPORTING_CAPABILITY_ID = "progress-reporting";
 export const COLLECTIONS_CAPABILITY_ID = "collections";
 /** Saves the articles another run read; its tools read and save collection records too. */
 export const EXTRACTION_SAVING_CAPABILITY_ID = "extraction-saving";
+/** Lets an automation finish the workflow step it is running on. */
+export const STEP_COMPLETION_CAPABILITY_ID = "step-completion";
 
 export const WorkflowDraft = Schema.Struct({
   name: Workflow.fields.name,

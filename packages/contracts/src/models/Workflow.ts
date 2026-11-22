@@ -559,7 +559,7 @@ export const recordReviewsOf = (fields: ReadonlyArray<Field>, step: Step) =>
     ];
   });
 
-/** Only confirmed entries for records and review fields explicitly passed into this step. */
+/** Eligible entries from records and review fields explicitly passed into this step. */
 export const getComparisonSources = (
   mapping: ComparisonCriteria,
   inputs: ReturnType<typeof stepInputFields>,
@@ -567,7 +567,7 @@ export const getComparisonSources = (
   const fromStep = inputs.filter(({ source }) => source.stepDefinitionId === mapping.stepId);
   const input = fromStep.find(({ field }) => field.id === mapping.reviewId);
   if (input?.field.type !== "group" || !input.field.recordReview) return undefined;
-  const { recordsFieldId } = input.field.recordReview;
+  const { recordsFieldId, isConfirmationOptional } = input.field.recordReview;
   const recordsIndex = inputs.findIndex(
     ({ source, field }) =>
       source.id === input.source.id && field.type === "records" && field.id === recordsFieldId,
@@ -588,7 +588,7 @@ export const getComparisonSources = (
   return {
     recordsIndex,
     records: entries
-      .filter((entry) => entry.isConfirmed && entry.rowId !== null)
+      .filter((entry) => entry.rowId !== null && (entry.isConfirmed || isConfirmationOptional))
       .map((entry) => {
         const prefix = `${field.id}.${entry.rowId}.${table.id}`;
         const criteria = rowIds(source.values[prefix]).flatMap((id) => {
@@ -615,10 +615,10 @@ export const getComparisonRefusal = (
     return comparison ? "This field has no comparison criteria." : null;
   const sources = getComparisonSources(field.comparisonCriteria, inputs);
   if (!sources?.records.some((record) => record.criteria.length))
-    return comparison ? "There are no confirmed comparison criteria." : null;
+    return comparison ? "There are no comparison criteria available." : null;
   const source = sources.records.find((record) => record.recordKey === comparison?.sourceRecordKey);
   if (!source?.criteria.length || !comparison)
-    return "Choose a sourceRecordKey with confirmed criteria from get_fields.";
+    return "Choose a sourceRecordKey with criteria from get_fields.";
   const ids = comparison.assessments.map((item) => item.criterionId);
   if (!hasDistinctIds(ids) || ids.some((id) => !source.criteria.some((row) => row.id === id)))
     return "Use each criterion id from the selected source at most once.";
@@ -780,11 +780,16 @@ export const stepCompletionRefusal = (
   step: Step,
 ) => {
   const fields = definition?.fields ?? [];
+  const reviews = recordReviewsOf(fields, step);
   if (
-    recordReviewsOf(fields, step).some(({ entries }) => entries.some((entry) => !entry.isConfirmed))
+    reviews.some(
+      ({ isConfirmationOptional, entries }) =>
+        !isConfirmationOptional && entries.some(({ isConfirmed }) => !isConfirmed),
+    )
   )
     return "record_review_pending" as const;
   return !fieldsComplete(fields, step.values) ||
+    reviews.some(({ entries }) => entries.some(({ rowId }) => rowId === null)) ||
     ticket.steps.some(
       (child) => child.parentStepId === step.id && child.status.type !== "completed",
     )

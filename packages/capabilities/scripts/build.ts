@@ -7,6 +7,7 @@ import { build } from "vite-plus/pack";
 
 import { workflowDrafting } from "../src/workflows.ts";
 import { stepOperations } from "../src/steps.ts";
+import { stepCompletion } from "../src/step-completion.ts";
 import { projectOperations } from "../src/projects.ts";
 import { agents } from "../src/agents.ts";
 import { webBrowser } from "../src/browser.ts";
@@ -22,6 +23,7 @@ const programs = [
   { name: "report-tools", definition: progressReporting },
   { name: "workflow-tools", definition: workflowDrafting },
   { name: "step-tools", definition: stepOperations },
+  { name: "step-completion-tools", definition: stepCompletion },
   {
     name: "extraction-tools",
     definition: documentExtraction,

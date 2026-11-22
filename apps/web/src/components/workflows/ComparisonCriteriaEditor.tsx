@@ -85,7 +85,7 @@ export function ComparisonCriteriaEditor({
           </DialogHeader>
           <DialogPanel>
             <Choice
-              label={t("Confirmed input table")}
+              label={t("Input characteristics table")}
               value={index < 0 ? "" : String(index)}
               choices={{
                 "": t("None"),
@@ -115,7 +115,7 @@ export function ComparisonCriteriaEditor({
                   onChange={(nameId) => setDraft({ ...draft, nameId })}
                 />
                 <Choice
-                  label={t("Confirmed value")}
+                  label={t("Source value")}
                   value={draft.valueId}
                   choices={columns}
                   onChange={(valueId) => setDraft({ ...draft, valueId })}

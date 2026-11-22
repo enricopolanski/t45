@@ -90,7 +90,8 @@ import {
 } from "@t45/contracts/models/Field";
 import type { AssignmentView } from "@t45/contracts/resources/Assignments";
 import { buildFieldViews } from "@t45/core/fieldViews";
-import { NotFound } from "@t45/contracts/resources/errors";
+import { AccessDenied, NotFound } from "@t45/contracts/resources/errors";
+import { STEP_COMPLETION_CAPABILITY_ID } from "@t45/contracts/resources/AgentTools";
 import type { NotificationView } from "@t45/contracts/resources/Notifications";
 import type {
   FieldView,
@@ -1812,7 +1813,6 @@ const make = Effect.gen(function* () {
   ) {
     const { work, step, actorId } = yield* loadStepFor(caller, input.stepId);
     yield* requireActionable(step);
-    const chatId = typeof caller === "string" ? null : caller.chatId;
     const definition = definitionOf(work, step);
     const reviewed = withConfirmedRecordEntry(definition.fields, step, input);
     if (typeof reviewed === "string")
@@ -1824,23 +1824,25 @@ const make = Effect.gen(function* () {
     });
     if (
       definition.isDoneWhenApproved === true &&
-      stepCompletionRefusal(definition, work.ticket, reviewed) === null
+      recordReviewsOf(definition.fields, reviewed).every(({ entries }) =>
+        entries.every(({ isConfirmed }) => isConfirmed),
+      )
     )
       // One that can't complete yet, such as when the next step can't start, stays open.
-      yield* completeStep(work, reviewed, actorId, chatId).pipe(
+      yield* completeStep(work, reviewed, caller, actorId).pipe(
         Effect.catchTags({ WorkflowRefused: () => Effect.void }),
       );
   }, transaction);
 
   /**
-   * Completes the step and enters the next one, stopping the step's runs but `chatId`, the run
+   * Completes the step and enters the next one, stopping the step's runs except for the run
    * asking, which goes on to its end.
    */
   const completeStep = Effect.fnUntraced(function* (
     work: Work,
     step: Step,
+    caller: Caller,
     actorId: string,
-    chatId: ChatId | null,
   ) {
     const refusal = stepCompletionRefusal(definitionOf(work, step), work.ticket, step);
     if (refusal !== null) return yield* new WorkflowRefused({ reason: refusal });
@@ -1856,7 +1858,7 @@ const make = Effect.gen(function* () {
         ? null
         : stepEntryRefusal(work.version.steps, completed.ticket, completed.next);
     if (entryRefusal !== null) return yield* refuse(entryRefusal);
-    yield* stopStepRuns(work, step, undefined, chatId);
+    yield* stopStepRuns(work, step, undefined, typeof caller === "string" ? null : caller.chatId);
     const snapshot = yield* stepContents(work, step, true);
     const linkedFileIds = (fields: ReadonlyArray<FieldView>): ReadonlyArray<AttachmentId> =>
       fields.flatMap((field) => [
@@ -1877,12 +1879,22 @@ const make = Effect.gen(function* () {
         yield* enterStep(work, completed.next, null, step.assignee, actorId),
       );
     yield* save(work);
-    yield* record("workflows.markStepDone", actorId, targetOf(work, step));
+    yield* record("workflows.markStepDone", caller, targetOf(work, step));
   });
-  const markStepDone = Effect.fnUntraced(function* (actorId: string, stepId: string) {
-    const { work, step } = yield* loadForCommand(actorId, stepId);
+  const markStepDone = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
+    if (
+      typeof caller !== "string" &&
+      (caller.origin.kind !== "automation" ||
+        !(yield* capabilities.listForAgent(caller.agentId)).some(
+          ({ id }) => id === STEP_COMPLETION_CAPABILITY_ID,
+        ))
+    )
+      return yield* new AccessDenied({
+        message: "Step completion requires a member or an authorized step automation.",
+      });
+    const { work, step, actorId } = yield* loadStepFor(caller, stepId);
     yield* requireActionable(step);
-    yield* completeStep(work, step, actorId, null);
+    yield* completeStep(work, step, caller, actorId);
   }, transaction);
 
   const setStepAssignee = Effect.fnUntraced(function* (

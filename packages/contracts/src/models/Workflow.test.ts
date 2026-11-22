@@ -624,7 +624,7 @@ describe("proposing a value", () => {
   });
 });
 
-it("compares only confirmed criteria from the selected article and declared inputs", () => {
+it("requires confirmation for completion and comparison unless the review makes it optional", () => {
   const mapping = {
     stepId: root.id,
     reviewId: "reviews",
@@ -721,5 +721,30 @@ it("compares only confirmed criteria from the selected article and declared inpu
       { source: confirmed, field: records },
     ])?.records.map(({ recordKey }) => recordKey),
     ["article-one", "article-two"],
+  );
+
+  const optionalReview = {
+    ...review,
+    recordReview: { ...review.recordReview!, isConfirmationOptional: true },
+  };
+  const optionalStep = definition(root.id, [], { fields: [records, optionalReview] });
+  const optionalInputs = [
+    { source, field: optionalReview },
+    { source, field: records },
+  ];
+  assert.isNull(stepCompletionRefusal(optionalStep, ticket, source));
+  assert.isNull(
+    getComparisonRefusal(field, optionalInputs, { ...comparison, sourceRecordKey: "article-two" }),
+  );
+  assert.deepEqual(getComparisonSources(mapping, optionalInputs)?.records[1], {
+    recordKey: "article-two",
+    criteria: [{ id: "row-test", name: "Heat", value: "100 °C" }],
+  });
+  assert.strictEqual(
+    stepCompletionRefusal(optionalStep, ticket, {
+      ...source,
+      values: { ...source.values, reviews: ["row-first"] },
+    }),
+    "step_incomplete",
   );
 });

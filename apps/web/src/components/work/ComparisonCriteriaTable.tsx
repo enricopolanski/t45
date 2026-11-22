@@ -92,16 +92,13 @@ export function ComparisonCriteriaTable({
         >
           <thead className="border-y bg-muted/50 text-xs text-muted-foreground">
             <tr>
-              {[
-                t("Characteristic"),
-                t("Confirmed value"),
-                t("Proposed record"),
-                t("Comparison"),
-              ].map((label) => (
-                <th scope="col" key={label} className="px-4 py-2 font-medium">
-                  {label}
-                </th>
-              ))}
+              {[t("Characteristic"), t("Source value"), t("Proposed record"), t("Comparison")].map(
+                (label) => (
+                  <th scope="col" key={label} className="px-4 py-2 font-medium">
+                    {label}
+                  </th>
+                ),
+              )}
             </tr>
           </thead>
           <tbody>
@@ -168,7 +165,7 @@ export function ComparisonCriteriaTable({
           </tbody>
         </table>
         {hideEqual && rows.every((row) => row.status === "equal") && (
-          <p className="p-3 text-sm text-muted-foreground">{t("All confirmed values match.")}</p>
+          <p className="p-3 text-sm text-muted-foreground">{t("All compared values match.")}</p>
         )}
       </div>
     </section>
