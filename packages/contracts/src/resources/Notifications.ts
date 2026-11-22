@@ -26,4 +26,8 @@ export const Notifications = RpcGroup.make(
     payload: { notificationId: NotificationId },
     error: Schema.Union([NotFound, AccessDenied]),
   }),
+  Rpc.make("remove", {
+    payload: { notificationId: NotificationId },
+    error: AccessDenied,
+  }),
 ).prefix("notifications.");

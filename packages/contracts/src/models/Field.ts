@@ -117,6 +117,12 @@ const SelectField = Schema.Struct({
     .annotate({ description: "Allowed choices, shown as written." })
     .check(Schema.isMinLength(1)),
   tones: Schema.optionalKey(FieldTones),
+  isMultiple: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "Holds a list of its options, each once, instead of one; only a collection's top-level fields.",
+    }),
+  ),
 });
 
 const comparisonFieldId = String.raw`[A-Za-z0-9_-]+`;
@@ -161,6 +167,16 @@ const DerivedComparisonFields = Schema.Array(DerivedComparisonField).check(
   }),
 );
 
+/** The reviewed input table supplying the criteria for each source record. */
+export const ComparisonCriteria = Schema.Struct({
+  stepId: StringId,
+  reviewId: FieldPathSegment,
+  tableId: FieldPathSegment,
+  nameId: FieldPathSegment,
+  valueId: FieldPathSegment,
+});
+export type ComparisonCriteria = typeof ComparisonCriteria.Type;
+
 /** The properties shown in a record comparison, by field ID on either side. */
 export const ComparisonFields = Schema.Union([
   ComparisonFieldOrder,
@@ -188,6 +204,20 @@ const RecordsField = Schema.Struct({
   type: Schema.Literal("records"),
   collectionId: StringId.annotate({ description: "The collection whose records it links." }),
   comparisonFields: Schema.optionalKey(ComparisonFields),
+  comparisonCriteria: Schema.optionalKey(ComparisonCriteria),
+});
+
+/**
+ * One record of another collection, by its key: a top-level field of a collection only. Once set
+ * it can be cleared, but not changed to another record.
+ */
+const ForeignKeyField = Schema.Struct({
+  ...FieldBase,
+  type: Schema.Literal("foreignKey"),
+  collectionId: StringId.annotate({
+    description:
+      "The collection whose record it links; only a collection's top-level fields link one.",
+  }),
 });
 
 /** Short text in place of a field's label, described on the string as sent, as `FieldUnit` is. */
@@ -316,6 +346,7 @@ export const Field = Schema.Union([
   UrlField,
   SelectField,
   RecordsField,
+  ForeignKeyField,
   GroupField,
 ]);
 
@@ -326,6 +357,7 @@ export type Field =
   | typeof UrlField.Type
   | typeof SelectField.Type
   | typeof RecordsField.Type
+  | typeof ForeignKeyField.Type
   | GroupField;
 
 const fieldIdsAreDistinct = (fields: ReadonlyArray<Field>): boolean =>
@@ -337,6 +369,7 @@ const defaultsFit = (fields: ReadonlyArray<Field>): boolean =>
     field.type === "group"
       ? defaultsFit(field.fields)
       : field.type === "records" ||
+        field.type === "foreignKey" ||
         field.defaultValue === undefined ||
         (field.type !== "file" && fieldValueProblem(field, field.id, field.defaultValue) === null),
   );
@@ -351,12 +384,27 @@ export const hasValidLinkTargets = (fields: ReadonlyArray<Field>): boolean =>
         fields.some((other) => other.id !== field.id && other.id === field.displayLinkOn),
   );
 
+/** Link fields and multiple-choice selects: a collection's top-level fields only. */
+export const isCollectionOnly = (field: Field) =>
+  field.type === "foreignKey" || (field.type === "select" && field.isMultiple === true);
+
+/** No group holds a field only a collection's top level holds. */
+const hasCollectionOnlyAtTopLevel = (fields: ReadonlyArray<Field>): boolean =>
+  fields.every(
+    (field) =>
+      field.type !== "group" ||
+      (!field.fields.some(isCollectionOnly) && hasCollectionOnlyAtTopLevel(field.fields)),
+  );
+
 /** A form's fields: distinct ids, fitting defaults, and links to other fields in the same row. */
 export const Fields = Schema.Array(Field).check(
   Schema.makeFilter(fieldIdsAreDistinct, { expected: "distinct field ids among siblings" }),
   Schema.makeFilter(defaultsFit, { expected: "default values that fit their fields" }),
   Schema.makeFilter(hasValidLinkTargets, {
     expected: "links displayed on another field in the same row",
+  }),
+  Schema.makeFilter(hasCollectionOnlyAtTopLevel, {
+    expected: "no link or multiple-choice fields inside a group",
   }),
 );
 
@@ -377,7 +425,7 @@ export const defaultValues = (
   Object.fromEntries(
     fields.flatMap((field) => {
       const key = prefix ? `${prefix}.${field.id}` : field.id;
-      if (field.type === "records") return [];
+      if (field.type === "records" || field.type === "foreignKey") return [];
       if (field.type !== "group")
         return field.defaultValue === undefined ? [] : [[key, field.defaultValue]];
       return field.repeatable ? [] : Object.entries(defaultValues(field.fields, key));
@@ -391,7 +439,9 @@ export const holdsData = (value: Schema.Json | undefined): boolean =>
   (!Array.isArray(value) || value.length > 0);
 
 const isRowIds = Schema.is(Schema.UniqueArray(FieldPathSegment));
+const isRecordKey = Schema.is(TrimmedNonEmptyString);
 const isRecordKeys = Schema.is(Schema.UniqueArray(TrimmedNonEmptyString));
+const isTextList = Schema.is(Schema.UniqueArray(Schema.String));
 const isFiniteNumber = Schema.is(Schema.Finite);
 const isAttachmentId = Schema.is(AttachmentId);
 
@@ -401,6 +451,13 @@ export const rowIds = (value: Schema.Json | undefined): ReadonlyArray<string> =>
 /** The keys of the records a records field links. */
 export const recordKeys = (value: Schema.Json | undefined): ReadonlyArray<string> =>
   isRecordKeys(value) ? value : [];
+
+/** The records `values` link by these top-level fields: each field with the key it holds. */
+export const foreignKeys = (fields: ReadonlyArray<Field>, values: FieldValues) =>
+  fields.flatMap((field) => {
+    const recordKey = values[field.id];
+    return field.type === "foreignKey" && isRecordKey(recordKey) ? [{ field, recordKey }] : [];
+  });
 
 export const groupRows = (field: Field, value: Schema.Json | undefined) =>
   field.type === "group" && field.repeatable ? rowIds(value) : [null];
@@ -466,12 +523,18 @@ const expectation = (field: Field) => {
       return "true or false";
     case "date":
       return "a date as YYYY-MM-DD";
-    case "select":
-      return `one of ${field.options.map((option) => JSON.stringify(option)).join(", ")}`;
+    case "select": {
+      const options = field.options.map((option) => JSON.stringify(option)).join(", ");
+      return field.isMultiple
+        ? `a list of some of ${options}, each once, like [${JSON.stringify(field.options[0])}]`
+        : `one of ${options}`;
+    }
     case "file":
       return "a file attached with this field's key";
     case "records":
       return `the list of the keys of the records of collection ${field.collectionId} that belong here, like ["k1", "k2"]; save a new record with the collection tools first`;
+    case "foreignKey":
+      return `the key of one existing record of collection ${field.collectionId}; once set, clear it and save before linking another record`;
     case "group":
       return field.repeatable
         ? `the list of its row ids, like ["r1", "r2"] (letters, digits, _ and -, each once)`
@@ -508,22 +571,26 @@ const describeFields = (fields: ReadonlyArray<Field>, prefix = ""): string =>
 export const fieldValueProblem = (field: Field, key: string, value: Schema.Json) => {
   const fits =
     field.type === "select"
-      ? typeof value === "string" && field.options.includes(value)
+      ? field.isMultiple
+        ? isTextList(value) && value.every((option) => field.options.includes(option))
+        : typeof value === "string" && field.options.includes(value)
       : field.type === "records"
         ? isRecordKeys(value)
-        : field.type === "group"
-          ? field.repeatable && isRowIds(value)
-          : field.type === "text"
-            ? typeof value === "string"
-            : field.type === "url"
-              ? isUrlFieldValue(value)
-              : field.type === "number"
-                ? isFiniteNumber(value)
-                : field.type === "boolean"
-                  ? typeof value === "boolean"
-                  : field.type === "date"
-                    ? isDay(value)
-                    : isAttachmentId(value);
+        : field.type === "foreignKey"
+          ? isRecordKey(value)
+          : field.type === "group"
+            ? field.repeatable && isRowIds(value)
+            : field.type === "text"
+              ? typeof value === "string"
+              : field.type === "url"
+                ? isUrlFieldValue(value)
+                : field.type === "number"
+                  ? isFiniteNumber(value)
+                  : field.type === "boolean"
+                    ? typeof value === "boolean"
+                    : field.type === "date"
+                      ? isDay(value)
+                      : isAttachmentId(value);
   if (fits) return null;
   if (field.type === "group" && !field.repeatable)
     return `${key} is a group: set its fields instead.\n${describeFields(field.fields, key)}`;

@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import { type ComposerAttachment, composerAttachmentNeedsReattach } from "../composerDraftStore";
 
 export type AttachmentUploadState =
@@ -14,18 +15,20 @@ export function attachmentUploadBlockReason(
   const reattach = count(composerAttachmentNeedsReattach);
   if (reattach > 0) {
     return reattach === 1
-      ? "Attach the interrupted file again or remove it"
-      : "Attach the interrupted files again or remove them";
+      ? translate("Attach the interrupted file again or remove it")
+      : translate("Attach the interrupted files again or remove them");
   }
   const failed = count(({ id }) => uploadsByAttachmentId[id]?.status === "failed");
   if (failed > 0) {
     return failed === 1
-      ? "Retry or remove the failed attachment"
-      : "Retry or remove the failed attachments";
+      ? translate("Retry or remove the failed attachment")
+      : translate("Retry or remove the failed attachments");
   }
   const pending = count(({ id }) => uploadsByAttachmentId[id]?.status !== "ready");
   if (pending > 0) {
-    return pending === 1 ? "Attachment still uploading" : "Attachments still uploading";
+    return pending === 1
+      ? translate("Attachment still uploading")
+      : translate("Attachments still uploading");
   }
   return null;
 }

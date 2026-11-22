@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { CircleDashedIcon, FileIcon, ImageIcon } from "lucide-react";
@@ -116,13 +117,14 @@ export function ImageChipButton({
   size: string;
   suffix?: string | null;
 }) {
+  const t = useTranslation();
   const [sample, setSample] = useState<{ url: string; color: string | undefined }>();
   const accent = sample?.url === previewUrl ? sample?.color : undefined;
   return (
     <ContextChip
       kind="image"
       render={<button type="button" />}
-      aria-label={`Image attachment, ${name}, ${size}`}
+      aria-label={t("Image attachment, {0}, {1}", name, size)}
       style={accent ? ({ "--context-chip-accent": accent } as CSSProperties) : undefined}
       {...props}
     >
@@ -153,6 +155,7 @@ export function FileChip(props: {
   unresolved?: boolean;
   href?: string;
 }) {
+  const t = useTranslation();
   return (
     <ChipTooltip tooltip={props.tooltip}>
       <ContextChip
@@ -160,7 +163,7 @@ export function FileChip(props: {
         state={props.unresolved ? "unresolved" : props.error ? "invalid" : undefined}
         render={props.href ? <a href={props.href} download={props.name} /> : undefined}
         tabIndex={props.href ? undefined : 0}
-        aria-label={[`File attachment, ${props.name}, ${props.size}`, props.suffix]
+        aria-label={[t("File attachment, {0}, {1}", props.name, props.size), props.suffix]
           .filter(Boolean)
           .join(", ")}
       >
@@ -172,12 +175,13 @@ export function FileChip(props: {
 }
 
 export function UnresolvedChip(props: { label: string; tooltip: string }) {
+  const t = useTranslation();
   return (
     <ChipTooltip tooltip={props.tooltip}>
       <ContextChip
         state="unresolved"
         tabIndex={0}
-        aria-label={`Unavailable context, ${props.label}`}
+        aria-label={t("Unavailable context, {0}", props.label)}
       >
         <CircleDashedIcon />
         <ContextChipLabel>{props.label}</ContextChipLabel>

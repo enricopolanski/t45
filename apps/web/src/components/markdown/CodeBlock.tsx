@@ -1,3 +1,4 @@
+import { useTranslation, translate } from "~/i18n/locale";
 import type { DiffsHighlighter } from "@pierre/diffs";
 import { CatchBoundary } from "@tanstack/react-router";
 import DOMPurify from "dompurify";
@@ -144,6 +145,7 @@ function CodeBlockFrame({
   leadingActions?: ReactNode;
   children: ReactNode;
 }) {
+  const t = useTranslation();
   const [wrapped, setWrapped] = useState(true);
 
   return (
@@ -158,16 +160,20 @@ function CodeBlockFrame({
         className="chat-markdown-codeblock-header flex items-center justify-between gap-2 pt-1.5 pr-1.5 pb-0 pl-3 select-none"
       >
         <span className="min-w-0 truncate font-mono text-2xs">{title}</span>
-        <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
+        <span
+          className="flex items-center gap-0.5"
+          role="toolbar"
+          aria-label={t("Code block actions")}
+        >
           {leadingActions}
           <MarkdownAction
-            label={wrapped ? "Disable line wrap" : "Wrap lines"}
+            label={wrapped ? t("Disable line wrap") : t("Wrap lines")}
             pressed={wrapped}
             onClick={() => setWrapped((value) => !value)}
           >
             <WrapTextIcon className="size-3" />
           </MarkdownAction>
-          <CopyButton text={code} label="Copy code" />
+          <CopyButton text={code} label={t("Copy code")} />
         </span>
       </div>
       {children}
@@ -194,11 +200,12 @@ function MermaidCodeBlock({
   onExpand: (imageUrl: string) => void;
   children: ReactNode;
 }) {
+  const t = useTranslation();
   const [showCode, setShowCode] = useState(false);
   const source = code.trim();
   const toggle = isStreaming ? null : (
     <MarkdownAction
-      label={showCode ? "Show diagram" : "Show code"}
+      label={showCode ? t("Show diagram") : t("Show code")}
       onClick={() => setShowCode((value) => !value)}
     >
       {showCode ? <WorkflowIcon className="size-3" /> : <CodeIcon className="size-3" />}
@@ -221,7 +228,7 @@ function MermaidCodeBlock({
               className="flex min-h-36 items-center justify-center gap-2 text-xs text-muted-foreground"
             >
               <Spinner size="sm" />
-              Rendering diagram…
+              {t("Rendering diagram…")}
             </div>
           }
         >
@@ -230,7 +237,7 @@ function MermaidCodeBlock({
       </CatchBoundary>
       <div data-md-ui="" className="mt-0.5 flex items-center justify-between select-none">
         {toggle}
-        <CopyButton text={code} label="Copy code" />
+        <CopyButton text={code} label={t("Copy code")} />
       </div>
     </div>
   );
@@ -511,7 +518,7 @@ async function renderMermaid(source: string): Promise<MermaidRenderResult> {
   try {
     mermaid = await loadMermaid();
   } catch {
-    return { status: "error", message: "Mermaid failed to load.", retryable: true };
+    return { status: "error", message: translate("Mermaid failed to load."), retryable: true };
   }
   try {
     // initialize() mutates global config, so renders run one at a time.
@@ -539,7 +546,7 @@ async function renderMermaid(source: string): Promise<MermaidRenderResult> {
     const { svg } = await mermaid.render(id, source);
     return { status: "rendered", svg: sanitizeMermaidSvg(svg) };
   } catch (error) {
-    const message = describeFailure(error, "The diagram could not be rendered.");
+    const message = describeFailure(error, translate("The diagram could not be rendered."));
     return { status: "error", message, retryable: CHUNK_LOAD_ERROR.test(message) };
   } finally {
     document.getElementById(`d${id}`)?.remove();
@@ -589,6 +596,7 @@ function MermaidDiagram({
   source: string;
   onExpand: (imageUrl: string) => void;
 }) {
+  const t = useTranslation();
   const [, setAttempt] = useState(0);
   const result = use(mermaidRenderPromise(source));
 
@@ -596,7 +604,7 @@ function MermaidDiagram({
     return (
       <div>
         <div className="flex items-center justify-between gap-2">
-          <ErrorText text={`Unable to render diagram: ${result.message}`} />
+          <ErrorText text={t("Unable to render diagram: {0}", result.message)} />
           {result.retryable ? (
             <Button
               type="button"
@@ -607,7 +615,7 @@ function MermaidDiagram({
                 setAttempt((attempt) => attempt + 1);
               }}
             >
-              Retry
+              {t("Retry")}
             </Button>
           ) : null}
         </div>
@@ -622,7 +630,7 @@ function MermaidDiagram({
     <div className="overflow-x-auto">
       <button
         type="button"
-        aria-label="Expand diagram"
+        aria-label={t("Expand diagram")}
         className="flex w-full cursor-zoom-in justify-center rounded-md focus-visible:outline-2 focus-visible:outline-ring [&_svg]:h-auto [&_svg]:max-w-full"
         onClick={() => onExpand(mermaidImageUrl(result.svg))}
         dangerouslySetInnerHTML={{ __html: result.svg }}

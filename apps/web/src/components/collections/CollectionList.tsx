@@ -1,39 +1,40 @@
+import { useTranslation } from "~/i18n/locale";
 import { Link } from "@tanstack/react-router";
 
-import { api } from "../../rpc/api";
+import { useApiQuery } from "../../state/rpc";
 import { useIsAdmin } from "../../state/session";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { WorkFrame } from "../work/WorkFrame";
-import { plural } from "../work/workLogic";
-import { useWorkflowData } from "../workflows/useWorkflowData";
-
-const loadCollections = () => api("collections.list", undefined);
+import { collectionListQuery } from "./collectionQueries";
 
 /** The collections the member uses; admins see and define every one. */
 export function CollectionList() {
+  const t = useTranslation();
   const isAdmin = useIsAdmin();
-  const { detail: collections, error } = useWorkflowData(loadCollections);
+  const { data, error } = useApiQuery(collectionListQuery);
+  const collections = data?.filter(({ extension }) => extension === undefined) ?? null;
   return (
     <WorkFrame
-      title="Collections"
+      title={t("Collections")}
       actions={
         isAdmin ? (
           <Button size="sm" render={<Link to="/settings/collections/new" />}>
-            New collection
+            {t("New collection")}
           </Button>
         ) : null
       }
     >
       <p className="text-sm text-muted-foreground">
-        Collections keep data that people and agents reuse across tasks. A record's primary key
-        identifies it within its collection.
+        {t(
+          "Collections keep data that people and agents reuse across tasks. A record's primary key identifies it within its collection.",
+        )}
       </p>
-      <section aria-label="Collections" className="flex flex-col gap-3">
+      <section aria-label={t("Collections")} className="flex flex-col gap-3">
         {error && <ErrorText text={error} />}
         {collections !== null && collections.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {isAdmin ? "No collections yet." : "No collection is shared with you yet."}
+            {isAdmin ? t("No collections yet.") : t("No collection is shared with you yet.")}
           </p>
         ) : null}
         {collections?.map((collection) => (
@@ -48,7 +49,11 @@ export function CollectionList() {
             >
               <p className="truncate text-sm font-medium">{collection.title}</p>
               <p className="text-xs text-muted-foreground">
-                {plural(collection.fields.length, "field", "fields")} · keyed by{" "}
+                {t(
+                  collection.fields.length === 1 ? "{0} field" : "{0} fields",
+                  collection.fields.length,
+                )}{" "}
+                {t("· keyed by")}{" "}
                 {
                   collection.fields.find((field) => field.id === collection.primaryKeyFieldId)
                     ?.label
@@ -66,7 +71,7 @@ export function CollectionList() {
                   />
                 }
               >
-                Edit
+                {t("Edit")}
               </Button>
             ) : null}
           </div>

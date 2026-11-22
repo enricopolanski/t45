@@ -68,7 +68,7 @@ serve({
     rpcTool(
       "create",
       "collections.create",
-      "Create a collection for the person you chat with, who must be an admin: its title, its fields (each with an id unique among its siblings, a label and a type), primaryKeyFieldId, the top-level text field whose value identifies a record, and memberUserIds, the people besides admins who work with its records (empty for admins only). Answers the collection with its id.",
+      "Create a collection for the person you chat with, who must be an admin: its title, its fields (each with an id unique among its siblings, a label and a type), primaryKeyFieldId, the top-level text or link field whose value identifies a record, and memberUserIds, the people besides admins who work with its records (empty for admins only). Answers the collection with its id.",
     ),
     rpcTool(
       "list",
@@ -83,7 +83,7 @@ serve({
     rpcTool(
       "search",
       "collections.searchRecords",
-      "Find records: each word of text appears, ignoring case, in one of fields, or of the fields the collection's layout searches when left out; filters match top-level fields' values exactly, or a number or date field within a {min, max} range, all of them. Records come in key order, up to limit (25 when left out); hasMore says whether more follow from offset + limit; matchCount counts the matching records and totalCount all of them.",
+      "Find records: each word of text appears, ignoring case, in one of fields, or of the fields the collection's layout searches when left out; filters match top-level fields' values exactly (a multiple-choice select: records whose list holds that option), or a number or date field within a {min, max} range, all of them. Records come in key order, up to limit (25 when left out); hasMore says whether more follow from offset + limit; matchCount counts the matching records and totalCount all of them.",
     ),
     rpcTool(
       "field_values",
@@ -93,7 +93,12 @@ serve({
     rpcTool(
       "save_record",
       "collections.saveRecord",
-      "Save a record: values by field key, the primary key included, as on a step: text and dates (YYYY-MM-DD) as strings (text fields marked isMarkdown render Markdown: use short paragraphs, lists and labelled links with real newlines, not literal backslash-n sequences, and no enclosing code fence), numbers as JSON numbers, yes/no as booleans, selects as one of their options, URLs as http:// or https:// strings. A repeatable group holds its row ids, and each row's field is group.rowId.field. A file field holds the id upload_file returned. The values replace the record with that key whole, or add it when there is none, so give every value the record keeps. Answers the saved record; a refusal says exactly what didn't fit.",
+      "Save a record: values by field key, the primary key included, as on a step: text and dates (YYYY-MM-DD) as strings (text fields marked isMarkdown render Markdown: use short paragraphs, lists and labelled links with real newlines, not literal backslash-n sequences, and no enclosing code fence), numbers as JSON numbers, yes/no as booleans, selects as one of their options (one marked isMultiple as a list of them, each once), URLs as http:// or https:// strings. A repeatable group holds its row ids, and each row's field is group.rowId.field. A file field holds the id upload_file returned. A link field (foreignKey) holds the key of one existing record of its collection; to link another record, clear it and save first. The values replace the record with that key whole, or add it when there is none, so give every value the record keeps. Answers the saved record; a refusal says exactly what didn't fit.",
+    ),
+    rpcTool(
+      "delete_record",
+      "collections.deleteRecord",
+      "Delete a record by its primary key value, with its files. Refused while a record of another collection links it through a link field, or a ticket's step links it: remove those links first.",
     ),
     {
       name: "upload_file",

@@ -7,6 +7,7 @@ import {
   WorkflowIcon,
 } from "lucide-react";
 
+import type { Message } from "~/i18n/locale";
 import type { NavLink } from "../sidebar/AppNav";
 
 /**
@@ -14,7 +15,7 @@ import type { NavLink } from "../sidebar/AppNav";
  * from this list, so each label exists once.
  */
 export const SETTINGS_GROUPS: ReadonlyArray<{
-  readonly label: string;
+  readonly label: Message;
   readonly links: ReadonlyArray<NavLink>;
 }> = [
   {

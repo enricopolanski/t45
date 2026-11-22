@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import { MESSAGE_MAX_INPUT_CHARS } from "@t45/contracts/models/Chat";
 
 import { parseInlineTokens } from "./inlineTokens";
@@ -306,6 +307,11 @@ export function getComposerPromptLengthValidationMessage(prompt: string): string
   const excessCharacters = normalizedPrompt.length - MESSAGE_MAX_INPUT_CHARS;
   if (excessCharacters <= 0) return null;
 
-  const characterLabel = excessCharacters === 1 ? "character" : "characters";
-  return `Prompt is ${excessCharacters.toLocaleString("en-US")} ${characterLabel} over the ${MESSAGE_MAX_INPUT_CHARS.toLocaleString("en-US")}-character limit. Shorten or split it before sending.`;
+  const characterLabel = translate(excessCharacters === 1 ? "character" : "characters");
+  return translate(
+    "Prompt is {0} {1} over the {2}-character limit. Shorten or split it before sending.",
+    excessCharacters.toLocaleString("en-US"),
+    characterLabel,
+    MESSAGE_MAX_INPUT_CHARS.toLocaleString("en-US"),
+  );
 }

@@ -8,7 +8,7 @@ import { AutomationId } from "../models/Automation.ts";
 import { ChatId, Report } from "../models/Chat.ts";
 import { RunStatus } from "../models/ChatOrigin.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
-import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
+import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { Collection } from "../models/Collection.ts";
 import {
   ComparisonFields,
@@ -163,6 +163,8 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     unit: Schema.optionalKey(TrimmedNonEmptyString),
     /** A select field's tones by option, when it sets them. */
     tones: Schema.optionalKey(FieldTones),
+    /** Whether a select field holds a list of its options. */
+    isMultiple: Schema.optionalKey(Schema.Boolean),
     /** How a repeatable group's entries are shown, when it sets that. */
     layout: Schema.optionalKey(Layout),
     /** Whether the text is shown as Markdown; its value stays the original source. */
@@ -172,6 +174,8 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     comparisonFields: Schema.optionalKey(ComparisonFields),
     /** A sibling URL displayed on this field; its value is still kept in that URL field. */
     linkUrl: Schema.optionalKey(Schema.String),
+    /** A link field's collection, whose record its value keys. */
+    linkedCollectionId: Schema.optionalKey(StringId),
     repeatable: Schema.Boolean,
     file: Schema.NullOr(FieldFileView),
     /**
@@ -206,6 +210,46 @@ export class FieldView extends Schema.Opaque<FieldView>()(
   }),
 ) {}
 
+const StepFieldSelection = Schema.Struct({
+  key: FieldPathSegment,
+  /** For an input, disambiguates the same field key from multiple source steps. */
+  sourceStepId: Schema.optionalKey(StringId),
+  /** For a records field, return only these linked records. */
+  recordKeys: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  /** Collection field keys to include in each record's values. An empty list returns keys only. */
+  recordFields: Schema.optionalKey(Schema.Array(FieldPathSegment)),
+});
+export type StepFieldSelection = typeof StepFieldSelection.Type;
+
+const ComparisonSources = Schema.Struct({
+  recordsIndex: NonNegativeInt,
+  records: Schema.Array(
+    Schema.Struct({
+      recordKey: TrimmedNonEmptyString,
+      criteria: Schema.Array(
+        Schema.Struct({ id: FieldPathSegment, name: Schema.String, value: Schema.String }),
+      ),
+    }),
+  ),
+});
+
+const StepFieldData = Schema.Struct({
+  key: FieldPathSegment,
+  label: TrimmedNonEmptyString,
+  type: FieldView.fields.type,
+  value: Schema.Json,
+  comparisonSources: Schema.optionalKey(ComparisonSources),
+});
+
+const RecordReviewEntries = Schema.Array(
+  Schema.Struct({
+    recordKey: TrimmedNonEmptyString,
+    rowId: Schema.NullOr(FieldPathSegment),
+    hasDuplicateEntries: Schema.Boolean,
+    isConfirmed: Schema.Boolean,
+  }),
+);
+
 /**
  * One step as someone who may see it does, with the names of the steps it sits in and of its
  * sub-steps. Of the ticket's other steps it holds nothing, not even their names, but the fields
@@ -221,8 +265,31 @@ export const StepView = Schema.Struct({
   otherSteps: Schema.Array(
     Schema.Struct({ step: StepSummaryView, name: Schema.String, fields: Schema.Array(FieldView) }),
   ),
+  /** The steps the viewer can open from this page, in workflow order. */
+  stepNavigation: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        ...StepNameView.fields,
+        status: Schema.Literals(["working", "blocked", "completed"]),
+      }),
+    ),
+  ),
+  /** How the read-only view of a completed step was obtained. */
+  completedStep: Schema.optionalKey(Schema.Literals(["snapshot", "legacy"])),
   /** The fields of earlier steps this step reads. */
   inputs: Schema.Array(FieldView),
+  /** Review information only when both fields are inputs from the same step. */
+  comparisonSources: Schema.optionalKey(Schema.Record(Schema.String, ComparisonSources)),
+  inputRecordReviews: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        recordsIndex: NonNegativeInt,
+        groupIndex: NonNegativeInt,
+        recordKeyFieldId: FieldPathSegment,
+        entries: RecordReviewEntries,
+      }),
+    ),
+  ),
   /** The active members of the step, who can be assigned to it. */
   assignableUserIds: Schema.Array(StringId),
   /** The commands run on this step, oldest first; a ticket's first step starts with its creation. */
@@ -233,6 +300,8 @@ export const StepView = Schema.Struct({
       userId: Schema.NullOr(StringId),
       agentId: Schema.NullOr(StringId),
       fieldKey: Schema.NullOr(TrimmedNonEmptyString),
+      /** Whether entering the step ran it, on the authority of its assignee. */
+      isAutomatic: Schema.Boolean,
       automation: Schema.NullOr(Schema.Struct({ id: AutomationId, title: TrimmedNonEmptyString })),
       createdAt: Schema.DateTimeUtcFromString,
     }),
@@ -247,14 +316,7 @@ export const StepView = Schema.Struct({
     Schema.Struct({
       groupFieldId: FieldPathSegment,
       ...RecordEntryReview.fields,
-      entries: Schema.Array(
-        Schema.Struct({
-          recordKey: TrimmedNonEmptyString,
-          rowId: Schema.NullOr(FieldPathSegment),
-          hasDuplicateEntries: Schema.Boolean,
-          isConfirmed: Schema.Boolean,
-        }),
-      ),
+      entries: RecordReviewEntries,
     }),
   ),
   subSteps: Schema.Array(Schema.Struct({ ...StepSummaryView.fields, name: TrimmedNonEmptyString })),
@@ -277,6 +339,8 @@ export const StepView = Schema.Struct({
           /** The chat it runs in. */
           chatId: ChatId,
           ranBy: StringId,
+          /** Whether entering the step started it, rather than a member. */
+          isAutomatic: Schema.Boolean,
           startedAt: Schema.DateTimeUtcFromString,
           /** Null while it runs. */
           endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
@@ -292,6 +356,23 @@ export const StepView = Schema.Struct({
   ),
 });
 export type StepView = typeof StepView.Type;
+
+/** The content presented at completion, including the values and layouts of linked collections. */
+export const StepSnapshot = Schema.Struct({
+  ...Struct.pick(StepView.fields, [
+    "definition",
+    "fields",
+    "inputs",
+    "inputRecordReviews",
+    "comparisonSources",
+    "recordReviews",
+    "subSteps",
+    "comments",
+    "files",
+  ]),
+  assignee: Step.fields.assignee,
+});
+export type StepSnapshot = typeof StepSnapshot.Type;
 
 export const Workflows = RpcGroup.make(
   Rpc.make("listWorkflows", {
@@ -389,6 +470,8 @@ export const Workflows = RpcGroup.make(
       /** Refused with `slug_taken` when another project has it; null clears it. */
       slug: Schema.optionalKey(Schema.NullOr(Slug)),
       defaultAssignees: Schema.optionalKey(Project.fields.defaultAssignees),
+      stepHistoryAccess: Project.fields.stepHistoryAccess,
+      automationTriggers: Project.fields.automationTriggers,
       /** Refused with `last_admin` when it leaves no active admin. */
       adminUserIds: Schema.optionalKey(Project.fields.adminUserIds),
     },
@@ -465,6 +548,21 @@ export const Workflows = RpcGroup.make(
   Rpc.make("watchStep", { payload: step, success: StepView, error: WorkflowErrors, stream: true }),
   /** The step as the web shows it, once; an automation reads its own step. */
   Rpc.make("getStep", { payload: step, success: StepView, error: WorkflowErrors }),
+  Rpc.make("getStepFields", {
+    payload: {
+      ...step,
+      inputs: Schema.optionalKey(Schema.Array(StepFieldSelection)),
+      fields: Schema.optionalKey(Schema.Array(StepFieldSelection)),
+    },
+    success: Schema.Struct({
+      inputs: Schema.Array(Schema.Struct({ ...StepFieldData.fields, sourceStepId: StringId })),
+      fields: Schema.Array(StepFieldData),
+      proposals: Schema.Array(
+        Schema.Struct(Struct.pick(Proposal.fields, ["fieldKey", "value", "isDiscarded"])),
+      ),
+    }),
+    error: WorkflowErrors,
+  }),
   Rpc.make("setStepField", {
     payload: { ...step, fieldKey: TrimmedNonEmptyString, value: FieldValue },
     error: WorkflowErrors,
@@ -478,7 +576,7 @@ export const Workflows = RpcGroup.make(
       ...step,
       fieldKey: TrimmedNonEmptyString,
       value: FieldValue,
-      ...Struct.pick(Proposal.fields, ["whyYes", "whyNo", "score"]),
+      ...Struct.pick(Proposal.fields, ["whyYes", "whyNo", "score", "comparison"]),
     },
     error: WorkflowErrors,
   }),

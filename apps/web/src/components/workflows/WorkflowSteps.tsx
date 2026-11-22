@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { DraftStep } from "./workflowLogic";
 import type { WorkflowView } from "@t45/contracts/resources/Workflows";
 import { useBlocker } from "@tanstack/react-router";
@@ -29,20 +30,21 @@ function StepTrail({
   readonly path: ReadonlyArray<DraftStep>;
   readonly onOpen: (key: string | null) => void;
 }) {
+  const t = useTranslation();
   const link = "text-xs text-muted-foreground hover:text-foreground hover:underline";
   return (
-    <nav aria-label="Sub-step path" className="flex flex-wrap items-center gap-1">
+    <nav aria-label={t("Sub-step path")} className="flex flex-wrap items-center gap-1">
       <button type="button" className={link} onClick={() => onOpen(null)}>
-        All steps
+        {t("All steps")}
       </button>
       {path.map((step, at) => (
         <span key={step.id} className="flex items-center gap-1">
           <ChevronRightIcon className="size-3 text-muted-foreground" />
           {at === path.length - 1 ? (
-            <span className="text-xs font-medium">{step.name || "Untitled sub-step"}</span>
+            <span className="text-xs font-medium">{step.name || t("Untitled sub-step")}</span>
           ) : (
             <button type="button" className={link} onClick={() => onOpen(step.id)}>
-              {step.name || "Untitled step"}
+              {step.name || t("Untitled step")}
             </button>
           )}
         </span>
@@ -66,6 +68,7 @@ export function WorkflowSteps({
   readonly openStepKey: string | null;
   readonly onOpenStep: (key: string | null) => void;
 }) {
+  const t = useTranslation();
   const [steps, setSteps] = useState<ReadonlyArray<DraftStep>>([]);
   const [dirty, setDirty] = useState(false);
   /** Takes the server's steps as they are, dropping unsaved edits. */
@@ -81,16 +84,17 @@ export function WorkflowSteps({
   useBlocker({
     // Opening a sub-step stays on this page and keeps the unsaved steps.
     shouldBlockFn: ({ current, next }) =>
-      current.pathname !== next.pathname && !window.confirm("Leave without saving your changes?"),
+      current.pathname !== next.pathname &&
+      !window.confirm(t("Leave without saving your changes?")),
     disabled: !dirty,
     enableBeforeUnload: dirty,
   });
 
   if (detail === null) {
     return (
-      <WorkFrame title="Steps">
+      <WorkFrame title={t("Steps")}>
         <p role={error !== null ? "alert" : undefined} className="text-sm text-muted-foreground">
-          {error ?? "Loading…"}
+          {error ?? t("Loading…")}
         </p>
       </WorkFrame>
     );
@@ -117,7 +121,8 @@ export function WorkflowSteps({
 
   return (
     <WorkFrame
-      title="Steps"
+      title={t("Steps")}
+      tabTitle={t("Steps · {0}", workflow.name)}
       parent={
         <PageBreadcrumbLink
           to="/settings/workflows/$workflowId"
@@ -129,27 +134,31 @@ export function WorkflowSteps({
       actions={
         <>
           <span aria-live="polite" className="text-xs text-muted-foreground">
-            {dirty ? "Unsaved changes." : "All changes saved."}
+            {dirty ? t("Unsaved changes.") : t("All changes saved.")}
           </span>
           <Button size="sm" disabled={disabled || !dirty} onClick={save}>
-            Save
+            {t("Save")}
           </Button>
         </>
       }
     >
       <p className="text-sm text-muted-foreground">
         {version.isFrozen
-          ? `Version ${version.number} is in use and no longer changes: saving starts version ${version.number + 1}. Layouts are the exception: every version takes them in place. `
-          : `Version ${version.number} is a draft until a project adopts it. `}
-        Tickets keep the version they started on.
+          ? t(
+              "Version {0} is in use and no longer changes: saving starts version {1}. Layouts are the exception: every version takes them in place. ",
+              version.number,
+              version.number + 1,
+            )
+          : t("Version {0} is a draft until a project adopts it. ", version.number)}
+        {t("Tickets keep the version they started on.")}
       </p>
       {!canEdit ? (
         <p className="text-sm text-muted-foreground">
-          Only this workflow's creator, its editors and organization admins can edit it.
+          {t("Only this workflow's creator, its editors and organization admins can edit it.")}
         </p>
       ) : null}
-      <section aria-label="Step Editor" className="flex flex-col gap-2.5">
-        <h2 className="text-sm font-semibold">Step Editor</h2>
+      <section aria-label={t("Step Editor")} className="flex flex-col gap-2.5">
+        <h2 className="text-sm font-semibold">{t("Step Editor")}</h2>
         {error && <ErrorText text={error} />}
         {path !== null && open !== undefined ? (
           <div className="flex flex-col gap-2.5">
@@ -169,7 +178,7 @@ export function WorkflowSteps({
           </div>
         ) : (
           <div className="flex flex-col gap-2.5">
-            <p className="text-sm font-medium">Define the steps in this process.</p>
+            <p className="text-sm font-medium">{t("Define the steps in this process.")}</p>
             {steps.length > 0 ? (
               <ol className="flex flex-col gap-2.5">
                 {listEntries(steps, edit).map((place) => (
@@ -193,7 +202,7 @@ export function WorkflowSteps({
             <div>
               <Button size="sm" variant="outline" disabled={disabled} onClick={addStep}>
                 <PlusIcon />
-                Add step
+                {t("Add step")}
               </Button>
             </div>
           </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { ArrowLeftIcon, SettingsIcon } from "lucide-react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
@@ -16,6 +17,7 @@ import { isSettingsPage, useNavigateToMainApp } from "./mainAppLocation";
 
 /** The organization's logo, or T45 while it has none, linking home. */
 export function SidebarChromeHeader() {
+  const t = useTranslation();
   const organization = useOrganizationIfLoaded();
   return (
     // The page headers' spacing, and at least their height: a tall logo makes it taller.
@@ -24,7 +26,7 @@ export function SidebarChromeHeader() {
       {/* The padding keeps the brand's focus ring inside the clip. */}
       <div className="flex min-h-8 min-w-0 flex-1 items-center overflow-hidden py-0.5">
         <Link
-          aria-label="Go to Home"
+          aria-label={t("Go to Home")}
           className="ml-[var(--sidebar-toggle-left)] hidden min-h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md text-foreground outline-hidden ring-ring focus-visible:ring-2 md:flex"
           to="/my-work"
         >
@@ -50,6 +52,7 @@ export function SidebarChromeHeader() {
 
 /** Settings for admins; on a Settings page, Back to the page it was opened from. */
 export function SidebarChromeFooter() {
+  const t = useTranslation();
   const canManage = useIsAdmin();
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
@@ -70,7 +73,7 @@ export function SidebarChromeFooter() {
               }}
             >
               <ArrowLeftIcon />
-              <span>Back</span>
+              <span>{t("Back")}</span>
             </SidebarMenuButton>
           ) : canManage ? (
             <SidebarMenuButton
@@ -80,7 +83,7 @@ export function SidebarChromeFooter() {
               }}
             >
               <SettingsIcon />
-              <span>Settings</span>
+              <span>{t("Settings")}</span>
             </SidebarMenuButton>
           ) : null}
         </SidebarMenuItem>

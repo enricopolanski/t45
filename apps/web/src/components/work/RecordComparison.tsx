@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { ComparisonFields, DerivedComparisonField, Field } from "@t45/contracts/models/Field";
 import {
   comparisonFieldReference,
@@ -7,7 +8,9 @@ import {
 } from "@t45/contracts/models/Field";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
-import type { FieldView } from "@t45/contracts/resources/Workflows";
+import type { Proposal } from "@t45/contracts/models/Workflow";
+import { ComparisonCriteriaTable } from "./ComparisonCriteriaTable";
+import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
 import { getFieldLink } from "@t45/core/fieldViews";
 import { useId, useState } from "react";
 
@@ -156,17 +159,18 @@ function ComparisonValue({
   readonly record: CollectionRecordView;
   readonly isProposed?: boolean;
 }) {
+  const t = useTranslation();
   if (field !== undefined && "template" in field) {
     return (
       formatDerivedComparisonValue(
         (isProposed ? field.proposedTemplate : undefined) ?? field.template,
         collection,
         record,
-      ) ?? <span className="text-muted-foreground">Not provided</span>
+      ) ?? <span className="text-muted-foreground">{t("Not provided")}</span>
     );
   }
   return field === undefined || !holdsData(record.values[field.id]) ? (
-    <span className="text-muted-foreground">Not provided</span>
+    <span className="text-muted-foreground">{t("Not provided")}</span>
   ) : (
     renderRecordValue(
       field,
@@ -174,6 +178,7 @@ function ComparisonValue({
       record.files,
       getFieldLink(field.id, collection.fields, record.values),
       true,
+      t,
     )
   );
 }
@@ -197,6 +202,7 @@ function ComparisonPropertyRow({
   readonly collection: RecordCollection;
   readonly record: CollectionRecordView;
 }) {
+  const t = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const cellId = useId();
   const left =
@@ -228,7 +234,7 @@ function ComparisonPropertyRow({
       <td id={`${cellId}-source`} className="border-l p-3 wrap-anywhere whitespace-pre-wrap">
         {showsValues &&
           (source === undefined ? (
-            <span className="text-muted-foreground">Choose a source record</span>
+            <span className="text-muted-foreground">{t("Choose a source record")}</span>
           ) : (
             <ComparisonValue field={left} collection={source.collection} record={source.record} />
           ))}
@@ -248,15 +254,23 @@ export function RecordComparison({
   collection,
   record,
   rationale,
+  comparison,
+  criteriaSources,
   comparisonFields,
 }: {
   readonly inputs: ReadonlyArray<FieldView>;
   readonly collection: RecordCollection;
   readonly record: CollectionRecordView;
   readonly rationale: string;
+  readonly comparison: Proposal["comparison"];
+  readonly criteriaSources: NonNullable<StepView["comparisonSources"]>[string] | undefined;
   readonly comparisonFields: ComparisonFields | undefined;
 }) {
-  const sources = listSources(inputs);
+  const t = useTranslation();
+  const sourceInput = criteriaSources && inputs[criteriaSources.recordsIndex];
+  const sources = listSources(sourceInput ? [sourceInput] : inputs).filter(
+    (source) => !comparison || source.record.key === comparison.sourceRecordKey,
+  );
   const [selected, setSelected] = useState(() => {
     // Existing proposals name source keys in their rationale rather than a structured link.
     const references = rationale.split(/[\s`,;()]+/u);
@@ -272,6 +286,7 @@ export function RecordComparison({
   const sourceHeading =
     source === undefined ? undefined : getRecordHeading(source.collection, source.record);
   const proposedHeading = getRecordHeading(collection, record);
+  const confirmed = criteriaSources?.records.find((row) => row.recordKey === source?.record.key);
   const { shown, hidden, order, derived } = resolveComparisonFields(comparisonFields);
   const available = [
     ...new Map(
@@ -315,59 +330,95 @@ export function RecordComparison({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-col gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Compare with step input</span>
-        <Select value={selected} onValueChange={setSelected}>
-          <SelectTrigger aria-label="Compare with step input" className="w-full min-w-0" isWrapped>
-            <SelectValue placeholder="Choose the article to compare">
-              {source === undefined || sourceHeading === undefined
-                ? null
-                : `${source.label} · ${sourceHeading.text}`}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            {sources.map((candidate) => (
-              <SelectItem key={candidate.id} value={candidate.id}>
-                {candidate.label} · {getRecordHeading(candidate.collection, candidate.record).text}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        <span className="text-xs font-medium text-muted-foreground">
+          {t("Compare with step input")}
+        </span>
+        {comparison && sourceHeading ? (
+          <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 text-sm sm:grid-cols-2">
+            <span>
+              <span className="block text-xs text-muted-foreground">{source?.label}</span>
+              <strong>
+                <RecordHeading heading={sourceHeading} />
+              </strong>
+            </span>
+            <span>
+              <span className="block text-xs text-muted-foreground">{t("Proposed record")}</span>
+              <strong>
+                <RecordHeading heading={proposedHeading} />
+              </strong>
+            </span>
+          </div>
+        ) : (
+          <Select value={selected} onValueChange={setSelected}>
+            <SelectTrigger
+              aria-label={t("Compare with step input")}
+              className="w-full min-w-0"
+              isWrapped
+            >
+              <SelectValue placeholder={t("Choose the article to compare")}>
+                {source === undefined || sourceHeading === undefined
+                  ? null
+                  : `${source.label} · ${sourceHeading.text}`}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {sources.map((candidate) => (
+                <SelectItem key={candidate.id} value={candidate.id}>
+                  {candidate.label} ·{" "}
+                  {getRecordHeading(candidate.collection, candidate.record).text}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        )}
         {source === undefined ? (
           <p className="text-sm text-muted-foreground">
-            The proposal does not identify a source record. Choose one to compare; no match is
-            assumed.
+            {t(
+              "The proposal does not identify a source record. Choose one to compare; no match is assumed.",
+            )}
           </p>
         ) : null}
       </div>
+      {confirmed && (
+        <ComparisonCriteriaTable
+          key={confirmed.recordKey}
+          source={confirmed}
+          assessments={comparison?.assessments ?? []}
+        />
+      )}
       <div className="overflow-x-auto rounded-lg border">
         <table
-          aria-label="Record comparison"
+          aria-label={t("Record comparison")}
           className="w-full min-w-[36rem] table-fixed border-collapse text-sm"
         >
           <thead className="bg-muted/60 text-left align-top">
             <tr>
               <th scope="col" className="w-1/6 p-3 font-medium">
-                Property
+                {t("Property")}
               </th>
               <th scope="col" className="w-5/12 border-l p-3">
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
-                  {source?.label ?? "Step input"} · Source record
+                  {source?.label ?? t("Step input")} {t("· Source record")}
                 </div>
-                <h3 className="wrap-anywhere font-semibold">
-                  {sourceHeading === undefined ? (
-                    "Choose a source record"
-                  ) : (
-                    <RecordHeading heading={sourceHeading} />
-                  )}
-                </h3>
+                {!comparison && (
+                  <h3 className="wrap-anywhere font-semibold">
+                    {sourceHeading === undefined ? (
+                      t("Choose a source record")
+                    ) : (
+                      <RecordHeading heading={sourceHeading} />
+                    )}
+                  </h3>
+                )}
               </th>
               <th scope="col" className="w-5/12 border-l p-3">
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
-                  Proposed record
+                  {t("Proposed record")}
                 </div>
-                <h3 className="wrap-anywhere font-semibold">
-                  <RecordHeading heading={proposedHeading} />
-                </h3>
+                {!comparison && (
+                  <h3 className="wrap-anywhere font-semibold">
+                    <RecordHeading heading={proposedHeading} />
+                  </h3>
+                )}
               </th>
             </tr>
           </thead>
@@ -385,14 +436,14 @@ export function RecordComparison({
         </table>
       </div>
       <details className="rounded-lg border p-3">
-        <summary className="cursor-pointer text-sm font-medium">Full record details</summary>
+        <summary className="cursor-pointer text-sm font-medium">{t("Full record details")}</summary>
         <div className="mt-4 grid min-w-0 gap-6 lg:grid-cols-2">
           {source === undefined ? null : (
-            <section aria-label="Source record details" className="min-w-0">
+            <section aria-label={t("Source record details")} className="min-w-0">
               <RecordShowcase collection={source.collection} record={source.record} />
             </section>
           )}
-          <section aria-label="Proposed record details" className="min-w-0">
+          <section aria-label={t("Proposed record details")} className="min-w-0">
             <RecordShowcase collection={collection} record={record} />
           </section>
         </div>

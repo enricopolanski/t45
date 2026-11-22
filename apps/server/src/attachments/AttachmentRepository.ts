@@ -139,7 +139,8 @@ const make = Effect.gen(function* () {
 
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const unheld = sql.literal(`step_id IS NULL AND collection_id IS NULL
-    AND NOT EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id)`);
+    AND NOT EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id)
+    AND NOT EXISTS (SELECT 1 FROM completed_step_files c WHERE c.attachment_id = attachments.id)`);
 
   const columns = sql.literal(COLUMNS);
   const select = (where: Statement.Fragment) =>

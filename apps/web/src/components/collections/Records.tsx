@@ -1,3 +1,4 @@
+import { translate, type Translate, useTranslation } from "~/i18n/locale";
 import { type Collection, UPDATED_AT_COLUMN } from "@t45/contracts/models/Collection";
 import {
   isUrlFieldValue,
@@ -8,6 +9,7 @@ import {
 import { isTableColumn, resolveTableLayout, sortRows } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
 import { buildFieldViews, getFieldLink } from "@t45/core/fieldViews";
+import { Link } from "@tanstack/react-router";
 import { ArrowLeftIcon, ArrowRightIcon, EyeIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
@@ -31,13 +33,16 @@ import {
 } from "../ui/dialog";
 import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
-import { FormGrid, layOutForm, uploadFile } from "../work/StepFields";
-import { formatDay, formatNumber, plural } from "../work/workLogic";
+import { AttachmentLink, FormGrid, layOutForm, uploadFile } from "../work/StepFields";
+import { formatDay, formatNumber } from "../work/workLogic";
 
 type RecordFiles = CollectionRecordView["files"];
 
 /** What a collection holds of its records: their fields and which one keys them. */
 type RecordShape = Pick<Collection, "fields" | "primaryKeyFieldId" | "columnOrder" | "layout">;
+
+const formatEntryCount = (count: number) =>
+  translate(count === 1 ? "{0} entry" : "{0} entries", count);
 
 /** A record's value as text, so a displayed link never wraps another link. */
 export function formatRecordValue(
@@ -46,11 +51,11 @@ export function formatRecordValue(
   files: RecordFiles,
 ) {
   if (field.type === "group")
-    return field.repeatable ? plural(rowIds(value).length, "entry", "entries") : field.label;
+    return field.repeatable ? formatEntryCount(rowIds(value).length) : field.label;
   if (value === undefined) return "";
   switch (field.type) {
     case "boolean":
-      return value === true ? "Yes" : "No";
+      return translate(value === true ? "Yes" : "No");
     case "date":
       return formatDay(String(value));
     case "number":
@@ -58,8 +63,28 @@ export function formatRecordValue(
     case "file":
       return files.find((file) => file.id === value)?.name ?? "";
     default:
-      return String(value);
+      return Array.isArray(value) ? value.join(", ") : String(value);
   }
+}
+
+/** A link field's record, by its key, opening on its own page. */
+export function RecordLink({
+  collectionId,
+  recordKey,
+}: {
+  readonly collectionId: string;
+  readonly recordKey: string;
+}) {
+  return (
+    <Link
+      to="/collections/$collectionId/records/$recordKey"
+      params={{ collectionId, recordKey }}
+      className="underline"
+      onClick={(event) => event.stopPropagation()}
+    >
+      {recordKey}
+    </Link>
+  );
 }
 
 /** What a record's cell shows, with a sibling URL when one is displayed on it. */
@@ -69,6 +94,7 @@ export function renderRecordValue(
   files: RecordFiles,
   linkUrl: string | undefined,
   isWrapped: boolean,
+  t: Translate,
 ) {
   if (linkUrl !== undefined)
     return (
@@ -77,6 +103,10 @@ export function renderRecordValue(
       </ExternalUrl>
     );
   switch (field.type) {
+    case "file": {
+      const attachment = files.find((file) => file.id === value);
+      return attachment ? <AttachmentLink attachment={attachment} /> : "";
+    }
     case "url":
       return isUrlFieldValue(value) ? (
         <ExternalUrl href={value} onClick={(event) => event.stopPropagation()}>
@@ -97,13 +127,23 @@ export function renderRecordValue(
           className="text-muted-foreground underline"
           onClick={(event) => event.stopPropagation()}
         >
-          Link
+          {t("Link")}
         </a>
       ) : (
         formatRecordValue(field, value, files)
       );
     case "select":
-      return typeof value === "string" ? <OptionValue option={value} tones={field.tones} /> : "";
+      return typeof value === "string" ? (
+        <OptionValue option={value} tones={field.tones} />
+      ) : (
+        formatRecordValue(field, value, files)
+      );
+    case "foreignKey":
+      return typeof value === "string" ? (
+        <RecordLink collectionId={field.collectionId} recordKey={value} />
+      ) : (
+        ""
+      );
     default:
       return formatRecordValue(field, value, files);
   }
@@ -201,6 +241,7 @@ export function RecordTable({
       }
     | undefined;
 }) {
+  const t = useTranslation();
   const order = listColumnOrder(collection);
   const table = resolveTableLayout(
     collection.fields,
@@ -212,7 +253,7 @@ export function RecordTable({
     ...table.columns.map((column) => ({ id: column.field.id, label: column.header, column })),
     ...(collection.layout?.isUpdatedAtVisible === false
       ? []
-      : [{ id: UPDATED_AT_COLUMN, label: "Last update", column: null }]),
+      : [{ id: UPDATED_AT_COLUMN, label: t("Last update"), column: null }]),
   ];
   const columns = hasLayoutColumns
     ? shown
@@ -240,7 +281,7 @@ export function RecordTable({
           <tr>
             {renderStatus === undefined ? null : (
               <th scope="col" className={headerCell}>
-                Status
+                {t("Status")}
               </th>
             )}
             {columns.map((column, index) => (
@@ -259,7 +300,7 @@ export function RecordTable({
                     <Button
                       size="icon-xs"
                       variant="ghost"
-                      aria-label={`Move ${column.label} left`}
+                      aria-label={t("Move {0} left", column.label)}
                       disabled={reorder.disabled || index === 0}
                       onClick={() => move(column.id, columns[index - 1]!.id)}
                     >
@@ -268,7 +309,7 @@ export function RecordTable({
                     <Button
                       size="icon-xs"
                       variant="ghost"
-                      aria-label={`Move ${column.label} right`}
+                      aria-label={t("Move {0} right", column.label)}
                       disabled={reorder.disabled || index === columns.length - 1}
                       onClick={() => move(column.id, columns[index + 1]!.id)}
                     >
@@ -281,7 +322,7 @@ export function RecordTable({
             ))}
             {hasActions ? (
               <th scope="col" className={cn(headerCell, "text-center")}>
-                Actions
+                {t("Actions")}
               </th>
             ) : null}
           </tr>
@@ -293,7 +334,7 @@ export function RecordTable({
               <tr
                 key={record.key}
                 tabIndex={onOpen === undefined ? undefined : 0}
-                aria-label={`Record ${record.key}`}
+                aria-label={t("Record {0}", record.key)}
                 className={
                   onOpen === undefined
                     ? undefined
@@ -328,6 +369,7 @@ export function RecordTable({
                     record.files,
                     getFieldLink(field.id, collection.fields, record.values),
                     column.isWrapped,
+                    t,
                   );
                   const text = findLongText(field, value);
                   const isWrapped = text !== undefined && column.isWrapped;
@@ -358,8 +400,8 @@ export function RecordTable({
                           type="button"
                           size="icon-xs"
                           variant="ghost"
-                          aria-label={`View record ${record.key}`}
-                          title="View record"
+                          aria-label={t("View record {0}", record.key)}
+                          title={t("View record")}
                           onClick={() => onView(record)}
                         >
                           <EyeIcon />
@@ -370,8 +412,8 @@ export function RecordTable({
                           type="button"
                           size="icon-xs"
                           variant="ghost"
-                          aria-label={`Edit record ${record.key}`}
-                          title="Edit record"
+                          aria-label={t("Edit record {0}", record.key)}
+                          title={t("Edit record")}
                           onClick={() => onEdit(record)}
                         >
                           <PencilIcon />
@@ -465,11 +507,12 @@ export function RecordDialog({
   readonly onClose: () => void;
   readonly onSaved: (record: CollectionRecordView) => void;
 }) {
+  const t = useTranslation();
   const { editor, form, isBusy, error, save } = useRecordForm(collection, record, onSaved);
   return (
     <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : onClose())}>
       <DialogPopup
-        aria-label="Record"
+        aria-label={t("Record")}
         className={
           form.dialogWidth === 1024
             ? "sm:max-w-5xl"
@@ -486,7 +529,7 @@ export function RecordDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Record</DialogTitle>
+            <DialogTitle>{t("Record")}</DialogTitle>
           </DialogHeader>
           <DialogPanel>
             <div className="flex flex-col gap-4">
@@ -496,7 +539,7 @@ export function RecordDialog({
           </DialogPanel>
           <DialogFooter>
             <Button type="submit" disabled={isBusy}>
-              Save record
+              {t("Save record")}
             </Button>
           </DialogFooter>
         </form>
@@ -519,6 +562,7 @@ export function RecordPicker({
   readonly onClose: () => void;
   readonly onPick: (record: CollectionRecordView) => void;
 }) {
+  const t = useTranslation();
   const [text, setText] = useState("");
   const [found, setFound] = useState<{
     readonly records: ReadonlyArray<CollectionRecordView>;
@@ -554,24 +598,24 @@ export function RecordPicker({
     <Dialog open onOpenChange={(isOpen) => (isOpen ? undefined : onClose())}>
       <DialogPopup className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{`Link a record to ${label}`}</DialogTitle>
+          <DialogTitle>{t("Link a record to {0}", label)}</DialogTitle>
         </DialogHeader>
         <DialogPanel>
           <div className="flex flex-col gap-3">
             <Input
               type="search"
-              aria-label="Search records"
-              placeholder="Search records"
+              aria-label={t("Search records")}
+              placeholder={t("Search records")}
               value={text}
               onChange={(event) => setText(event.target.value)}
             />
             {error && <ErrorText text={error} />}
             {found !== null && records.length === 0 && !found.hasMore ? (
-              <p className="text-sm text-muted-foreground">No record to link.</p>
+              <p className="text-sm text-muted-foreground">{t("No record to link.")}</p>
             ) : null}
             {records.length > 0 ? (
               <RecordTable
-                label="Records to link"
+                label={t("Records to link")}
                 collection={collection}
                 records={records}
                 onOpen={onPick}
@@ -580,7 +624,7 @@ export function RecordPicker({
             {found?.hasMore ? (
               <div>
                 <Button type="button" size="sm" variant="outline" onClick={loadMore}>
-                  Show more
+                  {t("Show more")}
                 </Button>
               </div>
             ) : null}

@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { ChevronDownIcon } from "lucide-react";
 
 import {
@@ -30,6 +31,7 @@ export function AssigneePicker({
   readonly disabled: boolean;
   readonly onPick: (ref: string) => void;
 }) {
+  const t = useTranslation();
   const directory = useWorkDirectory();
   const actors = assignablePeople(directory).filter(
     (actor) => actor.id !== current && memberIds.includes(actor.id),
@@ -46,7 +48,7 @@ export function AssigneePicker({
     >
       <ComboboxTrigger
         disabled={disabled}
-        aria-label={`Assignee: ${actorName(directory, current)}. Change`}
+        aria-label={t("Assignee: {0}. Change", actorName(directory, current))}
         render={
           <button
             type="button"
@@ -57,9 +59,9 @@ export function AssigneePicker({
         <ActorName actor={current} />
         <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
       </ComboboxTrigger>
-      <ComboboxPopup aria-label="Assign to" className="flex w-72 flex-col">
-        <ComboboxSearchInput placeholder="Search people" />
-        <ComboboxEmpty>Nobody matches.</ComboboxEmpty>
+      <ComboboxPopup aria-label={t("Assign to")} className="flex w-72 flex-col">
+        <ComboboxSearchInput placeholder={t("Search people")} />
+        <ComboboxEmpty>{t("Nobody matches.")}</ComboboxEmpty>
         <ComboboxList>
           {(actor: Actor) => (
             <ComboboxItem key={actor.id} value={actor}>

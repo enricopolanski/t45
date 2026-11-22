@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Link } from "@tanstack/react-router";
 import { Building2Icon, LogOutIcon, SettingsIcon, UserIcon } from "lucide-react";
 
@@ -15,31 +16,32 @@ import { actorName } from "./workLogic";
  * Sign out.
  */
 export function AccountMenu() {
+  const t = useTranslation();
   const userId = useSession()?.userId;
   const directory = useWorkDirectory();
   const isAdmin = useIsAdmin();
-  const name = userId === undefined ? "You" : actorName(directory, userId);
+  const name = userId === undefined ? t("You") : actorName(directory, userId);
 
   return (
     <Menu>
-      <MenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Account" />}>
+      <MenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={t("Account")} />}>
         <ActorAvatar actor={userId ?? null} />
       </MenuTrigger>
       <MenuPopup align="end">
         <p className="truncate px-2 py-1.5 text-xs text-muted-foreground">{name}</p>
         <MenuLinkItem render={<Link to="/profile" />}>
           <UserIcon />
-          Profile
+          {t("Profile")}
         </MenuLinkItem>
         {isAdmin ? (
           <>
             <MenuLinkItem render={<Link to="/settings" />}>
               <SettingsIcon />
-              Settings
+              {t("Settings")}
             </MenuLinkItem>
             <MenuLinkItem render={<Link to="/settings/organization" />}>
               <Building2Icon />
-              Organization
+              {t("Organization")}
             </MenuLinkItem>
           </>
         ) : null}
@@ -47,11 +49,11 @@ export function AccountMenu() {
         <MenuItem
           variant="destructive"
           onClick={() =>
-            void signOut().catch((cause: unknown) => toastFailure("Sign-out failed", cause))
+            void signOut().catch((cause: unknown) => toastFailure(t("Sign-out failed"), cause))
           }
         >
           <LogOutIcon />
-          Sign out
+          {t("Sign out")}
         </MenuItem>
       </MenuPopup>
     </Menu>

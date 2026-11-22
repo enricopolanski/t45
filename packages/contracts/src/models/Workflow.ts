@@ -10,11 +10,14 @@ import { AutomationId } from "./Automation.ts";
 import {
   Field,
   FieldPathSegment,
+  type ComparisonCriteria,
   Fields,
   FieldValues,
   groupRows,
   hasDistinctIds,
   holdsData,
+  isCollectionOnly,
+  isUrlFieldValue,
   type Layout,
   recordKeys,
   rowIds,
@@ -40,6 +43,7 @@ export interface StepDefinitionEncoded {
   readonly subSteps: ReadonlyArray<StepDefinitionEncoded>;
   readonly inputs?: ReadonlyArray<StepInput>;
   readonly automationIds?: ReadonlyArray<string>;
+  readonly isDoneWhenApproved?: boolean;
 }
 
 export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition")({
@@ -63,6 +67,12 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
   /** The automations people run on this step, the same in every project; none when left out. */
   automationIds: Schema.UniqueArray(AutomationId).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
+  isDoneWhenApproved: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "Whether the step marks itself done, moving the ticket on, once every record review is confirmed and its fields are complete.",
+    }),
   ),
 }) {}
 
@@ -150,6 +160,10 @@ const Steps = Schema.Array(StepDefinition).check(
       expected: "top-level repeatable record reviews with a linked records field and a text key",
     },
   ),
+  Schema.makeFilter(
+    (steps) => stepNodes(steps).every(({ step }) => !step.fields.some(isCollectionOnly)),
+    { expected: "no link or multiple-choice fields, which only collections hold" },
+  ),
 );
 
 /**
@@ -184,6 +198,38 @@ export class WorkflowVersion extends Schema.Opaque<WorkflowVersion>()(
   }),
 ) {}
 
+/** Which earlier step the members of a step can consult after it is completed. */
+export const StepHistoryAccess = Schema.Struct({ stepId: StringId, previousStepId: StringId });
+export type StepHistoryAccess = typeof StepHistoryAccess.Type;
+
+export const isPreviousStep = (
+  steps: ReadonlyArray<Pick<StepDefinition, "id">>,
+  { stepId, previousStepId }: StepHistoryAccess,
+) => {
+  const previous = steps.findIndex(({ id }) => id === previousStepId);
+  return previous >= 0 && previous < steps.findIndex(({ id }) => id === stepId);
+};
+
+/** What starts an automation attached to a step: a member on demand, or also each ticket entering the step. */
+export const AutomationTrigger = Schema.Literals(["on_demand", "step_entry"]);
+export type AutomationTrigger = typeof AutomationTrigger.Type;
+
+/** What starts one automation attached to a step of the workflow, by the step's definition id. */
+export const StepAutomationTrigger = Schema.Struct({
+  stepId: StringId,
+  automationId: AutomationId,
+  trigger: AutomationTrigger,
+});
+
+/** Why entering a step didn't start one of the automations the project runs on its entry. */
+export const AutomationSkipReason = Schema.Literals([
+  "no_assignee",
+  "automation_unavailable",
+  "step_too_large",
+  "file_unavailable",
+]);
+export type AutomationSkipReason = typeof AutomationSkipReason.Type;
+
 /** A team's use of a workflow, with its own people, settings and board. */
 export class Project extends Schema.Opaque<Project>()(
   Schema.Struct({
@@ -197,10 +243,23 @@ export class Project extends Schema.Opaque<Project>()(
     defaultAssignees: Schema.Record(Schema.String, StringId).check(
       Schema.isPropertyNames(StringId),
     ),
+    stepHistoryAccess: Schema.optionalKey(Schema.Array(StepHistoryAccess)),
+    /** What starts the automations its workflow's steps attach; those left out run on demand. */
+    automationTriggers: Schema.optionalKey(Schema.Array(StepAutomationTrigger)),
     slug: Schema.NullOr(Slug),
     isArchived: Schema.Boolean,
   }),
 ) {}
+
+/** What starts the automation attached to the step `stepId` in the project: on demand by default. */
+export const automationTriggerOf = (
+  project: Pick<Project, "automationTriggers">,
+  stepId: string,
+  automationId: string,
+): AutomationTrigger =>
+  project.automationTriggers?.find(
+    (entry) => entry.stepId === stepId && entry.automationId === automationId,
+  )?.trigger ?? "on_demand";
 
 const StepStatus = Schema.Union([
   Schema.Struct({
@@ -214,12 +273,31 @@ const StepStatus = Schema.Union([
   }),
 ]);
 
+const CriterionAssessment = Schema.Struct({
+  criterionId: FieldPathSegment,
+  status: Schema.Literals(["equal", "very_similar", "less_similar", "different", "missing"]),
+  value: Schema.optionalKey(TrimmedNonEmptyString),
+  evidence: TrimmedNonEmptyString,
+  sourceUrl: Schema.optionalKey(
+    Schema.String.check(
+      Schema.makeFilter(isUrlFieldValue, { expected: "an HTTP or HTTPS source URL" }),
+    ),
+  ),
+  isImportant: Schema.optionalKey(Schema.Boolean),
+});
+
+const RecordComparison = Schema.Struct({
+  sourceRecordKey: TrimmedNonEmptyString,
+  assessments: Schema.Array(CriterionAssessment),
+});
+
 /** A value proposed for a reviewed field of a step, kept until a member approves or discards it. */
 export const Proposal = Schema.Struct({
   id: StringId,
   fieldKey: TrimmedNonEmptyString,
   /** The field's value; for a records field, the key of one more record to link. */
   value: Schema.Json,
+  comparison: Schema.optionalKey(RecordComparison),
   whyYes: TrimmedNonEmptyString,
   whyNo: Schema.String,
   /** How well it fits, from 0 to 100; the best are reviewed first. */
@@ -247,6 +325,17 @@ export class Step extends Schema.Opaque<Step>()(
     proposals: Schema.optionalKey(Schema.Array(Proposal)),
     /** Confirmed group entries, by group field and row id. */
     confirmedReviewRows: Schema.optionalKey(Schema.UniqueArray(TrimmedNonEmptyString)),
+    /** The automations entering the step was to start that didn't start, each with why. */
+    skippedAutomations: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          automationId: AutomationId,
+          // Existing skips stored their display message before reason codes were introduced.
+          reason: TrimmedNonEmptyString,
+          at: Schema.DateTimeUtcFromString,
+        }),
+      ),
+    ),
   }),
 ) {}
 
@@ -332,6 +421,8 @@ export class Ticket extends Schema.Opaque<Ticket>()(
     title: TrimmedNonEmptyString,
     description: Schema.String,
     status: TicketStatus,
+    /** Who started it, the default assignee of its steps; null when started before this was kept. */
+    creatorUserId: Schema.NullOr(StringId),
     steps: Schema.Array(Step).check(
       Schema.makeFilter(hasValidStepReferences, {
         expected: "unique steps following their parents",
@@ -372,6 +463,7 @@ const REFUSALS = {
   invalid_input:
     "A step's input must be a field of a step that comes earlier in the workflow. Remove the inputs that no longer are.",
   inputs_missing: "The next step can't start: one of its inputs has no value.",
+  invalid_step_history: "Previous step access must point to an earlier step of the workflow.",
   slug_taken: "Another project already has that slug.",
   invalid_people_ref: "That person or agent can no longer be given work.",
   no_steps: "This version has no steps yet.",
@@ -466,6 +558,74 @@ export const recordReviewsOf = (fields: ReadonlyArray<Field>, step: Step) =>
       },
     ];
   });
+
+/** Only confirmed entries for records and review fields explicitly passed into this step. */
+export const getComparisonSources = (
+  mapping: ComparisonCriteria,
+  inputs: ReturnType<typeof stepInputFields>,
+) => {
+  const fromStep = inputs.filter(({ source }) => source.stepDefinitionId === mapping.stepId);
+  const input = fromStep.find(({ field }) => field.id === mapping.reviewId);
+  if (input?.field.type !== "group" || !input.field.recordReview) return undefined;
+  const { recordsFieldId } = input.field.recordReview;
+  const recordsIndex = inputs.findIndex(
+    ({ source, field }) =>
+      source.id === input.source.id && field.type === "records" && field.id === recordsFieldId,
+  );
+  const table = input.field.fields.find(({ id }) => id === mapping.tableId);
+  if (
+    recordsIndex < 0 ||
+    table?.type !== "group" ||
+    !table.repeatable ||
+    mapping.nameId === mapping.valueId ||
+    ![mapping.nameId, mapping.valueId].every((id) =>
+      table.fields.some((field) => field.id === id && field.type === "text"),
+    )
+  )
+    return undefined;
+  const { source, field } = input;
+  const entries = recordReviewsOf([field], source)[0]!.entries;
+  return {
+    recordsIndex,
+    records: entries
+      .filter((entry) => entry.isConfirmed && entry.rowId !== null)
+      .map((entry) => {
+        const prefix = `${field.id}.${entry.rowId}.${table.id}`;
+        const criteria = rowIds(source.values[prefix]).flatMap((id) => {
+          const name = source.values[`${prefix}.${id}.${mapping.nameId}`];
+          const value = source.values[`${prefix}.${id}.${mapping.valueId}`];
+          return typeof name === "string" &&
+            name.trim() &&
+            typeof value === "string" &&
+            value.trim()
+            ? [{ id, name, value }]
+            : [];
+        });
+        return { recordKey: entry.recordKey, criteria };
+      }),
+  };
+};
+
+export const getComparisonRefusal = (
+  field: Field,
+  inputs: ReturnType<typeof stepInputFields>,
+  comparison: Proposal["comparison"],
+) => {
+  if (field.type !== "records" || !field.comparisonCriteria)
+    return comparison ? "This field has no comparison criteria." : null;
+  const sources = getComparisonSources(field.comparisonCriteria, inputs);
+  if (!sources?.records.some((record) => record.criteria.length))
+    return comparison ? "There are no confirmed comparison criteria." : null;
+  const source = sources.records.find((record) => record.recordKey === comparison?.sourceRecordKey);
+  if (!source?.criteria.length || !comparison)
+    return "Choose a sourceRecordKey with confirmed criteria from get_fields.";
+  const ids = comparison.assessments.map((item) => item.criterionId);
+  if (!hasDistinctIds(ids) || ids.some((id) => !source.criteria.some((row) => row.id === id)))
+    return "Use each criterion id from the selected source at most once.";
+  if (comparison.assessments.some((item) => item.status !== "missing" && !item.value))
+    return "Provide the candidate value and its evidence for each assessed criterion.";
+  return null;
+};
 
 /** An edit releases a confirmation when its entry or the record it belongs to changes. */
 export const withEditedStepValues = (
@@ -662,6 +822,27 @@ export const topLevelStep = (ticket: Ticket, step: Step) =>
 export const canSeeStep = (access: TicketAccess, ticket: Ticket, step: Step) =>
   access !== null && (access.type === "all" || topLevelStep(ticket, step).id === access.step.id);
 
+/** The page of a completed step may also be read through the project's explicit history access. */
+export const canReadStepHistory = (
+  access: TicketAccess,
+  project: Pick<Project, "stepHistoryAccess">,
+  version: Pick<WorkflowVersion, "steps">,
+  ticket: Ticket,
+  step: Step,
+) => {
+  if (access?.type !== "step" || step.status.type !== "completed") return false;
+  const root = topLevelStep(ticket, step);
+  return (
+    root.status.type === "completed" &&
+    (project.stepHistoryAccess ?? []).some(
+      (permission) =>
+        permission.stepId === access.step.stepDefinitionId &&
+        permission.previousStepId === root.stepDefinitionId &&
+        isPreviousStep(version.steps, permission),
+    )
+  );
+};
+
 /**
  * The steps `userId` is assigned to under the workflow's step `stepDefinitionId`, sub-steps
  * included and completed ones too: while a ticket is open they keep that person a member.
@@ -767,6 +948,11 @@ export const WorkflowEdit = Schema.Union([
     instructions: Schema.String,
   }),
   Schema.Struct({
+    type: Schema.Literal("set_step_done_when_approved"),
+    ...stepRef,
+    isDoneWhenApproved: Schema.Boolean,
+  }),
+  Schema.Struct({
     type: Schema.Literal("add_field"),
     ...stepRef,
     index: NonNegativeInt,
@@ -862,6 +1048,10 @@ const applyWorkflowEdit = (steps: StepList, edit: WorkflowEdit): StepList | null
       return changeStep(steps, edit.stepId, () => ({ name: edit.name }));
     case "set_step_instructions":
       return changeStep(steps, edit.stepId, () => ({ instructions: edit.instructions }));
+    case "set_step_done_when_approved":
+      return changeStep(steps, edit.stepId, () => ({
+        isDoneWhenApproved: edit.isDoneWhenApproved,
+      }));
     case "add_field":
       return changeStep(steps, edit.stepId, (step) =>
         withFields(placeAt(step.fields, edit.index, edit.field)),

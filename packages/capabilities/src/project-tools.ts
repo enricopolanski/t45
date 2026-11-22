@@ -35,7 +35,7 @@ serve({
     rpcTool(
       "propose_value",
       "workflows.proposeStepField",
-      "Propose a value for a step field marked isReviewed, which set_field refuses, for a member to approve: one record's key at a time for a records field, whyYes and whyNo in a sentence or two each, and score from 0 to 100.",
+      "Propose a value for a step field marked isReviewed, which set_field refuses, for a member to approve: one record's key at a time for a records field, whyYes and whyNo in a sentence or two each, and score from 0 to 100. When the field has comparisonSources, include comparison with its sourceRecordKey and per-criterion assessments from that source.",
     ),
   ],
   failure: "The project operation could not complete.",

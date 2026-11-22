@@ -1,14 +1,15 @@
-import type { Collection } from "@t45/contracts/models/Collection";
+import { useTranslation } from "~/i18n/locale";
+import { canEditRecords, type Collection } from "@t45/contracts/models/Collection";
 import { defaultValues } from "@t45/contracts/models/Field";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, Navigate, useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { describeFailure } from "../../lib/failures";
 import { api } from "../../rpc/api";
-import { useIsAdmin } from "../../state/session";
+import { useSession } from "../../state/session";
 import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { Input } from "../ui/input";
@@ -27,12 +28,16 @@ export function CollectionPage({
   collectionId,
   page,
   onPage,
+  isInSettings = false,
 }: {
   readonly collectionId: string;
   readonly page: number;
   readonly onPage: (page: number) => void;
+  readonly isInSettings?: boolean;
 }) {
-  const isAdmin = useIsAdmin();
+  const t = useTranslation();
+  const viewer = useSession();
+  const isAdmin = viewer?.role === "admin";
   const navigate = useNavigate();
   const [collection, setCollection] = useState<Collection | null>(null);
   const { text, filters, found, filterChoices, refresh, ...search } = useRecordSearch(
@@ -82,16 +87,27 @@ export function CollectionPage({
 
   if (collection === null)
     return (
-      <WorkFrame title="Collection">
+      <WorkFrame title={t("Collection")}>
         <p role={error === null ? undefined : "alert"} className="text-sm text-muted-foreground">
-          {error ?? "Loading…"}
+          {error ?? t("Loading…")}
         </p>
       </WorkFrame>
     );
+  if (collection.extension !== undefined)
+    return (
+      <Navigate
+        replace
+        to={isInSettings ? "/settings/collections/$collectionId" : "/collections/$collectionId"}
+        params={{ collectionId: collection.extension.parentCollectionId }}
+      />
+    );
   const shownView = view ?? resolveRecordDisplay(collection).defaultView;
+  const canEdit = viewer !== null && canEditRecords({ ...viewer, id: viewer.userId }, collection);
   const openRecord = (record: CollectionRecordView) =>
     void navigate({
-      to: "/settings/collections/$collectionId/records/$recordKey",
+      to: isInSettings
+        ? "/settings/collections/$collectionId/records/$recordKey"
+        : "/collections/$collectionId/records/$recordKey",
       params: { collectionId, recordKey: record.key },
     });
   return (
@@ -108,21 +124,23 @@ export function CollectionPage({
                 <Link to="/settings/collections/$collectionId/edit" params={{ collectionId }} />
               }
             >
-              Edit collection
+              {t("Edit collection")}
             </Button>
           ) : null}
-          <Button size="sm" onClick={() => setIsAdding(true)}>
-            <PlusIcon />
-            New record
-          </Button>
+          {canEdit ? (
+            <Button size="sm" onClick={() => setIsAdding(true)}>
+              <PlusIcon />
+              {t("New record")}
+            </Button>
+          ) : null}
         </>
       }
     >
       <div className="flex items-center gap-4">
         <Input
           type="search"
-          aria-label="Search records"
-          placeholder="Search records"
+          aria-label={t("Search records")}
+          placeholder={t("Search records")}
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
@@ -130,16 +148,16 @@ export function CollectionPage({
           value={shownView}
           onValueChange={(next) => setView(next === "cards" ? "cards" : "table")}
         >
-          <TabsList aria-label="Show records as">
-            <TabsTab value="table">Table</TabsTab>
-            <TabsTab value="cards">Grid</TabsTab>
+          <TabsList aria-label={t("Show records as")}>
+            <TabsTab value="table">{t("Table")}</TabsTab>
+            <TabsTab value="cards">{t("Grid")}</TabsTab>
           </TabsList>
         </Tabs>
         {/* A layout's columns replace the column order, so it reorders only without them. */}
         {isAdmin && shownView === "table" && collection.layout?.table?.columns === undefined ? (
           <label className="flex shrink-0 items-center gap-2 text-sm">
             <Switch size="sm" checked={isReordering} onCheckedChange={setIsReordering} />
-            Reorder
+            {t("Reorder")}
           </label>
         ) : null}
       </div>
@@ -151,15 +169,15 @@ export function CollectionPage({
       />
       {error && <ErrorText text={error} />}
       {found === null ? null : found.totalCount === 0 ? (
-        <p className="text-sm text-muted-foreground">No records yet.</p>
+        <p className="text-sm text-muted-foreground">{t("No records yet.")}</p>
       ) : found.matchCount === 0 ? (
-        <p className="text-sm text-muted-foreground">No record matches.</p>
+        <p className="text-sm text-muted-foreground">{t("No record matches.")}</p>
       ) : (
         <RecordCount matchCount={found.matchCount} totalCount={found.totalCount} />
       )}
       {found !== null && found.records.length > 0 && shownView === "cards" ? (
         <RecordCards
-          label="Records"
+          label={t("Records")}
           collection={collection}
           records={found.records}
           onOpen={openRecord}
@@ -167,7 +185,7 @@ export function CollectionPage({
       ) : null}
       {found !== null && (found.records.length > 0 || isReordering) && shownView === "table" ? (
         <RecordTable
-          label="Records"
+          label={t("Records")}
           collection={collection}
           records={found.records}
           onOpen={openRecord}
@@ -181,7 +199,7 @@ export function CollectionPage({
       {found === null ? null : (
         <RecordPager page={page} matchCount={found.matchCount} onPage={onPage} />
       )}
-      {isAdding ? (
+      {isAdding && canEdit ? (
         <RecordDialog
           collection={collection}
           record={{ values: defaultValues(collection.fields), files: [] }}

@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { Collection } from "@t45/contracts/models/Collection";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
 import { buildFieldViews } from "@t45/core/fieldViews";
@@ -23,6 +24,7 @@ function CollectionLayoutDialog({
   readonly onSaved: (collection: Collection) => void;
   readonly onClose: () => void;
 }) {
+  const t = useTranslation();
   const [records, setRecords] = useState<ReadonlyArray<CollectionRecordView> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +50,7 @@ function CollectionLayoutDialog({
   }, [collection.id]);
   return (
     <LayoutEditor
-      trail={`Collections · ${collection.title}`}
+      trail={t("Collections · {0}", collection.title)}
       title={collection.title}
       fields={collection.fields}
       layout={collection.layout}
@@ -57,31 +59,33 @@ function CollectionLayoutDialog({
       entries={(records ?? []).map((record) => ({ id: record.key, label: record.key }))}
       previewNote={
         records === null
-          ? (error ?? "Loading the records…")
+          ? (error ?? t("Loading the records…"))
           : records.length === 0
-            ? "This collection has no records yet."
+            ? t("This collection has no records yet.")
             : null
       }
-      rowsHint="Sorting changes only how records show, not the order kept, and sorts the records loaded so far."
+      rowsHint={t(
+        "Sorting changes only how records show, not the order kept, and sorts the records loaded so far.",
+      )}
       tableSettings={(layout, onChange) => (
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
             checked={layout?.isUpdatedAtVisible !== false}
             onCheckedChange={(isUpdatedAtVisible) => onChange({ ...layout, isUpdatedAtVisible })}
           />
-          Show Last update
+          {t("Show Last update")}
         </label>
       )}
       renderTable={(layout, onOpen) => (
         <RecordTable
-          label="Records"
+          label={t("Records")}
           collection={{ ...collection, layout: layout ?? {} }}
           records={records ?? []}
           onOpen={(record) => onOpen(record.key)}
         />
       )}
       renderForm={renderForm}
-      views={makeCollectionViews(collection, records ?? [], renderForm)}
+      views={makeCollectionViews(collection, records ?? [], renderForm, t)}
       isSaving={isSaving}
       error={records === null ? null : error}
       onSave={(layout) => {
@@ -115,6 +119,7 @@ export function CollectionLayoutButton({
   readonly disabled: boolean;
   readonly onSaved: (layout: NonNullable<Collection["layout"]>) => void;
 }) {
+  const t = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   return (
     <>
@@ -125,7 +130,7 @@ export function CollectionLayoutButton({
         onClick={() => setIsOpen(true)}
         disabled={disabled}
       >
-        Layout
+        {t("Layout")}
       </Button>
       {isOpen ? (
         <CollectionLayoutDialog

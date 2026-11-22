@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { canManage, isBuiltIn } from "@t45/contracts/models/Agent";
 import type { AgentSummary } from "@t45/contracts/resources/Agents";
 import { Link } from "@tanstack/react-router";
@@ -11,19 +12,24 @@ import { Section } from "../Section";
 
 /** Organization-wide skills agents can use. Only admins write them. */
 function SkillsSection() {
+  const t = useTranslation();
   const skills = useSkills();
   return (
     <Section
-      title="Skills"
-      description="Reusable know-how with its scripts. Pick them per agent; its chats get them in their folder."
+      title={t("Skills")}
+      description={t(
+        "Reusable know-how with its scripts. Pick them per agent; its chats get them in their folder.",
+      )}
       action={
         <Button size="sm" variant="outline" render={<Link to="/settings/agents/skills/new" />}>
-          New skill
+          {t("New skill")}
         </Button>
       }
       card
     >
-      {skills.length === 0 ? <p className="text-sm text-muted-foreground">No skills yet.</p> : null}
+      {skills.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("No skills yet.")}</p>
+      ) : null}
       {skills.map((skill) => {
         const fileCount = Object.keys(skill.files).length;
         return (
@@ -39,7 +45,7 @@ function SkillsSection() {
             </span>
             {fileCount > 0 ? (
               <span className="text-xs text-muted-foreground">
-                {fileCount} {fileCount === 1 ? "file" : "files"}
+                {fileCount} {fileCount === 1 ? t("file") : t("files")}
               </span>
             ) : null}
           </Link>
@@ -65,22 +71,27 @@ export function AgentList() {
 }
 
 function AgentsSection() {
+  const t = useTranslation();
   const member = useSession();
   const agents = useAgents().filter(
     (agent) => agent.status === "active" || (member !== null && canManage(agent, member)),
   );
   return (
     <Section
-      title="Agents"
-      description="Each agent has its own instructions and model, and works in a folder of its own in every chat."
+      title={t("Agents")}
+      description={t(
+        "Each agent has its own instructions and model, and works in a folder of its own in every chat.",
+      )}
       action={
         <Button size="sm" variant="outline" render={<Link to="/settings/agents/new" />}>
-          New agent
+          {t("New agent")}
         </Button>
       }
       card
     >
-      {agents.length === 0 ? <p className="text-sm text-muted-foreground">No agents yet.</p> : null}
+      {agents.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("No agents yet.")}</p>
+      ) : null}
       {agents.map((agent) => (
         <AgentRow key={agent.id} agent={agent} />
       ))}
@@ -89,6 +100,7 @@ function AgentsSection() {
 }
 
 function AgentRow({ agent }: { readonly agent: AgentSummary }) {
+  const t = useTranslation();
   const member = useSession();
   const [busy, startTransition] = useTransition();
   const active = agent.status === "active";
@@ -108,22 +120,22 @@ function AgentRow({ agent }: { readonly agent: AgentSummary }) {
       )}
       {active ? null : (
         <Badge variant="secondary" size="sm">
-          Archived
+          {t("Archived")}
         </Badge>
       )}
       {isBuiltIn(agent) ? (
         <Badge variant="secondary" size="sm">
-          Built-in
+          {t("Built-in")}
         </Badge>
       ) : null}
       {agent.isPublished ? null : (
         <Badge variant="secondary" size="sm">
-          Private
+          {t("Private")}
         </Badge>
       )}
       {agent.isConversational ? (
         <Badge variant="info" size="sm">
-          In Chat
+          {t("In Chat")}
         </Badge>
       ) : null}
       <span className="flex-1" />
@@ -134,7 +146,7 @@ function AgentRow({ agent }: { readonly agent: AgentSummary }) {
           disabled={busy}
           onClick={() => startTransition(() => agentActions.publish(agent.id))}
         >
-          Publish
+          {t("Publish")}
         </Button>
       ) : null}
       {canChange && active ? (
@@ -142,10 +154,10 @@ function AgentRow({ agent }: { readonly agent: AgentSummary }) {
           size="sm"
           variant="ghost"
           disabled={busy}
-          title="For good: an archived agent takes no new work and can't be restored."
+          title={t("For good: an archived agent takes no new work and can't be restored.")}
           onClick={() => startTransition(() => agentActions.archive(agent.id))}
         >
-          Archive
+          {t("Archive")}
         </Button>
       ) : null}
     </div>

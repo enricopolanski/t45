@@ -25,6 +25,7 @@ const rawTicket = {
   title: "Review",
   description: "",
   status: { type: "open" },
+  creatorUserId: null,
   steps: [rawStep],
   createdAt: at,
 };

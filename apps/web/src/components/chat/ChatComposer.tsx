@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { formatComposerContextReference } from "@t45/core/composerContextReferences";
 import { questionDraftKey, countQuestionAttachments } from "../../questionDrafts";
 import {
@@ -135,13 +136,14 @@ const COMPOSER_SCROLL_GESTURE_RESET_MS = 120;
 const NEW_CHAT_COMMAND = {
   command: "new",
   description: "Start a new chat",
-} satisfies ComposerCommandItem;
+} as const satisfies ComposerCommandItem;
 
 function RetryUploadButton(props: {
   variant: "overlay" | "ghost";
   attachment: ComposerAttachment;
   reason: string;
 }) {
+  const t = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger
@@ -150,7 +152,7 @@ function RetryUploadButton(props: {
             variant={props.variant}
             size="icon-xs"
             onClick={() => retryAttachmentUpload(props.attachment)}
-            aria-label={`Retry upload for ${props.attachment.name}`}
+            aria-label={t("Retry upload for {0}", props.attachment.name)}
           />
         }
       >
@@ -215,6 +217,7 @@ export interface ChatComposerProps {
 export type ComposerLayout = "open" | "collapsed" | "resting";
 
 export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps) {
+  const t = useTranslation();
   const {
     chatId,
     promptHistoryMessages,
@@ -383,7 +386,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const menuQuery = composerTrigger?.query.toLowerCase() ?? null;
   const composerMenuItems: ComposerCommandItem[] =
-    menuQuery === null ? [] : searchSlashCommandItems([NEW_CHAT_COMMAND], menuQuery);
+    menuQuery === null
+      ? []
+      : searchSlashCommandItems(
+          [{ ...NEW_CHAT_COMMAND, description: t(NEW_CHAT_COMMAND.description) }],
+          menuQuery,
+        );
   const composerMenuOpen = composerTrigger !== null;
   const highlightedCommand = menuHighlight?.query === menuQuery ? menuHighlight?.command : null;
   const activeComposerMenuItem =
@@ -401,7 +409,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         isResponding: question.responding,
         blockedReason:
           attachmentBlockReason ??
-          (compressingImages > 0 ? "Wait for images to finish compressing." : null) ??
+          (compressingImages > 0 ? t("Wait for images to finish compressing.") : null) ??
           question.progress.blockedReason,
         onPreviousField: question.onPreviousField,
       }
@@ -632,8 +640,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       event?.preventDefault();
       toastManager.add({
         type: "info",
-        title: "Still compressing a pasted image.",
-        description: "Send again once its thumbnail appears.",
+        title: t("Still compressing a pasted image."),
+        description: t("Send again once its thumbnail appears."),
       });
       return;
     }
@@ -807,7 +815,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             key={image.id}
             type="button"
             className="relative size-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-border/70 bg-muted/60"
-            aria-label={`Preview ${image.name}`}
+            aria-label={t("Preview {0}", image.name)}
             onPointerDown={keepComposerFocus}
             onClick={() => expandImage(image.id)}
           >
@@ -824,7 +832,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <button
             type="button"
             className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border/70 bg-muted/60 font-medium text-secondary-label text-xs tabular-nums outline-none hover:bg-muted focus-ring"
-            aria-label={`Show ${String(restingImageOverflowCount)} more image attachments`}
+            aria-label={t("Show {0} more image attachments", String(restingImageOverflowCount))}
             onPointerDown={keepComposerFocus}
             onClick={() => {
               if (isComposerCollapsedMobile) {
@@ -1009,7 +1017,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       question !== null &&
       (!question.progress.field?.acceptsAttachments || question.responding)
     ) {
-      toastManager.add({ type: "error", title: "This question cannot accept attachments." });
+      toastManager.add({ type: "error", title: t("This question cannot accept attachments.") });
       return false;
     }
     // Images landing with no prose live on the shelf with no chip. Read before
@@ -1053,24 +1061,31 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         replacedReattachMarkerIds.add(matchingReattachMarker.id);
       }
       if (!matchingReattachMarker && reservedCount >= MESSAGE_MAX_ATTACHMENTS) {
-        error = `You can attach up to ${MESSAGE_MAX_ATTACHMENTS} files per message.`;
+        error = t("You can attach up to {0} files per message.", MESSAGE_MAX_ATTACHMENTS);
         // Keep scanning: a later file in this batch can still replace a
         // needs-reattach marker without needing a free slot.
         continue;
       }
       if (attachmentKind === "unsupported-image") {
-        error = `'${file.name}' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.`;
+        error = t(
+          "'{0}' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.",
+          file.name,
+        );
         continue;
       }
       if (attachmentKind === "image") {
         acceptedImages.push(normalizeComposerImageFileMimeType(file));
       } else {
         if (file.size <= 0) {
-          error = `'${file.name}' is empty or could not be read.`;
+          error = t("'{0}' is empty or could not be read.", file.name);
           continue;
         }
         if (file.size > ATTACHMENT_MAX_FILE_BYTES) {
-          error = `'${file.name}' exceeds the ${ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024)} MB attachment limit.`;
+          error = t(
+            "'{0}' exceeds the {1} MB attachment limit.",
+            file.name,
+            ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024),
+          );
           continue;
         }
         const attachmentFile =
@@ -1111,10 +1126,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const attached = storedFiles[0]!;
         toastManager.add({
           type: "info",
-          title: `Large paste attached as ${attached.name}`,
-          description: `${formatAttachmentSize(attached.sizeBytes)} · Use ${
-            isMacPlatform(navigator.platform) ? "⌘⇧V" : "Ctrl+Shift+V"
-          } to keep a large paste inline.`,
+          title: t("Large paste attached as {0}", attached.name),
+          description: t(
+            "{0} · Use {1} to keep a large paste inline.",
+            formatAttachmentSize(attached.sizeBytes),
+            isMacPlatform(navigator.platform) ? "⌘⇧V" : "Ctrl+Shift+V",
+          ),
           data: { hideCopyButton: true },
         });
       }
@@ -1132,8 +1149,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (!compressed.ok) {
         compressionError =
           compressed.reason === "unreadable"
-            ? `'${file.name}' could not be read as an image.`
-            : `'${file.name}' is too large to attach, even after compression.`;
+            ? t("'{0}' could not be read as an image.", file.name)
+            : t("'{0}' is too large to attach, even after compression.", file.name);
         continue;
       }
       nextImages.push({
@@ -1210,8 +1227,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (!wouldExceedInputLimit) return false;
       toastManager.add({
         type: "error",
-        title: "Pasted text is too large for this message",
-        description: "Remove some text or an attachment, then paste again.",
+        title: t("Pasted text is too large for this message"),
+        description: t("Remove some text or an attachment, then paste again."),
         data: { hideCopyButton: true },
       });
       return true;
@@ -1232,8 +1249,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (!wouldExceedInputLimit) return false;
       toastManager.add({
         type: "error",
-        title: "Pasted text is too large to attach",
-        description: "Reduce the clipboard contents or save a smaller excerpt as a file.",
+        title: t("Pasted text is too large to attach"),
+        description: t("Reduce the clipboard contents or save a smaller excerpt as a file."),
         data: { hideCopyButton: true },
       });
       return true;
@@ -1407,9 +1424,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         )}
                         onPointerDown={keepComposerFocus}
                         onClick={expandMobileComposer}
-                        aria-label="Write custom answer"
+                        aria-label={t("Write custom answer")}
                       >
-                        {question.progress.customAnswer || "Write custom answer"}
+                        {question.progress.customAnswer || t("Write custom answer")}
                       </button>
                     ) : null}
                     {question.progress.field?.multiSelect ? (
@@ -1447,9 +1464,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   )}
                   onPointerDown={keepComposerFocus}
                   onClick={expandMobileComposer}
-                  aria-label="Expand composer"
+                  aria-label={t("Expand composer")}
                 >
-                  {prompt.trim() || "Ask anything..."}
+                  {prompt.trim() || t("Ask anything...")}
                 </button>
                 {collapsedComposerImagePreviews}
                 <ComposerSendActions
@@ -1472,7 +1489,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )}
             >
               <div role="status" aria-atomic="true" className="sr-only">
-                {composerMenuOpen && composerMenuItems.length === 0 ? "No matching command." : ""}
+                {composerMenuOpen && composerMenuItems.length === 0
+                  ? t("No matching command.")
+                  : ""}
               </div>
               {!isComposerCollapsedMobile && question === null && composerImages.length > 0 && (
                 <div className="mb-3 flex max-w-full flex-wrap gap-2">
@@ -1486,7 +1505,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         <button
                           type="button"
                           className="h-full w-full cursor-zoom-in"
-                          aria-label={`Preview ${image.name}`}
+                          aria-label={t("Preview {0}", image.name)}
                           onClick={() => expandImage(image.id)}
                         >
                           <ComposerImageThumbnail
@@ -1503,7 +1522,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         </button>
                         {composerAttachmentNeedsReattach(image) && (
                           <span className="absolute inset-x-0 bottom-0 bg-background/85 px-1 text-center text-3xs text-foreground">
-                            Attach again
+                            {t("Attach again")}
                           </span>
                         )}
                         {upload?.status === "uploading" && (
@@ -1525,7 +1544,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             variant="media-close"
                             size="icon-xs"
                             onClick={() => removeComposerImage(image.id)}
-                            aria-label={`Remove ${image.name}`}
+                            aria-label={t("Remove {0}", image.name)}
                           >
                             <XIcon />
                           </Button>
@@ -1550,7 +1569,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         <span className="min-w-0 flex-1 truncate">{file.name}</span>
                         <span className="shrink-0 text-xs text-secondary-label">
                           {needsReattach
-                            ? "Attach again"
+                            ? t("Attach again")
                             : upload?.status === "uploading"
                               ? formatAttachmentUploadProgress(upload.progress)
                               : formatAttachmentSize(file.sizeBytes)}
@@ -1566,7 +1585,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           variant="ghost"
                           size="icon-xs"
                           onClick={() => removeComposerFile(file.id)}
-                          aria-label={`Remove ${file.name}`}
+                          aria-label={t("Remove {0}", file.name)}
                         >
                           <XIcon />
                         </Button>
@@ -1587,7 +1606,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               >
                 <ComposerChipsContext value={{ records: composerContextRecords, expandImage }}>
                   <ComposerPromptEditor
-                    ariaLabel="Message"
+                    ariaLabel={t("Message")}
                     suggestionListId={composerSuggestionListId}
                     activeSuggestionId={
                       activeComposerMenuItem
@@ -1618,11 +1637,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     placeholder={
                       question
                         ? isChoiceOnlyField
-                          ? "Choose an option above"
-                          : "Type your own answer, or leave this blank to use the selected option"
+                          ? t("Choose an option above")
+                          : t(
+                              "Type your own answer, or leave this blank to use the selected option",
+                            )
                         : isServerUnreachable
-                          ? "Server: Reconnecting…"
-                          : "Ask anything, or / for commands"
+                          ? t("Server: Reconnecting…")
+                          : t("Ask anything, or / for commands")
                     }
                     disabled={isChoiceOnlyField || question?.responding === true}
                   />
@@ -1677,13 +1698,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               size="icon-sm"
                               onPointerDown={keepComposerFocus}
                               onClick={() => attachmentInputRef.current?.click()}
-                              aria-label="Attach files"
+                              aria-label={t("Attach files")}
                             />
                           }
                         >
                           <PaperclipIcon />
                         </TooltipTrigger>
-                        <TooltipPopup>Attach files</TooltipPopup>
+                        <TooltipPopup>{t("Attach files")}</TooltipPopup>
                       </Tooltip>
                     </>
                   ) : null}
@@ -1717,13 +1738,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       >
         <DialogPopup closeButton={false}>
           <DialogHeader>
-            <DialogTitle>{`Remove ${pendingImageName ?? "this image"} from the message?`}</DialogTitle>
+            <DialogTitle>
+              {t("Remove {0} from the message?", pendingImageName ?? t("this image"))}
+            </DialogTitle>
             <DialogDescription>
-              It is referenced in your text; removing it also removes every reference.
+              {t("It is referenced in your text; removing it also removes every reference.")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <DialogClose render={<Button variant="outline" />}>{t("Cancel")}</DialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -1731,7 +1754,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 setPendingImageRemoval(null);
               }}
             >
-              Confirm
+              {t("Confirm")}
             </Button>
           </DialogFooter>
         </DialogPopup>

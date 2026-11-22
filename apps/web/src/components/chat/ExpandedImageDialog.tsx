@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useRef, useState, type KeyboardEvent } from "react";
 import {
   ChevronLeftIcon,
@@ -25,10 +26,11 @@ export interface ImageGallery {
 }
 
 export function ImageUnavailableLabel({ alt }: { alt: string }) {
+  const t = useTranslation();
   return (
     <span className="inline-flex items-center gap-1.5">
       <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
-      {alt.length > 0 ? `Image unavailable · ${alt}` : "Image unavailable"}
+      {alt.length > 0 ? t("Image unavailable · {0}", alt) : t("Image unavailable")}
     </span>
   );
 }
@@ -40,6 +42,7 @@ export function ExpandedImageDialog({
   gallery: ImageGallery;
   onClose: () => void;
 }) {
+  const t = useTranslation();
   const [index, setIndex] = useState(gallery.index);
   const [failedImageSrc, setFailedImageSrc] = useState<string | null>(null);
   const zoomableImageRef = useRef<ZoomableImageHandle>(null);
@@ -88,14 +91,14 @@ export function ExpandedImageDialog({
           if (event.target === event.currentTarget) onClose();
         }}
       >
-        <DialogTitle className="sr-only">Expanded image preview</DialogTitle>
+        <DialogTitle className="sr-only">{t("Expanded image preview")}</DialogTitle>
         {imageCount > 1 && (
           <Button
             type="button"
             size="icon"
             variant="media-navigation"
             className="absolute -bottom-12 left-0 z-20 sm:top-1/2 sm:bottom-auto sm:-translate-y-1/2"
-            aria-label="Previous media"
+            aria-label={t("Previous media")}
             onClick={() => navigateImage(-1)}
           >
             <ChevronLeftIcon className="size-5" />
@@ -109,7 +112,7 @@ export function ExpandedImageDialog({
             variant="media-close"
             className="absolute right-0 -top-10 z-20"
             onClick={onClose}
-            aria-label="Close image preview"
+            aria-label={t("Close image preview")}
           >
             <XIcon />
           </Button>
@@ -132,7 +135,7 @@ export function ExpandedImageDialog({
                   }
                 >
                   <ExternalLinkIcon />
-                  Open original
+                  {t("Open original")}
                 </Button>
               ) : null}
             </div>
@@ -158,7 +161,7 @@ export function ExpandedImageDialog({
             size="icon"
             variant="media-navigation"
             className="absolute right-0 -bottom-12 z-20 sm:top-1/2 sm:bottom-auto sm:-translate-y-1/2"
-            aria-label="Next media"
+            aria-label={t("Next media")}
             onClick={() => navigateImage(1)}
           >
             <ChevronRightIcon className="size-5" />

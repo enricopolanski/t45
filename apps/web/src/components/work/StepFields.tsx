@@ -1,4 +1,6 @@
+import { useTranslation, translate } from "~/i18n/locale";
 import { Refused } from "@t45/contracts/models/Workflow";
+import type { Collection } from "@t45/contracts/models/Collection";
 import {
   defaultValues,
   type Field,
@@ -20,9 +22,10 @@ import { type ComponentProps, type ReactNode, useId, useRef, useState } from "re
 
 import { attachmentUploadUrl, attachmentUrl, decodeUploadResult } from "../../lib/attachmentUrl";
 import { api } from "../../rpc/api";
+import { describeFailure } from "../../lib/failures";
 import { cn } from "../../lib/utils";
 import { RecordShowcase } from "../collections/RecordDisplay";
-import { RecordDialog, RecordPicker, RecordTable } from "../collections/Records";
+import { RecordDialog, RecordLink, RecordPicker, RecordTable } from "../collections/Records";
 import { SavedInput, saveTyped } from "../SavedInput";
 import { ExternalUrl } from "../ExternalUrl";
 import {
@@ -54,7 +57,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { newKey } from "../workflows/workflowLogic";
 import { CardFold } from "./CardFold";
 import { ReadOnlyForm } from "./StepInputs";
-import { formatDay, formatNumber, missingFields, plural } from "./workLogic";
+import { formatDay, formatNumber, missingFields } from "./workLogic";
 
 /** Uploads a file as the member's pending attachment, ready to be given to a field; answers its id. */
 export async function uploadFile(file: File) {
@@ -68,7 +71,7 @@ export async function uploadFile(file: File) {
   );
   if (!response.ok) {
     throw response.status === 401
-      ? new AccessDenied({ message: "Your session ended. Sign in again." })
+      ? new AccessDenied({ message: translate("Your session ended. Sign in again.") })
       : new Refused({ reason: "invalid_attachment" });
   }
   return decodeUploadResult(await response.text()).attachmentId;
@@ -93,6 +96,7 @@ export function AttachmentLink({
     <a
       href={attachmentUrl(attachment)}
       download={attachment.name}
+      onClick={(event) => event.stopPropagation()}
       className="inline-flex min-w-0 items-center gap-1.5 text-sm text-primary hover:underline"
     >
       <PaperclipIcon className="size-3.5 shrink-0" />
@@ -101,7 +105,7 @@ export function AttachmentLink({
   );
 }
 
-export function FilePickButton({
+function FilePickButton({
   label,
   disabled,
   onPick,
@@ -140,10 +144,10 @@ export function FilePickButton({
 export function shownValue(field: FieldView) {
   if (field.type === "file") return field.file?.name ?? field.label;
   if (field.type === "group" || field.type === "records") return field.label;
-  if (field.value === null) return "Not filled in";
+  if (field.value === null) return translate("Not filled in");
   switch (field.type) {
     case "boolean":
-      return field.value === true ? "Yes" : "No";
+      return field.value === true ? translate("Yes") : translate("No");
     case "date":
       return typeof field.value === "string" ? formatDay(field.value) : String(field.value);
     case "number":
@@ -151,23 +155,24 @@ export function shownValue(field: FieldView) {
         ? formatNumber(field.value, field)
         : String(field.value);
     default:
-      return String(field.value);
+      return Array.isArray(field.value) ? field.value.join(", ") : String(field.value);
   }
 }
 
 export function FieldValue({ field }: { readonly field: FieldView }) {
+  const t = useTranslation();
   if (field.linkUrl !== undefined && field.type !== "group" && field.type !== "records")
     return <ExternalUrl href={field.linkUrl}>{shownValue(field)}</ExternalUrl>;
   if (field.type === "records") {
     return field.collection === null || field.records.length === 0 ? (
-      <span className="text-sm text-muted-foreground">No records</span>
+      <span className="text-sm text-muted-foreground">{t("No records")}</span>
     ) : (
       <RecordTable label={field.label} collection={field.collection} records={field.records} />
     );
   }
   if (field.type === "group") {
     if (field.rows.length === 0)
-      return <span className="text-sm text-muted-foreground">No entries</span>;
+      return <span className="text-sm text-muted-foreground">{t("No entries")}</span>;
     return (
       <div className="flex flex-col gap-2">
         {field.repeatable
@@ -189,7 +194,7 @@ export function FieldValue({ field }: { readonly field: FieldView }) {
   }
   if (field.type === "file") {
     return field.file === null ? (
-      <span className="text-sm text-muted-foreground">No file</span>
+      <span className="text-sm text-muted-foreground">{t("No file")}</span>
     ) : (
       <AttachmentLink attachment={field.file} />
     );
@@ -197,6 +202,8 @@ export function FieldValue({ field }: { readonly field: FieldView }) {
   if (field.type === "url" && isUrlFieldValue(field.value)) {
     return <ExternalUrl href={field.value}>{field.label}</ExternalUrl>;
   }
+  if (field.linkedCollectionId !== undefined && typeof field.value === "string")
+    return <RecordLink collectionId={field.linkedCollectionId} recordKey={field.value} />;
   if (field.type === "text" && field.isMarkdown && typeof field.value === "string")
     return <MarkdownText text={field.value} />;
   return (
@@ -308,6 +315,63 @@ const storedText = (field: FieldView) =>
 const typedValue = (field: FieldView, typed: string): StepFieldValue =>
   typed === "" ? null : field.type === "number" ? Number(typed) : typed;
 
+/** A link field's record, picked from its collection; another is picked once it is unlinked. */
+function RecordLinkInput({
+  field,
+  control,
+  onSave,
+}: {
+  readonly field: FieldView;
+  readonly control: ComponentProps<typeof Button>;
+  readonly onSave: (value: StepFieldValue) => void;
+}) {
+  const t = useTranslation();
+  const [collection, setCollection] = useState<Collection | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const collectionId = field.linkedCollectionId;
+  if (collectionId === undefined) return null;
+  const pick = () =>
+    void api("collections.get", { collectionId }).then(setCollection, (cause: unknown) =>
+      setError(describeFailure(cause)),
+    );
+  return (
+    <div className="flex min-h-9 flex-wrap items-center gap-2 sm:min-h-8">
+      {typeof field.value === "string" ? (
+        <>
+          <RecordLink collectionId={collectionId} recordKey={field.value} />
+          <Button
+            {...control}
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label={t("Unlink record {0}", field.value)}
+            onClick={() => onSave(null)}
+          >
+            <XIcon />
+          </Button>
+        </>
+      ) : (
+        <Button {...control} type="button" size="xs" variant="outline" onClick={pick}>
+          {t("Link a record")}
+        </Button>
+      )}
+      {error && <ErrorText text={error} />}
+      {collection === null ? null : (
+        <RecordPicker
+          label={field.label}
+          collection={collection}
+          linked={[]}
+          onClose={() => setCollection(null)}
+          onPick={(record) => {
+            setCollection(null);
+            onSave(record.key);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 /** A field's input, framed; a group has none. */
 function FieldControl({
   field,
@@ -323,6 +387,7 @@ function FieldControl({
     readonly "aria-invalid": true | undefined;
   };
 }) {
+  const t = useTranslation();
   const save = (value: StepFieldValue) => onSave(field.key, value);
   const saveText = (typed: string) => save(typedValue(field, typed));
   switch (field.type) {
@@ -382,10 +447,31 @@ function FieldControl({
         <SavedInput {...control} type={field.type} value={storedText(field)} onSave={saveText} />
       );
     case "select":
+      if (field.isMultiple)
+        return (
+          <Select
+            multiple
+            value={Array.isArray(field.value) ? field.value : []}
+            onValueChange={(options: Array<string>) => save(options)}
+          >
+            <SelectTrigger {...control} isWrapped={isStacked}>
+              <SelectValue placeholder={t("Choose some")}>
+                {(options: Array<string>) => options.join(", ")}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {field.options.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        );
       return (
         <Select value={typeof field.value === "string" ? field.value : null} onValueChange={save}>
           <SelectTrigger {...control} isWrapped={isStacked}>
-            <SelectValue placeholder="Choose one" />
+            <SelectValue placeholder={t("Choose one")} />
           </SelectTrigger>
           <SelectPopup>
             {field.options.map((option) => (
@@ -406,17 +492,19 @@ function FieldControl({
       return (
         <div className="flex min-h-9 flex-wrap items-center gap-3 sm:min-h-8">
           {field.file === null ? (
-            <span className="text-sm text-muted-foreground">No file</span>
+            <span className="text-sm text-muted-foreground">{t("No file")}</span>
           ) : (
             <AttachmentLink attachment={field.file} />
           )}
           <FilePickButton
             {...control}
-            label={field.file === null ? "Upload" : "Replace"}
+            label={field.file === null ? t("Upload") : t("Replace")}
             onPick={(file) => onUpload(field.key, file)}
           />
         </div>
       );
+    case "foreignKey":
+      return <RecordLinkInput field={field} control={control} onSave={save} />;
     case "records":
     case "group":
       return null;
@@ -434,6 +522,7 @@ function FieldEditor({
 }: EditorProps & {
   readonly span?: keyof typeof FORM_SPANS;
 }) {
+  const t = useTranslation();
   const { field, missing } = props;
   const isStacked = span !== undefined;
   const id = useId();
@@ -476,7 +565,7 @@ function FieldEditor({
           <ExternalUrl href={field.linkUrl}>{shownValue(field)}</ExternalUrl>
         )}
         {isStacked && guidance}
-        {invalid && <ErrorText id={`${id}-missing`} text="Required" />}
+        {invalid && <ErrorText id={`${id}-missing`} text={t("Required")} />}
       </div>
     </div>
   );
@@ -575,6 +664,7 @@ function GroupEditor({ field, ...props }: EditorProps) {
  * record opens to edit it; others are linked from the collection, or added to it and linked.
  */
 function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: EditorProps) {
+  const t = useTranslation();
   const [opened, setOpened] = useState<{
     readonly values: FieldValues;
     readonly files: FieldView["records"][number]["files"];
@@ -593,14 +683,16 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
     <div data-field-key={field.key} className="col-span-full flex flex-col gap-2">
       <GroupHeading field={field}>
         <span className="text-xs text-muted-foreground">
-          {plural(field.records.length, "record", "records")}
+          {t(field.records.length === 1 ? "{0} record" : "{0} records", field.records.length)}
         </span>
       </GroupHeading>
       {missing.has(field.key) && (
-        <ErrorText text={canPickRecord ? "Link at least one record" : "Add at least one record"} />
+        <ErrorText
+          text={canPickRecord ? t("Link at least one record") : t("Add at least one record")}
+        />
       )}
       {collection === null ? (
-        <p className="text-sm text-muted-foreground">Its collection is gone.</p>
+        <p className="text-sm text-muted-foreground">{t("Its collection is gone.")}</p>
       ) : (
         <>
           {field.records.length > 0 ? (
@@ -613,7 +705,7 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
               onEdit={setOpened}
               renderStatus={renderStatus}
               remove={(record) => ({
-                label: `Unlink record ${record.key}`,
+                label: t("Unlink record {0}", record.key),
                 onRemove: () =>
                   onSave(
                     field.key,
@@ -626,7 +718,7 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
             {canPickRecord ? (
               <Button type="button" size="sm" variant="outline" onClick={() => setIsPicking(true)}>
                 <LinkIcon />
-                Link record
+                {t("Link record")}
               </Button>
             ) : null}
             <Button
@@ -636,7 +728,7 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
               onClick={() => setOpened({ values: defaultValues(collection.fields), files: [] })}
             >
               <PlusIcon />
-              New record
+              {t("New record")}
             </Button>
           </div>
           {viewed === undefined ? null : (
@@ -652,7 +744,7 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
                 className="sm:max-w-5xl"
               >
                 <DialogHeader>
-                  <DialogTitle>Record details</DialogTitle>
+                  <DialogTitle>{t("Record details")}</DialogTitle>
                 </DialogHeader>
                 <DialogPanel>
                   <RecordShowcase collection={collection} record={viewed} />
@@ -665,7 +757,7 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
                       setOpened(viewed);
                     }}
                   >
-                    Edit record
+                    {t("Edit record")}
                   </Button>
                 </DialogFooter>
               </DialogPopup>
@@ -720,13 +812,14 @@ function RemoveEntry({
  * forms. Adding and removing entries saves the row ids; a removed entry's values go with it.
  */
 function EntriesEditor(props: EditorProps) {
+  const t = useTranslation();
   const { field, missing, onSave } = props;
   const isTable = field.rowFields.every((child) => child.type !== "group");
   const [shown, setShown] = useState(isTable ? "table" : "form");
   const entries = sortEntries(field);
   const ids = field.rows.flatMap((row) => (row.id === null ? [] : [row.id]));
   const remove = (at: number) => ({
-    label: `Remove entry ${at + 1} of ${field.label}`,
+    label: t("Remove entry {0} of {1}", at + 1, field.label),
     onRemove: () =>
       onSave(
         field.key,
@@ -743,20 +836,20 @@ function EntriesEditor(props: EditorProps) {
       <div className="flex flex-col gap-2">
         <GroupHeading field={field}>
           <span className="text-xs text-muted-foreground">
-            {entries.length === 1 ? "1 entry" : `${entries.length} entries`}
+            {entries.length === 1 ? t("1 entry") : t("{0} entries", entries.length)}
           </span>
           {isTable ? (
-            <TabsList size="sm" aria-label={`Show ${field.label} as`} className="ml-auto">
+            <TabsList size="sm" aria-label={t("Show {0} as", field.label)} className="ml-auto">
               <TabsTab size="sm" value="table">
-                Table
+                {t("Table")}
               </TabsTab>
               <TabsTab size="sm" value="form">
-                Form
+                {t("Form")}
               </TabsTab>
             </TabsList>
           ) : null}
         </GroupHeading>
-        {missing.has(field.key) && <ErrorText text="Add at least one entry" />}
+        {missing.has(field.key) && <ErrorText text={t("Add at least one entry")} />}
         {entries.length > 0 ? (
           <>
             <TabsPanel value="table">
@@ -775,7 +868,7 @@ function EntriesEditor(props: EditorProps) {
             onClick={() => onSave(field.key, [...ids, newKey("row")])}
           >
             <PlusIcon />
-            Add entry
+            {t("Add entry")}
           </Button>
         </div>
       </div>
@@ -796,6 +889,7 @@ const headerCell =
  * place; when some fields show only in details, each entry opens to all its fields.
  */
 function EntryTable({ entries, remove, ...props }: EntriesProps) {
+  const t = useTranslation();
   const { field, missing, onSave, onUpload } = props;
   const { columns, density } = resolveTableLayout(field.rowFields, field.layout);
   const isColumn = (child: FieldView, entry: Entry) =>
@@ -853,11 +947,11 @@ function EntryTable({ entries, remove, ...props }: EntriesProps) {
             ))}
             {hasDetails ? (
               <th scope="col" className={headerCell}>
-                <span className="sr-only">Details</span>
+                <span className="sr-only">{t("Details")}</span>
               </th>
             ) : null}
             <th scope="col" className={headerCell}>
-              <span className="sr-only">Remove</span>
+              <span className="sr-only">{t("Remove")}</span>
             </th>
           </tr>
         </thead>
@@ -875,7 +969,7 @@ function EntryTable({ entries, remove, ...props }: EntriesProps) {
                     {child === undefined ? null : (
                       <CellControl
                         field={child}
-                        label={`${child.label}, entry ${at + 1}`}
+                        label={t("{0}, entry {1}", child.label, at + 1)}
                         isWrapped={
                           column.isWrapped ||
                           (props.wrapEntryText === true &&
@@ -908,10 +1002,10 @@ function EntryTable({ entries, remove, ...props }: EntriesProps) {
                             ? "destructive-outline"
                             : "ghost"
                         }
-                        aria-label={`Details of entry ${at + 1} of ${field.label}`}
+                        aria-label={t("Details of entry {0} of {1}", at + 1, field.label)}
                         onClick={() => setDetailsId(entry.id)}
                       >
-                        Details
+                        {t("Details")}
                       </Button>,
                     )}
                 </td>
@@ -935,7 +1029,7 @@ function EntryTable({ entries, remove, ...props }: EntriesProps) {
             }
           >
             <DialogHeader>
-              <DialogTitle>{`${field.label}, entry ${detailsAt + 1}`}</DialogTitle>
+              <DialogTitle>{t("{0}, entry {1}", field.label, detailsAt + 1)}</DialogTitle>
             </DialogHeader>
             <DialogPanel>
               <FormGrid {...props} form={form} />
@@ -963,6 +1057,7 @@ function CellControl({
   readonly isWrapped: boolean;
   readonly isMissing: boolean;
 }) {
+  const t = useTranslation();
   if (field.linkUrl !== undefined) {
     const link = <ExternalUrl href={field.linkUrl}>{shownValue(field)}</ExternalUrl>;
     return isWrapped ? (
@@ -1075,7 +1170,11 @@ function CellControl({
           <SelectTrigger {...control} variant="cell" isWrapped={isWrapped}>
             <SelectValue>
               {(value: string | null) =>
-                value === null ? "Choose one" : <OptionValue option={value} tones={field.tones} />
+                value === null ? (
+                  t("Choose one")
+                ) : (
+                  <OptionValue option={value} tones={field.tones} />
+                )
               }
             </SelectValue>
           </SelectTrigger>
@@ -1113,11 +1212,12 @@ function CellControl({
           {field.file === null ? null : <AttachmentLink attachment={field.file} />}
           <FilePickButton
             {...control}
-            label={field.file === null ? "Upload" : "Replace"}
+            label={field.file === null ? t("Upload") : t("Replace")}
             onPick={(file) => onUpload(field.key, file)}
           />
         </div>
       );
+    case "foreignKey":
     case "records":
     case "group":
       return null;
@@ -1129,6 +1229,7 @@ function CellControl({
  * open. An entry's header shows its first field's value and how many of its fields are filled.
  */
 function EntryForms({ entries, remove, ...props }: EntriesProps) {
+  const t = useTranslation();
   const { field } = props;
   const [openId, setOpenId] = useState(entries[0]?.id ?? null);
   return (
@@ -1160,10 +1261,10 @@ function EntryForms({ entries, remove, ...props }: EntriesProps) {
                     title === null ? "text-muted-foreground" : "font-medium",
                   )}
                 >
-                  {title ?? "Untitled entry"}
+                  {title ?? t("Untitled entry")}
                 </span>
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {filled.length} of {entry.fields.length} filled
+                  {filled.length} {t("of")} {entry.fields.length} {t("filled")}
                 </span>
               </CollapsibleTrigger>
               <RemoveEntry {...remove(at)} />
@@ -1202,9 +1303,10 @@ export function StepFields({
   readonly recordStatus?: EditorProps["recordStatus"];
   readonly holdOpen?: boolean;
 }) {
+  const t = useTranslation();
   if (fields.length === 0) return null;
   return (
-    <CardFold title="Fields" held={holdOpen || missing.size > 0}>
+    <CardFold title={t("Fields")} held={holdOpen || missing.size > 0}>
       {review}
       {editable ? (
         <FieldInputs

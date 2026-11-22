@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import {
   useCallback,
   useEffect,
@@ -34,6 +35,7 @@ export function ZoomableImage({
   onError: () => void;
   ref?: Ref<ZoomableImageHandle>;
 }) {
+  const t = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const [fitted, setFitted] = useState({ width: 0, height: 0 });
@@ -127,8 +129,10 @@ export function ZoomableImage({
       <div
         ref={viewportRef}
         role="region"
-        aria-label={`${name}, zoomable image`}
-        aria-description="Click to zoom in or return to fit. Scroll to zoom, drag to pan. Use Enter to toggle zoom, plus or minus to zoom, and 0 to fit."
+        aria-label={t("{0}, zoomable image", name)}
+        aria-description={t(
+          "Click to zoom in or return to fit. Scroll to zoom, drag to pan. Use Enter to toggle zoom, plus or minus to zoom, and 0 to fit.",
+        )}
         tabIndex={0}
         data-zoomed={zoom > 1 ? "" : undefined}
         className="max-h-(--media-height) w-fit max-w-(--media-width) cursor-zoom-in overflow-auto overscroll-contain rounded-lg bg-background shadow-2xl ring-1 ring-border/70 outline-none focus-visible:ring-2 focus-visible:ring-ring data-zoomed:cursor-grab data-zoomed:active:cursor-grabbing"
@@ -209,7 +213,8 @@ export function ZoomableImage({
         />
       </div>
       <span className="sr-only" aria-live="polite">
-        {Math.round(zoom * 100)}% zoom
+        {Math.round(zoom * 100)}
+        {t("% zoom")}
       </span>
     </div>
   );

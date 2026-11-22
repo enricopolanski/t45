@@ -14,6 +14,16 @@ import Migration0004 from "./Migrations/004_Collections.ts";
 import Migration0005 from "./Migrations/005_UrlFieldValues.ts";
 import Migration0006 from "./Migrations/006_CollectionColumnOrder.ts";
 import Migration0007 from "./Migrations/007_CollectionLayout.ts";
+import Migration0008 from "./Migrations/008_CollectionPublication.ts";
+import Migration0009 from "./Migrations/009_CompletedStepHistory.ts";
+import Migration0010 from "./Migrations/010_UserLocale.ts";
+import Migration0011 from "./Migrations/011_AutomationTriggers.ts";
+import Migration0012 from "./Migrations/012_AutomationStepContext.ts";
+import Migration0013 from "./Migrations/013_AutomationNext.ts";
+import Migration0014 from "./Migrations/014_AutomationFollowUp.ts";
+import Migration0015 from "./Migrations/015_TicketCreator.ts";
+import Migration0016 from "./Migrations/016_AutomationPhases.ts";
+import Migration0017 from "./Migrations/017_CollectionExtensions.ts";
 
 /**
  * Append only. The migrator skips every id up to the highest a database has recorded, so a
@@ -27,6 +37,16 @@ const migrations = [
   [5, "UrlFieldValues", Migration0005],
   [6, "CollectionColumnOrder", Migration0006],
   [7, "CollectionLayout", Migration0007],
+  [8, "CollectionPublication", Migration0008],
+  [9, "CompletedStepHistory", Migration0009],
+  [10, "UserLocale", Migration0010],
+  [11, "AutomationTriggers", Migration0011],
+  [12, "AutomationStepContext", Migration0012],
+  [13, "AutomationNext", Migration0013],
+  [14, "AutomationFollowUp", Migration0014],
+  [15, "TicketCreator", Migration0015],
+  [16, "AutomationPhases", Migration0016],
+  [17, "CollectionExtensions", Migration0017],
 ] as const;
 
 class PremigrationDatabaseError extends Schema.TaggedError<PremigrationDatabaseError>()(

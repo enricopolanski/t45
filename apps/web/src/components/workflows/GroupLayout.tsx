@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { Field, type Layout } from "@t45/contracts/models/Field";
 import { resolveTableLayout } from "@t45/contracts/models/Layout";
 import type { FieldView } from "@t45/contracts/resources/Workflows";
@@ -47,7 +48,7 @@ const findSteps = async (workflowId: string, stepId: string) => {
     tickets.flatMap((ticket) =>
       ticket.steps
         .filter((step) => step.stepDefinitionId === stepId)
-        .map((step) => ({ id: step.id, label: `Ticket “${ticket.title}”` })),
+        .map((step) => ({ id: step.id, title: ticket.title })),
     ),
   );
 };
@@ -71,8 +72,9 @@ function GroupLayoutDialog({
   readonly onChange: (group: DraftField) => void;
   readonly onClose: () => void;
 }) {
+  const t = useTranslation();
   const fields = group.fields.flatMap((field) => Option.toArray(decodeField(field)));
-  const [steps, setSteps] = useState<ReadonlyArray<{ id: string; label: string }> | null>(null);
+  const [steps, setSteps] = useState<ReadonlyArray<{ id: string; title: string }> | null>(null);
   const [shownStepId, setShownStepId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<{
     readonly stepId: string;
@@ -122,7 +124,11 @@ function GroupLayoutDialog({
       const value = first === undefined ? undefined : findEntryField(shown, entry, first.field.id);
       return {
         id: entry.id,
-        label: `Entry ${at + 1}${value === undefined || value.value === null ? "" : ` · ${shownValue(value)}`}`,
+        label: t(
+          "Entry {0}{1}",
+          at + 1,
+          value === undefined || value.value === null ? "" : ` · ${shownValue(value)}`,
+        ),
       };
     });
   })();
@@ -137,18 +143,21 @@ function GroupLayoutDialog({
         steps !== null && shownStepId !== null ? (
           <div className="flex items-center gap-2">
             <span aria-hidden className="text-xs whitespace-nowrap text-muted-foreground">
-              Preview with
+              {t("Preview with")}
             </span>
             <Select value={shownStepId} onValueChange={(id) => id !== null && setShownStepId(id)}>
-              <SelectTrigger size="sm" aria-label="Preview with" className="max-w-64">
+              <SelectTrigger size="sm" aria-label={t("Preview with")} className="max-w-64">
                 <SelectValue>
-                  {(id: string) => steps.find((step) => step.id === id)?.label}
+                  {(id: string) => {
+                    const step = steps.find((candidate) => candidate.id === id);
+                    return step === undefined ? "" : t("Ticket “{0}”", step.title);
+                  }}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup>
                 {steps.map((step) => (
                   <SelectItem key={step.id} value={step.id}>
-                    {step.label}
+                    {t("Ticket “{0}”", step.title)}
                   </SelectItem>
                 ))}
               </SelectPopup>
@@ -160,15 +169,17 @@ function GroupLayoutDialog({
       previewNote={
         error ??
         (steps === null || (shownStepId !== null && view === undefined)
-          ? "Loading a ticket's entries…"
+          ? t("Loading a ticket's entries…")
           : steps.length === 0
-            ? "No ticket you can see is in this step yet, so there are no entries to preview."
+            ? t("No ticket you can see is in this step yet, so there are no entries to preview.")
             : entries.length === 0
-              ? "This ticket has no entries in this group yet."
+              ? t("This ticket has no entries in this group yet.")
               : null)
       }
-      rowsHint="Sorting changes only how rows show, not the order kept."
-      saveNote="Once the workflow is saved, every ticket shows the new layout, without a new version."
+      rowsHint={t("Sorting changes only how rows show, not the order kept.")}
+      saveNote={t(
+        "Once the workflow is saved, every ticket shows the new layout, without a new version.",
+      )}
       renderTable={(layout) => {
         const shown = preview(layout);
         if (shown === null) return null;
@@ -208,6 +219,7 @@ export function GroupLayoutButton({
   disabled,
   ...props
 }: Omit<Parameters<typeof GroupLayoutDialog>[0], "onClose"> & { readonly disabled: boolean }) {
+  const t = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   return (
     <>
@@ -218,7 +230,7 @@ export function GroupLayoutButton({
         onClick={() => setIsOpen(true)}
         disabled={disabled}
       >
-        Layout
+        {t("Layout")}
       </Button>
       {isOpen ? <GroupLayoutDialog {...props} onClose={() => setIsOpen(false)} /> : null}
     </>

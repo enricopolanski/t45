@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import { type ChatAttachment } from "@t45/contracts/models/Attachment";
 import { type ChatMessage, InputMetadata } from "@t45/contracts/resources/Chats";
 import { WORKFLOW_DRAFT_TOOL_NAME, WorkflowDraft } from "@t45/contracts/resources/AgentTools";
@@ -188,7 +189,7 @@ function boundedJson(value: unknown): string {
     let count = 0;
     for (const [key, entry] of Object.entries(input)) {
       if (count++ >= 20 || nodes <= 0 || remaining <= 0) {
-        result["…"] = "Preview shortened";
+        result["…"] = translate("Preview shortened");
         break;
       }
       result[text(key)] = visit(entry, depth + 1);

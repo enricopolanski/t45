@@ -1,3 +1,5 @@
+import { type Message, type Translate, useTranslation } from "~/i18n/locale";
+import type { Collection } from "@t45/contracts/models/Collection";
 import { FieldTone } from "@t45/contracts/models/Field";
 import { isTableColumn } from "@t45/contracts/models/Layout";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XIcon } from "lucide-react";
@@ -11,7 +13,6 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { FoldChevron } from "../work/CardFold";
-import { plural } from "../work/workLogic";
 import {
   blankField,
   type DraftField,
@@ -55,13 +56,14 @@ export function MoveRemove({
   readonly place: Placement;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   return (
     <>
       <Button
         type="button"
         size="icon-sm"
         variant="ghost"
-        aria-label={`Move ${what} up`}
+        aria-label={t("Move {0} up", what)}
         onClick={() => place.move(-1)}
         disabled={disabled || place.first}
       >
@@ -71,7 +73,7 @@ export function MoveRemove({
         type="button"
         size="icon-sm"
         variant="ghost"
-        aria-label={`Move ${what} down`}
+        aria-label={t("Move {0} down", what)}
         onClick={() => place.move(1)}
         disabled={disabled || place.last}
       >
@@ -81,7 +83,7 @@ export function MoveRemove({
         type="button"
         size="icon-sm"
         variant="ghost"
-        aria-label={`Remove ${what}`}
+        aria-label={t("Remove {0}", what)}
         onClick={place.remove}
         disabled={disabled}
       >
@@ -101,6 +103,7 @@ export function ColumnSwitch({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   if (field.type === "url" && field.displayLinkOn !== undefined) return null;
   return (
     <label className="flex items-center gap-2 text-xs">
@@ -113,7 +116,7 @@ export function ColumnSwitch({
         }}
         disabled={disabled}
       />
-      Show in table
+      {t("Show in table")}
     </label>
   );
 }
@@ -128,6 +131,7 @@ export function MarkdownSwitch({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   if (field.type !== "text") return null;
   return (
     <label className="flex items-center gap-2 text-xs">
@@ -140,7 +144,7 @@ export function MarkdownSwitch({
         }}
         disabled={disabled}
       />
-      Render as Markdown
+      {t("Render as Markdown")}
     </label>
   );
 }
@@ -155,6 +159,7 @@ function ReviewSwitch({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   if (field.type === "group" || field.type === "file") return null;
   return (
     <label className="flex items-center gap-2 text-xs">
@@ -167,7 +172,7 @@ function ReviewSwitch({
         }}
         disabled={disabled}
       />
-      Agents propose, members approve
+      {t("Agents propose, members approve")}
     </label>
   );
 }
@@ -184,10 +189,11 @@ export function LinkDisplaySelect({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   if (field.type !== "url") return null;
   const choices = fields.filter((other) => other.id !== field.id);
   return (
-    <Field label="Display link on" size="xs">
+    <Field label={t("Display link on")} size="xs">
       <Select
         value={field.displayLinkOn ?? ""}
         onValueChange={(target) => {
@@ -200,16 +206,16 @@ export function LinkDisplaySelect({
           <SelectValue>
             {(target: string) =>
               target === ""
-                ? "Own field"
-                : choices.find(({ id }) => id === target)?.label || "Untitled field"
+                ? t("Own field")
+                : choices.find(({ id }) => id === target)?.label || t("Untitled field")
             }
           </SelectValue>
         </SelectTrigger>
         <SelectPopup>
-          <SelectItem value="">Own field</SelectItem>
+          <SelectItem value="">{t("Own field")}</SelectItem>
           {choices.map((other) => (
             <SelectItem key={other.id} value={other.id}>
-              {other.label || "Untitled field"}
+              {other.label || t("Untitled field")}
             </SelectItem>
           ))}
         </SelectPopup>
@@ -230,10 +236,11 @@ function DecimalsSelect({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   if (field.type !== "number") return null;
   const { decimals, ...rest } = field;
   return (
-    <Field label="Decimals" size="xs">
+    <Field label={t("Decimals")} size="xs">
       <Select
         value={decimals === undefined ? AS_ENTERED : String(decimals)}
         onValueChange={(choice) =>
@@ -245,11 +252,11 @@ function DecimalsSelect({
       >
         <SelectTrigger>
           <SelectValue>
-            {(choice: string) => (choice === AS_ENTERED ? "As entered" : choice)}
+            {(choice: string) => (choice === AS_ENTERED ? t("As entered") : choice)}
           </SelectValue>
         </SelectTrigger>
         <SelectPopup>
-          <SelectItem value={AS_ENTERED}>As entered</SelectItem>
+          <SelectItem value={AS_ENTERED}>{t("As entered")}</SelectItem>
           {["0", "1", "2", "3", "4", "5", "6"].map((choice) => (
             <SelectItem key={choice} value={choice}>
               {choice}
@@ -271,10 +278,11 @@ function UnitInput({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   if (field.type !== "number") return null;
   const { unit, ...rest } = field;
   return (
-    <Field label="Unit" size="xs">
+    <Field label={t("Unit")} size="xs">
       <Input
         placeholder="%, €, kg"
         value={unit ?? ""}
@@ -289,7 +297,7 @@ function UnitInput({
 
 const NO_TONE = "";
 
-const TONE_LABELS: Record<string, string> = {
+const TONE_LABELS: Record<string, Message> = {
   [NO_TONE]: "No tone",
   positive: "Positive",
   neutral: "Neutral",
@@ -309,6 +317,7 @@ function ToneSelect({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   const { tones = {}, ...rest } = field;
   const { [option.trim()]: tone, ...others } = tones;
   return (
@@ -321,13 +330,23 @@ function ToneSelect({
       }}
       disabled={disabled}
     >
-      <SelectTrigger size="sm" aria-label={`Tone of option ${option}`} className="min-w-28">
-        <SelectValue>{(choice: string) => TONE_LABELS[choice]}</SelectValue>
+      {/* Capped, as the trigger fills its row and would leave the option's input no room. */}
+      <SelectTrigger
+        size="sm"
+        aria-label={t("Tone of option {0}", option)}
+        className="min-w-28 max-w-36"
+      >
+        <SelectValue>
+          {(choice: string) => {
+            const message = TONE_LABELS[choice];
+            return message === undefined ? "" : t(message);
+          }}
+        </SelectValue>
       </SelectTrigger>
       <SelectPopup>
         {Object.entries(TONE_LABELS).map(([choice, label]) => (
           <SelectItem key={choice} value={choice}>
-            {label}
+            {t(label)}
           </SelectItem>
         ))}
       </SelectPopup>
@@ -335,8 +354,98 @@ function ToneSelect({
   );
 }
 
-/** A collection a records field can link. */
-export type LinkableCollection = { readonly id: string; readonly title: string };
+/** A select's options, each with its tone, typed into, added and removed. */
+export function OptionsEditor({
+  field,
+  onChange,
+  disabled,
+}: {
+  readonly field: Extract<DraftField, { type: "select" }>;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  const t = useTranslation();
+  const optionRows = useRowKeys(field.options.length);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs text-muted-foreground">{t("Options")}</span>
+      {listEntries(field.options, (options) => onChange(withOptions(field, options))).map(
+        (option) => (
+          <div key={optionRows.keys[option.index]} className="flex items-center gap-1.5">
+            <Input
+              aria-label={t("Option {0}", option.index + 1)}
+              placeholder={[t("Approved"), t("Declined")][option.index]}
+              value={option.entry}
+              onChange={(event) => option.replace(event.target.value)}
+              autoFocus={!option.first && option.last && !option.entry}
+              disabled={disabled}
+              className="min-w-0 flex-1"
+            />
+            <ToneSelect
+              field={field}
+              option={option.entry}
+              onChange={onChange}
+              disabled={disabled}
+            />
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label={t("Remove option {0}", option.entry)}
+              onClick={() => {
+                optionRows.remove(option.index);
+                option.remove();
+              }}
+              disabled={disabled}
+            >
+              <XIcon />
+            </Button>
+          </div>
+        ),
+      )}
+      <AddButton
+        label={t("Add option")}
+        onClick={() => onChange({ ...field, options: [...field.options, ""] })}
+        disabled={disabled}
+      />
+    </div>
+  );
+}
+
+/** Whether a collection's top-level select holds several of its options; it then has no default. */
+function MultipleSwitch({
+  field,
+  onChange,
+  disabled,
+}: {
+  readonly field: DraftField;
+  readonly onChange: (field: DraftField) => void;
+  readonly disabled: boolean;
+}) {
+  const t = useTranslation();
+  if (field.type !== "select") return null;
+  const { isMultiple: _, defaultValue, ...rest } = field;
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <Switch
+        size="sm"
+        checked={field.isMultiple === true}
+        onCheckedChange={(checked) =>
+          onChange(
+            checked
+              ? { ...rest, isMultiple: true }
+              : { ...rest, ...(defaultValue === undefined ? {} : { defaultValue }) },
+          )
+        }
+        disabled={disabled}
+      />
+      {t("Multiple choices")}
+    </label>
+  );
+}
+
+/** A collection a records or link field can link. */
+export type LinkableCollection = Pick<Collection, "id" | "title" | "extension">;
 
 type ComparisonFieldsControl = (
   field: Extract<DraftField, { type: "records" }>,
@@ -352,8 +461,9 @@ type GroupLayoutControl = (
 /**
  * Fields as a step or a collection defines them, with a way to add one; `depth` counts the groups
  * around them. `areColumns` when a table lists them, each a column but `keyFieldId`'s, which
- * always is one. With `collections`, a field can link records of one of them. With
- * `groupLayout`, a repeatable group's layout is edited there. `areReviewable` on a step, whose
+ * always is one. With `collections`, a top-level field can link records of one of them: a
+ * step's records field, or with `areCollectionFields` a collection's link to one record, whose
+ * top-level selects can also hold several options. With `groupLayout`, a repeatable group's layout is edited there. `areReviewable` on a step, whose
  * fields agents can be made to only propose.
  */
 export function FieldsEditor({
@@ -363,6 +473,7 @@ export function FieldsEditor({
   areColumns,
   keyFieldId,
   collections,
+  areCollectionFields = false,
   groupLayout,
   comparisonFieldsEditor,
   areReviewable = false,
@@ -375,12 +486,14 @@ export function FieldsEditor({
   readonly areColumns: boolean;
   readonly keyFieldId?: string;
   readonly collections?: ReadonlyArray<LinkableCollection>;
+  readonly areCollectionFields?: boolean;
   readonly groupLayout?: GroupLayoutControl | undefined;
   readonly comparisonFieldsEditor?: ComparisonFieldsControl | undefined;
   readonly areReviewable?: boolean;
   readonly onChange: (fields: ReadonlyArray<DraftField>) => void;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   return (
     <>
       {listEntries(fields, onChange).map((place) => (
@@ -391,6 +504,7 @@ export function FieldsEditor({
           depth={depth}
           isColumn={areColumns && place.entry.id !== keyFieldId}
           collections={collections}
+          areCollectionFields={areCollectionFields}
           groupLayout={groupLayout}
           comparisonFieldsEditor={comparisonFieldsEditor}
           isReviewable={areReviewable}
@@ -398,7 +512,7 @@ export function FieldsEditor({
         />
       ))}
       <AddButton
-        label="Add field"
+        label={t("Add field")}
         onClick={() => onChange([...fields, blankField()])}
         disabled={disabled}
       />
@@ -421,15 +535,23 @@ function DefaultValueInput({
   readonly onChange: (field: DraftField) => void;
   readonly disabled: boolean;
 }) {
-  if (field.type === "group" || field.type === "file" || field.type === "records") return null;
+  const t = useTranslation();
+  if (
+    field.type === "group" ||
+    field.type === "file" ||
+    field.type === "records" ||
+    field.type === "foreignKey" ||
+    (field.type === "select" && field.isMultiple === true)
+  )
+    return null;
   const { defaultValue, ...rest } = field;
   const set = (value: string | number | boolean | null) =>
     onChange(value === null ? rest : { ...rest, defaultValue: value });
   const choices =
     field.type === "boolean"
       ? [
-          { value: "true", label: "Yes" },
-          { value: "false", label: "No" },
+          { value: "true", label: t("Yes") },
+          { value: "false", label: t("No") },
         ]
       : field.type === "select"
         ? field.options
@@ -438,11 +560,11 @@ function DefaultValueInput({
             .map((option) => ({ value: option, label: option }))
         : null;
   return (
-    <Field label="Default value" size="xs">
+    <Field label={t("Default value")} size="xs">
       {choices === null ? (
         <Input
           type={field.type}
-          placeholder="Optional"
+          placeholder={t("Optional")}
           value={defaultValue === undefined ? "" : String(defaultValue)}
           onChange={(event) => {
             const typed = event.target.value;
@@ -467,12 +589,12 @@ function DefaultValueInput({
           <SelectTrigger>
             <SelectValue>
               {(choice: string) =>
-                choices.find((option) => option.value === choice)?.label ?? "None"
+                choices.find((option) => option.value === choice)?.label ?? t("None")
               }
             </SelectValue>
           </SelectTrigger>
           <SelectPopup>
-            <SelectItem value={NO_DEFAULT}>None</SelectItem>
+            <SelectItem value={NO_DEFAULT}>{t("None")}</SelectItem>
             {choices.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
@@ -486,15 +608,15 @@ function DefaultValueInput({
 }
 
 /** What a field's collapsed row says after its label. */
-function fieldSummary(field: DraftField) {
+function fieldSummary(field: DraftField, t: Translate) {
   if (field.type === "select") {
-    return `${FIELD_TYPES.select} · ${plural(field.options.length, "option", "options")}`;
+    return `${t(FIELD_TYPES.select)} · ${t(field.options.length === 1 ? "{0} option" : "{0} options", field.options.length)}`;
   }
   if (field.type === "group") {
-    const fields = plural(field.fields.length, "field", "fields");
-    return `${FIELD_TYPES.group} · ${fields}${field.repeatable ? " · multiple entries" : ""}`;
+    const fields = t(field.fields.length === 1 ? "{0} field" : "{0} fields", field.fields.length);
+    return `${t(FIELD_TYPES.group)} · ${fields}${field.repeatable ? ` · ${t("Multiple entries")}` : ""}`;
   }
-  return FIELD_TYPES[field.type];
+  return t(FIELD_TYPES[field.type]);
 }
 
 /**
@@ -508,6 +630,7 @@ function FieldCard({
   depth,
   isColumn,
   collections,
+  areCollectionFields,
   groupLayout,
   comparisonFieldsEditor,
   isReviewable,
@@ -518,15 +641,16 @@ function FieldCard({
   readonly depth: number;
   readonly isColumn: boolean;
   readonly collections: ReadonlyArray<LinkableCollection> | undefined;
+  readonly areCollectionFields: boolean;
   readonly groupLayout: GroupLayoutControl | undefined;
   readonly comparisonFieldsEditor: ComparisonFieldsControl | undefined;
   readonly isReviewable: boolean;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   const id = useId();
   const { entry: field, replace: setField } = place;
   const [startsOpen] = useState(field.label === "");
-  const optionRows = useRowKeys(field.type === "select" ? field.options.length : 0);
   return (
     <div className="rounded-lg border border-border">
       <Collapsible defaultOpen={startsOpen}>
@@ -540,43 +664,45 @@ function FieldCard({
                   : "truncate text-sm text-muted-foreground"
               }
             >
-              {field.label || "New field"}
+              {field.label || t("New field")}
             </span>
-            <span className="shrink-0 text-xs text-muted-foreground">{fieldSummary(field)}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{fieldSummary(field, t)}</span>
           </CollapsibleTrigger>
-          <MoveRemove what={`field ${field.label}`} place={place} disabled={disabled} />
+          <MoveRemove what={t("field {0}", field.label)} place={place} disabled={disabled} />
         </div>
         <CollapsiblePanel>
           <div className="flex flex-col gap-2 border-t border-border p-3">
             <div className="flex flex-wrap items-end gap-2">
-              <Field label="Label" size="xs" className="min-w-40 flex-1">
+              <Field label={t("Label")} size="xs" className="min-w-40 flex-1">
                 <Input
-                  placeholder="Total"
+                  placeholder={t("Total")}
                   value={field.label}
                   autoFocus={field.label === ""}
                   onChange={(event) => setField({ ...field, label: event.target.value })}
                   disabled={disabled}
                 />
               </Field>
-              <Field label="Type" size="xs">
+              <Field label={t("Type")} size="xs">
                 <Select
                   value={field.type}
                   onValueChange={(type) => setField(retypeField(field, type as FieldType))}
                   disabled={disabled}
                 >
                   <SelectTrigger>
-                    <SelectValue>{(type: FieldType) => FIELD_TYPES[type]}</SelectValue>
+                    <SelectValue>{(type: FieldType) => t(FIELD_TYPES[type])}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
                     {Object.entries(FIELD_TYPES)
                       .filter(
                         ([type]) =>
                           (type !== "group" || depth < 2) &&
-                          (type !== "records" || collections !== undefined),
+                          ((type !== "records" && type !== "foreignKey") ||
+                            (collections !== undefined &&
+                              type === (areCollectionFields ? "foreignKey" : "records"))),
                       )
                       .map(([type, label]) => (
                         <SelectItem key={type} value={type}>
-                          {label}
+                          {t(label)}
                         </SelectItem>
                       ))}
                   </SelectPopup>
@@ -590,51 +716,13 @@ function FieldCard({
               disabled={disabled}
             />
             {field.type === "select" ? (
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs text-muted-foreground">Options</span>
-                {listEntries(field.options, (options) => setField(withOptions(field, options))).map(
-                  (option) => (
-                    <div key={optionRows.keys[option.index]} className="flex items-center gap-1.5">
-                      <Input
-                        aria-label={`Option ${option.index + 1}`}
-                        placeholder={["Approved", "Declined"][option.index]}
-                        value={option.entry}
-                        onChange={(event) => option.replace(event.target.value)}
-                        autoFocus={!option.first && option.last && !option.entry}
-                        disabled={disabled}
-                        className="min-w-0 flex-1"
-                      />
-                      <ToneSelect
-                        field={field}
-                        option={option.entry}
-                        onChange={setField}
-                        disabled={disabled}
-                      />
-                      <Button
-                        type="button"
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label={`Remove option ${option.entry}`}
-                        onClick={() => {
-                          optionRows.remove(option.index);
-                          option.remove();
-                        }}
-                        disabled={disabled}
-                      >
-                        <XIcon />
-                      </Button>
-                    </div>
-                  ),
-                )}
-                <AddButton
-                  label="Add option"
-                  onClick={() => setField({ ...field, options: [...field.options, ""] })}
-                  disabled={disabled}
-                />
-              </div>
+              <OptionsEditor field={field} onChange={setField} disabled={disabled} />
             ) : null}
-            {field.type === "records" ? (
-              <Field label="Collection" size="xs">
+            {areCollectionFields && depth === 0 ? (
+              <MultipleSwitch field={field} onChange={setField} disabled={disabled} />
+            ) : null}
+            {field.type === "records" || field.type === "foreignKey" ? (
+              <Field label={t("Collection")} size="xs">
                 <Select
                   value={field.collectionId === "" ? null : field.collectionId}
                   onValueChange={(collectionId) =>
@@ -646,18 +734,24 @@ function FieldCard({
                     <SelectValue>
                       {(collectionId: string | null) =>
                         collectionId === null
-                          ? "Choose one"
+                          ? t("Choose one")
                           : (collections?.find(({ id }) => id === collectionId)?.title ??
                             collectionId)
                       }
                     </SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
-                    {collections?.map((collection) => (
-                      <SelectItem key={collection.id} value={collection.id}>
-                        {collection.title}
-                      </SelectItem>
-                    ))}
+                    {collections
+                      ?.filter(
+                        (collection) =>
+                          collection.extension === undefined ||
+                          collection.id === field.collectionId,
+                      )
+                      .map((collection) => (
+                        <SelectItem key={collection.id} value={collection.id}>
+                          {collection.title}
+                        </SelectItem>
+                      ))}
                   </SelectPopup>
                 </Select>
               </Field>
@@ -680,15 +774,15 @@ function FieldCard({
                   />
                   <div className="flex flex-col gap-0.5">
                     <label htmlFor={`${id}-repeatable`} className="text-xs font-medium">
-                      Multiple entries
+                      {t("Multiple entries")}
                     </label>
                     <p id={`${id}-repeatable-hint`} className="text-xs text-muted-foreground">
-                      e.g. product variants, transactions, colors, etc.
+                      {t("e.g. product variants, transactions, colors, etc.")}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">Fields</span>
+                  <span className="text-xs text-muted-foreground">{t("Fields")}</span>
                   {field.repeatable ? groupLayout?.(field, setField) : null}
                 </div>
                 <FieldsEditor
@@ -707,9 +801,9 @@ function FieldCard({
                 />
               </div>
             ) : null}
-            <Field label="Description" size="xs">
+            <Field label={t("Description")} size="xs">
               <Input
-                placeholder="Optional"
+                placeholder={t("Optional")}
                 value={field.description ?? ""}
                 onChange={(event) => {
                   const { description: _, ...rest } = field;

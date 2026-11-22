@@ -1,3 +1,4 @@
+import { translate, useTranslation } from "~/i18n/locale";
 import {
   Outlet,
   redirect,
@@ -63,27 +64,28 @@ function RootRouteView() {
 }
 
 function RootRouteErrorView({ error }: ErrorComponentProps) {
+  const t = useTranslation();
   const router = useRouter();
-  const message = errorMessage(error, "An unexpected router error occurred.");
+  const message = errorMessage(error, t("An unexpected router error occurred."));
   const pathname = useLocation({ select: (location) => location.pathname });
   const report = useMemo(() => errorReport(error, pathname), [error, pathname]);
 
   return (
     <StandalonePage>
-      <StandalonePageHeader title="Something went wrong." description={message} />
+      <StandalonePageHeader title={t("Something went wrong.")} description={message} />
 
       <div className="mt-5 flex flex-wrap gap-2">
         <Button size="sm" onClick={() => void router.invalidate()}>
-          Try again
+          {t("Try again")}
         </Button>
         <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
-          Reload app
+          {t("Reload app")}
         </Button>
         <CopyErrorButton report={report} />
       </div>
 
       <div className="mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
-        <p className="px-3 py-1.5 text-xs font-medium text-muted-foreground">Error report</p>
+        <p className="px-3 py-1.5 text-xs font-medium text-muted-foreground">{t("Error report")}</p>
         <pre className="max-h-64 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs whitespace-pre-wrap text-foreground/85">
           {report}
         </pre>
@@ -94,12 +96,13 @@ function RootRouteErrorView({ error }: ErrorComponentProps) {
 
 /** Copies the full error report and swaps to a check mark for a moment as confirmation. */
 function CopyErrorButton({ report }: { report: string }) {
+  const t = useTranslation();
   const { copyToClipboard, isCopied } = useCopyToClipboard();
 
   return (
     <Button size="sm" variant="outline" onClick={() => copyToClipboard(report)}>
       <MorphIcon className={cn(isCopied && "text-success")} icon={isCopied ? Check : Copy} />
-      {isCopied ? "Copied" : "Copy error"}
+      {isCopied ? t("Copied") : t("Copy error")}
     </Button>
   );
 }
@@ -116,7 +119,7 @@ function errorDetails(error: unknown): string {
   try {
     return JSON.stringify(error, null, 2);
   } catch {
-    return "No additional error details are available.";
+    return translate("No additional error details are available.");
   }
 }
 

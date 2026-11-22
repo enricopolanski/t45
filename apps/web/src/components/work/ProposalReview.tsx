@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { openProposals } from "@t45/contracts/models/Workflow";
 import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
 import { useState } from "react";
@@ -38,14 +39,17 @@ function ProposedValue({
   field,
   proposal,
   inputs,
+  criteriaSources,
 }: {
   readonly field: FieldView;
   readonly proposal: Proposal;
   readonly inputs: ReadonlyArray<FieldView>;
+  readonly criteriaSources: NonNullable<StepView["comparisonSources"]>[string] | undefined;
 }) {
+  const t = useTranslation();
   if (field.type === "records") {
     return field.collection === null || proposal.record === null ? (
-      <p className="text-sm text-muted-foreground">The record is gone.</p>
+      <p className="text-sm text-muted-foreground">{t("The record is gone.")}</p>
     ) : (
       <RecordComparison
         key={proposal.id}
@@ -53,6 +57,8 @@ function ProposedValue({
         collection={field.collection}
         record={proposal.record}
         rationale={proposal.whyYes}
+        comparison={proposal.comparison}
+        criteriaSources={criteriaSources}
         comparisonFields={field.comparisonFields}
       />
     );
@@ -60,23 +66,27 @@ function ProposedValue({
   const { linkUrl: _, ...unlinked } = field;
   return (
     <dl className="grid gap-3 sm:grid-cols-2">
-      <ValueBox term="Now" field={field} />
-      <ValueBox term="Proposed" field={{ ...unlinked, value: proposal.value }} />
+      <ValueBox term={t("Now")} field={field} />
+      <ValueBox term={t("Proposed")} field={{ ...unlinked, value: proposal.value }} />
     </dl>
   );
 }
 
 function ProposalComment({ proposal }: { readonly proposal: Proposal }) {
+  const t = useTranslation();
   return (
-    <section aria-label="Comment" className="flex flex-col gap-3 rounded-lg border p-3 text-sm">
-      <h3 className="font-semibold">Comment</h3>
-      <section aria-label="Why it fits" className="flex min-w-0 flex-col gap-1">
-        <h4 className="font-medium">Why it fits</h4>
+    <section
+      aria-label={t("Comment")}
+      className="flex flex-col gap-3 rounded-lg border p-3 text-sm"
+    >
+      <h3 className="font-semibold">{t("Comment")}</h3>
+      <section aria-label={t("Why it fits")} className="flex min-w-0 flex-col gap-1">
+        <h4 className="font-medium">{t("Why it fits")}</h4>
         <MarkdownText text={proposal.whyYes} className="wrap-anywhere" />
       </section>
-      <section aria-label="Why it may not" className="flex min-w-0 flex-col gap-1">
-        <h4 className="font-medium">Why it may not</h4>
-        <MarkdownText text={proposal.whyNo || "Nothing against it."} className="wrap-anywhere" />
+      <section aria-label={t("Why it may not")} className="flex min-w-0 flex-col gap-1">
+        <h4 className="font-medium">{t("Why it may not")}</h4>
+        <MarkdownText text={proposal.whyNo || t("Nothing against it.")} className="wrap-anywhere" />
       </section>
     </section>
   );
@@ -105,6 +115,7 @@ export function ProposalReview({
   readonly view: StepView;
   readonly onReview: (proposal: Proposal, isApproved: boolean) => Promise<string | null>;
 }) {
+  const t = useTranslation();
   const directory = useWorkDirectory();
   const [isOpen, setIsOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
@@ -115,6 +126,8 @@ export function ProposalReview({
   const proposal = remaining[0];
   if (open.length === 0 && !isOpen) return null;
   const field = proposal === undefined ? null : findField(view.fields, proposal.fieldKey);
+  const criteriaSources = field && view.comparisonSources?.[field.key];
+  const hasScopedRationale = !criteriaSources || proposal?.comparison !== undefined;
   const review = (isApproved: boolean) => {
     if (proposal === undefined) return;
     setIsBusy(true);
@@ -136,20 +149,20 @@ export function ProposalReview({
             setIsOpen(true);
           }}
         >
-          Review ({open.length})
+          {t("Review ({0})", open.length)}
         </Button>
       </div>
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogPopup
-          aria-label="Review"
+          aria-label={t("Review")}
           className={field?.type === "records" ? "sm:max-w-7xl" : "sm:max-w-3xl"}
         >
           <DialogHeader>
             <DialogTitle>
-              Review {field?.label ?? ""}
+              {field === null ? t("Review") : t("Review {0}", field.label)}
               <span className="ms-2 text-sm font-normal text-muted-foreground tabular-nums">
-                {remaining.length} left
-                {postponed.length > 0 ? ` · ${postponed.length} postponed` : ""}
+                {t("{0} left", remaining.length)}
+                {postponed.length > 0 ? t(" · {0} postponed", postponed.length) : ""}
               </span>
             </DialogTitle>
           </DialogHeader>
@@ -157,13 +170,18 @@ export function ProposalReview({
             <DialogPanel>
               <div className="flex flex-col gap-4">
                 <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  {proposal.score === undefined ? null : (
-                    <Badge variant="outline">Fit {proposal.score}%</Badge>
+                  {!hasScopedRationale || proposal.score === undefined ? null : (
+                    <Badge variant="outline">{t("Fit {0}%", proposal.score)}</Badge>
                   )}
-                  Proposed by {actorName(directory, proposal.author)}
+                  {t("Proposed by {0}", actorName(directory, proposal.author))}
                 </p>
-                <ProposedValue field={field} proposal={proposal} inputs={view.inputs} />
-                <ProposalComment key={proposal.id} proposal={proposal} />
+                <ProposedValue
+                  field={field}
+                  proposal={proposal}
+                  inputs={view.inputs}
+                  criteriaSources={criteriaSources ?? undefined}
+                />
+                {hasScopedRationale && <ProposalComment key={proposal.id} proposal={proposal} />}
                 {error && <ErrorText text={error} />}
               </div>
             </DialogPanel>
@@ -175,7 +193,7 @@ export function ProposalReview({
               variant="success"
               onClick={() => review(true)}
             >
-              Approve
+              {t("Approve")}
             </Button>
             <Button
               type="button"
@@ -183,7 +201,7 @@ export function ProposalReview({
               disabled={isBusy || proposal === undefined}
               onClick={() => review(false)}
             >
-              Discard
+              {t("Discard")}
             </Button>
             <Button
               type="button"
@@ -195,7 +213,7 @@ export function ProposalReview({
                 if (remaining.length === 1) setIsOpen(false);
               }}
             >
-              Maybe (postpone)
+              {t("Maybe (postpone)")}
             </Button>
           </DialogFooter>
         </DialogPopup>

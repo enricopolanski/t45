@@ -7,6 +7,14 @@ import * as NodeUtil from "node:util";
 
 const run = NodeUtil.promisify(NodeChildProcess.execFile);
 const pdfImageDirectory = "/work/.t45-document-pages";
+/** Reading answers with what the documents state and has no tools; extraction saves records. */
+const isReading = process.env.T45_DOCUMENT_MODE === "read";
+/** The only tools an extraction uses: reading categories, then saving once. */
+const EXTRACTION_TOOLS = new Set([
+  "extraction_categories",
+  "extraction_category_schema",
+  "extraction_save_records",
+]);
 
 const uniqueImages = async (images) => {
   const digests = await Promise.all(
@@ -37,8 +45,8 @@ const attachReference = async ({ name }) => {
   }
 };
 
-const preparePdf = async ({ id, name }, index) => {
-  const directory = `${pdfImageDirectory}/document-${index + 1}`;
+const preparePdf = async ({ id, name }) => {
+  const directory = `${pdfImageDirectory}/${id}`;
   const pdf = NodePath.resolve("attachments", id);
   await NodeFSP.mkdir(directory, { recursive: true });
   const [text, info, , images] = await Promise.all([
@@ -66,7 +74,7 @@ const preparePdf = async ({ id, name }, index) => {
       const [, page, image] = /^\s*(\d+)\s+(\d+)\s+image\s+/u.exec(line) ?? [];
       if (page === undefined || image === undefined) return [];
       const filename = `image-${image.padStart(3, "0")}.png`;
-      const reference = `pdf-image:document-${index + 1}/${filename}`;
+      const reference = `pdf-image:${id}/${filename}`;
       return [
         {
           text: `${name}, page ${page}. Embedded image reference: ${reference}`,
@@ -95,7 +103,7 @@ export default {
         NodeFSP.readFile("AGENTS.md", "utf8"),
         NodeFSP.readdir(".", { withFileTypes: true }),
         Promise.all(pdfs.map(preparePdf)),
-        run("node", ["/opt/t45/extraction-tools.mjs", "--schema"]),
+        isReading ? null : run("node", ["/opt/t45/extraction-tools.mjs", "--schema"]),
       ]);
       const pages = documents.flatMap(({ pages }) => pages);
       const [images, references] = await Promise.all([
@@ -112,11 +120,22 @@ export default {
         ),
       ]);
       const material = [...pages, ...images];
+      const sources = `Source attachment IDs:\n${pdfs.map(({ name, id }) => `${name}: ${id}`).join("\n")}`;
+      if (isReading) {
+        prompt.text = [
+          instructions,
+          "You have no tools: the documents are all below, so answer in one message, without calling anything. Read every page image and its selectable text. Answer with everything the documents state, article by article, for the automation that records the articles after you: each code and name, each value with its unit, condition and test method, prices, terms and packaging, which data sheet or specification table covers which articles, and the embedded image references that show each article, citing the document and page of each fact. Report what the documents say; record nothing yourself.",
+          sources,
+          ...material.map(({ text }) => text),
+        ].join("\n\n");
+        prompt.files = [...material.map(({ file }) => file), ...references];
+        return;
+      }
       prompt.text = [
         instructions,
         `Extraction fields by ID. If the destination has review fields, supply review data. The tool fills every link and database identifier.\n${schema.stdout}`,
-        'Read every page image and its selectable text as source evidence. Submit one extraction_save_records call when all articles and review fields are ready. Start with {"recordsFieldId": "...", "groups": [{"sharedValues": {}, "sharedReview": {}, "articles": [{"sourceId": "...", "values": {}, "review": {}}]}]}. Each code occurs once, even across groups. Use field IDs and arrays of objects for repeatable groups. The tool supplies identifiers and links. Report only source discrepancies that require a person to resolve them. After saving, reply with one short sentence.',
-        `Source attachment IDs:\n${pdfs.map(({ name, id }) => `${name}: ${id}`).join("\n")}`,
+        'Read every page image and its selectable text as source evidence. When the instructions describe articles by their category, call extraction_categories, choose each article\'s category, and call extraction_category_schema for each category chosen. Submit one extraction_save_records call when all articles and review fields are ready. Start with {"recordsFieldId": "...", "groups": [{"sharedValues": {}, "sharedReview": {}, "articles": [{"sourceId": "...", "values": {}, "review": {}}]}]}. Each code occurs once, even across groups. Articles the instructions leave out go in skipped, not in groups. Use field IDs and arrays of objects for repeatable groups. The tool supplies identifiers and links. Report only source discrepancies that require a person to resolve them. After saving, reply with one short sentence.',
+        sources,
         ...material.map(({ text }) => text),
       ].join("\n\n");
       prompt.files = [...material.map(({ file }) => file), ...references];
@@ -127,7 +146,7 @@ export default {
         () => false,
       );
       for (const name of Object.keys(tools)) {
-        if (isSaved || name !== "extraction_save_records") delete tools[name];
+        if (isReading || isSaved || !EXTRACTION_TOOLS.has(name)) delete tools[name];
       }
     });
   },

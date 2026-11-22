@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { type ComposerCommandItem } from "../../composerPrompt";
 import { keepComposerFocus } from "./composerLayout";
 import { ScrollArea } from "../ui/scroll-area";
@@ -13,11 +14,12 @@ export function ComposerCommandMenu(props: {
   onHighlight: (command: ComposerCommandItem["command"]) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
+  const t = useTranslation();
   return (
     <div className="composer-drawer absolute inset-x-(--chat-composer-drawer-inset) -bottom-(--chat-composer-attachment-overlap) z-20 flex flex-col overflow-hidden pb-(--chat-composer-attachment-overlap) **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4">
       {props.items.length > 0 ? (
         <ScrollArea scrollbarGutter scrollFade>
-          <div id={props.listId} role="listbox" aria-label="Commands" className="max-h-72 p-2">
+          <div id={props.listId} role="listbox" aria-label={t("Commands")} className="max-h-72 p-2">
             {props.items.map((item) => (
               <div
                 key={item.command}
@@ -45,7 +47,7 @@ export function ComposerCommandMenu(props: {
         </ScrollArea>
       ) : (
         <div className="px-5 pt-3.5 pb-7">
-          <p className="text-secondary-label text-xs">No matching command.</p>
+          <p className="text-secondary-label text-xs">{t("No matching command.")}</p>
         </div>
       )}
     </div>

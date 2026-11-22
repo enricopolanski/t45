@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { AgentModels } from "@t45/contracts/resources/Agents";
 import type { Agent } from "@t45/contracts/models/Agent";
 import type { Capability } from "@t45/contracts/models/Capability";
@@ -29,10 +30,11 @@ function CapabilityPicker({
   readonly selected: ReadonlyArray<string>;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   return (
     <div className="flex flex-col gap-1">
       {capabilities.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No capabilities available.</p>
+        <p className="text-sm text-muted-foreground">{t("No capabilities available.")}</p>
       ) : null}
       {capabilities.map(({ id, name, description }) => (
         <label
@@ -42,7 +44,7 @@ function CapabilityPicker({
           <Checkbox
             name="capabilities"
             value={id}
-            aria-label={`Use ${name}`}
+            aria-label={t("Use {0}", name)}
             defaultChecked={selected.includes(id)}
             disabled={disabled}
           />
@@ -65,16 +67,17 @@ function SkillPicker({
   readonly selected: ReadonlyArray<StringId>;
   readonly disabled: boolean;
 }) {
+  const t = useTranslation();
   const isAdmin = useIsAdmin();
   if (skills.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No skills yet.
+        {t("No skills yet.")}
         {isAdmin ? (
           <>
             {" "}
             <Link to="/settings/agents/skills/new" className="underline">
-              Create one
+              {t("Create one")}
             </Link>
             .
           </>
@@ -92,7 +95,7 @@ function SkillPicker({
           <Checkbox
             name="skills"
             value={skill.id}
-            aria-label={`Use ${skill.name}`}
+            aria-label={t("Use {0}", skill.name)}
             defaultChecked={selected.includes(skill.id)}
             disabled={disabled}
           />
@@ -113,13 +116,14 @@ function ModelPicker({
   readonly models: AgentModels;
   readonly value: string | null;
 }) {
+  const t = useTranslation();
   if (models.reason !== null) {
-    return <ErrorText text={`T45 can't list the models: ${models.reason}`} />;
+    return <ErrorText text={t("T45 can't list the models: {0}", models.reason)} />;
   }
   return (
     <Select name="model" required defaultValue={value}>
       <SelectTrigger>
-        <SelectValue placeholder="Choose a model">
+        <SelectValue placeholder={t("Choose a model")}>
           {(slug: string) => models.models.find((model) => model.slug === slug)?.name ?? slug}
         </SelectValue>
       </SelectTrigger>
@@ -150,6 +154,7 @@ function AgentForm({
   readonly capabilities: ReadonlyArray<Capability>;
   readonly models: AgentModels;
 }) {
+  const t = useTranslation();
   const navigate = useNavigate();
   const [files, setFiles] = useState(() => fileRows(agent?.files ?? {}));
   const [isConversational, setIsConversational] = useState(agent?.isConversational ?? false);
@@ -157,14 +162,14 @@ function AgentForm({
   const [busy, startTransition] = useTransition();
   return (
     <form
-      aria-label={agent ? `Edit ${agent.name}` : "New agent"}
+      aria-label={agent ? t("Edit {0}", agent.name) : t("New agent")}
       className="flex flex-col gap-6"
       onSubmit={(event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         const model = form.get("model") ?? agent?.model;
         if (typeof model !== "string" || model === "") {
-          setError("Choose a model.");
+          setError(t("Choose a model."));
         } else {
           startTransition(async () => {
             setError(null);
@@ -190,38 +195,42 @@ function AgentForm({
       }}
     >
       <fieldset disabled={busy} className="contents">
-        <Section title="Identity" card>
-          <Field label="Name">
+        <Section title={t("Identity")} card>
+          <Field label={t("Name")}>
             <Input
               name="name"
               required
               pattern=".*\S.*"
-              placeholder="e.g. Business analyst"
+              placeholder={t("e.g. Business analyst")}
               defaultValue={agent?.name}
             />
           </Field>
         </Section>
         <Section
-          title="Instructions"
-          description="Written to AGENTS.md in every chat's folder."
+          title={t("Instructions")}
+          description={t("Written to AGENTS.md in every chat's folder.")}
           card
         >
           <Textarea
             name="instructions"
-            aria-label="Agent instructions"
-            placeholder="What this agent does, how it works, and what it hands back"
+            aria-label={t("Agent instructions")}
+            placeholder={t("What this agent does, how it works, and what it hands back")}
             rows={12}
             defaultValue={agent?.instructions}
           />
         </Section>
-        <Section title="Execution" card>
-          <Field label="Model">
+        <Section title={t("Execution")} card>
+          <Field label={t("Model")}>
             <ModelPicker models={models} value={agent?.model ?? models.models[0]?.slug ?? null} />
           </Field>
         </Section>
-        <Section title="Network" description="Every chat gets a virtual machine of its own." card>
+        <Section
+          title={t("Network")}
+          description={t("Every chat gets a virtual machine of its own.")}
+          card
+        >
           <Select name="network" defaultValue={agent?.permissions.network ?? "provider"}>
-            <SelectTrigger aria-label="Network">
+            <SelectTrigger aria-label={t("Network")}>
               <SelectValue>
                 {(value: Agent["permissions"]["network"]) => NETWORKS[value]}
               </SelectValue>
@@ -233,15 +242,15 @@ function AgentForm({
           </Select>
         </Section>
         <Section
-          title="Chat"
-          description="Allow whoever can use this agent to start conversations with it."
+          title={t("Chat")}
+          description={t("Allow whoever can use this agent to start conversations with it.")}
           card
         >
           <label className="flex items-center justify-between gap-3 text-sm">
-            Available in Chat
+            {t("Available in Chat")}
             <Switch
               name="isConversational"
-              aria-label="Available in Chat"
+              aria-label={t("Available in Chat")}
               checked={isConversational}
               onCheckedChange={setIsConversational}
               disabled={busy}
@@ -249,15 +258,15 @@ function AgentForm({
           </label>
         </Section>
         <Section
-          title="Skills"
-          description="Written to .opencode/skills/ in every chat's folder."
+          title={t("Skills")}
+          description={t("Written to .opencode/skills/ in every chat's folder.")}
           card
         >
           <SkillPicker skills={skills} selected={agent?.skills ?? []} disabled={busy} />
         </Section>
         <Section
-          title="Capabilities"
-          description="Choose the capabilities this agent can use together."
+          title={t("Capabilities")}
+          description={t("Choose the capabilities this agent can use together.")}
           card
         >
           <CapabilityPicker
@@ -267,8 +276,10 @@ function AgentForm({
           />
         </Section>
         <Section
-          title="Files"
-          description="Copied into every chat's folder. Files sent to the chat go in attachments/."
+          title={t("Files")}
+          description={t(
+            "Copied into every chat's folder. Files sent to the chat go in attachments/.",
+          )}
           card
         >
           <FilesEditor files={files} onChange={setFiles} />
@@ -276,7 +287,7 @@ function AgentForm({
         {error && <ErrorText text={error} />}
         <div className="flex gap-2">
           <Button type="submit" size="sm">
-            {agent ? "Save agent" : "Create agent"}
+            {agent ? t("Save agent") : t("Create agent")}
           </Button>
           <Button
             type="button"
@@ -284,7 +295,7 @@ function AgentForm({
             variant="ghost"
             onClick={() => void navigate({ to: "/settings/agents" })}
           >
-            Cancel
+            {t("Cancel")}
           </Button>
         </div>
       </fieldset>

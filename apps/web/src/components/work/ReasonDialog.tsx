@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { useId, useState } from "react";
 
 import { Button } from "../ui/button";
@@ -33,6 +34,7 @@ export function ReasonDialog({
   readonly isReasonOptional?: boolean;
   readonly onConfirm: (reason: string) => Promise<string | null>;
 }) {
+  const t = useTranslation();
   const id = useId();
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -77,7 +79,7 @@ export function ReasonDialog({
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor={`${id}-reason`}>
-                  {isReasonOptional ? "Reason (optional)" : "Reason"}
+                  {isReasonOptional ? t("Reason (optional)") : t("Reason")}
                 </Label>
                 <Textarea
                   id={`${id}-reason`}

@@ -31,6 +31,12 @@ serve({
       step,
     ),
     rpcTool(
+      "get_fields",
+      "workflows.getStepFields",
+      "Read only the requested step fields and authorized inputs. Pass inputs and/or fields as lists of {key}. For a records field, give recordFields to select collection columns and recordKeys to select specific linked records. An empty recordFields list returns only linked record keys. Records include collectionId and their keys. Groups have rows with values by field key and a list of field labels. For configured comparison fields, comparisonSources lists the confirmed criteria (id, name, value) for each sourceRecordKey. Includes proposed and discarded values for the requested fields on this step.",
+      step,
+    ),
+    rpcTool(
       "set_field",
       "workflows.setStepField",
       "Fill a step field by its key: text and dates (YYYY-MM-DD) as strings (text fields marked isMarkdown render Markdown: use short paragraphs, lists and labelled links with real newlines, not literal backslash-n sequences, and no enclosing code fence), numbers as JSON numbers, yes/no as booleans, selects as one of their options, URLs as http:// or https:// strings; null clears it. Nested fields use dotted keys. Set a repeatable group to the list of its row ids, then fill each row's fields as group.rowId.field, with the field ids in the group's rowFields. A refusal says exactly what didn't fit.",
@@ -39,7 +45,13 @@ serve({
     rpcTool(
       "propose_value",
       "workflows.proposeStepField",
-      "Propose a value for a field marked isReviewed, which set_field refuses: a member approves or discards it. Give the value as set_field takes it, but one record's key at a time for a records field; whyYes and whyNo in a sentence or two each, saying why it fits and what doesn't; and score, from 0 to 100, how well it fits. A value already proposed, discarded or held is refused: get_step lists the proposals.",
+      "Propose a value for a field marked isReviewed, which set_field refuses: a member approves or discards it. Give the value as set_field takes it, but one record's key at a time for a records field; whyYes and whyNo in a sentence or two each, saying why it fits and what doesn't; and score, from 0 to 100, how well it fits. When the field has comparisonSources, give comparison with the sourceRecordKey and assessments keyed by criterionId. Include the candidate value and precise source evidence for each judgment, with sourceUrl when available. Mark decisive criteria isImportant. Use missing for unknown, conflicting or incomplete evidence, including unknown test conditions; omit undocumented criteria. A value already proposed, discarded or held is refused: get_step lists the proposals.",
+      step,
+    ),
+    rpcTool(
+      "confirm_entry",
+      "workflows.confirmRecordEntry",
+      "Confirm one record's review entry, as its reviewer does once its values are right: get_step lists the step's recordReviews, each entry with its recordKey and rowId. Give groupFieldId, recordKey and rowId; previousValues, the entry's values as get_step shows them, by field key relative to the entry; and values, the same with your corrections. Refused, with why, when a value is missing or the entry changed meanwhile.",
       step,
     ),
     rpcTool(

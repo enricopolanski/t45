@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { toSlug } from "@t45/contracts/models/Workflow";
 import type { ProjectView } from "@t45/contracts/resources/Workflows";
 import { Link } from "@tanstack/react-router";
@@ -9,7 +10,6 @@ import { Button } from "../ui/button";
 import { ErrorText } from "../ui/error-text";
 import { Label } from "../ui/label";
 import { WorkFrame } from "../work/WorkFrame";
-import { plural } from "../work/workLogic";
 import { ActionRow } from "./ActionRow";
 import { useWorkflowData } from "./useWorkflowData";
 import { ProjectArchive, ProjectPeople, ProjectStepPeople, ProjectTickets } from "./ProjectPeople";
@@ -20,6 +20,7 @@ import { ProjectArchive, ProjectPeople, ProjectStepPeople, ProjectTickets } from
  * applies at once; steps are saved on the workflow's own page.
  */
 export function ProjectEditor({ projectId }: { readonly projectId: string }) {
+  const t = useTranslation();
   const id = useId();
   const { detail, busy, error, run } = useWorkflowData(
     useCallback(
@@ -31,9 +32,9 @@ export function ProjectEditor({ projectId }: { readonly projectId: string }) {
 
   if (detail === null) {
     return (
-      <WorkFrame title="Project">
+      <WorkFrame title={t("Project")}>
         <p role={error !== null ? "alert" : undefined} className="text-sm text-muted-foreground">
-          {error ?? "Loading…"}
+          {error ?? t("Loading…")}
         </p>
       </WorkFrame>
     );
@@ -46,17 +47,21 @@ export function ProjectEditor({ projectId }: { readonly projectId: string }) {
   return (
     <WorkFrame title={project.name}>
       <p className="text-sm text-muted-foreground">
-        This project uses the {workflow.name} workflow. Its name, people and assignments belong to
-        this project, and so does the version of the workflow its new tickets start on.
+        {t("This project uses the")} {workflow.name}{" "}
+        {t(
+          "workflow. Its name, people and assignments belong to this project, and so does the version of the workflow its new tickets start on.",
+        )}
       </p>
       <div className="flex flex-col gap-6">
         {error && <ErrorText text={error} />}
-        <section aria-label="General" className="flex flex-col gap-2.5">
-          <h2 className="text-sm font-semibold">General</h2>
+        <section aria-label={t("General")} className="flex flex-col gap-2.5">
+          <h2 className="text-sm font-semibold">{t("General")}</h2>
           <div className="divide-y divide-border rounded-xl border border-border bg-card">
             <div className="flex flex-col gap-1.5 px-4 py-3">
-              <Label htmlFor={`${id}-name`}>Name</Label>
-              <p className="text-xs text-muted-foreground">How this process appears to everyone.</p>
+              <Label htmlFor={`${id}-name`}>{t("Name")}</Label>
+              <p className="text-xs text-muted-foreground">
+                {t("How this process appears to everyone.")}
+              </p>
               <SavedInput
                 id={`${id}-name`}
                 value={project.name}
@@ -66,27 +71,34 @@ export function ProjectEditor({ projectId }: { readonly projectId: string }) {
               />
             </div>
             <div className="flex flex-col gap-1.5 px-4 py-3">
-              <Label htmlFor={`${id}-slug`}>Slug</Label>
-              <p className="text-xs text-muted-foreground">Used in its web address.</p>
+              <Label htmlFor={`${id}-slug`}>{t("Slug")}</Label>
+              <p className="text-xs text-muted-foreground">{t("Used in its web address.")}</p>
               <SavedInput
                 id={`${id}-slug`}
                 value={project.slug ?? ""}
-                placeholder="e.g. orders"
+                placeholder={t("e.g. orders")}
                 tidy={(typed) => toSlug(typed) ?? ""}
                 onSave={(typed) => void update({ slug: typed || null })}
               />
             </div>
           </div>
         </section>
-        <section aria-label="Workflow" className="flex flex-col gap-2.5">
-          <h2 className="text-sm font-semibold">Workflow</h2>
+        <section aria-label={t("Workflow")} className="flex flex-col gap-2.5">
+          <h2 className="text-sm font-semibold">{t("Workflow")}</h2>
           <div className="divide-y divide-border rounded-xl border border-border bg-card">
             <ActionRow
               title={workflow.name}
               description={
                 adopted === null
-                  ? "No version adopted yet, so no ticket can start."
-                  : `New tickets start on version ${adopted.number}, with ${plural(adopted.steps.length, "step", "steps")}.`
+                  ? t("No version adopted yet, so no ticket can start.")
+                  : t(
+                      "New tickets start on version {0}, with {1}.",
+                      adopted.number,
+                      t(
+                        adopted.steps.length === 1 ? "{0} step" : "{0} steps",
+                        adopted.steps.length,
+                      ),
+                    )
               }
               action={
                 <Button
@@ -99,14 +111,18 @@ export function ProjectEditor({ projectId }: { readonly projectId: string }) {
                     />
                   }
                 >
-                  Open workflow
+                  {t("Open workflow")}
                 </Button>
               }
             />
             {adopted?.id !== latest.id && !project.isArchived && !workflow.isArchived ? (
               <ActionRow
-                title={`Adopt version ${latest.number}`}
-                description={`${plural(latest.steps.length, "step", "steps")}, each of which needs a member below first. ${latest.isFrozen ? "" : "It is a draft: adopting it freezes it for good. "}Tickets already started stay on their version.`}
+                title={t("Adopt version {0}", latest.number)}
+                description={t(
+                  "{0}, each of which needs a member below first. {1}Tickets already started stay on their version.",
+                  t(latest.steps.length === 1 ? "{0} step" : "{0} steps", latest.steps.length),
+                  latest.isFrozen ? "" : t("It is a draft: adopting it freezes it for good. "),
+                )}
                 action={
                   <Button
                     size="sm"
@@ -121,7 +137,7 @@ export function ProjectEditor({ projectId }: { readonly projectId: string }) {
                       )
                     }
                   >
-                    Adopt
+                    {t("Adopt")}
                   </Button>
                 }
               />

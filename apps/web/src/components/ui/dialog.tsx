@@ -1,4 +1,5 @@
 "use client";
+import { useTranslation } from "~/i18n/locale";
 
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
@@ -55,6 +56,7 @@ function DialogPopup({
   closeButton = variant === "default",
   ...props
 }: DialogPrimitive.Popup.Props & { variant?: "default" | "media"; closeButton?: boolean }) {
+  const t = useTranslation();
   const classes = VARIANT_CLASSES[variant];
   return (
     <DialogPrimitive.Portal>
@@ -72,7 +74,7 @@ function DialogPopup({
           {children}
           {closeButton ? (
             <DialogPrimitive.Close
-              aria-label="Close"
+              aria-label={t("Close")}
               className="absolute end-2 top-2"
               render={<Button size="icon" variant="ghost" />}
             >

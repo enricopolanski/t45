@@ -12,7 +12,11 @@ import { agents } from "../src/agents.ts";
 import { webBrowser } from "../src/browser.ts";
 import { progressReporting } from "../src/reporting.ts";
 import { collections } from "../src/collections.ts";
-import { documentExtraction } from "../src/document-extraction.ts";
+import {
+  documentExtraction,
+  documentReading,
+  extractionSaving,
+} from "../src/document-extraction.ts";
 
 const programs = [
   { name: "report-tools", definition: progressReporting },
@@ -23,6 +27,13 @@ const programs = [
     definition: documentExtraction,
     plugin: "document-extraction/server.js",
   },
+  // Reading and saving split an extraction in two runs, each with its own agent.
+  {
+    name: "extraction-tools",
+    definition: documentReading,
+    plugin: "document-extraction/server.js",
+  },
+  { name: "extraction-tools", definition: extractionSaving },
   { name: "project-tools", definition: projectOperations },
   { name: "collection-tools", definition: collections },
   { name: "browser-open", definition: webBrowser },
@@ -30,7 +41,7 @@ const programs = [
 const encodeCapabilities = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Capability)));
 const encodeBuiltIns = Schema.encodeSync(Schema.fromJsonString(BuiltIns));
 
-for (const [index, { name }] of programs.entries()) {
+for (const [index, name] of [...new Set(programs.map(({ name }) => name))].entries()) {
   await build({
     config: false,
     entry: { [name]: `src/${name}.ts` },

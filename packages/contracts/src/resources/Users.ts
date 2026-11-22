@@ -4,7 +4,7 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 
 import { StringId, NonNegativeInt } from "../models/primitives.ts";
 import { Avatar, InvalidAvatar } from "../models/Avatar.ts";
-import { DisplayName, Refused, Role, User } from "../models/User.ts";
+import { DisplayName, Locale, Refused, Role, User } from "../models/User.ts";
 import { AdminOnly } from "../Authorization.ts";
 import { AccessDenied, NotFound } from "./errors.ts";
 
@@ -24,6 +24,7 @@ export const Users = RpcGroup.make(
     success: User,
     error: Schema.Union([InvalidAvatar, NotFound, AccessDenied]),
   }),
+  Rpc.make("setLocale", { payload: { locale: Schema.NullOr(Locale) }, error: AccessDenied }),
   Rpc.make("approve", {
     payload: { userId: StringId, role: Role },
     success: User,

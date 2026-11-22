@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import type { Agent } from "@t45/contracts/models/Agent";
 import type { ChatId } from "@t45/contracts/models/Chat";
 
@@ -36,7 +37,10 @@ export async function sendChatMessage(send: {
     await awaitAttachmentUploads(attachments.map((attachment) => attachment.id));
     const uploaded = getUploadedAttachments(attachments);
     if (uploaded === null) {
-      toastManager.add({ type: "error", title: "Retry or remove failed uploads before sending." });
+      toastManager.add({
+        type: "error",
+        title: translate("Retry or remove failed uploads before sending."),
+      });
       return;
     }
     try {
@@ -61,7 +65,7 @@ export async function sendChatMessage(send: {
     }
     if (send.isOpen()) send.scrollToEnd();
   } catch (error) {
-    toastFailure("Couldn't send the message", error);
+    toastFailure(translate("Couldn't send the message"), error);
   } finally {
     sendsInFlight.delete(chatId);
     send.setBusy(false);

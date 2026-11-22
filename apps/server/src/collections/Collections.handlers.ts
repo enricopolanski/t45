@@ -11,18 +11,23 @@ export const layer = Collections.middleware(Authorization).toLayer(
       "collections.create": (input) =>
         Effect.flatMap(CurrentActor, (actor) => collections.create(actor, input)),
       "collections.update": (input) => collections.update(input),
+      "collections.setExtension": (input) => collections.setExtension(input),
       "collections.reorderColumns": (input) => collections.reorderColumns(input),
       "collections.list": () => Effect.flatMap(CurrentActor, collections.list),
       "collections.get": ({ collectionId }) =>
         Effect.flatMap(CurrentActor, (actor) => collections.get(actor, collectionId)),
       "collections.getRecord": (input) =>
         Effect.flatMap(CurrentActor, (actor) => collections.getRecord(actor, input)),
+      "collections.getRecordExtensions": (input) =>
+        Effect.flatMap(CurrentActor, (actor) => collections.getRecordExtensions(actor, input)),
       "collections.searchRecords": (input) =>
         Effect.flatMap(CurrentActor, (actor) => collections.searchRecords(actor, input)),
       "collections.listFieldValues": (input) =>
         Effect.flatMap(CurrentActor, (actor) => collections.listFieldValues(actor, input)),
       "collections.saveRecord": (input) =>
         Effect.flatMap(CurrentActor, (actor) => collections.saveRecord(actor, input)),
+      "collections.deleteRecord": (input) =>
+        Effect.flatMap(CurrentActor, (actor) => collections.deleteRecord(actor, input)),
     });
   }),
 );

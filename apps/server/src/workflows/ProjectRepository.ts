@@ -1,4 +1,5 @@
 import { Refused, Project } from "@t45/contracts/models/Workflow";
+import { StepAutomationTrigger, StepHistoryAccess } from "@t45/contracts/models/Workflow";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -9,6 +10,10 @@ const Row = Schema.Struct({
   ...Project.fields,
   adminUserIds: Schema.fromJsonString(Project.fields.adminUserIds),
   defaultAssignees: Schema.fromJsonString(Project.fields.defaultAssignees),
+  stepHistoryAccess: Schema.optionalKey(Schema.fromJsonString(Schema.Array(StepHistoryAccess))),
+  automationTriggers: Schema.optionalKey(
+    Schema.fromJsonString(Schema.Array(StepAutomationTrigger)),
+  ),
   isArchived: Schema.BooleanFromBit,
 });
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
@@ -16,7 +21,8 @@ const encodeRow = Schema.encodeEffect(Row);
 
 const COLUMNS = `id, workflow_id AS "workflowId", workflow_version_id AS "workflowVersionId", name,
   admin_user_ids AS "adminUserIds", default_assignees AS "defaultAssignees", slug,
-  is_archived AS "isArchived"`;
+  is_archived AS "isArchived", step_history_access AS "stepHistoryAccess",
+  automation_triggers AS "automationTriggers"`;
 
 /** A member of one of the workflow's steps in a project; `stepId` is the step's definition id. */
 interface StepMember {
@@ -47,9 +53,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const row = yield* encodeRow(project);
         yield* sql`INSERT INTO projects (id, workflow_id, workflow_version_id, name,
-              admin_user_ids, default_assignees, slug, is_archived)
+              admin_user_ids, default_assignees, slug, is_archived, step_history_access,
+              automation_triggers)
             VALUES (${row.id}, ${row.workflowId}, ${row.workflowVersionId}, ${row.name},
-              ${row.adminUserIds}, ${row.defaultAssignees}, ${row.slug}, ${row.isArchived})`;
+              ${row.adminUserIds}, ${row.defaultAssignees}, ${row.slug}, ${row.isArchived},
+              ${row.stepHistoryAccess ?? "[]"}, ${row.automationTriggers ?? "[]"})`;
       }).pipe(Effect.orDie),
     update: (project: Project) =>
       Effect.gen(function* () {
@@ -64,7 +72,8 @@ const make = Effect.gen(function* () {
               workflow_version_id = ${row.workflowVersionId},
               admin_user_ids = ${row.adminUserIds},
               default_assignees = ${row.defaultAssignees}, slug = ${row.slug},
-              is_archived = ${row.isArchived}
+              is_archived = ${row.isArchived}, step_history_access = ${row.stepHistoryAccess ?? "[]"},
+              automation_triggers = ${row.automationTriggers ?? "[]"}
             WHERE id = ${row.id}`.pipe(Effect.orDie);
       }),
     members: {

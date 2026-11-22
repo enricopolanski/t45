@@ -15,6 +15,7 @@ import { PageBreadcrumb } from "../PageBreadcrumb";
  */
 export function WorkFrame({
   title,
+  tabTitle,
   parent,
   actions,
   width = "column",
@@ -22,6 +23,7 @@ export function WorkFrame({
   children,
 }: {
   readonly title: string;
+  readonly tabTitle?: string;
   /** A linked page between the page's section and the page, in its location. */
   readonly parent?: ReactNode;
   /** Right-aligned above the content. */
@@ -33,7 +35,7 @@ export function WorkFrame({
   return (
     <SidebarInset className="h-dvh min-h-0 scroll-pt-(--page-header-height) overflow-y-auto overscroll-y-none">
       <PageHeader className="sticky top-0 z-10">
-        <PageBreadcrumb title={title} parent={parent} />
+        <PageBreadcrumb title={title} tabTitle={tabTitle} parent={parent} />
       </PageHeader>
       <PageContent width={width} className={contentClassName}>
         {actions ? (

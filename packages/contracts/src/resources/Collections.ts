@@ -8,6 +8,7 @@ import { Attachment } from "../models/Attachment.ts";
 import {
   Collection,
   CollectionColumnOrder,
+  CollectionExtension,
   CollectionRecord,
   RecordFilters,
   Refused,
@@ -40,15 +41,16 @@ const FieldValuesWithCounts = Schema.Array(
 );
 
 /** What an admin sets of a collection. */
-const CollectionDraft = Schema.Struct(
-  Struct.pick(Collection.fields, [
+const CollectionDraft = Schema.Struct({
+  ...Struct.pick(Collection.fields, [
     "title",
     "fields",
     "primaryKeyFieldId",
     "memberUserIds",
     "layout",
   ]),
-);
+  isPublished: Schema.optionalKey(Collection.fields.isPublished),
+});
 
 /**
  * What members and agents do with collections, each checking the caller's access itself; agents'
@@ -77,6 +79,13 @@ export const CollectionOperations = RpcGroup.make(
     },
     /** Null when the collection holds no record with that key. */
     success: Schema.NullOr(CollectionRecordView),
+    error: CollectionErrors,
+  }),
+  Rpc.make("getRecordExtensions", {
+    payload: { collectionId: StringId, key: TrimmedNonEmptyString },
+    success: Schema.Array(
+      Schema.Struct({ collection: Collection, record: Schema.NullOr(CollectionRecordView) }),
+    ),
     error: CollectionErrors,
   }),
   Rpc.make("searchRecords", {
@@ -128,9 +137,22 @@ export const CollectionOperations = RpcGroup.make(
     success: CollectionRecordView,
     error: CollectionErrors,
   }),
+  /** Removes the record, refused while another collection's record links it. */
+  Rpc.make("deleteRecord", {
+    payload: {
+      collectionId: StringId,
+      key: TrimmedNonEmptyString.annotate({ description: "The record's primary key value." }),
+    },
+    error: CollectionErrors,
+  }),
 ).prefix("collections.");
 
 export const Collections = RpcGroup.make(
+  Rpc.make("setExtension", {
+    payload: { collectionId: StringId, extension: CollectionExtension },
+    success: Collection,
+    error: CollectionErrors,
+  }),
   Rpc.make("update", {
     payload: { collectionId: StringId, ...CollectionDraft.fields },
     success: Collection,

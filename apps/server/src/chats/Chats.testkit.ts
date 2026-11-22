@@ -165,6 +165,7 @@ export const seedChat = (chat: {
                     stepId: chat.stepId,
                     automationId: AutomationId.make(chat.id),
                     effectiveUserId: "fixture",
+                    isAutomatic: false,
                   }
                 : {
                     type: "manual",

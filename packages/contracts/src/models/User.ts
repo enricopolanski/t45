@@ -12,6 +12,10 @@ export type Role = typeof Role.Type;
 export const State = Schema.Literals(["pending", "active", "deactivated"]);
 export type State = typeof State.Type;
 
+/** Languages members can choose for their own interface. */
+export const Locale = Schema.Literals(["en", "de", "it"]);
+export type Locale = typeof Locale.Type;
+
 /** A name chosen in the profile editor; the identity provider's initial suggestion may be longer. */
 export const DisplayName = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
 

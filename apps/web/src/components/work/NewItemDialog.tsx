@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { Project } from "@t45/contracts/models/Workflow";
 import { useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
@@ -21,6 +22,7 @@ const NO_PROJECT = "There's no project you can start items in yet.";
  * the given one, and opens its first step.
  */
 export function NewItemDialog({ project }: { readonly project?: Pick<Project, "id" | "name"> }) {
+  const t = useTranslation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   return (
@@ -30,11 +32,11 @@ export function NewItemDialog({ project }: { readonly project?: Pick<Project, "i
       trigger={
         <DialogTrigger render={<Button size="sm" />}>
           <PlusIcon />
-          New item
+          {t("New item")}
         </DialogTrigger>
       }
-      title={project === undefined ? "New item" : `New item in ${project.name}`}
-      submitLabel="Start"
+      title={project === undefined ? t("New item") : t("New item in {0}", project.name)}
+      submitLabel={t("Start")}
       onSubmit={async (fields) => {
         const projectId = fields.get("projectId");
         if (typeof projectId !== "string") return false;
@@ -55,13 +57,13 @@ export function NewItemDialog({ project }: { readonly project?: Pick<Project, "i
       ) : (
         <input type="hidden" name="projectId" value={project.id} />
       )}
-      <Field label="Title">
-        <Input name="title" required pattern=".*\S.*" placeholder="e.g. Customer onboarding" />
+      <Field label={t("Title")}>
+        <Input name="title" required pattern=".*\S.*" placeholder={t("e.g. Customer onboarding")} />
       </Field>
-      <Field label="Description (optional)">
+      <Field label={t("Description (optional)")}>
         <Textarea
           name="description"
-          placeholder="What this item is about, for everyone who works on it"
+          placeholder={t("What this item is about, for everyone who works on it")}
         />
       </Field>
     </FormDialog>
@@ -69,10 +71,11 @@ export function NewItemDialog({ project }: { readonly project?: Pick<Project, "i
 }
 
 function ProjectChoice() {
+  const t = useTranslation();
   const projects = useStartableProjects();
   if (projects.length === 0) return <p className="text-sm text-muted-foreground">{NO_PROJECT}</p>;
   return (
-    <Field label="Project">
+    <Field label={t("Project")}>
       <Select
         name="projectId"
         defaultValue={projects[0]?.id}

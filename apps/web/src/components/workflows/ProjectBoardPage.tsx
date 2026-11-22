@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import { chatTargets } from "../../state/agents";
 import { useApiQuery } from "../../state/rpc";
 import { useNewChat } from "../../hooks/useNewChat";
@@ -29,6 +30,7 @@ function BoardCard({
   readonly step: StepSummaryView;
 }) {
   const directory = useWorkDirectory();
+  const t = useTranslation();
   const status = stepStatus(step);
   return (
     <Link
@@ -39,7 +41,7 @@ function BoardCard({
       <span className="text-sm font-medium">{ticket.title}</span>
       <span className="text-xs text-muted-foreground">{actorName(directory, step.assignee)}</span>
       <span className="flex flex-wrap gap-1">
-        <Badge variant={status.variant}>{status.label}</Badge>
+        <Badge variant={status.variant}>{t(status.label)}</Badge>
       </span>
     </Link>
   );
@@ -52,6 +54,7 @@ function BoardCard({
  * start items here. A project with a slug is shown under it, so a link by id ends on the slug.
  */
 export function ProjectBoardPage({ projectId }: { readonly projectId: string }) {
+  const t = useTranslation();
   const newChat = useNewChat();
   const targets = useApiQuery(chatTargets);
   const [board, setBoard] = useState<ProjectBoardView | null>(null);
@@ -73,7 +76,7 @@ export function ProjectBoardPage({ projectId }: { readonly projectId: string }) 
 
   return (
     <WorkFrame
-      title={board?.project.name ?? "Board"}
+      title={board?.project.name ?? t("Board")}
       width="full"
       actions={
         board !== null ? (
@@ -84,16 +87,16 @@ export function ProjectBoardPage({ projectId }: { readonly projectId: string }) 
                 onValueChange={setVersionId}
                 items={board.versions.map(({ id, number }) => ({
                   value: id,
-                  label: `Version ${number}`,
+                  label: t("Version {0}", number),
                 }))}
               >
-                <SelectTrigger size="sm" aria-label="Workflow version">
+                <SelectTrigger size="sm" aria-label={t("Workflow version")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectPopup>
                   {board.versions.map(({ id, number }) => (
                     <SelectItem key={id} value={id}>
-                      Version {number}
+                      {t("Version")} {number}
                     </SelectItem>
                   ))}
                 </SelectPopup>
@@ -105,11 +108,11 @@ export function ProjectBoardPage({ projectId }: { readonly projectId: string }) 
                 variant="outline"
                 onClick={() =>
                   void newChat(target.agentId, target.projectId).catch((cause) =>
-                    toastFailure("Project chat unavailable", cause),
+                    toastFailure(t("Project chat unavailable"), cause),
                   )
                 }
               >
-                Chat
+                {t("Chat")}
               </Button>
             )}
             {board.canStartTicket && <NewItemDialog project={board.project} />}

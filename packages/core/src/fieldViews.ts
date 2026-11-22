@@ -47,11 +47,13 @@ export const buildFieldViews = (
         : {}),
       ...(field.type === "number" && field.unit !== undefined ? { unit: field.unit } : {}),
       ...(field.type === "select" && field.tones !== undefined ? { tones: field.tones } : {}),
+      ...(field.type === "select" && field.isMultiple === true ? { isMultiple: true } : {}),
       ...(field.type === "group" && field.layout !== undefined ? { layout: field.layout } : {}),
       ...(field.type === "text" && field.isMarkdown !== undefined
         ? { isMarkdown: field.isMarkdown }
         : {}),
       ...(linkUrl === undefined ? {} : { linkUrl }),
+      ...(field.type === "foreignKey" ? { linkedCollectionId: field.collectionId } : {}),
       ...(isReviewedField(field) ? { isReviewed: true } : {}),
       ...(field.type === "records" && field.comparisonFields !== undefined
         ? { comparisonFields: field.comparisonFields }

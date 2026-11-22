@@ -1,3 +1,4 @@
+import { translate } from "~/i18n/locale";
 import type { Form } from "@opencode/schema/form";
 import type { ChatAttachment } from "@t45/contracts/models/Attachment";
 import type { Question } from "@t45/contracts/resources/Chats";
@@ -71,7 +72,13 @@ function questionField(form: Form.Info, field: FormField): QuestionField {
     key: field.key,
     header: field.title ?? form.title,
     question: field.type === "external" ? [text, field.url].join("\n") : text,
-    options: fieldOptions(field),
+    options:
+      field.type === "boolean"
+        ? BOOLEAN_OPTIONS.map((option) => ({
+            ...option,
+            label: translate(option.value === "true" ? "Yes" : "No"),
+          }))
+        : fieldOptions(field),
     multiSelect: field.type === "multiselect",
     allowCustomAnswer: allowsCustomAnswer(field),
     acceptsAttachments: acceptsAttachments(field),
@@ -120,24 +127,28 @@ function fieldProblem(
   if (field.type === "external") return null;
   const label = field.title ?? field.key;
   if (draft?.attachmentsBlocked) {
-    return "Wait for attachments to finish uploading, or remove failed uploads.";
+    return translate("Wait for attachments to finish uploading, or remove failed uploads.");
   }
   const typed = draft?.customAnswer?.trim() ?? "";
   if ((field.type === "number" || field.type === "integer") && typed !== "") {
     if (!parsesAs(field, Number(typed))) {
-      return `Answer ${label} with ${field.type === "integer" ? "a whole number" : "a number"}.`;
+      return translate(
+        "Answer {0} with {1}.",
+        label,
+        translate(field.type === "integer" ? "a whole number" : "a number"),
+      );
     }
   }
   const filesAnswer = acceptsAttachments(field) && (draft?.attachmentCount ?? 0) > 0;
   if (field.required === true && isEmptyAnswer(value) && !filesAnswer) {
-    return `Answer ${label} first.`;
+    return translate("Answer {0} first.", label);
   }
   if (field.type === "multiselect" && Array.isArray(value)) {
     if (
       (field.minItems !== undefined && value.length < field.minItems) ||
       (field.maxItems !== undefined && value.length > field.maxItems)
     ) {
-      return `Check how many choices ${label} takes.`;
+      return translate("Check how many choices {0} takes.", label);
     }
   }
   return null;

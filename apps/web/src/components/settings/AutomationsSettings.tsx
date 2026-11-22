@@ -1,3 +1,4 @@
+import { useTranslation } from "~/i18n/locale";
 import type { Automation, AutomationId } from "@t45/contracts/models/Automation";
 import { canUse } from "@t45/contracts/models/Agent";
 import type { AutomationRun, AutomationSummary } from "@t45/contracts/resources/Automations";
@@ -14,6 +15,7 @@ import {
   PlusIcon,
   SquareIcon,
   TimerIcon,
+  XIcon,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
@@ -48,7 +50,13 @@ import { toastManager } from "../ui/toast";
 import { RUN_STATUSES, RunDetail } from "../work/StepPage";
 import { useWorkDirectory } from "../work/useWorkDirectory";
 import { actorName } from "../work/workLogic";
-import { EMPTY_DRAFT, settingsFromDraft, type DraftState } from "./automationsSettings.logic";
+import {
+  draftOf,
+  type DraftPhase,
+  EMPTY_DRAFT,
+  settingsFromDraft,
+  type DraftState,
+} from "./automationsSettings.logic";
 
 const automationList = apiWatch("automations.watch", { idleTtlMs: 0 })(undefined);
 
@@ -57,6 +65,7 @@ function reportFailure(title: string, description: string) {
 }
 
 export function AutomationsSettings() {
+  const t = useTranslation();
   const automationsQuery = useApiQuery(automationList);
   const automations = automationsQuery.data;
   const [editor, setEditor] = useState<{ automation: Automation | null } | null>(null);
@@ -74,15 +83,15 @@ export function AutomationsSettings() {
   return (
     <div className="flex min-h-0 flex-1 flex-wrap overflow-y-auto">
       <nav
-        aria-label="Automations"
+        aria-label={t("Automations")}
         className="flex shrink-0 grow basis-60 flex-col gap-1 border-e px-3 py-4"
       >
         <AutomationNavButton isCurrent={selected === null} onSelect={() => setSelectedId(null)}>
           <CirclePlayIcon aria-hidden className="size-4 shrink-0" />
-          All automations
+          {t("All automations")}
         </AutomationNavButton>
         <h2 className="mt-3 px-2 text-xs leading-6 font-medium text-muted-foreground">
-          Automations
+          {t("Automations")}
         </h2>
         {(automations ?? []).map((automation) => (
           <AutomationNavButton
@@ -106,19 +115,19 @@ export function AutomationsSettings() {
           onClick={() => setEditor({ automation: null })}
         >
           <PlusIcon aria-hidden />
-          New automation
+          {t("New automation")}
         </Button>
       </nav>
       <div className="min-w-0 shrink grow-[999] basis-120 p-6">
         <div className="mb-4 flex items-start gap-2">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <h2 className="text-2xl font-semibold tracking-tight">
-              {selected?.title ?? "All automations"}
+              {selected?.title ?? t("All automations")}
             </h2>
             <p className="text-sm text-muted-foreground">
               {selected === null
-                ? "Showing runs from all automations"
-                : "Showing runs from this automation"}
+                ? t("Showing runs from all automations")
+                : t("Showing runs from this automation")}
             </p>
           </div>
           {selected !== null && (
@@ -132,13 +141,13 @@ export function AutomationsSettings() {
         {automationsQuery.error ? (
           <ErrorText text={automationsQuery.error} />
         ) : !automations ? (
-          <p className="text-sm text-muted-foreground">Loading automations…</p>
+          <p className="text-sm text-muted-foreground">{t("Loading automations…")}</p>
         ) : runs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No runs yet.</p>
+          <p className="text-sm text-muted-foreground">{t("No runs yet.")}</p>
         ) : (
-          <section aria-label="Runs" className="overflow-hidden rounded-xl border bg-card">
+          <section aria-label={t("Runs")} className="overflow-hidden rounded-xl border bg-card">
             <h3 className="bg-muted/40 px-4 py-2.5 text-xs font-medium text-muted-foreground">
-              {runs.length === 1 ? "1 run" : `${runs.length} runs`}
+              {runs.length === 1 ? t("1 run") : t("{0} runs", runs.length)}
             </h3>
             <ol>
               {runs.map(({ run, automation, number }) => (
@@ -222,6 +231,7 @@ function AutomationActions({
   readonly onEdit: () => void;
   readonly onArchived: () => void;
 }) {
+  const t = useTranslation();
   const { busy, act } = useAction();
   return (
     <Menu>
@@ -231,7 +241,7 @@ function AutomationActions({
             size="icon-sm"
             variant="ghost"
             disabled={busy}
-            aria-label={`Actions for ${automation.title}`}
+            aria-label={t("Actions for {0}", automation.title)}
           />
         }
       >
@@ -240,29 +250,29 @@ function AutomationActions({
       <MenuPopup align="end">
         <MenuItem onClick={onEdit}>
           <PencilIcon />
-          Edit
+          {t("Edit")}
         </MenuItem>
         <MenuItem
           onClick={() =>
-            void act("Could not run automation", () =>
+            void act(t("Could not run automation"), () =>
               api("automations.runNow", { id: automation.id }),
             )
           }
         >
           <PlayIcon />
-          Run now
+          {t("Run now")}
         </MenuItem>
         <MenuItem
           variant="destructive"
           onClick={() =>
-            void act("Could not archive automation", async () => {
+            void act(t("Could not archive automation"), async () => {
               await api("automations.archive", { id: automation.id });
               onArchived();
             })
           }
         >
           <ArchiveIcon />
-          Archive for good
+          {t("Archive for good")}
         </MenuItem>
       </MenuPopup>
     </Menu>
@@ -282,6 +292,7 @@ function AutomationRunRow({
   readonly automation: AutomationSummary;
   readonly number: number;
 }) {
+  const t = useTranslation();
   const directory = useWorkDirectory();
   const now = useNowMinute();
   const { busy, act } = useAction();
@@ -293,13 +304,15 @@ function AutomationRunRow({
   const callOnStep = (tag: "workflows.runStepAutomation" | "workflows.stopStepAutomation") =>
     view &&
     void act(
-      tag === "workflows.stopStepAutomation" ? "Could not stop run" : "Could not run automation",
+      tag === "workflows.stopStepAutomation"
+        ? t("Could not stop run")
+        : t("Could not run automation"),
       () => api(tag, { stepId: view.step.id, automationId: automation.id }),
     );
   const runAgain =
     run.stepId === null
       ? () =>
-          void act("Could not run automation", () =>
+          void act(t("Could not run automation"), () =>
             api("automations.runNow", { id: automation.id }),
           )
       : stepAutomation?.runLabel != null
@@ -309,7 +322,7 @@ function AutomationRunRow({
     <li className="flex flex-wrap items-start gap-x-4 gap-y-2 border-t px-4 py-3 text-sm">
       <div className="flex min-w-0 shrink grow basis-70 flex-col gap-1">
         <p className="flex items-center gap-2">
-          <span role="img" aria-label={label} className="flex size-4 shrink-0">
+          <span role="img" aria-label={t(label)} className="flex size-4 shrink-0">
             <Icon aria-hidden className={`size-4 ${tone}`} />
           </span>
           <span className="min-w-0 font-semibold">{automation.title}</span>
@@ -326,7 +339,8 @@ function AutomationRunRow({
           ) : (
             `#${number}`
           )}{" "}
-          · Manually run by {actorName(directory, run.ranBy)}
+          {run.isAutomatic ? t("· Automatically run for") : t("· Manually run by")}{" "}
+          {actorName(directory, run.ranBy)}
         </p>
         {run.status === "running" ? (
           <ProgressReport report={run.latestReport} isRunning />
@@ -350,7 +364,9 @@ function AutomationRunRow({
       <div className="flex shrink-0 basis-30 flex-col gap-1 pt-0.5 text-xs text-muted-foreground">
         <RunDetail Icon={CalendarIcon}>{formatRelativeTimeLabel(run.startedAt, now)}</RunDetail>
         <RunDetail Icon={TimerIcon}>
-          {run.endedAt === null ? "In progress" : formatDurationLabel(run.startedAt, run.endedAt)}
+          {run.endedAt === null
+            ? t("In progress")
+            : formatDurationLabel(run.startedAt, run.endedAt)}
         </RunDetail>
       </div>
       <div className="flex shrink-0 basis-16 justify-end">
@@ -363,7 +379,7 @@ function AutomationRunRow({
                 onClick={() => callOnStep("workflows.stopStepAutomation")}
               >
                 <SquareIcon aria-hidden className="size-2.5 fill-current" />
-                Stop
+                {t("Stop")}
               </Button>
             )
           : runAgain !== null && (
@@ -374,7 +390,7 @@ function AutomationRunRow({
                       size="icon-xs"
                       variant="ghost"
                       disabled={busy}
-                      aria-label={`Options for ${automation.title} run ${number}`}
+                      aria-label={t("Options for {0} run {1}", automation.title, number)}
                     />
                   }
                 >
@@ -383,7 +399,7 @@ function AutomationRunRow({
                 <MenuPopup align="end">
                   <MenuItem onClick={runAgain}>
                     <PlayIcon />
-                    Run again
+                    {t("Run again")}
                   </MenuItem>
                 </MenuPopup>
               </Menu>
@@ -402,6 +418,7 @@ function AutomationEditorDialog({
   readonly onSaved: () => void;
   readonly onClose: () => void;
 }) {
+  const t = useTranslation();
   const agentsQuery = useApiQuery(agentsList);
   const userId = useSession()?.userId;
   // An admin also lists other people's private agents, to manage them and never to run them.
@@ -409,23 +426,29 @@ function AutomationEditorDialog({
     agentsQuery.data?.filter(
       (agent) => agent.status === "active" && userId !== undefined && canUse(agent, userId),
     ) ?? null;
-  const [draft, setDraft] = useState<DraftState>(automation ?? EMPTY_DRAFT);
+  const [draft, setDraft] = useState<DraftState>(
+    automation === null ? EMPTY_DRAFT : draftOf(automation),
+  );
   const patch = (change: Partial<DraftState>) => setDraft((current) => ({ ...current, ...change }));
   const [saving, setSaving] = useState(false);
+  const stepContextItems = [
+    { value: "included", label: t("Include in the initial message") },
+    { value: "on_demand", label: t("Read on demand") },
+  ] as const;
 
   // A new automation runs on the first active agent until another is picked.
   const agentId = draft.agentId ?? activeAgents?.[0]?.id ?? null;
   const agentName =
     agentsQuery.error ??
     (activeAgents === null
-      ? "Loading agents…"
+      ? t("Loading agents…")
       : (activeAgents.find((agent) => agent.id === agentId)?.name ??
-        (agentId ? "An archived or private agent" : "No active agents")));
+        (agentId ? t("An archived or private agent") : t("No active agents"))));
 
   const submit = async () => {
     const checked = settingsFromDraft({ ...draft, agentId });
     if ("problem" in checked) {
-      reportFailure(checked.problem.title, checked.problem.description);
+      reportFailure(t(checked.problem.title), t(checked.problem.description));
       return;
     }
     // Stays saving through a successful save, until the dialog closes.
@@ -439,7 +462,7 @@ function AutomationEditorDialog({
       onClose();
     } catch (error) {
       setSaving(false);
-      reportFailure("Could not save automation", describeFailure(error));
+      reportFailure(t("Could not save automation"), describeFailure(error));
     }
   };
 
@@ -452,33 +475,54 @@ function AutomationEditorDialog({
     >
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{automation ? "Edit automation" : "New automation"}</DialogTitle>
+          <DialogTitle>{automation ? t("Edit automation") : t("New automation")}</DialogTitle>
           <DialogDescription>
-            Changes apply everywhere this automation is used, on its next run.
+            {t("Changes apply everywhere this automation is used, on its next run.")}
           </DialogDescription>
         </DialogHeader>
 
         <DialogPanel>
           <Fieldset disabled={saving}>
-            <Field label="Name">
+            <Field label={t("Name")}>
               <Input
                 maxLength={200}
-                placeholder="e.g. Check for Sentry issues"
+                placeholder={t("e.g. Check for Sentry issues")}
                 value={draft.title}
                 onChange={(event) => patch({ title: event.target.value })}
               />
             </Field>
 
-            <Field label="Prompt">
+            <Field label={t("Prompt")}>
               <Textarea
                 className="max-h-64 overflow-y-auto"
-                placeholder="What should the agent do each time this runs?"
+                placeholder={t("What should the agent do each time this runs?")}
                 value={draft.prompt}
                 onChange={(event) => patch({ prompt: event.target.value })}
               />
             </Field>
 
-            <Field label="Agent">
+            <Field label={t("Step context")}>
+              <Select
+                value={draft.stepContext ?? "included"}
+                items={stepContextItems}
+                onValueChange={(value) => {
+                  if (value === "included" || value === "on_demand") patch({ stepContext: value });
+                }}
+              >
+                <SelectTrigger size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  {stepContextItems.map(({ value, label }) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </Field>
+
+            <Field label={t("Agent")}>
               <Select
                 value={agentId}
                 disabled={!activeAgents?.length}
@@ -498,15 +542,101 @@ function AutomationEditorDialog({
                 </SelectPopup>
               </Select>
             </Field>
+
+            {(draft.nextPhases ?? []).map((phase, index) => {
+              const number = index + 2;
+              const change = (changed: Partial<DraftPhase>) =>
+                patch({
+                  nextPhases: (draft.nextPhases ?? []).with(index, { ...phase, ...changed }),
+                });
+              return (
+                <Field key={index} label={t("Phase {0}", number)}>
+                  <div className="flex w-full items-center gap-2">
+                    <Select
+                      value={phase.agentId}
+                      onValueChange={(value) =>
+                        change({
+                          agentId: activeAgents?.find((agent) => agent.id === value)?.id ?? null,
+                        })
+                      }
+                    >
+                      <SelectTrigger size="sm">
+                        <SelectValue>
+                          {activeAgents?.find((agent) => agent.id === phase.agentId)?.name ??
+                            (phase.agentId ? t("An archived or private agent") : t("Agent"))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup>
+                        {(activeAgents ?? []).map((agent) => (
+                          <SelectItem key={agent.id} value={agent.id}>
+                            {agent.name}
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t("Remove phase {0}", number)}
+                      onClick={() =>
+                        patch({
+                          nextPhases: (draft.nextPhases ?? []).filter((_, at) => at !== index),
+                        })
+                      }
+                    >
+                      <XIcon />
+                    </Button>
+                  </div>
+                  <Textarea
+                    className="max-h-64 overflow-y-auto"
+                    placeholder={t("What should this agent do with what the phase before found?")}
+                    value={phase.prompt}
+                    onChange={(event) => change({ prompt: event.target.value })}
+                  />
+                  <Select
+                    value={phase.stepContext ?? draft.stepContext ?? "included"}
+                    items={stepContextItems}
+                    onValueChange={(value) => {
+                      if (value === "included" || value === "on_demand")
+                        change({ stepContext: value });
+                    }}
+                  >
+                    <SelectTrigger size="sm" aria-label={t("Step context")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {stepContextItems.map(({ value, label }) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </Field>
+              );
+            })}
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="w-fit"
+              onClick={() =>
+                patch({ nextPhases: [...(draft.nextPhases ?? []), { agentId: null, prompt: "" }] })
+              }
+            >
+              <PlusIcon />
+              {t("Add a phase")}
+            </Button>
           </Fieldset>
         </DialogPanel>
 
         <DialogFooter>
           <DialogClose render={<Button variant="outline" size="sm" disabled={saving} />}>
-            Cancel
+            {t("Cancel")}
           </DialogClose>
           <Button size="sm" disabled={saving} onClick={() => void submit()}>
-            {automation ? "Save automation" : "Create automation"}
+            {automation ? t("Save automation") : t("Create automation")}
           </Button>
         </DialogFooter>
       </DialogPopup>

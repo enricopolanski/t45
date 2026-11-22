@@ -1,4 +1,6 @@
 import { Comment, Ticket } from "@t45/contracts/models/Workflow";
+import type { AttachmentId } from "@t45/contracts/models/Attachment";
+import { StepSnapshot } from "@t45/contracts/resources/Workflows";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,9 +18,13 @@ const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
 const encodeRow = Schema.encodeEffect(Row);
 const decodeComments = Schema.decodeUnknownEffect(Schema.Array(Comment));
 const encodeComment = Schema.encodeEffect(Comment);
+const SnapshotJson = Schema.fromJsonString(StepSnapshot);
+const encodeSnapshot = Schema.encodeEffect(SnapshotJson);
+const decodeSnapshot = Schema.decodeUnknownEffect(SnapshotJson);
 
 const COLUMNS = `t.id, t.project_id AS "projectId", t.workflow_version_id AS "workflowVersionId",
-  t.title, t.description, t.status, t.steps, t.created_at AS "createdAt"`;
+  t.title, t.description, t.status, t.creator_user_id AS "creatorUserId", t.steps,
+  t.created_at AS "createdAt"`;
 
 const IS_OPEN = `json_extract(t.status, '$.type') = 'open'`;
 
@@ -97,9 +103,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const row = yield* encodeRow(ticket);
         yield* sql`INSERT INTO tickets (id, project_id, workflow_version_id, title, description,
-              status, steps, created_at)
+              status, creator_user_id, steps, created_at)
             VALUES (${row.id}, ${row.projectId}, ${row.workflowVersionId}, ${row.title},
-              ${row.description}, ${row.status}, ${row.steps}, ${row.createdAt})`;
+              ${row.description}, ${row.status}, ${row.creatorUserId}, ${row.steps}, ${row.createdAt})`;
         yield* publishChange(ticket.id);
       }).pipe(Effect.orDie),
     update: (ticket: Ticket) =>
@@ -117,6 +123,21 @@ const make = Effect.gen(function* () {
         Effect.flatMap(decodeComments),
         Effect.orDie,
       ),
+    /**
+     * How many tickets hold the record's key in a list of their steps' values, on a version with a
+     * records field of its collection. Completed steps keep their own copy of the records.
+     */
+    countLinking: (collectionId: string, key: string) =>
+      sql<{ readonly count: number }>`SELECT count(*) AS count FROM tickets t
+          JOIN workflow_versions v ON v.id = t.workflow_version_id
+        WHERE EXISTS (SELECT 1 FROM json_tree(v.steps) field WHERE field.type = 'object'
+            AND json_extract(field.value, '$.type') = 'records'
+            AND json_extract(field.value, '$.collectionId') = ${collectionId})
+          AND EXISTS (SELECT 1 FROM json_tree(t.steps) item WHERE item.atom = ${key}
+            AND typeof(item.key) = 'integer' AND item.path LIKE '$[%].values%')`.pipe(
+        Effect.map(([row]) => row!.count),
+        Effect.orDie,
+      ),
     insertComment: (ticketId: string, comment: Comment) =>
       Effect.gen(function* () {
         const row = yield* encodeComment(comment);
@@ -126,6 +147,40 @@ const make = Effect.gen(function* () {
               ${row.createdAt})`;
         yield* publishChange(ticketId);
       }).pipe(Effect.orDie),
+    completedSteps: {
+      has: (stepId: string) =>
+        sql`SELECT 1 FROM completed_steps WHERE step_id = ${stepId}`.pipe(
+          Effect.map((rows) => rows.length > 0),
+          Effect.orDie,
+        ),
+      get: (stepId: string) =>
+        sql<{ readonly snapshot: string }>`SELECT snapshot FROM completed_steps
+          WHERE step_id = ${stepId}`.pipe(
+          Effect.flatMap(([row]) =>
+            row === undefined ? Effect.succeed(null) : decodeSnapshot(row.snapshot),
+          ),
+          Effect.orDie,
+        ),
+      save: (
+        ticketId: string,
+        stepId: string,
+        snapshot: StepSnapshot,
+        attachmentIds: ReadonlyArray<AttachmentId>,
+      ) =>
+        Effect.gen(function* () {
+          const encoded = yield* encodeSnapshot(snapshot);
+          yield* sql`INSERT INTO completed_steps (step_id, ticket_id, snapshot)
+            VALUES (${stepId}, ${ticketId}, ${encoded})`;
+          if (attachmentIds.length > 0)
+            yield* sql`INSERT INTO completed_step_files (step_id, attachment_id)
+              SELECT ${stepId}, id FROM attachments WHERE ${sql.in("id", attachmentIds)}`;
+        }).pipe(Effect.orDie),
+      holdingFile: (attachmentId: AttachmentId) =>
+        sql<{ readonly stepId: string; readonly ticketId: string }>`
+          SELECT c.step_id AS "stepId", c.ticket_id AS "ticketId"
+          FROM completed_step_files cf JOIN completed_steps c ON c.step_id = cf.step_id
+          WHERE cf.attachment_id = ${attachmentId}`.pipe(Effect.orDie),
+    },
   };
 });
 

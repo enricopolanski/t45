@@ -33,6 +33,7 @@ export class NotificationRepository extends Context.Service<
       readonly userId: string;
       readonly at: DateTime.Utc;
     }) => Effect.Effect<void>;
+    readonly remove: (id: string, userId: string) => Effect.Effect<void>;
   }
 >()("t45/workflows/NotificationRepository") {}
 
@@ -76,6 +77,11 @@ export const layer = Layer.effect(
       markRead: (input) =>
         sql`UPDATE workflow_notifications SET read_at = ${DateTime.formatIso(input.at)}
           WHERE id = ${input.id} AND user_id = ${input.userId} AND read_at IS NULL`.pipe(
+          Effect.asVoid,
+          Effect.orDie,
+        ),
+      remove: (id, userId) =>
+        sql`DELETE FROM workflow_notifications WHERE id = ${id} AND user_id = ${userId}`.pipe(
           Effect.asVoid,
           Effect.orDie,
         ),
