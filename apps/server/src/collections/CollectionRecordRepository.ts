@@ -41,7 +41,7 @@ type FilterChoice = CountedValue & { readonly link?: string };
 type ValueCountRow = CountedValue & { readonly link: string | null };
 
 type SearchRow =
-  | { readonly kind: "key"; readonly value: string }
+  | { readonly kind: "record"; readonly value: string }
   | { readonly kind: "matchCount" | "totalCount"; readonly count: number }
   | ({ readonly kind: "choice"; readonly fieldId: string } & ValueCountRow);
 
@@ -81,9 +81,9 @@ export const layer = Layer.effect(
     const sql = yield* SqlClient.SqlClient;
     const recordJson = sql.literal(`json_object('collectionId', collection_id, 'key', key,
       'values', json(field_values), 'createdAt', created_at, 'updatedAt', updated_at)`);
-    const read = (where: Fragment, rest: Fragment = sql``) =>
+    const read = (where: Fragment) =>
       sql<{ readonly record: string }>`SELECT ${recordJson} AS record
-        FROM collection_records WHERE ${where} ORDER BY key ${rest}`.pipe(
+        FROM collection_records WHERE ${where}`.pipe(
         Effect.flatMap((rows) => decodeRecords(rows.map((row) => row.record))),
         Effect.orDie,
       );
@@ -126,12 +126,21 @@ export const layer = Layer.effect(
       ]);
     const transaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       sql.withTransaction(effect).pipe(Effect.catchTags({ SqlError: Effect.die }));
-    const count = (where: Fragment) =>
-      sql<{ readonly count: number }>`SELECT count(*) AS count FROM collection_records
-        WHERE ${where}`.pipe(
-        Effect.map(([row]) => row!.count),
-        Effect.orDie,
-      );
+    const searchSource = (collectionId: string, fields: ReadonlyArray<string> | null) => {
+      if (fields === null) return sql`collection_records`;
+      const missingFields = sql`
+        SELECT value FROM json_each(${JSON.stringify(fields)})
+        EXCEPT SELECT field_id FROM collection_search_fields WHERE collection_id = ${collectionId}
+      `;
+      // Coverage and record values must be read from the same layout snapshot.
+      return sql`(
+        SELECT collection_id, key, field_values FROM collection_record_search
+        WHERE collection_id = ${collectionId} AND NOT EXISTS (${missingFields})
+        UNION ALL
+        SELECT collection_id, key, field_values FROM collection_records
+        WHERE collection_id = ${collectionId} AND EXISTS (${missingFields})
+      )`;
+    };
     const queryValueCounts = (
       source: Fragment,
       where: Fragment,
@@ -152,67 +161,105 @@ export const layer = Layer.effect(
     const asChoice = ({ value, count, link }: ValueCountRow): FilterChoice =>
       link === null ? { value, count } : { value, count, link };
 
-    const searchWithChoices = Effect.fnUntraced(function* (
+    const searchPage = Effect.fnUntraced(function* (
       search: RecordPage,
       choiceFields: ReadonlyArray<ValueField>,
     ) {
       const { collectionId, filters, listFieldIds, limit, offset } = search;
       const fields = [...new Map(choiceFields.map((field) => [field.fieldId, field])).values()];
-      const projectedFields = new Set(Object.keys(filters));
+      const filterIds = Object.keys(filters);
+      const hasCriteria = search.words.length > 0 || filterIds.length > 0;
+      const inCollection = sql`collection_id = ${collectionId}`;
+      const projectedFields = new Set(filterIds);
       for (const { fieldId, linkFieldId } of fields) {
         projectedFields.add(fieldId);
         if (linkFieldId !== undefined) projectedFields.add(linkFieldId);
       }
-      const columns = new Map(
-        [...projectedFields].map((fieldId, index) => [fieldId, sql`${sql(`field_${index}`)}`]),
+      const source = searchSource(
+        collectionId,
+        search.words.length === 0
+          ? [...projectedFields]
+          : search.fields === null
+            ? null
+            : [...projectedFields, ...search.fields],
       );
-      const projectedValue = (fieldId: string) => columns.get(fieldId)!;
-      const projection = [...columns].map(
-        ([fieldId, column]) => sql`${valueOf(fieldId)} AS ${column}`,
-      );
-      const choices = fields.map(({ fieldId, linkFieldId }) => {
-        // A menu offers replacement values under the other filters.
-        const { [fieldId]: selected, ...otherFilters } = filters;
-        const counted = countedValues(
-          sql`projected`,
-          projectedValue(fieldId),
-          listFieldIds.includes(fieldId),
+      const ctes: Array<Fragment> = [];
+      const choices: Array<Fragment> = [];
+      let matching = hasCriteria
+        ? sql`SELECT key FROM ${source}
+            WHERE ${matchText(search)} AND ${matchFilters(filters, valueOf, listFieldIds)}`
+        : sql`SELECT key FROM collection_records WHERE ${inCollection}`;
+
+      if (fields.length > 0) {
+        const columns = new Map(
+          [...projectedFields].map((fieldId, index) => [fieldId, sql`${sql(`field_${index}`)}`]),
         );
-        const counts = queryValueCounts(
-          counted.source,
-          matchFilters(otherFilters, projectedValue, listFieldIds),
-          counted.value,
-          linkFieldId === undefined ? undefined : projectedValue(linkFieldId),
-          selected,
+        const projectedValue = (fieldId: string) => columns.get(fieldId)!;
+        const projection = [...columns].map(
+          ([fieldId, column]) => sql`${valueOf(fieldId)} AS ${column}`,
         );
-        return sql`SELECT 'choice', ${fieldId}, value, count, link FROM (${counts})`;
-      });
-      const hasCriteria = search.words.length > 0 || Object.keys(filters).length > 0;
-      // Read the wide JSON records once. Counts and pagination then use only the projected scalars.
-      const rows = yield* sql<SearchRow>`WITH projected AS MATERIALIZED (
-          SELECT key, ${sql.csv(projection)} FROM collection_records WHERE ${matchText(search)}
-        ), matching_keys AS MATERIALIZED (
-          SELECT key FROM projected WHERE ${matchFilters(filters, projectedValue, listFieldIds)}
-        )
-        SELECT 'key' AS kind, NULL AS fieldId, key AS value, NULL AS count, NULL AS link
-        FROM (SELECT key FROM matching_keys ORDER BY key LIMIT ${limit} OFFSET ${offset})
-        UNION ALL SELECT 'matchCount', NULL, NULL, count(*), NULL FROM matching_keys
+        // Menus share one projection of their fields. Only a filtered page needs those record keys.
+        ctes.push(sql`projected AS MATERIALIZED (
+          SELECT ${hasCriteria ? sql`key,` : sql``} ${sql.csv(projection)}
+          FROM ${source} WHERE ${matchText(search)}
+        )`);
+        if (hasCriteria) {
+          matching = sql`SELECT key FROM projected
+            WHERE ${matchFilters(filters, projectedValue, listFieldIds)}`;
+        }
+        for (const { fieldId, linkFieldId } of fields) {
+          // A menu offers replacement values under the other filters.
+          const { [fieldId]: selected, ...otherFilters } = filters;
+          const counted = countedValues(
+            sql`projected`,
+            projectedValue(fieldId),
+            listFieldIds.includes(fieldId),
+          );
+          const counts = queryValueCounts(
+            counted.source,
+            matchFilters(otherFilters, projectedValue, listFieldIds),
+            counted.value,
+            linkFieldId === undefined ? undefined : projectedValue(linkFieldId),
+            selected,
+          );
+          choices.push(
+            sql`UNION ALL SELECT 'choice', ${fieldId}, value, count, link FROM (${counts})`,
+          );
+        }
+      }
+
+      // Reuse filtered matches for the page and its count. An unfiltered page can
+      // take both directly from the covering index.
+      if (hasCriteria) {
+        ctes.push(sql`matching_keys AS MATERIALIZED (${matching})`);
+        matching = sql`SELECT key FROM matching_keys`;
+      }
+      ctes.push(sql`page AS (${matching} ORDER BY key LIMIT ${limit} OFFSET ${offset})`);
+      const matchSource = hasCriteria
+        ? sql`matching_keys`
+        : sql`collection_records WHERE ${inCollection}`;
+      // A single read statement keeps page, counts and menus on one SQLite snapshot.
+      const rows = yield* sql<SearchRow>`WITH ${sql.csv(ctes)}
+        SELECT 'record' AS kind, NULL AS fieldId, record AS value, NULL AS count, NULL AS link
+        FROM (SELECT ${recordJson} AS record FROM collection_records
+          WHERE ${inCollection} AND key IN (SELECT key FROM page) ORDER BY key)
+        UNION ALL SELECT 'matchCount', NULL, NULL, count(*), NULL FROM ${matchSource}
         ${
           hasCriteria
             ? sql`UNION ALL SELECT 'totalCount', NULL, NULL, count(*), NULL
-          FROM collection_records WHERE collection_id = ${collectionId}`
+          FROM collection_records WHERE ${inCollection}`
             : sql``
         }
-        UNION ALL ${sql.join(" UNION ALL ", false)(choices)}`.pipe(Effect.orDie);
+        ${sql.join(" ", false)(choices)}`;
 
-      const keys: Array<string> = [];
+      const found: Array<string> = [];
       const filterChoices = new Map(fields.map(({ fieldId }) => [fieldId, [] as FilterChoice[]]));
       let matchCount = 0;
       let totalCount = 0;
       for (const row of rows) {
         switch (row.kind) {
-          case "key":
-            keys.push(row.value);
+          case "record":
+            found.push(row.value);
             break;
           case "matchCount":
             matchCount = row.count;
@@ -224,17 +271,13 @@ export const layer = Layer.effect(
             filterChoices.get(row.fieldId)!.push(asChoice(row));
         }
       }
-      const records =
-        keys.length === 0
-          ? []
-          : yield* read(sql`collection_id = ${collectionId} AND ${sql.in("key", keys)}`);
       return {
-        records,
+        records: yield* decodeRecords(found),
         matchCount,
         totalCount: hasCriteria ? totalCount : matchCount,
         filterChoices: Object.fromEntries(filterChoices),
       };
-    });
+    }, Effect.orDie);
 
     return CollectionRecordRepository.of({
       transaction,
@@ -256,23 +299,13 @@ export const layer = Layer.effect(
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
         ),
-      searchPage: (search, choiceFields) =>
-        transaction(
-          Effect.gen(function* () {
-            if (choiceFields.length > 0) return yield* searchWithChoices(search, choiceFields);
-            const { collectionId, filters, listFieldIds, limit, offset } = search;
-            const matching = sql`${matchText(search)} AND ${matchFilters(filters, valueOf, listFieldIds)}`;
-            const records = yield* read(matching, sql`LIMIT ${limit} OFFSET ${offset}`);
-            const matchCount = yield* count(matching);
-            const totalCount =
-              search.words.length > 0 || Object.keys(filters).length > 0
-                ? yield* count(sql`collection_id = ${collectionId}`)
-                : matchCount;
-            return { records, matchCount, totalCount, filterChoices: {} };
-          }),
-        ),
+      searchPage,
       listValues: (collectionId, { fieldId, linkFieldId, isList = false }) => {
-        const counted = countedValues(sql`collection_records`, valueOf(fieldId), isList);
+        const source = searchSource(
+          collectionId,
+          linkFieldId === undefined ? [fieldId] : [fieldId, linkFieldId],
+        );
+        const counted = countedValues(source, valueOf(fieldId), isList);
         return queryValueCounts(
           counted.source,
           sql`collection_id = ${collectionId}`,
