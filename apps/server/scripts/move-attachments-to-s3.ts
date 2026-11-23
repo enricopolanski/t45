@@ -31,7 +31,7 @@ import * as BlobStore from "../src/attachments/BlobStore.ts";
 import * as ServerConfig from "../src/config.ts";
 
 const BATCH_SIZE = 500;
-const CONCURRENCY = 8;
+const CONCURRENCY = 32;
 
 const formatGigabytes = (bytes: number) => `${(bytes / 1e9).toFixed(2)} GB`;
 

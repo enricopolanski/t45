@@ -3,12 +3,15 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import { AwsClient } from "aws4fetch";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
@@ -27,8 +30,18 @@ export class BlobStore extends Context.Service<
     readonly put: (key: string, path: string) => Effect.Effect<void>;
     /** The stored bytes and their size, or null when the store has none under `key`. */
     readonly read: (key: string) => Effect.Effect<StoredBytes | null>;
+    /**
+     * A short-lived link the browser can fetch the bytes from directly, answering with `response`'s
+     * headers, or null when the bytes are only served through the app.
+     */
+    readonly link: (key: string, response: LinkResponse) => Effect.Effect<string | null>;
   }
 >()("t45/attachments/BlobStore") {}
+
+export interface LinkResponse {
+  readonly contentType: string;
+  readonly contentDisposition: string | null;
+}
 
 export interface StoredBytes {
   readonly sizeBytes: number;
@@ -54,8 +67,11 @@ const makeDirectoryStore = Effect.gen(function* () {
       if (sizeBytes === null) return null;
       return { sizeBytes, stream: fileSystem.stream(pathOf(key)).pipe(Stream.orDie) };
     }),
+    link: () => Effect.succeed(null),
   });
 });
+
+const HOUR_SECONDS = 3600;
 
 /** Blobs as objects named by their key in an S3-compatible bucket, such as Cloudflare R2. */
 export const layerS3 = (bucket: {
@@ -76,8 +92,14 @@ export const layerS3 = (bucket: {
         region: "auto",
       });
       const bucketUrl = `${bucket.endpoint.replace(/\/+$/u, "")}/${bucket.bucket}`;
+      // Some connections to the bucket never get past the handshake; a fresh attempt gets through.
       const send = (key: string, init: RequestInit) =>
-        Effect.promise((signal) => client.fetch(`${bucketUrl}/${key}`, { ...init, signal }));
+        Effect.tryPromise((signal) =>
+          client.fetch(`${bucketUrl}/${key}`, { ...init, signal }),
+        ).pipe(
+          Effect.retry({ times: 5, schedule: Schedule.exponential("1 second") }),
+          Effect.orDie,
+        );
       const dieWithStatus = (response: Response, key: string) =>
         Effect.die(new Error(`The bucket answered ${response.status} for blob ${key}.`));
 
@@ -121,6 +143,31 @@ export const layerS3 = (bucket: {
               onError: (cause) => cause,
             }).pipe(Stream.orDie),
           };
+        }),
+
+        link: Effect.fnUntraced(function* (key, response) {
+          if ((yield* directory.readSize(key)) !== null) return null;
+          const url = new URL(`${bucketUrl}/${key}`);
+          url.searchParams.set("X-Amz-Expires", String(2 * HOUR_SECONDS));
+          url.searchParams.set("response-content-type", response.contentType);
+          if (response.contentDisposition !== null) {
+            url.searchParams.set("response-content-disposition", response.contentDisposition);
+          }
+          url.searchParams.set("response-cache-control", `private, max-age=${HOUR_SECONDS}`);
+          // Signed as of the start of the hour, so the link stays the same for that hour and the
+          // browser reuses its cached bytes; it is valid for at least another hour.
+          const now = yield* Clock.currentTimeMillis;
+          const signedAt = DateTime.makeUnsafe(now - (now % (HOUR_SECONDS * 1000)));
+          const signed = yield* Effect.promise(() =>
+            client.sign(url.toString(), {
+              method: "GET",
+              aws: {
+                signQuery: true,
+                datetime: DateTime.formatIso(signedAt).replace(/[:-]|\.\d{3}/gu, ""),
+              },
+            }),
+          );
+          return signed.url;
         }),
       });
     }),

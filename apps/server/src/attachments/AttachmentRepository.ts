@@ -116,6 +116,11 @@ export class AttachmentRepository extends Context.Service<
     readonly sweep: Effect.Effect<void>;
     /** The attachment's stored bytes, or null when it or its bytes are gone. */
     readonly read: (id: AttachmentId) => Effect.Effect<BlobStore.StoredBytes | null>;
+    /** A short-lived direct link to the attachment's bytes, or null when the app must serve them. */
+    readonly link: (
+      id: AttachmentId,
+      response: BlobStore.LinkResponse,
+    ) => Effect.Effect<string | null>;
   }
 >()("t45/attachments/AttachmentRepository") {}
 
@@ -230,6 +235,12 @@ const make = Effect.gen(function* () {
       const [row] = yield* sql<{ readonly blobKey: string }>`SELECT blob_key AS "blobKey"
         FROM attachments WHERE id = ${id}`.pipe(Effect.orDie);
       return row === undefined ? null : yield* blobs.read(row.blobKey);
+    }),
+
+    link: Effect.fnUntraced(function* (id, response) {
+      const [row] = yield* sql<{ readonly blobKey: string }>`SELECT blob_key AS "blobKey"
+        FROM attachments WHERE id = ${id}`.pipe(Effect.orDie);
+      return row === undefined ? null : yield* blobs.link(row.blobKey, response);
     }),
 
     upload,

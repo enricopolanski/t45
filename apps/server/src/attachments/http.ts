@@ -104,12 +104,23 @@ const attachmentRoute = HttpRouter.add(
     });
     if (!(yield* readable)) return notFound;
 
+    const headers = attachmentResponseHeaders(attachment);
+    // The browser fetches the bytes straight from the bucket; a HEAD check stays here.
+    if (request.method === "GET") {
+      const link = yield* files.link(attachment.id, {
+        contentType: headers["Content-Type"] ?? "application/octet-stream",
+        contentDisposition: headers["Content-Disposition"] ?? null,
+      });
+      if (link !== null) {
+        return HttpServerResponse.redirect(link, {
+          status: 302,
+          headers: { "Cache-Control": "private, no-cache" },
+        });
+      }
+    }
     const stored = yield* files.read(attachment.id);
     if (stored === null) return notFound;
-    return HttpServerResponse.stream(stored.stream, {
-      contentLength: stored.sizeBytes,
-      headers: attachmentResponseHeaders(attachment),
-    });
+    return HttpServerResponse.stream(stored.stream, { contentLength: stored.sizeBytes, headers });
   }),
 );
 
