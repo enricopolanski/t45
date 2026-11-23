@@ -33,7 +33,7 @@ serve({
     rpcTool(
       "get_fields",
       "workflows.getStepFields",
-      "Read only the requested step fields and authorized inputs. Pass inputs and/or fields as lists of {key}. For a records field, give recordFields to select collection columns and recordKeys to select specific linked records. An empty recordFields list returns only linked record keys. Records include collectionId and their keys. Groups have rows with values by field key and a list of field labels. For configured comparison fields, comparisonSources lists the available criteria (id, name, value) for each sourceRecordKey. Includes proposed and discarded values for the requested fields on this step.",
+      "Read only the requested step fields and authorized inputs. Pass inputs and/or fields as lists of {key}. For a records field, give recordFields to select collection columns and recordKeys to select specific linked records. An empty recordFields list returns only linked record keys. Records include collectionId and their keys. Groups have rows with values by field key and a list of field labels. For configured comparison fields, comparisonSources lists the available criteria (id, name, value) for each sourceRecordKey. Includes proposed and discarded values for the requested fields on this step; set includeProposalDetails to true on a reviewed field to include proposal ids, scores, whyYes, whyNo and criterion assessments without loading catalogue records.",
       step,
     ),
     rpcTool(
@@ -45,7 +45,13 @@ serve({
     rpcTool(
       "propose_value",
       "workflows.proposeStepField",
-      "Propose a value for a field marked isReviewed, which set_field refuses: a member approves or discards it. Give the value as set_field takes it, but one record's key at a time for a records field; whyYes and whyNo in a sentence or two each, saying why it fits and what doesn't; and score, from 0 to 100, how well it fits. When the field has comparisonSources, give comparison with the sourceRecordKey and assessments keyed by criterionId. Include the candidate value and precise source evidence for each judgment, with sourceUrl when available. Mark decisive criteria isImportant. Use missing for unknown, conflicting or incomplete evidence, including unknown test conditions; omit undocumented criteria. A value already proposed, discarded or held is refused: get_step lists the proposals.",
+      "Propose a value for a field marked isReviewed, which set_field refuses: a member approves or discards it. Give the value as set_field takes it, but one record's key at a time for a records field; whyYes and whyNo in a sentence or two each, saying why it fits and what doesn't; and score, from 0 to 100, how well it fits. When the field has comparisonSources, give comparison with the sourceRecordKey and one assessment for every listed criterionId. Include the candidate value and precise source evidence for each judgment, with sourceUrl when available. Mark decisive criteria isImportant. For unknown, conflicting or incomplete evidence, including unknown test conditions, use missing and explain which evidence is unavailable. A value already proposed, discarded or held is refused: get_step lists the proposals.",
+      step,
+    ),
+    rpcTool(
+      "set_proposal_filters",
+      "workflows.setProposalFilters",
+      "Save ordered single-decision discrepancy questions for a reviewed field's open proposals, replacing any previous questions for that field. Each question states one discrepancy (question and driftSummary) and lists one or more open proposal ids with a concise evidence reason. Group candidates that share the same discrepancy, allow single-item questions when one clear answer saves opening a datasheet, use roughly six questions as a guideline, and pass an empty list when no filter question applies.",
       step,
     ),
     rpcTool(

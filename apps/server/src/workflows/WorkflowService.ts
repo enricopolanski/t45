@@ -60,7 +60,9 @@ import {
   lastAdminRefusal,
   approvedValue,
   isReviewedField,
+  proposalFiltersRefusal,
   proposalRefusal,
+  withReviewedProposals,
   recordReviewsOf,
   getComparisonSources,
   getComparisonRefusal,
@@ -1461,14 +1463,36 @@ const make = Effect.gen(function* () {
           }));
     });
     const selected = fields.filter((field) => field !== null);
+    const detailed = new Set(
+      (query.fields ?? [])
+        .filter((selection) => selection.includeProposalDetails === true)
+        .map((selection) => selection.key),
+    );
     return {
       inputs: inputs.filter((input) => input !== null),
       fields: selected,
-      proposals: (step.proposals ?? []).flatMap(({ fieldKey, value, isDiscarded }) =>
-        selected.some(({ key }) => key === fieldKey || fieldKey.startsWith(`${key}.`))
-          ? [{ fieldKey, value, isDiscarded }]
-          : [],
-      ),
+      proposals: (step.proposals ?? []).flatMap((proposal) => {
+        const matched = selected.find(
+          ({ key }) => key === proposal.fieldKey || proposal.fieldKey.startsWith(`${key}.`),
+        );
+        if (matched === undefined) return [];
+        const compact = {
+          fieldKey: proposal.fieldKey,
+          value: proposal.value,
+          isDiscarded: proposal.isDiscarded,
+        };
+        if (!detailed.has(matched.key)) return [compact];
+        return [
+          {
+            ...compact,
+            id: proposal.id,
+            whyYes: proposal.whyYes,
+            whyNo: proposal.whyNo,
+            ...(proposal.score === undefined ? {} : { score: proposal.score }),
+            ...(proposal.comparison === undefined ? {} : { comparison: proposal.comparison }),
+          },
+        ];
+      }),
     };
   });
 
@@ -1800,6 +1824,70 @@ const make = Effect.gen(function* () {
     yield* save(work);
     yield* record("workflows.discardProposal", actorId, targetOf(work, step), {
       fieldKey: proposal.fieldKey,
+    });
+  }, transaction);
+
+  const reviewProposals = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"reviewProposals">,
+  ) {
+    const { work, step } = yield* loadForCommand(actorId, input.stepId);
+    yield* requireActionable(step);
+    const field = yield* resolveField(work, step, input.fieldKey);
+    const reviewed = withReviewedProposals(step, field, input.fieldKey, {
+      approveIds: input.approveIds,
+      discardIds: input.discardIds,
+    });
+    if (typeof reviewed === "string")
+      return yield* new WorkflowRefused({ reason: "invalid_proposal", detail: reviewed });
+    if (reviewed.approvedValue !== undefined)
+      yield* writeField(
+        actorId,
+        work,
+        reviewed.step,
+        field,
+        input.fieldKey,
+        reviewed.approvedValue,
+      );
+    else putStep(work, reviewed.step);
+    yield* save(work);
+    yield* record("workflows.reviewProposals", actorId, targetOf(work, step), {
+      fieldKey: input.fieldKey,
+      approveIds: input.approveIds,
+      discardIds: input.discardIds,
+    });
+  }, transaction);
+
+  const setProposalFilters = Effect.fnUntraced(function* (
+    caller: Caller,
+    input: Payload<"setProposalFilters">,
+  ) {
+    const { work, step } = yield* loadStepFor(caller, input.stepId);
+    yield* requireWorkingStep(work, step);
+    const field = yield* resolveField(work, step, input.fieldKey);
+    const refusal = proposalFiltersRefusal(step, field, input.fieldKey, input.filters);
+    if (refusal !== null)
+      return yield* new WorkflowRefused({ reason: "invalid_proposal_filters", detail: refusal });
+    const saved = input.filters.map((filter) => ({
+      id: generateId(),
+      fieldKey: input.fieldKey,
+      question: filter.question,
+      driftSummary: filter.driftSummary,
+      items: filter.items,
+    }));
+    const retained = (step.proposalFilters ?? []).filter(
+      (existing) => existing.fieldKey !== input.fieldKey,
+    );
+    const nextFilters = [...retained, ...saved];
+    const { proposalFilters: _, ...rest } = step;
+    putStep(work, {
+      ...rest,
+      ...(nextFilters.length > 0 ? { proposalFilters: nextFilters } : {}),
+    });
+    yield* save(work);
+    yield* record("workflows.setProposalFilters", caller, targetOf(work, step), {
+      fieldKey: input.fieldKey,
+      filterIds: saved.map(({ id }) => id),
     });
   }, transaction);
 
@@ -2261,6 +2349,8 @@ const make = Effect.gen(function* () {
     approveProposal,
     confirmRecordEntry,
     discardProposal,
+    reviewProposals,
+    setProposalFilters,
     markStepDone,
     setStepAssignee,
     blockStep,

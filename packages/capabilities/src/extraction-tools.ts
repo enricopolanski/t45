@@ -1,7 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off - Runs inside the agent VM.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
-import * as NodeUtil from "node:util";
 import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
 import { type Collection, recordProblem } from "@t45/contracts/models/Collection";
 import {
@@ -19,6 +17,7 @@ import { AttachmentUploadResult } from "@t45/contracts/resources/Attachments";
 import type { StepView } from "@t45/contracts/resources/Workflows";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import { makePdfImageReader } from "./document-extraction/pdf-images.ts";
 import { apiHeaders, apiUrl, callOperation, refuse, serve } from "./mcp-stdio.ts";
 
 const step = { stepId: process.env.T45_STEP_ID! };
@@ -77,7 +76,6 @@ const document = Schema.toJsonSchemaDocument(Batch);
 const decodeUpload = Schema.decodeUnknownSync(AttachmentUploadResult);
 /** An image embedded in one of the step's PDFs, by the PDF's attachment ID. */
 const imageReference = /^pdf-image:([a-f0-9-]{36}\.[a-z0-9]{1,10})\/(image-\d{3,}\.png)$/u;
-const run = NodeUtil.promisify(NodeChildProcess.execFile);
 const readSettings = async () => {
   const schema = Schema.fromJsonString(
     Schema.Struct({
@@ -223,31 +221,6 @@ const extractionSchema = async () => {
     ];
   });
   return targets;
-};
-
-/**
- * Where the reading of the PDF left the image, or, when another run read it, the image taken out of
- * the step's PDF again.
- */
-const readImage = async (reference: RegExpExecArray) => {
-  const directory = `/work/.t45-document-pages/${reference[1]}`;
-  const path = `${directory}/${reference[2]}`;
-  const isTaken = await NodeFSP.access(path).then(
-    () => true,
-    () => false,
-  );
-  if (!isTaken) {
-    await NodeFSP.mkdir(directory, { recursive: true });
-    await run("pdfimages", ["-png", `attachments/${reference[1]}`, `${directory}/image`]).catch(
-      () => refuse(`There is no PDF image ${reference[0]}.`),
-    );
-  }
-  const info = await NodeFSP.stat(path).catch(() =>
-    refuse(`There is no PDF image ${reference[0]}.`),
-  );
-  if (!info.isFile() || info.size === 0 || info.size > ATTACHMENT_MAX_FILE_BYTES)
-    return refuse(`The size of PDF image ${reference[0]} is invalid.`);
-  return NodeFSP.readFile(path);
 };
 
 /** A PDF of the step, which the runner put in the attachments folder. */
@@ -400,6 +373,7 @@ const saveRecords = async ({ recordsFieldId, groups, skipped = [] }: typeof Batc
 
   const existing = new Map(target.records.map((record) => [record.key, record]));
   const reviewRows = group === undefined ? [] : [...rowIds(view.step.values[group.key])];
+  const readPdfImage = makePdfImageReader("attachments", "/work/.t45-document-pages");
   const prepared = [];
   for (const [index, record] of records.entries()) {
     const key = keys[index]!;
@@ -430,7 +404,7 @@ const saveRecords = async ({ recordsFieldId, groups, skipped = [] }: typeof Batc
         const reference = imageReference.exec(value);
         if (reference !== null)
           return [
-            readImage(reference).then((bytes) => ({
+            readPdfImage(reference[1]!, reference[2]!).then((bytes) => ({
               fieldKey,
               bytes,
               name: reference[2]!,

@@ -25,6 +25,7 @@ import { CollectionRecordView } from "./Collections.ts";
 import {
   Comment,
   Proposal,
+  ProposalFilter,
   Refused as WorkflowRefused,
   Slug,
   Step,
@@ -218,8 +219,23 @@ const StepFieldSelection = Schema.Struct({
   recordKeys: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   /** Collection field keys to include in each record's values. An empty list returns keys only. */
   recordFields: Schema.optionalKey(Schema.Array(FieldPathSegment)),
+  /** Include proposal IDs, scores, rationale and assessments for this reviewed field. */
+  includeProposalDetails: Schema.optionalKey(Schema.Boolean),
 });
 export type StepFieldSelection = typeof StepFieldSelection.Type;
+
+const StepFieldProposal = Schema.Struct({
+  ...Struct.pick(Proposal.fields, ["fieldKey", "value", "isDiscarded"]),
+  id: Schema.optionalKey(Proposal.fields.id),
+  whyYes: Schema.optionalKey(Proposal.fields.whyYes),
+  whyNo: Schema.optionalKey(Proposal.fields.whyNo),
+  score: Proposal.fields.score,
+  comparison: Proposal.fields.comparison,
+});
+
+const ProposalFilterInput = Schema.Struct(
+  Struct.pick(ProposalFilter.fields, ["question", "driftSummary", "items"]),
+);
 
 const ComparisonSources = Schema.Struct({
   recordsIndex: NonNegativeInt,
@@ -557,9 +573,7 @@ export const Workflows = RpcGroup.make(
     success: Schema.Struct({
       inputs: Schema.Array(Schema.Struct({ ...StepFieldData.fields, sourceStepId: StringId })),
       fields: Schema.Array(StepFieldData),
-      proposals: Schema.Array(
-        Schema.Struct(Struct.pick(Proposal.fields, ["fieldKey", "value", "isDiscarded"])),
-      ),
+      proposals: Schema.Array(StepFieldProposal),
     }),
     error: WorkflowErrors,
   }),
@@ -588,6 +602,25 @@ export const Workflows = RpcGroup.make(
   /** A member turns the proposal down; nobody can propose its value again. */
   Rpc.make("discardProposal", {
     payload: { ...step, proposalId: StringId },
+    error: WorkflowErrors,
+  }),
+  /** A member approves and/or turns down multiple open proposals on one field atomically. */
+  Rpc.make("reviewProposals", {
+    payload: {
+      ...step,
+      fieldKey: TrimmedNonEmptyString,
+      approveIds: Schema.Array(StringId),
+      discardIds: Schema.Array(StringId),
+    },
+    error: WorkflowErrors,
+  }),
+  /** Replaces the discrepancy-filter questions for a reviewed field's open proposals. */
+  Rpc.make("setProposalFilters", {
+    payload: {
+      ...step,
+      fieldKey: TrimmedNonEmptyString,
+      filters: Schema.Array(ProposalFilterInput),
+    },
     error: WorkflowErrors,
   }),
   /** A member saves and confirms one group entry for a linked record. */

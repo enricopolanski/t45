@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 
 import {
@@ -24,6 +25,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 
 import * as ServerConfig from "../config.ts";
+import * as BlobStore from "./BlobStore.ts";
 
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const isAttachmentId = Schema.is(AttachmentId);
@@ -51,13 +53,6 @@ const displayFileName = (name: string) =>
     .join("")
     .trim()
     .slice(0, 200);
-
-const storedFileId = (entry: string) =>
-  [entry, entry.replace(/\.part$/u, "")].find((id) => isAttachmentId(id));
-
-function attachmentPath(attachmentsDir: string, attachmentId: AttachmentId): string {
-  return NodePath.resolve(attachmentsDir, attachmentId);
-}
 
 /** Images render inline; every other stored extension downloads. */
 export function attachmentIsInlineImage(attachmentId: string): boolean {
@@ -88,7 +83,7 @@ export class AttachmentSizeError extends Schema.TaggedError<AttachmentSizeError>
 export class AttachmentRepository extends Context.Service<
   AttachmentRepository,
   {
-    /** Stores the body as a pending upload under a new id. */
+    /** Stores the body as a pending upload under a new id, sharing the blob of identical bytes. */
     readonly upload: <E>(
       input: AttachmentUploadInput,
       uploader: string,
@@ -119,7 +114,8 @@ export class AttachmentRepository extends Context.Service<
     readonly detach: (id: AttachmentId) => Effect.Effect<void>;
     readonly release: (chatId: ChatId) => Effect.Effect<void>;
     readonly sweep: Effect.Effect<void>;
-    readonly path: (id: AttachmentId) => string;
+    /** The attachment's stored bytes, or null when it or its bytes are gone. */
+    readonly read: (id: AttachmentId) => Effect.Effect<BlobStore.StoredBytes | null>;
   }
 >()("t45/attachments/AttachmentRepository") {}
 
@@ -136,6 +132,7 @@ const make = Effect.gen(function* () {
   yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
+  const blobs = yield* BlobStore.BlobStore;
 
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const unheld = sql.literal(`step_id IS NULL AND collection_id IS NULL
@@ -152,17 +149,6 @@ const make = Effect.gen(function* () {
   const get: AttachmentRepository["Service"]["get"] = (id) =>
     select(sql`id = ${id}`).pipe(Effect.map(([attachment]) => attachment ?? null));
 
-  const removeBytes = (id: AttachmentId) => {
-    const path = attachmentPath(attachmentsDir, id);
-    return Effect.forEach(
-      [path, `${path}.part`],
-      (each) => fileSystem.remove(each, { force: true }),
-      {
-        discard: true,
-      },
-    ).pipe(Effect.orDie);
-  };
-
   const upload: AttachmentRepository["Service"]["upload"] = Effect.fnUntraced(
     function* (input, uploader, body) {
       const name = displayFileName(input.name);
@@ -172,9 +158,10 @@ const make = Effect.gen(function* () {
           ? attachmentFileExtension(input.name)
           : IMAGE_ATTACHMENT_EXTENSIONS[input.mimeType];
       const id = `${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}.${extension}`;
-      const path = NodePath.resolve(attachmentsDir, id);
-      const partPath = `${path}.part`;
-      yield* Effect.gen(function* () {
+      // The bytes arrive in a file of their own, so the blob key is known before anything is stored.
+      const partPath = NodePath.resolve(attachmentsDir, `${id}.part`);
+      const blobKey = yield* Effect.gen(function* () {
+        const hash = NodeCrypto.createHash("sha256");
         let receivedBytes = 0;
         yield* Stream.run(
           body.pipe(
@@ -182,6 +169,7 @@ const make = Effect.gen(function* () {
               receivedBytes += chunk.byteLength;
               return receivedBytes <= input.sizeBytes;
             }),
+            Stream.tap((chunk) => Effect.sync(() => hash.update(chunk))),
           ),
           fileSystem.sink(partPath),
         ).pipe(Effect.catchTags({ PlatformError: Effect.die }));
@@ -191,10 +179,12 @@ const make = Effect.gen(function* () {
             received: receivedBytes,
           });
         }
-        yield* fileSystem.rename(partPath, path).pipe(Effect.orDie);
+        const key = hash.digest("hex");
+        if ((yield* blobs.readSize(key)) === null) yield* blobs.put(key, partPath);
+        return key;
       }).pipe(Effect.ensuring(fileSystem.remove(partPath, { force: true }).pipe(Effect.ignore)));
-      return yield* sql`INSERT INTO attachments (id, name, mime_type, size_bytes, uploader_id, created_at)
-      VALUES (${id}, ${name}, ${input.mimeType}, ${input.sizeBytes}, ${uploader}, ${yield* nowIso})
+      return yield* sql`INSERT INTO attachments (id, name, mime_type, size_bytes, uploader_id, created_at, blob_key)
+      VALUES (${id}, ${name}, ${input.mimeType}, ${input.sizeBytes}, ${uploader}, ${yield* nowIso}, ${blobKey})
       RETURNING ${columns}`.pipe(
         Effect.flatMap(([row]) => decodeAttachment(row)),
         Effect.orDie,
@@ -205,26 +195,23 @@ const make = Effect.gen(function* () {
   const sweep = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
     const cutoff = DateTime.formatIso(DateTime.makeUnsafe(now - PENDING_MAX_AGE_MS));
-    const removed = yield* sql<{ readonly id: string }>`DELETE FROM attachments
-      WHERE created_at < ${cutoff} AND ${unheld} RETURNING id`.pipe(Effect.orDie);
-    yield* Effect.forEach(removed, ({ id }) => removeBytes(id), { discard: true });
+    yield* sql`DELETE FROM attachments WHERE created_at < ${cutoff} AND ${unheld}`.pipe(
+      Effect.orDie,
+    );
     const entries = yield* fileSystem
       .readDirectory(attachmentsDir)
       .pipe(Effect.orElseSucceed(() => []));
     yield* Effect.forEach(
       entries,
       Effect.fnUntraced(function* (entry) {
-        const id = storedFileId(entry);
-        if (id === undefined) return;
+        if (!entry.endsWith(".part")) return;
         const path = NodePath.join(attachmentsDir, entry);
         const info = yield* fileSystem.stat(path).pipe(Effect.option);
-        // Uploads place bytes before inserting their row; a fresh file without a row may still be in flight.
+        // An upload's bytes arrive in a `.part` file; a day-old one was cut short.
         const old = Option.exists(info, (stat) =>
           Option.exists(stat.mtime, (mtime) => now - mtime.getTime() > PENDING_MAX_AGE_MS),
         );
-        if (!old) return;
-        const [row] = yield* sql`SELECT 1 FROM attachments WHERE id = ${id}`.pipe(Effect.orDie);
-        if (row === undefined) yield* fileSystem.remove(path, { force: true }).pipe(Effect.orDie);
+        if (old) yield* fileSystem.remove(path, { force: true }).pipe(Effect.orDie);
       }),
       { discard: true },
     );
@@ -237,8 +224,13 @@ const make = Effect.gen(function* () {
 
   return AttachmentRepository.of({
     sweep,
-    path: (id) => attachmentPath(attachmentsDir, id),
     get,
+
+    read: Effect.fnUntraced(function* (id) {
+      const [row] = yield* sql<{ readonly blobKey: string }>`SELECT blob_key AS "blobKey"
+        FROM attachments WHERE id = ${id}`.pipe(Effect.orDie);
+      return row === undefined ? null : yield* blobs.read(row.blobKey);
+    }),
 
     upload,
 
@@ -314,7 +306,8 @@ const make = Effect.gen(function* () {
         Effect.map(([claimed]) => claimed ?? null),
       ),
 
-    // Called inside workflow and collection transactions: leave byte deletion to the sweep so rollback keeps the file.
+    // Called inside workflow and collection transactions. Like every removal, keeps the bytes: other
+    // attachments may share them.
     detach: (id) =>
       sql
         .withTransaction(
@@ -326,21 +319,18 @@ const make = Effect.gen(function* () {
         )
         .pipe(Effect.orDie),
 
-    release: Effect.fnUntraced(function* (chatId) {
-      const freed = yield* sql
+    release: (chatId) =>
+      sql
         .withTransaction(
           Effect.gen(function* () {
             const bound = yield* sql<{ readonly id: string }>`DELETE FROM chat_attachments
               WHERE chat_id = ${chatId} RETURNING attachment_id AS id`;
             const ids = bound.map((row) => row.id);
-            return yield* sql<{ readonly id: string }>`DELETE FROM attachments
-              WHERE ${sql.in("id", ids)} AND ${unheld} RETURNING id`;
+            yield* sql`DELETE FROM attachments WHERE ${sql.in("id", ids)} AND ${unheld}`;
           }),
         )
-        .pipe(Effect.orDie);
-      yield* Effect.forEach(freed, ({ id }) => removeBytes(id), { discard: true });
-    }),
+        .pipe(Effect.orDie),
   });
 });
 
-export const layer = Layer.effect(AttachmentRepository, make);
+export const layer = Layer.effect(AttachmentRepository, make).pipe(Layer.provide(BlobStore.layer));

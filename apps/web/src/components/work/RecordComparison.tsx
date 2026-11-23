@@ -12,10 +12,11 @@ import type { Proposal } from "@t45/contracts/models/Workflow";
 import { ComparisonCriteriaTable } from "./ComparisonCriteriaTable";
 import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
 import { getFieldLink } from "@t45/core/fieldViews";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { listImageUrls, RecordShowcase } from "../collections/RecordDisplay";
 import { formatRecordValue, renderRecordValue } from "../collections/Records";
+import { api, type ApiSuccess } from "../../rpc/api";
 import { ExternalUrl } from "../ExternalUrl";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { FoldChevron } from "./CardFold";
@@ -302,11 +303,52 @@ export function RecordComparison({
         : null;
   });
   const source = sources.find((candidate) => candidate.id === selected);
+  const confirmed = criteriaSources?.records.find((row) => row.recordKey === source?.record.key);
+  const [extensions, setExtensions] = useState<{
+    collectionId: string;
+    recordKey: string;
+    rows: ApiSuccess<"collections.getRecordExtensions">;
+  }>();
+  const comparesCriteria = Boolean(confirmed);
+  const { id: collectionId } = collection;
+  const { key: recordKey } = record;
+  useEffect(() => {
+    if (!comparesCriteria) return;
+    let active = true;
+    void api("collections.getRecordExtensions", { collectionId, key: recordKey }).then(
+      (rows) => active && setExtensions({ collectionId, recordKey, rows }),
+      () => active && setExtensions({ collectionId, recordKey, rows: [] }),
+    );
+    return () => {
+      active = false;
+    };
+  }, [collectionId, recordKey, comparesCriteria]);
   if (sources.length === 0) return <RecordShowcase collection={collection} record={record} />;
   const sourceHeading =
     source === undefined ? undefined : getRecordHeading(source.collection, source.record);
   const proposedHeading = getRecordHeading(collection, record);
-  const confirmed = criteriaSources?.records.find((row) => row.recordKey === source?.record.key);
+  const extensionsForRecord =
+    extensions?.collectionId === collectionId && extensions.recordKey === recordKey
+      ? extensions.rows
+      : [];
+  const currentValues = new Map<string, string>();
+  for (const criterion of confirmed?.criteria ?? []) {
+    const matches = extensionsForRecord.flatMap(({ collection, record }) =>
+      record === null
+        ? []
+        : collection.fields.flatMap((field) =>
+            field.id !== collection.primaryKeyFieldId &&
+            field.label.trim().toLowerCase() === criterion.name.trim().toLowerCase()
+              ? [
+                  holdsData(record.values[field.id])
+                    ? formatRecordValue(field, record.values[field.id], record.files)
+                    : "",
+                ]
+              : [],
+          ),
+    );
+    if (matches.length === 1) currentValues.set(criterion.id, matches[0]!);
+  }
   const { shown, hidden, order, derived } = resolveComparisonFields(comparisonFields);
   const available = [
     ...new Map(
@@ -414,6 +456,7 @@ export function RecordComparison({
           key={confirmed.recordKey}
           source={confirmed}
           assessments={comparison?.assessments ?? []}
+          currentValues={currentValues}
         />
       )}
       <div className="overflow-x-auto rounded-lg border">

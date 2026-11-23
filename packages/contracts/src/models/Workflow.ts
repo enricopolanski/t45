@@ -310,6 +310,22 @@ export const Proposal = Schema.Struct({
 });
 export type Proposal = typeof Proposal.Type;
 
+const ProposalFilterItem = Schema.Struct({
+  proposalId: StringId,
+  reason: TrimmedNonEmptyString,
+});
+type ProposalFilterItem = typeof ProposalFilterItem.Type;
+
+/** One single-decision discrepancy question over open proposals of a reviewed field. */
+export const ProposalFilter = Schema.Struct({
+  id: StringId,
+  fieldKey: TrimmedNonEmptyString,
+  question: TrimmedNonEmptyString,
+  driftSummary: TrimmedNonEmptyString,
+  items: Schema.Array(ProposalFilterItem).check(Schema.isMinLength(1)),
+});
+export type ProposalFilter = typeof ProposalFilter.Type;
+
 /** One step or sub-step of one ticket. */
 export class Step extends Schema.Opaque<Step>()(
   Schema.Struct({
@@ -323,6 +339,8 @@ export class Step extends Schema.Opaque<Step>()(
     values: FieldValues,
     /** The values proposed for its reviewed fields, open or discarded. */
     proposals: Schema.optionalKey(Schema.Array(Proposal)),
+    /** Ordered discrepancy-filter questions over open proposals, by reviewed field. */
+    proposalFilters: Schema.optionalKey(Schema.Array(ProposalFilter)),
     /** Confirmed group entries, by group field and row id. */
     confirmedReviewRows: Schema.optionalKey(Schema.UniqueArray(TrimmedNonEmptyString)),
     /** The automations entering the step was to start that didn't start, each with why. */
@@ -387,6 +405,139 @@ export const openProposals = <P extends Proposal>(proposals: ReadonlyArray<P> = 
   proposals
     .filter((proposal) => !proposal.isDiscarded)
     .toSorted((one, other) => (other.score ?? -1) - (one.score ?? -1));
+
+/** Why `filters` can't be saved for `field` at `fieldKey` on `step`. Null when valid. */
+export const proposalFiltersRefusal = (
+  step: Step,
+  field: Field,
+  fieldKey: string,
+  filters: ReadonlyArray<Pick<ProposalFilter, "items">>,
+): string | null => {
+  if (!isReviewedField(field)) return `${fieldKey} isn't reviewed.`;
+  const openIds = new Set(
+    (step.proposals ?? [])
+      .filter((proposal) => !proposal.isDiscarded && proposal.fieldKey === fieldKey)
+      .map((proposal) => proposal.id),
+  );
+  for (const filter of filters) {
+    if (filter.items.length === 0) return "Each filter question needs at least one open proposal.";
+    const ids = filter.items.map((item) => item.proposalId);
+    if (!hasDistinctIds(ids)) return "List each proposal at most once per filter question.";
+    if (ids.some((id) => !openIds.has(id)))
+      return `Every filter item must reference an open proposal on ${fieldKey}.`;
+  }
+  return null;
+};
+
+/**
+ * Applies a batch of proposal approvals and discards on `fieldKey`, returning the updated step and
+ * next field value (when any proposal is approved), or why the batch can't be applied.
+ */
+export const withReviewedProposals = (
+  step: Step,
+  field: Field,
+  fieldKey: string,
+  decisions: {
+    readonly approveIds: ReadonlyArray<string>;
+    readonly discardIds: ReadonlyArray<string>;
+  },
+): { readonly step: Step; readonly approvedValue?: Schema.Json } | string => {
+  const { approveIds, discardIds } = decisions;
+  if (approveIds.length === 0 && discardIds.length === 0)
+    return "Choose at least one proposal to approve or discard.";
+  if (!hasDistinctIds([...approveIds, ...discardIds])) return "List each proposal at most once.";
+  if (field.type !== "records" && approveIds.length > 1)
+    return `${fieldKey} takes one value at a time.`;
+  const openById = new Map(
+    (step.proposals ?? [])
+      .filter((proposal) => !proposal.isDiscarded && proposal.fieldKey === fieldKey)
+      .map((proposal) => [proposal.id, proposal]),
+  );
+  if ([...approveIds, ...discardIds].some((id) => !openById.has(id)))
+    return "One or more selected proposals are no longer open.";
+  const approvedSet = new Set(approveIds);
+  const discardedSet = new Set(discardIds);
+  const nextValue: Schema.Json | undefined =
+    approveIds.length === 0
+      ? undefined
+      : field.type === "records"
+        ? [
+            ...new Set([
+              ...recordKeys(step.values[fieldKey]),
+              ...approveIds.map((id) => openById.get(id)!.value as string),
+            ]),
+          ]
+        : approvedValue(field, step.values[fieldKey], openById.get(approveIds[0]!)!);
+  const nextProposals = (step.proposals ?? []).flatMap((proposal) => {
+    if (approvedSet.has(proposal.id)) return [];
+    if (discardedSet.has(proposal.id)) return [{ ...proposal, isDiscarded: true }];
+    return [proposal];
+  });
+  return {
+    step: { ...step, proposals: nextProposals },
+    ...(nextValue !== undefined ? { approvedValue: nextValue } : {}),
+  };
+};
+
+export interface ProposalFilterDraftAnswer {
+  readonly decision: "accept" | "exclude";
+  /** The exact live proposal IDs shown when this question was answered. */
+  readonly shownIds: ReadonlyArray<string>;
+  /** Checked proposal IDs when `decision` is `"exclude"`; empty when `"accept"`. */
+  readonly excludedIds: ReadonlyArray<string>;
+}
+
+export interface EvaluatedProposalFilterStep {
+  readonly filter: ProposalFilter;
+  /** Items whose proposals are still open and not excluded by an earlier valid answer. */
+  readonly liveItems: ReadonlyArray<ProposalFilterItem>;
+  /** The saved answer when its `shownIds` still match `liveItems`, otherwise null. */
+  readonly answer: ProposalFilterDraftAnswer | null;
+  /** True when a prior answer was invalidated because its affected proposals changed. */
+  readonly isInvalidated: boolean;
+}
+
+const sameIdSet = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) => {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((id) => rightSet.has(id));
+};
+
+/**
+ * Evaluates ordered discrepancy filters against open proposals and draft answers. Exclusions are
+ * derived purely from the union of checked IDs in valid answered exclusion steps; any downstream
+ * answer whose affected proposals changed is invalidated so the reviewer sees it again.
+ */
+export const evaluateProposalFilterCascade = (
+  open: ReadonlyArray<Pick<Proposal, "id">>,
+  filters: ReadonlyArray<ProposalFilter>,
+  draftAnswers: Readonly<Record<string, ProposalFilterDraftAnswer>>,
+) => {
+  const openIds = new Set(open.map((proposal) => proposal.id));
+  const excluded = new Set<string>();
+  const steps: Array<EvaluatedProposalFilterStep> = [];
+  for (const filter of filters) {
+    const liveItems = filter.items.filter(
+      (item) => openIds.has(item.proposalId) && !excluded.has(item.proposalId),
+    );
+    if (liveItems.length === 0) continue;
+    const liveIds = liveItems.map((item) => item.proposalId);
+    const liveSet = new Set(liveIds);
+    const raw = draftAnswers[filter.id] ?? null;
+    const isValid = raw !== null && sameIdSet(raw.shownIds, liveIds);
+    const answer = isValid ? raw : null;
+    if (answer?.decision === "exclude") {
+      for (const id of answer.excludedIds) {
+        if (liveSet.has(id)) excluded.add(id);
+      }
+    }
+    steps.push({ filter, liveItems, answer, isInvalidated: raw !== null && !isValid });
+  }
+  const excludedIds = [...excluded];
+  const inPlayIds = open.map((proposal) => proposal.id).filter((id) => !excluded.has(id));
+  const nextUnansweredIndex = steps.findIndex((step) => step.answer === null);
+  return { steps, nextUnansweredIndex, excludedIds, inPlayIds };
+};
 
 const TicketStatus = Schema.Union([
   Schema.Struct({
@@ -488,6 +639,7 @@ const REFUSALS = {
   field_reviewed:
     "Agents only propose this field's value, saying why it fits and why not: use propose_value.",
   invalid_proposal: "That value can't be proposed.",
+  invalid_proposal_filters: "Those proposal filters can't be saved.",
   invalid_attachment: "That file can't be attached here.",
   invalid_automations:
     "An automation is archived, or its agent can't work on steps or is private to someone other than you and this workflow's creator. Choose another.",
@@ -622,6 +774,8 @@ export const getComparisonRefusal = (
   const ids = comparison.assessments.map((item) => item.criterionId);
   if (!hasDistinctIds(ids) || ids.some((id) => !source.criteria.some((row) => row.id === id)))
     return "Use each criterion id from the selected source at most once.";
+  if (ids.length !== source.criteria.length)
+    return "Assess every criterion from the selected source. Use missing with a reason for unavailable evidence.";
   if (comparison.assessments.some((item) => item.status !== "missing" && !item.value))
     return "Provide the candidate value and its evidence for each assessed criterion.";
   return null;

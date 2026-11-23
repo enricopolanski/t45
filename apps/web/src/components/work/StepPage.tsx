@@ -272,6 +272,12 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
                     true,
                   );
                 }}
+                onReviewMany={(fieldKey, decisions) =>
+                  act(
+                    () => api("workflows.reviewProposals", { ...step, fieldKey, ...decisions }),
+                    true,
+                  )
+                }
               />
             ) : null
           }

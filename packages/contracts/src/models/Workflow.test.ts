@@ -24,7 +24,11 @@ import {
   hasValidInputs,
   occupiedStep,
   openProposals,
+  proposalFiltersRefusal,
   proposalRefusal,
+  withReviewedProposals,
+  evaluateProposalFilterCascade,
+  type ProposalFilter,
   confirmRecordEntry,
   recordReviewsOf,
   getComparisonSources,
@@ -624,6 +628,263 @@ describe("proposing a value", () => {
   });
 });
 
+describe("discrepancy filter cascade and batch discards", () => {
+  const products: Field = {
+    id: "competitor_products",
+    label: "Competitor products",
+    type: "records",
+    collectionId: "collection01",
+    isReviewed: true,
+  };
+  const makeProposal = (id: string, value: string, extra = {}) => ({
+    id,
+    fieldKey: "competitor_products",
+    value,
+    whyYes: "Comparable tape.",
+    whyNo: "",
+    author: "agent001",
+    isDiscarded: false,
+    createdAt: at,
+    ...extra,
+  });
+  const makeFilter = (
+    id: string,
+    question: string,
+    proposalIds: ReadonlyArray<string>,
+  ): ProposalFilter => ({
+    id,
+    fieldKey: "competitor_products",
+    question,
+    driftSummary: question,
+    items: proposalIds.map((proposalId) => ({ proposalId, reason: `Matched ${proposalId}` })),
+  });
+
+  it("validates filters against open proposals on a reviewed field, allowing 0, single-item, and >6 questions", () => {
+    const withProposals: Step = {
+      ...step,
+      proposals: [
+        makeProposal("prop0001", "sku-1"),
+        makeProposal("prop0002", "sku-2", { isDiscarded: true }),
+      ],
+    };
+    const plain: Field = { id: "notes", label: "Notes", type: "text" };
+    assert.include(
+      proposalFiltersRefusal(withProposals, plain, "notes", []) ?? "",
+      "isn't reviewed",
+    );
+    assert.isNull(proposalFiltersRefusal(withProposals, products, "competitor_products", []));
+    // Single-tape questions and more than 6 questions are both allowed.
+    const sevenSingle = Array.from({ length: 7 }, (_, index) =>
+      makeFilter(`filter0${index}`, `Question ${index}`, ["prop0001"]),
+    );
+    assert.isNull(
+      proposalFiltersRefusal(withProposals, products, "competitor_products", sevenSingle),
+    );
+    assert.include(
+      proposalFiltersRefusal(withProposals, products, "competitor_products", [
+        makeFilter("filter01", "Discarded", ["prop0002"]),
+      ]) ?? "",
+      "open proposal",
+    );
+    assert.include(
+      proposalFiltersRefusal(withProposals, products, "competitor_products", [
+        makeFilter("filter01", "Duplicate", ["prop0001", "prop0001"]),
+      ]) ?? "",
+      "at most once",
+    );
+  });
+
+  it("keeps candidates in play when a discrepancy is accepted and excludes only checked items on later questions", () => {
+    const open = [makeProposal("tape-acrylic", "sku-a"), makeProposal("tape-rubber", "sku-b")];
+    const filters = [
+      makeFilter("f-temp", "Accept 90 °C maximum temperature?", ["tape-acrylic", "tape-rubber"]),
+      makeFilter("f-adhesive", "Accept acrylic adhesive?", ["tape-acrylic"]),
+    ];
+    const afterTemp = evaluateProposalFilterCascade(open, filters, {
+      "f-temp": {
+        decision: "accept",
+        shownIds: ["tape-acrylic", "tape-rubber"],
+        excludedIds: [],
+      },
+    });
+    assert.deepStrictEqual(afterTemp.inPlayIds, ["tape-acrylic", "tape-rubber"]);
+    assert.deepStrictEqual(afterTemp.excludedIds, []);
+    assert.strictEqual(afterTemp.nextUnansweredIndex, 1);
+    assert.deepStrictEqual(
+      afterTemp.steps[1]?.liveItems.map(({ proposalId }) => proposalId),
+      ["tape-acrylic"],
+    );
+
+    const afterAdhesive = evaluateProposalFilterCascade(open, filters, {
+      "f-temp": {
+        decision: "accept",
+        shownIds: ["tape-acrylic", "tape-rubber"],
+        excludedIds: [],
+      },
+      "f-adhesive": {
+        decision: "exclude",
+        shownIds: ["tape-acrylic"],
+        excludedIds: ["tape-acrylic"],
+      },
+    });
+    assert.deepStrictEqual(afterAdhesive.excludedIds, ["tape-acrylic"]);
+    assert.deepStrictEqual(afterAdhesive.inPlayIds, ["tape-rubber"]);
+    assert.strictEqual(afterAdhesive.nextUnansweredIndex, -1);
+  });
+
+  it("invalidates downstream answers when going back changes affected items, while preserving unaffected answers", () => {
+    const open = [
+      makeProposal("w-acr", "w-acr"),
+      makeProposal("a-acr-1", "a-acr-1"),
+      makeProposal("a-acr-2", "a-acr-2"),
+      makeProposal("a-acr-3", "a-acr-3"),
+      makeProposal("a-rub-1", "a-rub-1"),
+      makeProposal("a-rub-2", "a-rub-2"),
+      makeProposal("a-rub-3", "a-rub-3"),
+      makeProposal("a-rub-4", "a-rub-4"),
+      makeProposal("f-conf-1", "f-conf-1"),
+    ];
+    const filters = [
+      makeFilter("f-acrylic", "Acrylic?", ["w-acr", "a-acr-1", "a-acr-2", "a-acr-3"]),
+      makeFilter("f-temp", "Missing max temp?", [
+        "a-acr-1",
+        "a-acr-2",
+        "a-acr-3",
+        "a-rub-1",
+        "a-rub-2",
+        "a-rub-3",
+        "a-rub-4",
+      ]),
+      makeFilter("f-conflict", "Unresolved conflict?", ["f-conf-1"]),
+    ];
+    // Reviewer excluded acrylic (4), then excluded the remaining 4 missing-temp tapes and the conflict.
+    const initial = evaluateProposalFilterCascade(open, filters, {
+      "f-acrylic": {
+        decision: "exclude",
+        shownIds: ["w-acr", "a-acr-1", "a-acr-2", "a-acr-3"],
+        excludedIds: ["w-acr", "a-acr-1", "a-acr-2", "a-acr-3"],
+      },
+      "f-temp": {
+        decision: "exclude",
+        shownIds: ["a-rub-1", "a-rub-2", "a-rub-3", "a-rub-4"],
+        excludedIds: ["a-rub-1", "a-rub-2", "a-rub-3", "a-rub-4"],
+      },
+      "f-conflict": {
+        decision: "exclude",
+        shownIds: ["f-conf-1"],
+        excludedIds: ["f-conf-1"],
+      },
+    });
+    assert.strictEqual(initial.nextUnansweredIndex, -1);
+    assert.strictEqual(initial.steps[1]?.liveItems.length, 4);
+
+    // Going back to accept acrylic expands f-temp from 4 to 7, invalidating f-temp but keeping f-conflict.
+    const afterBack = evaluateProposalFilterCascade(open, filters, {
+      "f-acrylic": {
+        decision: "accept",
+        shownIds: ["w-acr", "a-acr-1", "a-acr-2", "a-acr-3"],
+        excludedIds: [],
+      },
+      "f-temp": {
+        decision: "exclude",
+        shownIds: ["a-rub-1", "a-rub-2", "a-rub-3", "a-rub-4"],
+        excludedIds: ["a-rub-1", "a-rub-2", "a-rub-3", "a-rub-4"],
+      },
+      "f-conflict": {
+        decision: "exclude",
+        shownIds: ["f-conf-1"],
+        excludedIds: ["f-conf-1"],
+      },
+    });
+    assert.strictEqual(afterBack.steps[1]?.liveItems.length, 7);
+    assert.isTrue(afterBack.steps[1]?.isInvalidated);
+    assert.isNull(afterBack.steps[1]?.answer);
+    assert.strictEqual(afterBack.nextUnansweredIndex, 1);
+    // f-temp's stale exclusion is not applied, while unaffected f-conflict stays answered.
+    assert.deepStrictEqual(afterBack.excludedIds, ["f-conf-1"]);
+    assert.isNotNull(afterBack.steps[2]?.answer);
+  });
+
+  it("exempts unchecked items only from that question, skips zero-item questions, and ignores stale ids", () => {
+    const open = [makeProposal("p1", "sku-1"), makeProposal("p2", "sku-2")];
+    const filters = [
+      makeFilter("f1", "First?", ["p1", "p2", "stale-id"]),
+      makeFilter("f2", "Second?", ["p1"]),
+    ];
+    // Unchecking p1 in f1 leaves p1 in play for f2.
+    const partial = evaluateProposalFilterCascade(open, filters, {
+      f1: { decision: "exclude", shownIds: ["p1", "p2"], excludedIds: ["p2"] },
+    });
+    assert.deepStrictEqual(
+      partial.steps.map((s) => s.filter.id),
+      ["f1", "f2"],
+    );
+    assert.deepStrictEqual(
+      partial.steps[1]?.liveItems.map(({ proposalId }) => proposalId),
+      ["p1"],
+    );
+    // Excluding both in f1 drops f2 to 0 remaining items and skips it.
+    const allExcluded = evaluateProposalFilterCascade(open, filters, {
+      f1: { decision: "exclude", shownIds: ["p1", "p2"], excludedIds: ["p1", "p2"] },
+    });
+    assert.deepStrictEqual(
+      allExcluded.steps.map((s) => s.filter.id),
+      ["f1"],
+    );
+  });
+
+  it("approves survivors and discards excluded proposals atomically while preserving prior decisions", () => {
+    const initial: Step = {
+      ...step,
+      values: { competitor_products: ["approved-sku"] },
+      proposals: [
+        makeProposal("tape-acrylic", "sku-a"),
+        makeProposal("tape-rubber", "sku-b"),
+        makeProposal("already-gone", "sku-c", { isDiscarded: true }),
+      ],
+    };
+    const updated = withReviewedProposals(initial, products, "competitor_products", {
+      approveIds: ["tape-rubber"],
+      discardIds: ["tape-acrylic"],
+    });
+    assert.isNotString(updated);
+    if (typeof updated !== "string") {
+      assert.deepStrictEqual(updated.approvedValue, ["approved-sku", "sku-b"]);
+      assert.deepStrictEqual(
+        updated.step.proposals?.map(({ id, isDiscarded }) => [id, isDiscarded]),
+        [
+          ["tape-acrylic", true],
+          ["already-gone", true],
+        ],
+      );
+    }
+    assert.isString(
+      withReviewedProposals(initial, products, "competitor_products", {
+        approveIds: [],
+        discardIds: [],
+      }),
+    );
+    assert.isString(
+      withReviewedProposals(initial, products, "competitor_products", {
+        approveIds: ["tape-acrylic"],
+        discardIds: ["tape-acrylic"],
+      }),
+    );
+    assert.isString(
+      withReviewedProposals(initial, products, "competitor_products", {
+        approveIds: [],
+        discardIds: ["already-gone"],
+      }),
+    );
+    assert.isString(
+      withReviewedProposals(initial, products, "other_field", {
+        approveIds: [],
+        discardIds: ["tape-acrylic"],
+      }),
+    );
+  });
+});
+
 it("requires confirmation for completion and comparison unless the review makes it optional", () => {
   const mapping = {
     stepId: root.id,
@@ -698,6 +959,18 @@ it("requires confirmation for completion and comparison unless the review makes 
   });
   assert.isUndefined(getComparisonSources(mapping, inputs.slice(0, 1)));
   assert.isNull(getComparisonRefusal(field, inputs, comparison));
+  assert.match(
+    getComparisonRefusal(field, inputs, { ...comparison, assessments: [] }) ?? "",
+    /Assess every criterion/,
+  );
+  assert.isNull(
+    getComparisonRefusal(field, inputs, {
+      ...comparison,
+      assessments: [
+        { criterionId: "row-test", status: "missing", evidence: "UV test unavailable" },
+      ],
+    }),
+  );
   assert.isNotNull(
     getComparisonRefusal(field, inputs, { ...comparison, sourceRecordKey: "article-two" }),
   );

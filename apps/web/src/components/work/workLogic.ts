@@ -115,6 +115,8 @@ const HISTORY_LABELS: Record<string, Message> = {
   "workflows.unblockStep": "unblocked the step",
   "workflows.commentOnStep": "commented",
   "workflows.confirmRecordEntry": "confirmed a record review",
+  "workflows.setProposalFilters": "updated proposal filters",
+  "workflows.reviewProposals": "reviewed proposals",
   "workflows.runStepAutomation": "ran an automation",
   "workflows.stopStepAutomation": "stopped an automation",
   "workflows.cancelTicket": "cancelled the item",

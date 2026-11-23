@@ -15,6 +15,17 @@ import { Button } from "../ui/button";
 
 type Assessment = NonNullable<Proposal["comparison"]>["assessments"][number];
 type Source = NonNullable<StepView["comparisonSources"]>[string]["records"][number];
+
+/** Ignore display precision for a plain number with the same unit. */
+function sameDisplayedValue(left: string, right: string) {
+  if (left.trim() === right.trim()) return true;
+  const measure = /^([+−-]?\d+(?:[.,]\d+)?)\s*(\S+)$/u;
+  const a = measure.exec(left.trim());
+  const b = measure.exec(right.trim());
+  const number = (text: string) => Number(text.replace(",", ".").replace("−", "-"));
+  return a !== null && b !== null && a[2] === b[2] && number(a[1]!) === number(b[1]!);
+}
+
 const states = {
   different: {
     label: "Different",
@@ -34,6 +45,18 @@ const states = {
     color: "bg-muted text-muted-foreground",
     order: 2,
   },
+  unassessed: {
+    label: "Not assessed",
+    Icon: CircleHelpIcon,
+    color: "bg-muted text-muted-foreground",
+    order: 2,
+  },
+  recheck: {
+    label: "Needs reassessment",
+    Icon: CircleHelpIcon,
+    color: "bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100",
+    order: 1,
+  },
   very_similar: {
     label: "Very similar",
     Icon: EqualApproximatelyIcon,
@@ -51,9 +74,11 @@ const states = {
 export function ComparisonCriteriaTable({
   source,
   assessments,
+  currentValues,
 }: {
   readonly source: Source;
   readonly assessments: ReadonlyArray<Assessment>;
+  readonly currentValues: ReadonlyMap<string, string>;
 }) {
   const t = useTranslation();
   const [hideEqual, setHideEqual] = useState(false);
@@ -61,10 +86,15 @@ export function ComparisonCriteriaTable({
   const rows = source.criteria
     .map((criterion) => {
       const assessment = assessments.find((row) => row.criterionId === criterion.id);
-      const status = assessment?.status ?? "missing";
+      const currentValue = currentValues.get(criterion.id);
+      const status = !assessment
+        ? "unassessed"
+        : currentValue === "" && assessment.status !== "missing"
+          ? "recheck"
+          : assessment.status;
       const state = states[status];
       const rank = status === "equal" ? 10 : state.order + (assessment?.isImportant ? 0 : 5);
-      return { criterion, assessment, state, status, rank };
+      return { criterion, assessment, currentValue, state, status, rank };
     })
     .sort((a, b) => a.rank - b.rank);
   if (!rows.length) return null;
@@ -104,7 +134,7 @@ export function ComparisonCriteriaTable({
           <tbody>
             {rows
               .filter((row) => !hideEqual || row.status !== "equal")
-              .map(({ criterion, assessment, state }) => {
+              .map(({ criterion, assessment, currentValue, state }) => {
                 const Icon = state.Icon;
                 const badge = (
                   <span
@@ -122,9 +152,16 @@ export function ComparisonCriteriaTable({
                       </th>
                       <td className="w-[29%] px-4 py-2.5 wrap-anywhere">{criterion.value}</td>
                       <td className="px-4 py-2.5 wrap-anywhere">
-                        {assessment?.value ?? (
+                        {(currentValue ?? assessment?.value) || (
                           <span className="text-muted-foreground">{t("Not provided")}</span>
                         )}
+                        {currentValue !== undefined &&
+                          assessment?.value &&
+                          !sameDisplayedValue(assessment.value, currentValue) && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {t("Saved assessment value: {0}", assessment.value)}
+                            </div>
+                          )}
                       </td>
                       <td className="px-4 py-2">
                         {assessment ? (

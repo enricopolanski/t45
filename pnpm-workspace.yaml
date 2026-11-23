@@ -34,6 +34,7 @@ catalog:
   "@tailwindcss/oxide": 4.3.3
   "@tailwindcss/vite": 4.3.3
   "@types/node": 24.12.4
+  aws4fetch: 1.0.20
   effect: 4.0.6
   jose: 6.2.2
   lightningcss: 1.33.0

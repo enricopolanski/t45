@@ -11,6 +11,7 @@
     "@effect/platform-node-shared": "catalog:",
     "@effect/sql-sqlite-node": "catalog:",
     "@opencode/schema": "catalog:",
+    "aws4fetch": "catalog:",
     "effect": "catalog:",
     "jose": "catalog:"
   },
