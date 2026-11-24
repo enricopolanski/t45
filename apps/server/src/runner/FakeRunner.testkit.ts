@@ -136,6 +136,7 @@ const make = () => {
 
   const handlers = RunnerRpcs.of({
     runScript: () => Effect.succeed({}),
+    runScriptForFile: () => Effect.succeed(new Uint8Array([1])),
     execute: (request) =>
       Stream.unwrap(
         Effect.gen(function* () {

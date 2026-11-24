@@ -16,15 +16,19 @@ export const Name = OpenCodeSkill.Name.check(
 /** What agents read to decide when to use the skill. */
 const Description = TrimmedNonEmptyString.check(Schema.isMaxLength(1024));
 
+export const SkillSetup = Schema.Struct({
+  name: Name,
+  description: Description,
+  /** SKILL.md's body, below the frontmatter the runner writes from the name and description. */
+  content: OpenCodeSkill.Info.fields.content,
+  /** The supporting files beside SKILL.md, by path. */
+  files: FilesByPath(["SKILL.md"]),
+});
+
 export class Skill extends Schema.Opaque<Skill>()(
   Schema.Struct({
     id: StringId,
-    name: Name,
-    description: Description,
-    /** SKILL.md's body, below the frontmatter the runner writes from the name and description. */
-    content: OpenCodeSkill.Info.fields.content,
-    /** The supporting files beside SKILL.md, by path. */
-    files: FilesByPath(["SKILL.md"]),
+    ...SkillSetup.fields,
     createdAt: Schema.DateTimeUtcFromString,
     updatedAt: Schema.DateTimeUtcFromString,
   }),

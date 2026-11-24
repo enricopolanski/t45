@@ -1,6 +1,7 @@
 import { type Translate, useTranslation } from "~/i18n/locale";
 import { isSameInput } from "@t45/contracts/models/Workflow";
-import type { CalculatorLabels } from "@t45/contracts/models/StepCalculator";
+import type { StepPreviewColumns } from "@t45/contracts/models/StepPreview";
+import { getScriptOutputFields, type CalculatorLabels } from "@t45/contracts/models/StepCalculator";
 import type { CalculatorOption } from "@t45/contracts/resources/Workflows";
 import type { DraftField, DraftStep, inputSourcesFor } from "./workflowLogic";
 import { XIcon } from "lucide-react";
@@ -146,6 +147,7 @@ export function WorkflowStepEditor({
   workflow,
   step,
   inputSources,
+  availablePreviewColumns,
   calculators,
   precedingStepId,
   position,
@@ -158,6 +160,7 @@ export function WorkflowStepEditor({
   readonly step: DraftStep;
   /** The fields of earlier steps it may read. */
   readonly inputSources: ReturnType<typeof inputSourcesFor>;
+  readonly availablePreviewColumns: StepPreviewColumns | undefined;
   readonly calculators: ReadonlyArray<CalculatorOption>;
   readonly precedingStepId?: string | undefined;
   /** Its place among the workflow's steps, with moving and removing it; null for a sub-step. */
@@ -177,7 +180,13 @@ export function WorkflowStepEditor({
   const recordSources = inputSources.filter(
     ({ field, input }) => field.type === "records" && inputs.some(isSameInput(input)),
   );
-  const previewFields = step.previewFields ?? [];
+  const scriptOutputs =
+    calculator?.kind === "script" ? getScriptOutputFields(calculator, step.fields) : [];
+  const hasScriptGroup = !calculator?.review && scriptOutputs.some(({ type }) => type === "group");
+  const defaultPreviewFields = hasScriptGroup
+    ? scriptOutputs.map(({ id }) => ({ stepId: step.id, fieldId: id }))
+    : [];
+  const previewFields = step.previewFields ?? defaultPreviewFields;
   const previewOptions = [
     ...inputSources.filter(({ input }) => inputs.some(isSameInput(input))),
     ...step.fields
@@ -188,11 +197,11 @@ export function WorkflowStepEditor({
     ({ input }) => !previewFields.some(isSameInput(input)),
   );
   const resultColumns =
-    calculator?.kind === "script"
-      ? step.fields
-          .filter(({ id }) => Object.values(calculator.outputs).includes(id))
-          .map(({ id, label }) => ({ id, label }))
-      : undefined;
+    calculator?.kind === "script" && !calculator.review
+      ? hasScriptGroup
+        ? undefined
+        : scriptOutputs.map(({ id, label }) => ({ id, label }))
+      : availablePreviewColumns;
   const hasResultTable =
     calculator !== undefined && resultColumns !== undefined && resultColumns.length > 0;
   const showsResultTable = hasResultTable && step.previewFields === undefined;
@@ -458,6 +467,7 @@ export function WorkflowStepEditor({
                   step={step}
                   sourceStepId={precedingStepId}
                   sources={inputSources}
+                  collections={collections}
                   calculators={calculators}
                   onChange={onChange}
                   disabled={disabled}
@@ -480,7 +490,7 @@ export function WorkflowStepEditor({
                       changePreview(
                         !checked
                           ? []
-                          : hasResultTable
+                          : hasResultTable || hasScriptGroup
                             ? undefined
                             : previewOptions.slice(0, 1).map(({ input }) => input),
                       )

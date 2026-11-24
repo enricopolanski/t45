@@ -41,6 +41,7 @@ import {
   canEditWorkflow,
   canSetWorkflowEditors,
   stepIds,
+  stepNodes,
   type WorkflowActor,
   findStep,
   isActionable,
@@ -95,6 +96,11 @@ import {
   rowIds,
 } from "@t45/contracts/models/Field";
 import type { AssignmentView } from "@t45/contracts/resources/Assignments";
+import {
+  applyScriptResultValues,
+  getScriptOutputFields,
+  readScriptResultValues,
+} from "@t45/contracts/models/StepCalculator";
 import { buildFieldViews } from "@t45/core/fieldViews";
 import { AccessDenied, NotFound } from "@t45/contracts/resources/errors";
 import { STEP_COMPLETION_CAPABILITY_ID } from "@t45/contracts/resources/AgentTools";
@@ -125,6 +131,7 @@ import { type CommandLogEntry, CommandLogRepository } from "../persistence/Comma
 import { UserRepository } from "../org/UserRepository.ts";
 import { NotificationRepository } from "./NotificationRepository.ts";
 import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
+import { acceptsCalculationEdits } from "@t45/contracts/models/CalculationReview";
 import { makeScriptCalculations, SCRIPT_RESULT_KEY } from "./ScriptCalculations.ts";
 import { TicketRepository } from "./TicketRepository.ts";
 import { WorkflowRepository } from "./WorkflowRepository.ts";
@@ -1047,9 +1054,9 @@ const make = Effect.gen(function* () {
       )
         return [];
       const available =
-        destination.previewFields === undefined
-          ? destination.calculator?.kind === "script"
-          : destination.previewFields.length > 0;
+        destination.previewFields !== undefined
+          ? destination.previewFields.length > 0
+          : destination.calculator?.kind === "script";
       return available
         ? [
             {
@@ -1099,15 +1106,21 @@ const make = Effect.gen(function* () {
     actorId: string,
     workflow: Workflow,
     edits: ReadonlyArray<WorkflowEdit>,
+    steps: ReadonlyArray<StepDefinition>,
   ) =>
     Effect.forEach(
       edits,
       Effect.fnUntraced(function* (edit) {
-        if (edit.type === "set_step_calculator" && edit.calculator?.kind === "script") {
+        if (edit.type === "set_step_calculator" && edit.calculator !== null) {
+          const calculator = edit.calculator;
           if (
-            !(yield* scripts.options(workflow, actorId)).some(
-              ({ id }) => id === edit.calculator?.id,
-            )
+            (calculator.kind === "script" &&
+              (!(yield* scripts.options(workflow, actorId)).some(
+                ({ id }) => id === calculator.id,
+              ) ||
+                !(yield* scripts.canReadRecordInputs(actorId, steps, calculator)))) ||
+            (calculator.exportTemplateId !== undefined &&
+              !(yield* scripts.canAttachExport(workflow, calculator, actorId)))
           )
             return yield* refuse("invalid_calculator");
           return;
@@ -1124,6 +1137,22 @@ const make = Effect.gen(function* () {
       { discard: true },
     );
 
+  const bindExportTemplates = Effect.fnUntraced(function* (
+    actorId: string,
+    workflowId: string,
+    steps: ReadonlyArray<StepDefinition>,
+  ) {
+    const ids = new Set(
+      stepNodes(steps).flatMap(({ step }) => {
+        const id = step.calculator?.exportTemplateId;
+        return id === undefined ? [] : [id];
+      }),
+    );
+    for (const id of ids)
+      if (!(yield* files.claimForWorkflow(id, workflowId, actorId)))
+        return yield* refuse("invalid_attachment");
+  });
+
   const createWorkflow = Effect.fnUntraced(function* (
     actorId: string,
     input: Payload<"createWorkflow">,
@@ -1139,8 +1168,9 @@ const make = Effect.gen(function* () {
       isArchived: false,
     };
     if (!(yield* scripts.validate(steps, workflow))) return yield* refuse("invalid_calculator");
-    yield* requireAttachable(actorId, workflow, input.edits ?? []);
+    yield* requireAttachable(actorId, workflow, input.edits ?? [], steps);
     yield* workflows.save(workflow);
+    yield* bindExportTemplates(actorId, workflow.id, steps);
     yield* workflows.versions.save({
       id: generateId(),
       workflowId: workflow.id,
@@ -1207,7 +1237,8 @@ const make = Effect.gen(function* () {
     if (steps === null) return yield* refuse("invalid_edit");
     if (!hasValidInputs(steps)) return yield* refuse("invalid_input");
     if (!(yield* scripts.validate(steps, workflow))) return yield* refuse("invalid_calculator");
-    yield* requireAttachable(actorId, workflow, input.edits);
+    yield* requireAttachable(actorId, workflow, input.edits, steps);
+    yield* bindExportTemplates(actorId, workflow.id, steps);
     const saved: WorkflowVersion =
       latest.isFrozen && !isLayoutChangeOnly(latest.steps, steps)
         ? {
@@ -1510,7 +1541,7 @@ const make = Effect.gen(function* () {
     const members = yield* memberOf(actorId, work.project.id);
     if (
       destination === undefined ||
-      (destination.previewFields === undefined && binding?.kind !== "script") ||
+      (destination.previewFields === undefined && binding === undefined) ||
       !members.has(destination.id)
     )
       return yield* new NotFound();
@@ -1560,16 +1591,11 @@ const make = Effect.gen(function* () {
   const buildPreviewFields = Effect.fnUntraced(function* (
     work: Work,
     destination: StepDefinition,
+    selections: NonNullable<StepDefinition["previewFields"]>,
+    outputs: FieldValues,
     interests?: RecordInterests,
   ) {
-    const selections = destination.previewFields ?? [];
     const inputs = stepInputFields(work.version.steps, work.ticket, destination);
-    const binding = destination.calculator;
-    interests?.clear();
-    const outputs =
-      binding?.kind === "script" && selections.some(({ stepId }) => stepId === destination.id)
-        ? ((yield* scripts.readValues(work.ticket, destination)) ?? {})
-        : {};
     const fields = yield* Effect.forEach(selections, (selection) => {
       const input = inputs.find(
         ({ source, field }) =>
@@ -1599,44 +1625,94 @@ const make = Effect.gen(function* () {
     const context = yield* previewContext(actorId, input);
     if (context.type === "entered") return { type: "entered", stepId: context.stepId } as const;
     const { work, binding, destination, members, current } = context;
+    interests?.clear();
     const details = {
       ...getPreviewLink(work.ticket, destination, work.version.steps),
       ...(members.has(current.stepDefinitionId) ? { sourceStepId: current.id } : {}),
     };
-    if (destination.previewFields !== undefined)
+    if (binding?.kind === "script" && binding.review && destination.previewFields === undefined) {
+      const result = yield* scripts.readPreview(work.ticket, destination);
+      return {
+        type: "table",
+        ...details,
+        labels: binding.labels ?? {},
+        columns: result?.columns ?? binding.previewColumns ?? [{ id: "$label", label: "" }],
+        rows: result?.rows ?? [],
+      } as const;
+    }
+    if (binding?.kind === "script") {
+      const outputFields = getScriptOutputFields(binding, destination.fields);
+      const labels = {
+        ...Object.fromEntries(
+          outputFields.flatMap((field) => [
+            [`history.field.${field.id}`, field.label],
+            ...(field.type === "group"
+              ? field.fields.map(({ id, label }) => [`history.field.${field.id}.${id}`, label])
+              : []),
+          ]),
+        ),
+        ...binding.labels,
+      };
+      const selections =
+        destination.previewFields ??
+        (outputFields.some(({ type }) => type === "group")
+          ? outputFields.map(({ id }) => ({ stepId: destination.id, fieldId: id }))
+          : undefined);
+      if (selections !== undefined) {
+        const hasOutputs = selections.some(({ stepId }) => stepId === destination.id);
+        const result = hasOutputs ? yield* scripts.read(work.ticket, destination) : null;
+        return {
+          type: "fields",
+          ...details,
+          fields: yield* buildPreviewFields(
+            work,
+            destination,
+            selections,
+            result === null ? {} : readScriptResultValues(result.snapshot),
+            interests,
+          ),
+          ...(result === null
+            ? {}
+            : { history: { key: SCRIPT_RESULT_KEY, latestId: result.id, labels } }),
+        } as const;
+      }
+      const columns =
+        binding.previewColumns ?? outputFields.map(({ id, label }) => ({ id, label }));
+      const result = yield* scripts.read(work.ticket, destination);
+      return {
+        type: "table",
+        ...details,
+        columns,
+        labels,
+        rows:
+          result === null
+            ? []
+            : [
+                {
+                  key: SCRIPT_RESULT_KEY,
+                  label: destination.name,
+                  cells: Object.fromEntries(
+                    result.snapshot.results.map((value) => [value.id, { values: [value] }]),
+                  ),
+                  historyId: result.id,
+                },
+              ],
+      } as const;
+    }
+    if (destination.previewFields !== undefined) {
       return {
         type: "fields",
         ...details,
-        fields: yield* buildPreviewFields(work, destination, interests),
+        fields: yield* buildPreviewFields(
+          work,
+          destination,
+          destination.previewFields,
+          {},
+          interests,
+        ),
       } as const;
-    if (binding?.kind !== "script") return yield* new NotFound();
-    const defaults = destination.fields.filter(({ id }) =>
-      Object.values(binding.outputs).includes(id),
-    );
-    const columns = binding.previewColumns ?? defaults.map(({ id, label }) => ({ id, label }));
-    const result = yield* scripts.read(work.ticket, destination);
-    return {
-      type: "table",
-      ...details,
-      columns,
-      labels: {
-        ...Object.fromEntries(defaults.map(({ id, label }) => [`history.field.${id}`, label])),
-        ...binding.labels,
-      },
-      rows:
-        result === null
-          ? []
-          : [
-              {
-                key: SCRIPT_RESULT_KEY,
-                label: destination.name,
-                cells: Object.fromEntries(
-                  result.snapshot.results.map((value) => [value.id, { values: [value] }]),
-                ),
-                historyId: result.id,
-              },
-            ],
-    } as const;
+    }
+    return yield* new NotFound();
   }, transaction);
 
   const observeRecords = (interests: RecordInterests) => (notify: () => void) =>
@@ -1661,11 +1737,22 @@ const make = Effect.gen(function* () {
     const destination = getStepAfter(work.version.steps, step.stepDefinitionId);
     if (destination === undefined) return {};
     const canReadPreview = (yield* memberOf(actorId, work.project.id)).has(destination.id);
-    return canReadPreview &&
+    const configured =
+      canReadPreview &&
       ((destination.previewFields?.length ?? 0) > 0 ||
         (destination.previewFields === undefined && destination.calculator?.kind === "script"))
-      ? { preview: getPreviewLink(work.ticket, destination, work.version.steps) }
-      : {};
+        ? { preview: getPreviewLink(work.ticket, destination, work.version.steps) }
+        : {};
+    if (!destination.calculator?.review) return configured;
+    const changes = yield* scripts.readPreviewChanges(work.ticket, destination);
+    return {
+      ...configured,
+      ...(changes === undefined || changes.count === 0
+        ? {}
+        : {
+            previewChanges: canReadPreview ? changes : { count: changes.count, sections: [] },
+          }),
+    };
   });
 
   const readStep = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
@@ -1812,18 +1899,36 @@ const make = Effect.gen(function* () {
     interests?.clear();
     const canReadLive = canSee && isOpen && step.status.type !== "completed";
     const calculated = definitionOf(work, step).calculator;
+    const review =
+      canReadLive && calculated?.kind === "script" && calculated.review
+        ? {
+            outputFields: Object.values(calculated.outputs),
+            labels: calculated.labels ?? {},
+            result: yield* scripts.readReview(work.ticket, definitionOf(work, step), step),
+          }
+        : undefined;
     const preview = canReadLive ? yield* previewForStep(actorId, work, step) : {};
     const associationFields = canReadLive
       ? yield* readAssociationFields(work, step, interests)
       : {};
     const scriptFields = calculated?.kind === "script" ? Object.values(calculated.outputs) : [];
+    const exportWorkflow =
+      canReadLive && calculated?.exportTemplateId !== undefined
+        ? yield* workflows.get(work.version.workflowId)
+        : null;
+    const fileExport =
+      exportWorkflow === null
+        ? undefined
+        : yield* scripts.exportView(exportWorkflow, definitionOf(work, step));
     return {
       ...contents,
       ...preview,
+      ...(fileExport === undefined ? {} : { fileExport }),
       ...(Object.keys(associationFields).length === 0 ? {} : { associationFields }),
       fields: contents.fields.map((field) =>
         scriptFields.includes(field.key) ? { ...field, isReadOnly: true } : field,
       ),
+      ...(review === undefined ? {} : { calculatedReview: review }),
       ticket: work.ticket,
       projectName: work.project.name,
       ...(forPage ? { stepNavigation } : {}),
@@ -2341,6 +2446,61 @@ const make = Effect.gen(function* () {
     });
   }, transaction);
 
+  const setCalculatedStepRow = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"setCalculatedStepRow">,
+  ) {
+    const { work, step } = yield* loadForCommand(actorId, input.stepId);
+    yield* requireActionable(step);
+    const definition = definitionOf(work, step);
+    if (definition.calculator?.kind !== "script" || !definition.calculator.review)
+      return yield* new NotFound();
+    const result = yield* scripts.read(work.ticket, definition);
+    const review = result?.snapshot.review;
+    if (review === undefined) return yield* refuse("calculation_pending");
+    if (result?.snapshot.inputRevision !== input.revision)
+      return yield* refuse("calculation_changed");
+    if (!acceptsCalculationEdits(review.sections, input.rowId, input.values))
+      return yield* refuse("invalid_calculator_edit");
+    const rows = { ...step.calculation?.rows };
+    const edited = Object.entries({ ...rows[input.rowId], ...input.values })
+      .filter(([, value]) => value !== null)
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value] as const);
+    if (edited.length === 0) delete rows[input.rowId];
+    else rows[input.rowId] = Object.fromEntries(edited);
+    putStep(work, { ...step, calculation: { ...step.calculation, rows } });
+    yield* save(work);
+    yield* record("workflows.setCalculatedStepRow", actorId, targetOf(work, step), {
+      rowId: input.rowId,
+    });
+  }, transaction);
+
+  const approveCalculatedStep = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"approveCalculatedStep">,
+  ) {
+    const { work, step } = yield* loadForCommand(actorId, input.stepId);
+    yield* requireActionable(step);
+    const definition = definitionOf(work, step);
+    if (definition.calculator?.kind !== "script" || !definition.calculator.review)
+      return yield* new NotFound();
+    const result = yield* scripts.read(work.ticket, definition);
+    if (result?.snapshot.inputRevision !== input.revision)
+      return yield* refuse("calculation_changed");
+    if (!result.snapshot.review?.canApprove) return yield* refuse("calculation_not_ready");
+    if (step.calculation?.approvedRevision !== input.revision) {
+      putStep(work, {
+        ...step,
+        calculation: { rows: step.calculation?.rows ?? {}, approvedRevision: input.revision },
+      });
+      yield* save(work);
+      yield* record("workflows.approveCalculatedStep", actorId, targetOf(work, step), {
+        revision: input.revision,
+      });
+    }
+  }, transaction);
+
   /**
    * A member, or an automation's run on its step, confirms an entry. A step done once approved
    * completes itself with the confirmation that leaves none pending.
@@ -2385,9 +2545,19 @@ const make = Effect.gen(function* () {
     const definition = definitionOf(work, step);
     const binding = definition.calculator;
     if (binding?.kind === "script") {
-      const values = yield* scripts.readValues(work.ticket, definition);
-      if (values === null) return yield* refuse("calculation_pending");
-      step = { ...step, values: { ...step.values, ...values } };
+      const result = yield* scripts.read(work.ticket, definition);
+      if (result === null) return yield* refuse("calculation_pending");
+      if (binding.review) {
+        if (typeof caller !== "string")
+          return yield* new AccessDenied({ message: "A step member sends the calculated result." });
+        if (!result.snapshot.review?.canApprove) return yield* refuse("calculation_not_ready");
+        if (step.calculation?.approvedRevision !== result.snapshot.inputRevision)
+          return yield* refuse("calculation_changed");
+      }
+      step = {
+        ...step,
+        values: applyScriptResultValues(step.values, readScriptResultValues(result.snapshot)),
+      };
     }
     const refusal = stepCompletionRefusal(definition, work.ticket, step);
     if (refusal !== null) return yield* new WorkflowRefused({ reason: refusal });
@@ -2424,7 +2594,7 @@ const make = Effect.gen(function* () {
       if (completed.next.calculator?.kind === "script") {
         const values = yield* scripts.readValues(work.ticket, completed.next);
         if (values !== null)
-          putStep(work, { ...entered, values: { ...entered.values, ...values } });
+          putStep(work, { ...entered, values: applyScriptResultValues(entered.values, values) });
       }
       yield* startEnteredAutomations(work, entered);
       if (
@@ -2557,6 +2727,55 @@ const make = Effect.gen(function* () {
     putStep(work, { ...step, values: { ...step.values, [fieldKey]: claimed.id } });
     yield* save(work);
   }, transaction);
+
+  const loadStepExport = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"exportStepResult">,
+  ) {
+    const { work, step } = yield* loadForCommand(actorId, input.stepId);
+    yield* requireActionable(step);
+    const definition = definitionOf(work, step);
+    const calculator = definition.calculator;
+    if (calculator?.exportTemplateId === undefined) return yield* new NotFound();
+    const result = yield* scripts.readExport(work.ticket, definition, step);
+    return result ?? (yield* refuse("calculation_pending"));
+  });
+
+  const exportStepResult = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"exportStepResult">,
+  ) {
+    const exportPlan = yield* transaction(loadStepExport(actorId, input));
+    const bytes = yield* scripts.exportFile(exportPlan).pipe(
+      Effect.mapError(
+        (error) =>
+          new WorkflowRefused({
+            reason: "file_export_failed",
+            ...(error._tag === "ExecutionFailed" ? { detail: error.reason } : {}),
+          }),
+      ),
+    );
+    const file = yield* files
+      .upload(
+        {
+          type: "file",
+          name: exportPlan.config.filename,
+          mimeType: exportPlan.config.mimeType,
+          sizeBytes: bytes.byteLength,
+        },
+        actorId,
+        Stream.succeed(bytes),
+      )
+      .pipe(Effect.mapError(() => refuse("invalid_attachment")));
+    return yield* transaction(
+      Effect.gen(function* () {
+        const current = yield* loadStepExport(actorId, input);
+        if (current.revision !== exportPlan.revision) return yield* refuse("calculation_changed");
+        yield* attachStepFile(actorId, { stepId: input.stepId, attachmentId: file.id });
+        return { id: file.id, name: file.name };
+      }),
+    );
+  });
 
   const removeStepFile = Effect.fnUntraced(function* (
     actorId: string,
@@ -2798,6 +3017,13 @@ const make = Effect.gen(function* () {
           canEdit,
           canSetEditors: canSetWorkflowEditors(actor, workflow),
           calculators: canEdit ? yield* scripts.options(workflow, actorId) : [],
+          availablePreviewColumns: Object.fromEntries(
+            stepNodes(version.steps).flatMap(({ step }) => {
+              if (step.calculator === undefined) return [];
+              const columns = step.calculator.previewColumns ?? [];
+              return columns.length === 0 ? [] : [[step.id, columns] as const];
+            }),
+          ),
         };
       }),
     listProjects,
@@ -2859,6 +3085,8 @@ const make = Effect.gen(function* () {
       );
     }, transaction),
     watchStepPreview,
+    setCalculatedStepRow,
+    approveCalculatedStep,
     setRecordAssociation,
     removeAssociatedRecord,
     setStepField,
@@ -2874,6 +3102,7 @@ const make = Effect.gen(function* () {
     unblockStep,
     commentOnStep,
     attachStepFile,
+    exportStepResult,
     removeStepFile,
     listAssignments,
     listNotifications,

@@ -25,7 +25,12 @@ import {
   valuesProblem,
 } from "./Field.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "./primitives.ts";
-import { CalculatorInput, CalculatorLabels, StepCalculator } from "./StepCalculator.ts";
+import {
+  CalculatorInput,
+  CalculatorLabels,
+  StepCalculation,
+  StepCalculator,
+} from "./StepCalculator.ts";
 import { StepPreviewColumns } from "./StepPreview.ts";
 
 /** A field of an earlier step that a step reads: the whole field, a group with all its rows. */
@@ -380,6 +385,7 @@ export class Step extends Schema.Opaque<Step>()(
         Schema.Record(TrimmedNonEmptyString, Schema.UniqueArray(TrimmedNonEmptyString)),
       ),
     ),
+    calculation: Schema.optionalKey(StepCalculation),
     /** Ordered discrepancy-filter questions over open proposals, by reviewed field. */
     proposalFilters: Schema.optionalKey(Schema.Array(ProposalFilter)),
     /** Confirmed group entries, by group field and row id. */
@@ -736,6 +742,11 @@ const REFUSALS = {
   invalid_calculator: "The calculator and its mapped fields do not fit this workflow version.",
   calculated_field: "This field is written by the step calculator.",
   calculation_pending: "The current calculation has no result yet.",
+  file_export_failed: "The file couldn't be generated.",
+  invalid_calculator_edit: "These changes do not fit a calculation row.",
+  calculation_not_ready: "The current result is not ready to approve.",
+  calculation_changed:
+    "The calculation has changed. Review the current results before sending them.",
   invalid_automations:
     "An automation is archived, or its agent can't work on steps or is private to someone other than you and this workflow's creator. Choose another.",
 };
@@ -1491,6 +1502,8 @@ export const setLayouts = (
 type CalculatorPresentation = {
   readonly labels?: CalculatorLabels | undefined;
   readonly previewColumns?: StepPreviewColumns | undefined;
+  readonly exportAutomationId?: StepCalculator["exportAutomationId"];
+  readonly exportTemplateId?: StepCalculator["exportTemplateId"];
 };
 
 const calculatorPresentationOf = (steps: StepList) =>
@@ -1504,6 +1517,8 @@ const calculatorPresentationOf = (steps: StepList) =>
               {
                 labels: calculator.labels,
                 previewColumns: calculator.previewColumns,
+                exportAutomationId: calculator.exportAutomationId,
+                exportTemplateId: calculator.exportTemplateId,
               },
             ] as const,
           ],
@@ -1518,10 +1533,17 @@ export const changedCalculatorPresentation = (saved: StepList, edited: StepList)
     const hasChangedLabels = JSON.stringify(previous?.labels) !== JSON.stringify(after.labels);
     const hasChangedColumns =
       JSON.stringify(previous?.previewColumns) !== JSON.stringify(after.previewColumns);
-    if (hasChangedLabels || hasChangedColumns)
+    const hasChangedExport =
+      previous?.exportAutomationId !== after.exportAutomationId ||
+      previous?.exportTemplateId !== after.exportTemplateId;
+    if (hasChangedLabels || hasChangedColumns || hasChangedExport)
       changes.set(key, {
         ...(hasChangedLabels && { labels: after.labels }),
         ...(hasChangedColumns && { previewColumns: after.previewColumns }),
+        ...(hasChangedExport && {
+          exportAutomationId: after.exportAutomationId,
+          exportTemplateId: after.exportTemplateId,
+        }),
       });
   }
   return changes;
@@ -1540,8 +1562,15 @@ export const setCalculatorPresentation = (
       const key = JSON.stringify([step.id, calculator.id, calculator.version]);
       const next = changes.get(key);
       if (next === undefined) return { ...step, subSteps };
-      const { labels, previewColumns, ...binding } = calculator;
-      const presentation = { labels, previewColumns, ...next };
+      const { labels, previewColumns, exportAutomationId, exportTemplateId, ...binding } =
+        calculator;
+      const presentation = {
+        labels,
+        previewColumns,
+        exportAutomationId,
+        exportTemplateId,
+        ...next,
+      };
       return {
         ...step,
         subSteps,
@@ -1551,6 +1580,12 @@ export const setCalculatorPresentation = (
           ...(presentation.previewColumns === undefined
             ? {}
             : { previewColumns: presentation.previewColumns }),
+          ...(presentation.exportAutomationId === undefined
+            ? {}
+            : { exportAutomationId: presentation.exportAutomationId }),
+          ...(presentation.exportTemplateId === undefined
+            ? {}
+            : { exportTemplateId: presentation.exportTemplateId }),
         },
       };
     });

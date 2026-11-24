@@ -8,9 +8,10 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import { Agent, AGENT_SETUP_PATHS } from "../models/Agent.ts";
+import { ATTACHMENT_MAX_FILE_BYTES } from "../models/Attachment.ts";
 import { Capability } from "../models/Capability.ts";
 import { FilesByPath, TrimmedNonEmptyString } from "../models/primitives.ts";
-import { Skill } from "../models/Skill.ts";
+import { SkillSetup } from "../models/Skill.ts";
 
 /** Files by their path under /work. */
 const Files = Schema.Record(Schema.String, Schema.Uint8Array);
@@ -34,13 +35,12 @@ export const ExecutionRequest = Schema.Struct({
           "hosts",
           "secrets",
           "note",
+          "skill",
         ]),
       ),
     ),
     files: FilesByPath(AGENT_SETUP_PATHS),
-    skills: Schema.Array(
-      Schema.Struct(Struct.pick(Skill.fields, ["name", "description", "content", "files"])),
-    ),
+    skills: Schema.Array(SkillSetup),
   }),
   serverUrl: Schema.String,
   /** Trusted execution bindings used by declarations. */
@@ -59,15 +59,35 @@ export const ExecutionRequest = Schema.Struct({
 export type ExecutionRequest = typeof ExecutionRequest.Type;
 
 export const SCRIPT_INPUT_FILE = ".t45-input.json";
+export const SCRIPT_TEMPLATE_FILE = ".t45-template";
+export const SCRIPT_OUTPUT_FILE = ".t45-output";
 
 export const ScriptRequest = Schema.Struct({
   entrypoint: TrimmedNonEmptyString,
-  files: FilesByPath([...AGENT_SETUP_PATHS, SCRIPT_INPUT_FILE]),
+  files: FilesByPath([
+    ...AGENT_SETUP_PATHS,
+    SCRIPT_INPUT_FILE,
+    SCRIPT_TEMPLATE_FILE,
+    SCRIPT_OUTPUT_FILE,
+  ]),
   inputs: Schema.Record(TrimmedNonEmptyString, Schema.Json),
 });
 export type ScriptRequest = typeof ScriptRequest.Type;
 
-export const ScriptOutputs = Schema.Record(TrimmedNonEmptyString, Schema.Finite);
+export const ScriptOutputs = Schema.Record(TrimmedNonEmptyString, Schema.Json);
+
+const ScriptFileBytes = Schema.Uint8Array.check(
+  Schema.makeFilter(
+    (bytes) => bytes.byteLength > 0 && bytes.byteLength <= ATTACHMENT_MAX_FILE_BYTES,
+    { expected: "a nonempty file within the attachment size limit" },
+  ),
+);
+export const ScriptFileRequest = Schema.Struct({
+  ...ScriptRequest.fields,
+  capabilityFiles: Schema.Array(FilesByPath([])),
+  template: ScriptFileBytes,
+});
+export type ScriptFileRequest = typeof ScriptFileRequest.Type;
 
 export const ExecutionUpdate = Schema.Union([
   Schema.TaggedStruct("sessions", { sessions: Schema.Array(Session.Info) }),
@@ -119,6 +139,11 @@ const question = { rootId: Session.ID, sessionId: Session.ID, formId: Form.ID };
 /** One execution per root session at a time; it lasts as long as its `execute` call. */
 export const RunnerRpcs = RpcGroup.make(
   Rpc.make("runScript", { payload: ScriptRequest, success: ScriptOutputs, error: ExecutionFailed }),
+  Rpc.make("runScriptForFile", {
+    payload: ScriptFileRequest,
+    success: ScriptFileBytes,
+    error: ExecutionFailed,
+  }),
   Rpc.make("execute", {
     payload: ExecutionRequest,
     success: ExecutionUpdate,

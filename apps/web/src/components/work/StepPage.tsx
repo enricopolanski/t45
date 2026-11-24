@@ -16,6 +16,7 @@ import {
   CircleIcon,
   CircleStopIcon,
   CircleXIcon,
+  FileChartColumnIncreasing,
   LoaderCircleIcon,
   type LucideIcon,
   MoreHorizontalIcon,
@@ -32,6 +33,7 @@ import { appAtomRegistry } from "../../state/atomRegistry";
 import { stepAutomationList } from "../../state/agents";
 import { useApiQuery } from "../../state/rpc";
 import { describeFailure } from "../../lib/failures";
+import { attachmentUrl } from "../../lib/attachmentUrl";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -45,6 +47,7 @@ import { ProgressReport } from "../ProgressReport";
 import { ActorName } from "./ActorAvatar";
 import { AssigneePicker } from "./AssigneePicker";
 import { CardFold } from "./CardFold";
+import { CalculationReviewPanel, ConfirmCalculationInputs } from "./CalculationReviewPanel";
 import { OtherStep } from "./ItemSteps";
 import { ItemDescription } from "./ItemDescription";
 import { StepComments, StepFiles } from "./StepConversation";
@@ -89,6 +92,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const [error, setError] = useState<string | null>(null);
   // Set once Mark done is tried; from then on, what's missing shows and clears as it's filled.
   const [triedDone, setTriedDone] = useState(false);
+  const [isConfirmingCalculation, setIsConfirmingCalculation] = useState(false);
   const navigate = useNavigate();
 
   const act: StepAct = async (run, quiet = false) => {
@@ -153,6 +157,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     return records === undefined ? [] : [{ ...review, group, records }];
   });
   const fields = view.fields.filter((field) => {
+    if (view.calculatedReview?.outputFields.includes(field.key)) return false;
     const subject = reviewFields.find(({ group }) => field.key === group.key);
     return (
       subject === undefined ||
@@ -176,15 +181,22 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const missing = triedDone ? empty : [];
   const unfinished = triedDone ? incomplete : [];
   const unconfirmed = triedDone ? pendingReviews : [];
+  const complete = () => {
+    setIsConfirmingCalculation(false);
+    void act(async () => {
+      const { nextStepId } = await api("workflows.markStepDone", step);
+      if (nextStepId) await navigate({ to: "/my-work/$stepId", params: { stepId: nextStepId } });
+      else if (view.parents.length === 0) await navigate({ to: "/my-work" });
+    });
+  };
   const markDone = () => {
     setTriedDone(true);
     setError(null);
     if (empty.length === 0 && incomplete.length === 0 && pendingReviews.length === 0) {
-      void act(async () => {
-        const { nextStepId } = await api("workflows.markStepDone", step);
-        if (nextStepId) await navigate({ to: "/my-work/$stepId", params: { stepId: nextStepId } });
-        else if (view.parents.length === 0) await navigate({ to: "/my-work" });
-      });
+      if (view.calculatedReview && !view.calculatedReview.result?.isApproved) {
+        setError(t("Approve the current results before completing this step."));
+      } else if (view.previewChanges) setIsConfirmingCalculation(true);
+      else complete();
     }
   };
   // The workflow's step this one is, or sits in, shown among all the others.
@@ -237,6 +249,25 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
         }
       />
+      {view.fileExport !== undefined && actions.canEditFields && (
+        <Button
+          type="button"
+          className="self-end"
+          disabled={busy}
+          onClick={() =>
+            void act(async () => {
+              const file = await api("workflows.exportStepResult", step);
+              window.location.assign(attachmentUrl(file));
+            })
+          }
+        >
+          <FileChartColumnIncreasing aria-hidden />
+          {view.fileExport.label ?? t("Download file")}
+        </Button>
+      )}
+      {view.calculatedReview && (
+        <CalculationReviewPanel view={view} editable={actions.canEditFields} onChanged={refresh} />
+      )}
       {isHistorical ? (
         <ReadOnlyStepFieldCard
           title={t("Fields")}
@@ -263,7 +294,7 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           onUnlink={(fieldKey, recordKey) =>
             act(() => api("workflows.removeAssociatedRecord", { ...step, fieldKey, recordKey }))
           }
-          fields={actions.canEditFields ? fields : view.fields}
+          fields={actions.canEditFields || view.calculatedReview ? fields : view.fields}
           editable={actions.canEditFields}
           missing={new Set(missing.map((field) => field.key))}
           holdOpen={unconfirmed.length > 0}
@@ -327,6 +358,13 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
       contentClassName="p-6"
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        {isConfirmingCalculation && view.previewChanges && (
+          <ConfirmCalculationInputs
+            changes={view.previewChanges}
+            onClose={() => setIsConfirmingCalculation(false)}
+            onConfirm={complete}
+          />
+        )}
         <div className="flex min-w-0 flex-col gap-4">
           <ItemHeader view={view} />
           <StepStepper view={view} rootId={rootId} />

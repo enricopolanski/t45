@@ -59,9 +59,11 @@ export function formatStepResultValue(
 function HistoryValues({
   values,
   labels,
+  prefix = "",
 }: {
   readonly values: ReadonlyArray<StepResultValue>;
   readonly labels: CalculatorLabels;
+  readonly prefix?: string;
 }) {
   const locale = useLocale();
   if (values.length === 0) return null;
@@ -69,7 +71,7 @@ function HistoryValues({
     <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
       {values.map((field) => (
         <div key={field.id} className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-          <dt>{formatCalculatorLabel(labels, `history.field.${field.id}`) ?? field.id}</dt>
+          <dt>{formatCalculatorLabel(labels, `history.field.${prefix}${field.id}`) ?? field.id}</dt>
           <dd className="break-all font-medium text-foreground tabular-nums">
             {formatStepResultValue(field, locale, labels)}
           </dd>
@@ -116,6 +118,17 @@ function Versions({ ticketId, stepDefinitionId, resultKey, latestId, labels }: H
                         {formatStepResultValue(primary, locale, labels)}
                       </strong>
                     </>
+                  ) : snapshot.groups?.length ? (
+                    snapshot.groups.map((group) => (
+                      <span key={group.id}>
+                        {formatCalculatorLabel(labels, `history.field.${group.id}`) ?? group.id}
+                        {" · "}
+                        {t(
+                          group.rows.length === 1 ? "{0} entry" : "{0} entries",
+                          group.rows.length,
+                        )}
+                      </span>
+                    ))
                   ) : (
                     t("No result")
                   )}
@@ -136,6 +149,19 @@ function Versions({ ticketId, stepDefinitionId, resultKey, latestId, labels }: H
               </summary>
               <div className="ms-6 mt-1">
                 <HistoryValues values={additional} labels={labels} />
+                {snapshot.groups?.map((group) => (
+                  <ul key={group.id} className="my-2 divide-y rounded-lg border px-3">
+                    {group.rows.map((row) => (
+                      <li key={row.id} className="py-2">
+                        <HistoryValues
+                          values={row.values}
+                          labels={labels}
+                          prefix={`${group.id}.`}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                ))}
                 <p className="mt-3 text-xs font-medium text-muted-foreground">
                   {formatCalculatorLabel(labels, "history.sources") ?? t("Sources used")}
                 </p>

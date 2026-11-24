@@ -58,6 +58,10 @@ export const layer = Workflows.middleware(Authorization).toLayer(
       "workflows.getStepPreview": (input) => asViewer((id) => workflows.getStepPreview(id, input)),
       "workflows.watchStepPreview": (input) =>
         Stream.unwrap(asViewer((id) => Effect.succeed(workflows.watchStepPreview(id, input)))),
+      "workflows.setCalculatedStepRow": (input) =>
+        asViewer((id) => workflows.setCalculatedStepRow(id, input)),
+      "workflows.approveCalculatedStep": (input) =>
+        asViewer((id) => workflows.approveCalculatedStep(id, input)),
       "workflows.setRecordAssociation": (input) =>
         asViewer((id) => workflows.setRecordAssociation(id, input)),
       "workflows.removeAssociatedRecord": (input) =>
@@ -94,6 +98,8 @@ export const layer = Workflows.middleware(Authorization).toLayer(
         Effect.flatMap(caller, (actor) => workflows.commentOnStep(actor, input)),
       "workflows.attachStepFile": (input) =>
         Effect.flatMap(caller, (actor) => workflows.attachStepFile(actor, input)),
+      "workflows.exportStepResult": (input) =>
+        asViewer((id) => workflows.exportStepResult(id, input)),
       "workflows.removeStepFile": (input) => asViewer((id) => workflows.removeStepFile(id, input)),
     });
   }),

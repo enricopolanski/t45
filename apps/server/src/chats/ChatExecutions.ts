@@ -156,6 +156,7 @@ export const make = Effect.gen(function* () {
                 "hosts",
                 "secrets",
                 "note",
+                "skill",
               ]),
             ),
           skills: (yield* skills.listForAgent(agent.id)).map((skill) =>

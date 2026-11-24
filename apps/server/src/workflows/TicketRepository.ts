@@ -1,4 +1,5 @@
-import { StepResultVersion, StepResultSnapshot } from "@t45/contracts/models/StepResultHistory";
+import { StepResultVersion } from "@t45/contracts/models/StepResultHistory";
+import { CalculationResult } from "@t45/contracts/models/StepCalculator";
 import * as DateTime from "effect/DateTime";
 import { Comment, Ticket } from "@t45/contracts/models/Workflow";
 import type { AttachmentId } from "@t45/contracts/models/Attachment";
@@ -25,7 +26,7 @@ const SnapshotJson = Schema.fromJsonString(StepSnapshot);
 const encodeSnapshot = Schema.encodeEffect(SnapshotJson);
 const decodeSnapshot = Schema.decodeUnknownEffect(SnapshotJson);
 
-const StepResultSnapshotJson = Schema.fromJsonString(StepResultSnapshot);
+const StepResultSnapshotJson = Schema.fromJsonString(CalculationResult);
 const encodeStepResultSnapshot = Schema.encodeEffect(StepResultSnapshotJson);
 const encodeStepResultInputs = Schema.encodeEffect(
   Schema.fromJsonString(Schema.Array(Schema.Tuple([Schema.String, Schema.String]))),
@@ -179,7 +180,7 @@ const make = Effect.gen(function* () {
       append: (
         ticketId: string,
         stepDefinitionId: string,
-        items: ReadonlyArray<{ key: string; snapshot: StepResultSnapshot }>,
+        items: ReadonlyArray<{ key: string; snapshot: CalculationResult }>,
       ) =>
         Effect.gen(function* () {
           const at = DateTime.formatIso(yield* DateTime.now);
@@ -190,7 +191,8 @@ const make = Effect.gen(function* () {
                 AND step_definition_id = ${stepDefinitionId} AND result_key = ${key} ORDER BY id DESC LIMIT 1
             ) INSERT INTO step_result_versions(ticket_id, step_definition_id, result_key, recorded_at, snapshot)
               SELECT ${ticketId}, ${stepDefinitionId}, ${key}, ${at}, ${encoded}
-              WHERE (${snapshot.sources.length + snapshot.results.length} > 0 OR EXISTS (SELECT 1 FROM last))
+              WHERE (${snapshot.sources.length + snapshot.results.length + (snapshot.groups?.length ?? 0) + Number(snapshot.preview !== undefined) + Number(snapshot.review !== undefined)} > 0
+                OR EXISTS (SELECT 1 FROM last))
                 AND (SELECT snapshot FROM last) IS NOT ${encoded}`;
           }
         }).pipe(Effect.orDie),
@@ -201,11 +203,6 @@ const make = Effect.gen(function* () {
           Effect.flatMap(decodeStepResultHistory),
           Effect.orDie,
         ),
-      hasInputs: (ticketId: string) =>
-        sql`SELECT 1 FROM step_result_inputs WHERE ticket_id = ${ticketId} LIMIT 1`.pipe(
-          Effect.map((rows) => rows.length > 0),
-          Effect.orDie,
-        ),
       latestIds: (ticketId: string, stepDefinitionId: string) =>
         sql<{ resultKey: string; id: number }>`SELECT result_key AS resultKey, MAX(id) AS id
           FROM step_result_versions WHERE ticket_id = ${ticketId} AND step_definition_id = ${stepDefinitionId}
@@ -213,22 +210,36 @@ const make = Effect.gen(function* () {
           Effect.map((rows) => Object.fromEntries(rows.map((row) => [row.resultKey, row.id]))),
           Effect.orDie,
         ),
-      setInputs: (ticketId: string, inputs: ReadonlyMap<string, Set<string>>) =>
+      setInputs: (
+        ticketId: string,
+        inputs: ReadonlyMap<string, Set<string>>,
+        stepDefinitionId: string,
+      ) =>
         Effect.gen(function* () {
           const keys = yield* encodeStepResultInputs(
             [...inputs].flatMap(([collection, records]) =>
               [...records].map((key) => [collection, key] as const),
             ),
           );
-          yield* sql`DELETE FROM step_result_inputs WHERE ticket_id = ${ticketId}
+          yield* sql`DELETE FROM step_result_inputs
+            WHERE ticket_id = ${ticketId} AND step_definition_id = ${stepDefinitionId}
             AND (collection_id, record_key) NOT IN
               (SELECT value ->> 0, value ->> 1 FROM json_each(${keys}))`;
-          yield* sql`INSERT OR IGNORE INTO step_result_inputs (collection_id, record_key, ticket_id)
-            SELECT value ->> 0, value ->> 1, ${ticketId} FROM json_each(${keys})`;
+          yield* sql`INSERT OR IGNORE INTO step_result_inputs
+              (collection_id, record_key, ticket_id, step_definition_id)
+            SELECT value ->> 0, value ->> 1, ${ticketId}, ${stepDefinitionId} FROM json_each(${keys})`;
         }).pipe(Effect.orDie),
-      forRecord: (collectionId: string, key: string) =>
-        sql<{ id: string }>`SELECT ticket_id AS id FROM step_result_inputs
-          WHERE collection_id = ${collectionId} AND record_key = ${key}`.pipe(Effect.orDie),
+      calculationsForRecords: (
+        records: ReadonlyArray<readonly [collectionId: string, key: string]>,
+      ) =>
+        Effect.gen(function* () {
+          const keys = yield* encodeStepResultInputs(records);
+          return yield* sql<{ id: string }>`SELECT DISTINCT inputs.ticket_id AS id
+            FROM json_each(${keys}) AS keys JOIN step_result_inputs AS inputs
+              ON inputs.collection_id = (keys.value ->> 0)
+              AND inputs.record_key = (keys.value ->> 1)
+            WHERE inputs.step_definition_id <> ''`;
+        }).pipe(Effect.orDie),
     },
     completedSteps: {
       has: (stepId: string) =>

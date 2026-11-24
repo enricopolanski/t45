@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { FieldDecimals } from "./Field.ts";
+import { FieldDecimals, FieldPathSegment } from "./Field.ts";
 import { TrimmedNonEmptyString } from "./primitives.ts";
 
 export const StepResultValue = Schema.Union([
@@ -29,9 +29,21 @@ export const StepResultValue = Schema.Union([
 ]);
 export type StepResultValue = typeof StepResultValue.Type;
 
+const StepResultGroup = Schema.Struct({
+  id: FieldPathSegment,
+  rows: Schema.Array(
+    Schema.Struct({
+      id: FieldPathSegment,
+      values: Schema.Array(StepResultValue),
+    }),
+  ),
+});
+export type StepResultGroup = typeof StepResultGroup.Type;
+
 export const StepResultSnapshot = Schema.Struct({
   inputRevision: Schema.optionalKey(TrimmedNonEmptyString),
   results: Schema.Array(StepResultValue),
+  groups: Schema.optionalKey(Schema.Array(StepResultGroup)),
   sources: Schema.Array(
     Schema.Struct({
       id: TrimmedNonEmptyString,

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { FilesByPath, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 import { ConfigMCP } from "@opencode/schema/config/mcp";
+import { SkillSetup } from "./Skill.ts";
 
 /** A runner secret's name; the runner reads its value from `CAPABILITY_SECRET_<name>`. */
 const SecretName = Schema.String.check(Schema.isPattern(/^[A-Z][A-Z0-9_]*$/u));
@@ -16,6 +17,8 @@ export const Capability = Schema.Struct({
    */
   requiredContext: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   files: Schema.optionalKey(FilesByPath([])),
+  /** Instructions for using the capability's programs, installed with the capability. */
+  skill: Schema.optionalKey(SkillSetup),
   mcpServers: Schema.optionalKey(Schema.Record(Schema.String, Schema.toEncoded(ConfigMCP.Server))),
   /** Variables of the agent's shell, such as a command-line tool's settings. */
   environment: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),

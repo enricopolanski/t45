@@ -27,6 +27,8 @@ import Migration0017 from "./Migrations/017_CollectionExtensions.ts";
 import Migration0018 from "./Migrations/018_CollectionRecordSearch.ts";
 import Migration0019 from "./Migrations/019_AttachmentBlobs.ts";
 import Migration0023 from "./Migrations/023_StepResultStorage.ts";
+import Migration0024 from "./Migrations/024_WorkflowAttachments.ts";
+import Migration0025 from "./Migrations/025_StepResultInputBindings.ts";
 
 /**
  * Append only. The migrator skips every id up to the highest a database has recorded, so a
@@ -53,6 +55,8 @@ const migrations = [
   [18, "CollectionRecordSearch", Migration0018],
   [19, "AttachmentBlobs", Migration0019],
   [23, "StepResultStorage", Migration0023],
+  [24, "WorkflowAttachments", Migration0024],
+  [25, "StepResultInputBindings", Migration0025],
 ] as const;
 
 class PremigrationDatabaseError extends Schema.TaggedError<PremigrationDatabaseError>()(

@@ -19,15 +19,25 @@ const merge = <A>(target: Map<string, A>, declarations: Readonly<Record<string, 
   }
 };
 
+export const mergeCapabilityFiles = (files: ReadonlyArray<Readonly<Record<string, string>>>) => {
+  const entries = new Map<string, string>();
+  for (const bundle of files) merge(entries, bundle);
+  return entries;
+};
+
 /** Applies dispatched declarations without a capability catalogue or capability-specific branches. */
 export const applyCapabilities = (request: ExecutionRequest) => {
-  const capabilityFiles = new Map<string, string>();
+  const capabilityFiles = mergeCapabilityFiles(
+    request.agent.capabilities.flatMap(({ files }) => (files === undefined ? [] : [files])),
+  );
+  const skills = new Map(request.agent.skills.map((skill) => [skill.name, skill]));
   const servers = new Map<string, typeof ConfigMCP.Server.Encoded>();
   const environment = new Map<string, string>();
   /** Each secret's hosts, from the capability that declares it. */
   const secrets = new Map<string, ReadonlyArray<string>>();
   for (const capability of request.agent.capabilities) {
-    merge(capabilityFiles, capability.files ?? {});
+    if (capability.skill !== undefined)
+      merge(skills, { [capability.skill.name]: capability.skill });
     merge(servers, capability.mcpServers ?? {});
     merge(environment, capability.environment ?? {});
     const hosts = [...(capability.hosts ?? [])].sort();
@@ -48,6 +58,7 @@ export const applyCapabilities = (request: ExecutionRequest) => {
   );
   return {
     ...request.agent,
+    skills: [...skills.values()],
     capabilityFiles: Object.fromEntries(capabilityFiles),
     mcpServers,
     environment: Object.fromEntries(

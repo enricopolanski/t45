@@ -104,6 +104,16 @@ export class AttachmentRepository extends Context.Service<
       readonly stepId: string;
       readonly fieldKey: string | null;
     }) => Effect.Effect<Attachment | null>;
+    /** Keeps a pending upload as a private file for all versions of the workflow. */
+    readonly claimForWorkflow: (
+      id: AttachmentId,
+      workflowId: string,
+      uploader: string,
+    ) => Effect.Effect<boolean>;
+    readonly getForWorkflow: (
+      id: AttachmentId,
+      workflowId: string,
+    ) => Effect.Effect<Attachment | null>;
     /** Gives a pending upload of `actor` to a collection record's file field. */
     readonly claimForCollection: (input: {
       readonly id: AttachmentId;
@@ -140,9 +150,13 @@ const make = Effect.gen(function* () {
   const blobs = yield* BlobStore.BlobStore;
 
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-  const unheld = sql.literal(`step_id IS NULL AND collection_id IS NULL
+  const notHeldByWorkflow = sql.literal(`NOT EXISTS (
+    SELECT 1 FROM workflow_attachments w WHERE w.attachment_id = attachments.id
+  )`);
+  const unheld = sql`step_id IS NULL AND collection_id IS NULL
     AND NOT EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id)
-    AND NOT EXISTS (SELECT 1 FROM completed_step_files c WHERE c.attachment_id = attachments.id)`);
+    AND NOT EXISTS (SELECT 1 FROM completed_step_files c WHERE c.attachment_id = attachments.id)
+    AND ${notHeldByWorkflow}`;
 
   const columns = sql.literal(COLUMNS);
   const select = (where: Statement.Fragment) =>
@@ -265,11 +279,13 @@ const make = Effect.gen(function* () {
         readonly uploaderId: string;
         readonly bound: number;
         readonly held: number;
+        readonly workflowHeld: number;
       }>`SELECT id, size_bytes AS "sizeBytes", step_id AS "stepId",
           collection_id AS "collectionId", uploader_id AS "uploaderId",
           EXISTS (SELECT 1 FROM chat_attachments c
             WHERE c.attachment_id = attachments.id AND c.chat_id = ${chatId}) AS "bound",
-          EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id) AS "held"
+          EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id) AS "held",
+          NOT (${notHeldByWorkflow}) AS "workflowHeld"
         FROM attachments WHERE ${sql.in("id", ids)}`.pipe(Effect.orDie);
       for (const file of files) {
         const row = rows.find((each) => each.id === file.id);
@@ -281,6 +297,7 @@ const make = Effect.gen(function* () {
             : row.stepId === null &&
               row.collectionId === null &&
               row.held === 0 &&
+              row.workflowHeld === 0 &&
               row.uploaderId === from;
         if (!usable) return yield* unavailable();
       }
@@ -301,10 +318,31 @@ const make = Effect.gen(function* () {
           field_key = ${input.fieldKey}
         WHERE id = ${input.id} AND step_id IS NULL AND uploader_id = ${input.actor}
           AND NOT EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id)
+          AND ${notHeldByWorkflow}
         RETURNING ${columns}`.pipe(
         Effect.flatMap(decodeAttachments),
         Effect.orDie,
         Effect.map(([claimed]) => claimed ?? null),
+      ),
+
+    claimForWorkflow: (id, workflowId, uploader) =>
+      sql`INSERT INTO workflow_attachments (attachment_id, workflow_id)
+        SELECT id, ${workflowId} FROM attachments
+        WHERE id = ${id} AND (
+          (uploader_id = ${uploader} AND ${unheld})
+          OR EXISTS (SELECT 1 FROM workflow_attachments WHERE attachment_id = ${id}
+            AND workflow_id = ${workflowId})
+        )
+        ON CONFLICT (attachment_id) DO UPDATE SET workflow_id = excluded.workflow_id
+        RETURNING attachment_id`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
+
+    getForWorkflow: (id, workflowId) =>
+      select(sql`id = ${id} AND EXISTS (SELECT 1 FROM workflow_attachments
+        WHERE attachment_id = ${id} AND workflow_id = ${workflowId})`).pipe(
+        Effect.map(([file]) => file ?? null),
       ),
 
     claimForCollection: (input) =>

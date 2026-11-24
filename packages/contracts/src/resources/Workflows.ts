@@ -11,6 +11,11 @@ import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { Collection } from "../models/Collection.ts";
 import { CalculatorLabels } from "../models/StepCalculator.ts";
+import {
+  CalculationEdits,
+  CalculationPreviewChanges,
+  CalculationReview,
+} from "../models/CalculationReview.ts";
 import { StepPreviewColumns, StepPreviewLink } from "../models/StepPreview.ts";
 import { StepResultValue, StepResultVersion } from "../models/StepResultHistory.ts";
 import {
@@ -87,6 +92,8 @@ const CalculatorOption = Schema.Struct({
   title: TrimmedNonEmptyString,
   inputs: Schema.Array(TrimmedNonEmptyString),
   outputs: Schema.Array(TrimmedNonEmptyString),
+  hasExport: Schema.optionalKey(Schema.Literal(true)),
+  review: Schema.optionalKey(Schema.Literal(true)),
 });
 export type CalculatorOption = typeof CalculatorOption.Type;
 
@@ -97,6 +104,7 @@ export const WorkflowView = Schema.Struct({
   canEdit: Schema.Boolean,
   canSetEditors: Schema.Boolean,
   calculators: Schema.Array(CalculatorOption),
+  availablePreviewColumns: Schema.Record(StringId, StepPreviewColumns),
 });
 export type WorkflowView = typeof WorkflowView.Type;
 
@@ -239,6 +247,13 @@ export const StepPreview = Schema.Union([
     ...StepPreviewLink.fields,
     sourceStepId: Schema.optionalKey(StringId),
     fields: Schema.Array(FieldView),
+    history: Schema.optionalKey(
+      Schema.Struct({
+        key: TrimmedNonEmptyString,
+        latestId: Schema.Int,
+        labels: CalculatorLabels,
+      }),
+    ),
   }),
   Schema.Struct({
     type: Schema.Literal("table"),
@@ -351,6 +366,24 @@ export const StepView = Schema.Struct({
   /** The fields of earlier steps this step reads. */
   inputs: Schema.Array(FieldView),
   preview: Schema.optionalKey(StepPreviewLink),
+  fileExport: Schema.optionalKey(
+    Schema.Struct({ label: Schema.optionalKey(TrimmedNonEmptyString) }),
+  ),
+  calculatedReview: Schema.optionalKey(
+    Schema.Struct({
+      outputFields: Schema.Array(FieldPathSegment),
+      labels: CalculatorLabels,
+      result: Schema.NullOr(
+        Schema.Struct({
+          ...CalculationReview.fields,
+          revision: TrimmedNonEmptyString,
+          isPending: Schema.Boolean,
+          isApproved: Schema.Boolean,
+        }),
+      ),
+    }),
+  ),
+  previewChanges: Schema.optionalKey(CalculationPreviewChanges),
   associationFields: Schema.optionalKey(
     Schema.Record(
       TrimmedNonEmptyString,
@@ -632,12 +665,30 @@ export const Workflows = RpcGroup.make(
     success: Schema.Array(StepResultVersion),
     error: WorkflowErrors,
   }),
+  Rpc.make("exportStepResult", {
+    payload: step,
+    success: FieldFileView,
+    error: WorkflowErrors,
+  }),
   Rpc.make("getStepPreview", { payload: stepPreview, success: StepPreview, error: WorkflowErrors }),
   Rpc.make("watchStepPreview", {
     payload: stepPreview,
     success: StepPreview,
     error: WorkflowErrors,
     stream: true,
+  }),
+  Rpc.make("setCalculatedStepRow", {
+    payload: {
+      ...step,
+      rowId: FieldPathSegment,
+      revision: TrimmedNonEmptyString,
+      values: CalculationEdits,
+    },
+    error: WorkflowErrors,
+  }),
+  Rpc.make("approveCalculatedStep", {
+    payload: { ...step, revision: TrimmedNonEmptyString },
+    error: WorkflowErrors,
   }),
   Rpc.make("setRecordAssociation", {
     payload: { ...recordAssociation, sourceRecordKeys: Schema.UniqueArray(TrimmedNonEmptyString) },

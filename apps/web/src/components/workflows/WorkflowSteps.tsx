@@ -169,6 +169,7 @@ export function WorkflowSteps({
                 workflow={workflow}
                 step={open}
                 inputSources={inputSourcesFor(steps, open.id)}
+                availablePreviewColumns={detail.availablePreviewColumns[open.id]}
                 calculators={detail.calculators}
                 position={null}
                 onChange={(next) => edit(updateStep(steps, open.id, () => next))}
@@ -191,6 +192,7 @@ export function WorkflowSteps({
                       workflow={workflow}
                       step={place.entry}
                       inputSources={inputSourcesFor(steps, place.entry.id)}
+                      availablePreviewColumns={detail.availablePreviewColumns[place.entry.id]}
                       calculators={detail.calculators}
                       precedingStepId={steps[place.index - 1]?.id}
                       position={place}
