@@ -19,7 +19,11 @@ const buildSourcemap: boolean | "hidden" =
       ? "hidden"
       : true;
 
-const isolatedUnitTestFiles = ["src/authBootstrap.test.ts"] as const;
+const isolatedUnitTestFiles = [
+  "src/authBootstrap.test.ts",
+  // Its upload queue mock needs a fresh module graph after the queue's own tests.
+  "src/questionDrafts.test.ts",
+] as const;
 
 const unitTestProject = {
   extends: true,
@@ -113,11 +117,16 @@ export default defineConfig(() => {
     optimizeDeps: {
       include: [
         "@clerk/react/internal",
-        "@pierre/diffs",
+        "@pierre/theme/pierre-light",
+        "@shikijs/core",
+        "@shikijs/engine-oniguruma",
+        "@shikijs/engine-oniguruma/wasm-inlined",
         "effect/Array",
         "effect/Order",
         "react-dom/client",
       ],
+      // Grammars are already ESM. Serve them directly so loading one does not reload the dev app.
+      exclude: ["@shikijs/langs"],
     },
     define: {
       "process.env.BUILD_SHA": JSON.stringify(process.env.BUILD_SHA || "development"),

@@ -1,12 +1,19 @@
 import { translate, type Translate, useTranslation } from "~/i18n/locale";
-import { type Collection, UPDATED_AT_COLUMN } from "@t45/contracts/models/Collection";
+import type { Collection } from "@t45/contracts/models/Collection";
 import {
   isUrlFieldValue,
   type FieldValues,
+  type RecordTableColumns,
   rowIds,
+  UPDATED_AT_COLUMN,
   withFieldValue,
 } from "@t45/contracts/models/Field";
-import { isTableColumn, resolveTableLayout, sortRows } from "@t45/contracts/models/Layout";
+import {
+  isTableColumn,
+  resolveTableLayout,
+  sortRows,
+  type TableColumn,
+} from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
 import { buildFieldViews, getFieldLink } from "@t45/core/fieldViews";
 import { Link } from "@tanstack/react-router";
@@ -192,6 +199,50 @@ export const listDefaultColumns = (collection: RecordShape) =>
     ),
   );
 
+export function resolveRecordTable(
+  collection: RecordShape,
+  t: Translate,
+  columnIds?: RecordTableColumns,
+) {
+  const table = resolveTableLayout(
+    collection.fields,
+    collection.layout,
+    listDefaultColumns(collection),
+  );
+  const updatedAt = { id: UPDATED_AT_COLUMN, label: t("Last update"), column: null };
+  const fields = table.columns.map((column) => ({
+    id: column.field.id,
+    label: column.header,
+    column,
+  }));
+  if (columnIds !== undefined) {
+    const columns = columnIds.flatMap<{ id: string; label: string; column: TableColumn | null }>(
+      (id) => {
+        if (id === UPDATED_AT_COLUMN) return [updatedAt];
+        const configured = fields.find((column) => column.id === id);
+        if (configured) return [configured];
+        const field = collection.fields.find((field) => field.id === id);
+        return field === undefined
+          ? []
+          : [
+              {
+                id,
+                label: field.label,
+                column: { field, header: field.label, width: undefined, isWrapped: false },
+              },
+            ];
+      },
+    );
+    return { ...table, columns };
+  }
+  const shown = collection.layout?.isUpdatedAtVisible === false ? fields : [...fields, updatedAt];
+  const columns =
+    collection.layout?.table?.columns === undefined
+      ? listColumnOrder(collection).flatMap((id) => shown.filter((column) => column.id === id))
+      : shown;
+  return { ...table, columns };
+}
+
 const headerCell =
   "bg-muted px-3 py-2 text-left text-xs font-medium whitespace-nowrap text-foreground/80";
 
@@ -206,9 +257,8 @@ const makeFixedWidthStyle = (width: keyof typeof FIXED_WIDTHS | undefined) => {
 const CELL_DENSITY = { compact: "[&_td]:py-1", normal: "", relaxed: "[&_td]:py-3" };
 
 /**
- * Records as a table, in the order the collection's layout sorts them: a column per field its
- * layout lists, then the last update; without that list, a column per field shown in the table,
- * the primary key always, in the column order. With `onOpen` a row opens the record, and with
+ * Records as a table, using the linked field's columns when supplied, or the collection's
+ * table layout and column order. With `onOpen` a row opens the record, and with
  * `remove` each row has a way to take it off the list, and with `reorder` columns move in the
  * column order.
  */
@@ -220,6 +270,7 @@ export function RecordTable({
   onView,
   onEdit,
   renderStatus,
+  columnIds,
   remove,
   reorder,
 }: {
@@ -229,6 +280,7 @@ export function RecordTable({
   readonly onOpen?: ((record: CollectionRecordView) => void) | undefined;
   readonly onView?: ((record: CollectionRecordView) => void) | undefined;
   readonly onEdit?: (record: CollectionRecordView) => void;
+  readonly columnIds?: RecordTableColumns | undefined;
   readonly renderStatus?: ((record: CollectionRecordView) => ReactNode) | undefined;
   readonly remove?: (record: CollectionRecordView) => {
     readonly label: string;
@@ -243,22 +295,8 @@ export function RecordTable({
 }) {
   const t = useTranslation();
   const order = listColumnOrder(collection);
-  const table = resolveTableLayout(
-    collection.fields,
-    collection.layout,
-    listDefaultColumns(collection),
-  );
-  const hasLayoutColumns = collection.layout?.table?.columns !== undefined;
-  const shown = [
-    ...table.columns.map((column) => ({ id: column.field.id, label: column.header, column })),
-    ...(collection.layout?.isUpdatedAtVisible === false
-      ? []
-      : [{ id: UPDATED_AT_COLUMN, label: t("Last update"), column: null }]),
-  ];
-  const columns = hasLayoutColumns
-    ? shown
-    : order.flatMap((id) => shown.filter((column) => column.id === id));
-  const sorted = sortRows(records, table.sortBy, (record, fieldId) => record.values[fieldId]);
+  const { columns, density, sortBy } = resolveRecordTable(collection, t, columnIds);
+  const sorted = sortRows(records, sortBy, (record, fieldId) => record.values[fieldId]);
   const hasActions = onView !== undefined || onEdit !== undefined || remove !== undefined;
   const move = (from: string, to: string) => {
     const next = [...order];
@@ -272,10 +310,7 @@ export function RecordTable({
     <div className="overflow-x-auto rounded-lg border">
       <table
         aria-label={label}
-        className={cn(
-          "w-full border-separate border-spacing-0 text-sm",
-          CELL_DENSITY[table.density],
-        )}
+        className={cn("w-full border-separate border-spacing-0 text-sm", CELL_DENSITY[density])}
       >
         <thead>
           <tr>

@@ -450,13 +450,14 @@ const make = Effect.gen(function* () {
             values,
           );
           const now = yield* DateTime.now;
-          return yield* records.save({
+          const savedRecord = yield* records.save({
             collectionId: collection.id,
             key,
             values,
             createdAt: now,
             updatedAt: now,
           });
+          return savedRecord;
         }),
       );
       return yield* viewOf(saved);

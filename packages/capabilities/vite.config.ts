@@ -7,7 +7,7 @@ export default defineConfig({
         // Cache the complete output together so a later restore cannot overwrite a fresh bundle.
         command: "node scripts/build.ts",
         cache: {
-          input: [{ auto: true }, "!dist/**"],
+          input: [{ auto: true }, "src/excel/**", "!dist/**"],
           output: ["dist/runtime/**", "dist/capabilities.json", "dist/built-ins.json"],
         },
       },

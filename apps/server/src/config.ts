@@ -62,6 +62,36 @@ export const instancesDir = dataDir.pipe(Config.map((dir) => NodePath.resolve(di
 export const dbPath = stateDir.pipe(Config.map((dir) => NodePath.join(dir, "statev2.sqlite")));
 export const attachmentsDir = stateDir.pipe(Config.map((dir) => NodePath.join(dir, "attachments")));
 
+/**
+ * The S3-compatible bucket (Cloudflare R2) that keeps attachment bytes, when all four variables are
+ * set; none keeps them in `attachmentsDir`. Setting only some is a configuration error.
+ */
+export const attachmentsS3 = Config.all({
+  endpoint: Config.option(Config.schema(Schema.NonEmptyString, "T45_ATTACHMENTS_S3_ENDPOINT")),
+  bucket: Config.option(Config.schema(Schema.NonEmptyString, "T45_ATTACHMENTS_S3_BUCKET")),
+  accessKeyId: Config.option(
+    Config.schema(Schema.NonEmptyString, "T45_ATTACHMENTS_S3_ACCESS_KEY_ID"),
+  ),
+  secretAccessKey: Config.option(
+    Config.schema(Schema.Redacted(Schema.NonEmptyString), "T45_ATTACHMENTS_S3_SECRET_ACCESS_KEY"),
+  ),
+}).pipe(
+  Config.flatMap((settings) => {
+    const complete = Option.all(settings);
+    if (
+      Option.isSome(complete) ||
+      Object.values(settings).every((setting) => Option.isNone<unknown>(setting))
+    ) {
+      return Config.succeed(complete);
+    }
+    return Config.fail(
+      new ConfigProvider.SourceError({
+        message: "Set all four T45_ATTACHMENTS_S3_* variables, or none of them.",
+      }),
+    );
+  }),
+);
+
 export const testLayer = (prefix: string) =>
   ConfigProvider.layer(
     Effect.gen(function* () {

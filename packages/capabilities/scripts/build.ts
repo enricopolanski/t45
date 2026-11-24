@@ -1,6 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - Build-time packaging reads and writes generated assets.
 import * as NodeFSP from "node:fs/promises";
-import { Capability } from "@t45/contracts/models/Capability";
+import * as NodeModule from "node:module";
+import { CAPABILITIES_DIR, Capability } from "@t45/contracts/models/Capability";
+import { Name as SkillName } from "@t45/contracts/models/Skill";
 import { BuiltIns } from "@t45/contracts/resources/BuiltIns";
 import * as Schema from "effect/Schema";
 import { build } from "vite-plus/pack";
@@ -74,6 +76,31 @@ const capabilities = await Promise.all(
       },
     }),
   ),
+);
+const excelDescription =
+  "Fills cells in an Excel template using a JSON map of values and formulas.";
+const require = NodeModule.createRequire(import.meta.url);
+capabilities.push(
+  Capability.make({
+    id: "excel-workbook",
+    name: "Excel",
+    description: excelDescription,
+    files: {
+      "excel/fill.py": await NodeFSP.readFile("src/excel/fill.py", "utf8"),
+      // The standalone bundle can be loaded by a Node script in the offline sandbox.
+      "excel/workbook.cjs": await NodeFSP.readFile(
+        require.resolve("exceljs/dist/exceljs.min.js"),
+        "utf8",
+      ),
+    },
+    skill: {
+      name: SkillName.make("excel"),
+      description: excelDescription,
+      content: await NodeFSP.readFile("src/excel/SKILL.md", "utf8"),
+      files: {},
+    },
+    note: `For Excel templates, use the excel skill with the bundled program at ${CAPABILITIES_DIR}/excel/fill.py.`,
+  }),
 );
 
 await NodeFSP.writeFile("dist/capabilities.json", `${encodeCapabilities(capabilities)}\n`);

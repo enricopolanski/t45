@@ -45,15 +45,16 @@ const sentFile = (file: Attachment): ChatAttachment => ({
 });
 
 describe("attachmentResponseHeaders", () => {
-  it("does not apply document policy to inline images", () => {
+  it("serves inline images as the image type of their extension, without document policy", () => {
     expect(
       attachmentResponseHeaders({
         id: "00000000-0000-4000-8000-000000000002.png",
         name: "diagram.png",
-        mimeType: "image/png",
+        mimeType: "text/html",
       }),
     ).toEqual({
       "Cache-Control": "private, no-cache",
+      "Content-Type": "image/png",
       "X-Content-Type-Options": "nosniff",
     });
   });
@@ -217,6 +218,7 @@ describe("attachment routes", () => {
       });
       expect(fetched.status).toBe(200);
       expect(fetched.headers.get("content-type")).toBe("text/plain");
+      expect(fetched.headers.get("content-length")).toBe("5");
       expect(fetched.headers.get("content-disposition")).toBe('attachment; filename="notes.txt"');
       expect(await fetched.text()).toBe("hello");
 
@@ -225,6 +227,18 @@ describe("attachment routes", () => {
         session: "member",
       });
       expect(head.status).toBe(200);
+
+      const image = await request(upload("image", "a.png", "image/png"), {
+        method: "POST",
+        session: "member",
+        body: "png",
+      });
+      const { attachmentId: imageId } = (await image.json()) as { attachmentId: string };
+      const shown = await request(`${ATTACHMENT_ROUTE_PREFIX}/${imageId}/a.png`, {
+        session: "member",
+      });
+      expect(shown.headers.get("content-type")).toBe("image/png");
+      expect(await shown.text()).toBe("png");
     }),
   );
 

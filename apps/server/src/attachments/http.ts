@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse, Mime } from "effect/http";
 
 import { member, uploader } from "../auth/http.ts";
 import { ChatService } from "../chats/ChatService.ts";
@@ -50,7 +50,7 @@ export function attachmentResponseHeaders(
     "Cache-Control": "private, no-cache",
     "X-Content-Type-Options": "nosniff",
     ...(attachmentIsInlineImage(attachment.id)
-      ? {}
+      ? { "Content-Type": Option.getOrThrow(Mime.getType(attachment.id)) }
       : {
           "Content-Disposition": downloadContentDisposition(attachment.name),
           "Content-Security-Policy": "default-src 'none'; sandbox",
@@ -79,7 +79,6 @@ const attachmentRoute = HttpRouter.add(
     const notFound = HttpServerResponse.text("Not Found", { status: 404 });
     const files = yield* AttachmentRepository;
     if (!isAttachmentId(attachmentId)) return notFound;
-    const path = files.path(attachmentId);
     const attachment = yield* files.get(attachmentId);
     if (attachment === null) return notFound;
 
@@ -105,17 +104,23 @@ const attachmentRoute = HttpRouter.add(
     });
     if (!(yield* readable)) return notFound;
 
-    return yield* HttpServerResponse.file(path, {
-      headers: attachmentResponseHeaders(attachment),
-    }).pipe(
-      Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(notFound)),
-      Effect.catchTags({
-        PlatformError: (cause) =>
-          Effect.logError("Failed to serve attachment.", { attachmentId, cause }).pipe(
-            Effect.as(HttpServerResponse.text("Internal Server Error", { status: 500 })),
-          ),
-      }),
-    );
+    const headers = attachmentResponseHeaders(attachment);
+    // The browser fetches the bytes straight from the bucket; a HEAD check stays here.
+    if (request.method === "GET") {
+      const link = yield* files.link(attachment.id, {
+        contentType: headers["Content-Type"] ?? "application/octet-stream",
+        contentDisposition: headers["Content-Disposition"] ?? null,
+      });
+      if (link !== null) {
+        return HttpServerResponse.redirect(link, {
+          status: 302,
+          headers: { "Cache-Control": "private, no-cache" },
+        });
+      }
+    }
+    const stored = yield* files.read(attachment.id);
+    if (stored === null) return notFound;
+    return HttpServerResponse.stream(stored.stream, { contentLength: stored.sizeBytes, headers });
   }),
 );
 

@@ -1,6 +1,17 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { Config as OpenCodeConfig } from "@opencode/schema/config";
 import { CAPABILITIES_DIR } from "@t45/contracts/models/Capability";
+import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
+import { generateId } from "@t45/contracts/models/primitives";
+import {
+  ExecutionFailed,
+  SCRIPT_INPUT_FILE,
+  SCRIPT_OUTPUT_FILE,
+  SCRIPT_TEMPLATE_FILE,
+  type ScriptFileRequest,
+  ScriptOutputs,
+  ScriptRequest,
+} from "@t45/contracts/resources/Runner";
 import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -11,7 +22,12 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { type NetworkBuilder, NetworkPolicy, Sandbox as Microvm } from "microsandbox";
-import { type AgentSetup, secretPlaceholder, TOOL_TOKEN_PLACEHOLDER } from "./AgentSetup.ts";
+import {
+  type AgentSetup,
+  mergeCapabilityFiles,
+  secretPlaceholder,
+  TOOL_TOKEN_PLACEHOLDER,
+} from "./AgentSetup.ts";
 
 type Agent = AgentSetup;
 
@@ -182,6 +198,107 @@ const write = (vm: Microvm, target: string, content: string | Uint8Array) => {
     Effect.andThen(sdk("write", () => fs.write(target, content))),
   );
 };
+
+const decodeScriptOutputs = Schema.decodeUnknownEffect(Schema.fromJsonString(ScriptOutputs));
+const encodeScriptInputs = Schema.encodeSync(Schema.fromJsonString(ScriptRequest.fields.inputs));
+
+const executeScript = Effect.fnUntraced(
+  function* (request: ScriptRequest | ScriptFileRequest) {
+    if (
+      !Object.hasOwn(request.files, request.entrypoint) ||
+      !/\.(?:js|mjs|ts)$/u.test(request.entrypoint)
+    )
+      return yield* new ExecutionFailed({
+        reason: "Choose a JavaScript or TypeScript file from the calculation files.",
+      });
+
+    const vm = yield* Effect.acquireRelease(
+      sdk("create", () =>
+        Microvm.builder(`calculation-${generateId()}`)
+          .image(IMAGE)
+          .pullPolicy("if-missing")
+          .user("agent")
+          .security("restricted")
+          .cpus(1)
+          .memory(512)
+          .ephemeral(true)
+          .network((settings) =>
+            settings.policyFromBuilder(
+              NetworkPolicy.builder().defaultEgress("deny").defaultIngress("deny"),
+            ),
+          )
+          .create(),
+      ),
+      (vm) => sdk("remove", () => vm.destroy()).pipe(Effect.catch(Effect.logWarning)),
+    );
+    const input = `/work/${SCRIPT_INPUT_FILE}`;
+    yield* write(vm, input, encodeScriptInputs(request.inputs));
+    for (const [path, content] of Object.entries(request.files))
+      yield* write(vm, `/work/${path}`, content);
+    if ("template" in request) {
+      for (const [path, content] of mergeCapabilityFiles(request.capabilityFiles))
+        yield* write(vm, `${CAPABILITIES_DIR}/${path}`, content);
+      yield* write(vm, `/work/${SCRIPT_TEMPLATE_FILE}`, request.template);
+    }
+    const output = yield* sdk("run script", () =>
+      vm.execWith("node", (exec) =>
+        exec
+          .args([`/work/${request.entrypoint}`, input])
+          .cwd("/work")
+          .timeout(30_000),
+      ),
+    );
+    if (!output.success)
+      return yield* new ExecutionFailed({
+        reason: `The calculation exited with code ${output.code}.`,
+      });
+    return { vm, output };
+  },
+  Effect.mapError((error) =>
+    error._tag === "ExecutionFailed" ? error : new ExecutionFailed({ reason: error.message }),
+  ),
+);
+
+export const runScript = Effect.fn("SandboxManager.runScript")(function* (request: ScriptRequest) {
+  const { output } = yield* executeScript(request);
+  return yield* decodeScriptOutputs(output.stdout()).pipe(
+    Effect.mapError(
+      () =>
+        new ExecutionFailed({
+          reason: "The calculation must print its outputs as a JSON object.",
+        }),
+    ),
+  );
+}, Effect.scoped);
+
+export const runScriptForFile = Effect.fn("SandboxManager.runScriptForFile")(function* (
+  request: ScriptFileRequest,
+) {
+  const { vm } = yield* executeScript(request);
+  const output = `/work/${SCRIPT_OUTPUT_FILE}`;
+  const fs = vm.fs();
+  return yield* Effect.tryPromise({
+    try: async () => {
+      const info = await fs.stat(output);
+      if (info.kind !== "file" || info.size === 0 || info.size > ATTACHMENT_MAX_FILE_BYTES)
+        throw new Error("Invalid script output file");
+      // Hold at most the stated size even if the guest changes the file after stat.
+      const bytes = new Uint8Array(info.size);
+      let length = 0;
+      await using stream = await fs.readStream(output);
+      for await (const chunk of stream) {
+        bytes.set(chunk, length);
+        length += chunk.byteLength;
+      }
+      if (length !== bytes.length) throw new Error("Script output file changed");
+      return bytes;
+    },
+    catch: () =>
+      new ExecutionFailed({
+        reason: `The script must write a file to ${SCRIPT_OUTPUT_FILE} within the attachment size limit.`,
+      }),
+  });
+}, Effect.scoped);
 
 const writeAgentSetup = Effect.fn("SandboxManager.writeAgentSetup")(function* (
   vm: Microvm,

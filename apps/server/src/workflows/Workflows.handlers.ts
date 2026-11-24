@@ -53,6 +53,19 @@ export const layer = Workflows.middleware(Authorization).toLayer(
       "workflows.cancelTicket": (input) => asViewer((id) => workflows.cancelTicket(id, input)),
       "workflows.getStep": ({ stepId }) =>
         Effect.flatMap(caller, (actor) => workflows.readStep(actor, stepId)),
+      "workflows.getStepResultHistory": (input) =>
+        asViewer((id) => workflows.getStepResultHistory(id, input)),
+      "workflows.getStepPreview": (input) => asViewer((id) => workflows.getStepPreview(id, input)),
+      "workflows.watchStepPreview": (input) =>
+        Stream.unwrap(asViewer((id) => Effect.succeed(workflows.watchStepPreview(id, input)))),
+      "workflows.setCalculatedStepRow": (input) =>
+        asViewer((id) => workflows.setCalculatedStepRow(id, input)),
+      "workflows.approveCalculatedStep": (input) =>
+        asViewer((id) => workflows.approveCalculatedStep(id, input)),
+      "workflows.setRecordAssociation": (input) =>
+        asViewer((id) => workflows.setRecordAssociation(id, input)),
+      "workflows.removeAssociatedRecord": (input) =>
+        asViewer((id) => workflows.removeAssociatedRecord(id, input)),
       "workflows.getStepFields": (input) =>
         Effect.flatMap(caller, (actor) => workflows.readStepFields(actor, input)),
       "workflows.watchStep": ({ stepId }) =>
@@ -65,6 +78,10 @@ export const layer = Workflows.middleware(Authorization).toLayer(
         asViewer((id) => workflows.approveProposal(id, input)),
       "workflows.discardProposal": (input) =>
         asViewer((id) => workflows.discardProposal(id, input)),
+      "workflows.reviewProposals": (input) =>
+        asViewer((id) => workflows.reviewProposals(id, input)),
+      "workflows.setProposalFilters": (input) =>
+        Effect.flatMap(caller, (actor) => workflows.setProposalFilters(actor, input)),
       "workflows.confirmRecordEntry": (input) =>
         Effect.flatMap(caller, (actor) => workflows.confirmRecordEntry(actor, input)),
       "workflows.markStepDone": ({ stepId }) =>
@@ -81,6 +98,8 @@ export const layer = Workflows.middleware(Authorization).toLayer(
         Effect.flatMap(caller, (actor) => workflows.commentOnStep(actor, input)),
       "workflows.attachStepFile": (input) =>
         Effect.flatMap(caller, (actor) => workflows.attachStepFile(actor, input)),
+      "workflows.exportStepResult": (input) =>
+        asViewer((id) => workflows.exportStepResult(id, input)),
       "workflows.removeStepFile": (input) => asViewer((id) => workflows.removeStepFile(id, input)),
     });
   }),

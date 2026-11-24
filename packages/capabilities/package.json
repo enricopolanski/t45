@@ -17,9 +17,12 @@
   },
   "dependencies": {
     "@t45/contracts": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "exceljs": "4.4.0",
+    "pngjs": "7.0.0"
   },
   "devDependencies": {
+    "@types/pngjs": "6.0.5",
     "vite-plus": "catalog:"
   }
 }

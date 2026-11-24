@@ -447,7 +447,7 @@ function MultipleSwitch({
 /** A collection a records or link field can link. */
 export type LinkableCollection = Pick<Collection, "id" | "title" | "extension">;
 
-type ComparisonFieldsControl = (
+type RecordsSettingsControl = (
   field: Extract<DraftField, { type: "records" }>,
   onChange: (field: DraftField) => void,
 ) => ReactNode;
@@ -475,7 +475,7 @@ export function FieldsEditor({
   collections,
   areCollectionFields = false,
   groupLayout,
-  comparisonFieldsEditor,
+  recordsSettings,
   areReviewable = false,
   onChange,
   disabled,
@@ -488,7 +488,7 @@ export function FieldsEditor({
   readonly collections?: ReadonlyArray<LinkableCollection>;
   readonly areCollectionFields?: boolean;
   readonly groupLayout?: GroupLayoutControl | undefined;
-  readonly comparisonFieldsEditor?: ComparisonFieldsControl | undefined;
+  readonly recordsSettings?: RecordsSettingsControl | undefined;
   readonly areReviewable?: boolean;
   readonly onChange: (fields: ReadonlyArray<DraftField>) => void;
   readonly disabled: boolean;
@@ -506,7 +506,7 @@ export function FieldsEditor({
           collections={collections}
           areCollectionFields={areCollectionFields}
           groupLayout={groupLayout}
-          comparisonFieldsEditor={comparisonFieldsEditor}
+          recordsSettings={recordsSettings}
           isReviewable={areReviewable}
           disabled={disabled}
         />
@@ -632,7 +632,7 @@ function FieldCard({
   collections,
   areCollectionFields,
   groupLayout,
-  comparisonFieldsEditor,
+  recordsSettings,
   isReviewable,
   disabled,
 }: {
@@ -643,7 +643,7 @@ function FieldCard({
   readonly collections: ReadonlyArray<LinkableCollection> | undefined;
   readonly areCollectionFields: boolean;
   readonly groupLayout: GroupLayoutControl | undefined;
-  readonly comparisonFieldsEditor: ComparisonFieldsControl | undefined;
+  readonly recordsSettings: RecordsSettingsControl | undefined;
   readonly isReviewable: boolean;
   readonly disabled: boolean;
 }) {
@@ -725,9 +725,13 @@ function FieldCard({
               <Field label={t("Collection")} size="xs">
                 <Select
                   value={field.collectionId === "" ? null : field.collectionId}
-                  onValueChange={(collectionId) =>
-                    collectionId === null ? undefined : setField({ ...field, collectionId })
-                  }
+                  onValueChange={(collectionId) => {
+                    if (collectionId === null || collectionId === field.collectionId) return;
+                    if (field.type === "records") {
+                      const { recordTableColumns: _, ...rest } = field;
+                      setField({ ...rest, collectionId });
+                    } else setField({ ...field, collectionId });
+                  }}
                   disabled={disabled}
                 >
                   <SelectTrigger>
@@ -794,7 +798,7 @@ function FieldCard({
                   }
                   // Only a step's own repeatable groups preview a ticket's entries.
                   groupLayout={field.repeatable ? undefined : groupLayout}
-                  comparisonFieldsEditor={comparisonFieldsEditor}
+                  recordsSettings={recordsSettings}
                   areReviewable={isReviewable}
                   onChange={(fields) => setField({ ...field, fields })}
                   disabled={disabled}
@@ -819,9 +823,7 @@ function FieldCard({
             {isReviewable ? (
               <ReviewSwitch field={field} onChange={setField} disabled={disabled} />
             ) : null}
-            {isReviewable && field.type === "records" && field.isReviewed
-              ? comparisonFieldsEditor?.(field, setField)
-              : null}
+            {field.type === "records" ? recordsSettings?.(field, setField) : null}
             {field.type === "number" ? (
               <div className="flex flex-wrap items-end gap-2">
                 <DecimalsSelect field={field} onChange={setField} disabled={disabled} />

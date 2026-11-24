@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
@@ -96,6 +97,16 @@ const storedFiles = Effect.gen(function* () {
   return NodeFS.readdirSync(attachmentsDir).toSorted();
 });
 
+const blobKeyOf = (bytes: ReadonlyArray<number>) =>
+  NodeCrypto.createHash("sha256").update(Uint8Array.from(bytes)).digest("hex");
+
+const readBytes = (id: string) =>
+  Effect.gen(function* () {
+    const stored = yield* (yield* AttachmentRepository).read(id);
+    if (stored === null) return null;
+    return Array.from(yield* Stream.mkUint8Array(stored.stream));
+  });
+
 const storedIds = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   return (yield* sql<{ readonly id: string }>`SELECT id FROM attachments ORDER BY id`).map(
@@ -104,36 +115,48 @@ const storedIds = Effect.gen(function* () {
 });
 
 describe("AttachmentRepository", () => {
-  it.effect("streams an upload to disk under a new id, as its uploader's pending file", () =>
+  it.effect(
+    "streams an upload into a blob named by its sha256, as its uploader's pending file",
+    () =>
+      Effect.gen(function* () {
+        const { files } = yield* setup;
+        const file = yield* files.upload(
+          { type: "file", name: "report.PDF", mimeType: "application/pdf", sizeBytes: 6 },
+          alice,
+          Stream.make(new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6])),
+        );
+        assert.match(file.id, /\.pdf$/);
+        assert.deepEqual(
+          {
+            name: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            uploader: file.uploader,
+            stepId: file.stepId,
+            fieldKey: file.fieldKey,
+          },
+          {
+            name: "report.PDF",
+            mimeType: "application/pdf",
+            sizeBytes: 6,
+            uploader: alice,
+            stepId: null,
+            fieldKey: null,
+          },
+        );
+        assert.deepEqual(yield* files.get(file.id), file);
+        assert.deepEqual(yield* storedFiles, [blobKeyOf([1, 2, 3, 4, 5, 6])]);
+        assert.deepEqual(yield* readBytes(file.id), [1, 2, 3, 4, 5, 6]);
+      }).pipe(Effect.provide(Attachments.layer)),
+  );
+
+  it.effect("stores identical uploads as one blob, each under its own id", () =>
     Effect.gen(function* () {
-      const { files } = yield* setup;
-      const file = yield* files.upload(
-        { type: "file", name: "report.PDF", mimeType: "application/pdf", sizeBytes: 6 },
-        alice,
-        Stream.make(new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6])),
-      );
-      assert.match(file.id, /\.pdf$/);
-      assert.deepEqual(
-        {
-          name: file.name,
-          mimeType: file.mimeType,
-          sizeBytes: file.sizeBytes,
-          uploader: file.uploader,
-          stepId: file.stepId,
-          fieldKey: file.fieldKey,
-        },
-        {
-          name: "report.PDF",
-          mimeType: "application/pdf",
-          sizeBytes: 6,
-          uploader: alice,
-          stepId: null,
-          fieldKey: null,
-        },
-      );
-      assert.deepEqual(yield* files.get(file.id), file);
-      assert.deepEqual(yield* storedFiles, [file.id]);
-      assert.deepEqual(NodeFS.readFileSync(files.path(file.id)), Buffer.from([1, 2, 3, 4, 5, 6]));
+      yield* setup;
+      const uploads = [yield* uploadText(alice), yield* uploadText(bob), yield* uploadText(alice)];
+      assert.lengthOf(new Set(uploads.map((file) => file.id)), 3);
+      assert.deepEqual(yield* storedFiles, [blobKeyOf([1, 2, 3])]);
+      for (const file of uploads) assert.deepEqual(yield* readBytes(file.id), [1, 2, 3]);
     }).pipe(Effect.provide(Attachments.layer)),
   );
 
@@ -241,62 +264,69 @@ describe("AttachmentRepository", () => {
     }).pipe(Effect.provide(Attachments.layer)),
   );
 
-  it.effect("releases a deleted chat's files, removing those nothing else holds", () =>
-    Effect.gen(function* () {
-      const { files, seeded, aliceChat, stepChat, otherStepChat } = yield* setup;
-      const mine = yield* uploadText(alice);
-      const step = yield* stepFile(seeded.stepId);
-      yield* files.bindToChat(aliceChat, [sent(mine)], alice);
-      yield* files.bindToChat(stepChat, [sent(step)], null);
-      yield* files.bindToChat(otherStepChat, [sent(step)], null);
-      const minePath = files.path(mine.id) ?? "";
-      const stepPath = files.path(step.id) ?? "";
+  it.effect(
+    "releases a deleted chat's files, removing those nothing else holds and keeping shared bytes",
+    () =>
+      Effect.gen(function* () {
+        const { files, seeded, aliceChat, stepChat, otherStepChat } = yield* setup;
+        const mine = yield* uploadText(alice);
+        const mineTwin = yield* uploadText(alice);
+        const step = yield* stepFile(seeded.stepId);
+        const stepTwin = yield* stepFile(seeded.stepId);
+        yield* files.bindToChat(aliceChat, [sent(mine)], alice);
+        yield* files.bindToChat(stepChat, [sent(step)], null);
+        yield* files.bindToChat(otherStepChat, [sent(step)], null);
+        const blobs = yield* storedFiles;
 
-      yield* files.release(aliceChat);
-      assert.isNull(yield* files.get(mine.id));
-      assert.isFalse(NodeFS.existsSync(minePath));
+        yield* files.release(aliceChat);
+        assert.isNull(yield* files.get(mine.id));
 
-      yield* files.release(stepChat);
-      yield* files.detach(step.id);
-      assert.deepEqual(yield* files.chatsHolding(step.id), [otherStepChat]);
-      assert.isTrue(NodeFS.existsSync(stepPath));
-      yield* files.release(otherStepChat);
-      assert.isNull(yield* files.get(step.id));
-      assert.isFalse(NodeFS.existsSync(stepPath));
-    }).pipe(Effect.provide(Attachments.layer)),
+        yield* files.release(stepChat);
+        yield* files.detach(step.id);
+        assert.deepEqual(yield* files.chatsHolding(step.id), [otherStepChat]);
+        assert.deepEqual(yield* readBytes(step.id), [4, 2]);
+        yield* files.release(otherStepChat);
+        assert.isNull(yield* files.get(step.id));
+
+        assert.deepEqual(yield* storedFiles, blobs);
+        assert.deepEqual(yield* readBytes(mineTwin.id), [1, 2, 3]);
+        assert.deepEqual(yield* readBytes(stepTwin.id), [4, 2]);
+      }).pipe(Effect.provide(Attachments.layer)),
   );
 
-  it.effect("sweeps unheld files after a day and keeps bound and step-held ones at any age", () =>
-    Effect.gen(function* () {
-      const { files, seeded, aliceChat } = yield* setup;
-      yield* uploadText(alice);
-      const bound = yield* uploadText(alice);
-      yield* files.bindToChat(aliceChat, [sent(bound)], alice);
-      const held = yield* stepFile(seeded.stepId);
-      const attachmentsDir = yield* ServerConfig.attachmentsDir;
-      for (const entry of yield* storedFiles) {
-        NodeFS.utimesSync(NodePath.join(attachmentsDir, entry), 0, 0);
-      }
+  it.effect(
+    "sweeps unheld files after a day, keeping their bytes, and keeps held ones at any age",
+    () =>
+      Effect.gen(function* () {
+        const { files, seeded, aliceChat } = yield* setup;
+        yield* uploadText(alice);
+        const bound = yield* uploadText(alice);
+        yield* files.bindToChat(aliceChat, [sent(bound)], alice);
+        const held = yield* stepFile(seeded.stepId);
+        const attachmentsDir = yield* ServerConfig.attachmentsDir;
+        for (const entry of yield* storedFiles) {
+          NodeFS.utimesSync(NodePath.join(attachmentsDir, entry), 0, 0);
+        }
 
-      yield* TestClock.adjust("25 hours");
-      const fresh = yield* uploadText(alice);
-      yield* files.sweep;
-      const kept = [bound, held, fresh];
-      assert.deepEqual(yield* storedIds, kept.map((file) => file.id).toSorted());
-      assert.deepEqual(yield* storedFiles, kept.map((file) => file.id).toSorted());
-    }).pipe(Effect.provide(Attachments.layer)),
+        yield* TestClock.adjust("25 hours");
+        const fresh = yield* uploadText(alice);
+        yield* files.sweep;
+        const kept = [bound, held, fresh];
+        assert.deepEqual(yield* storedIds, kept.map((file) => file.id).toSorted());
+        assert.deepEqual(yield* storedFiles, [blobKeyOf([1, 2, 3]), blobKeyOf([4, 2])].toSorted());
+      }).pipe(Effect.provide(Attachments.layer)),
   );
 
-  it.effect("removes bytes without a row once they are a day old, keeping younger ones", () =>
+  it.effect("removes uploads cut short a day ago, keeping younger ones and unused blobs", () =>
     Effect.gen(function* () {
       const { files } = yield* setup;
       const attachmentsDir = yield* ServerConfig.attachmentsDir;
       yield* TestClock.adjust("25 hours");
-      const old = "00000000-0000-4000-8000-000000000001.txt";
+      const unused = blobKeyOf([1]);
       const cutShort = "00000000-0000-4000-8000-000000000002.txt.part";
-      const young = "00000000-0000-4000-8000-000000000003.txt";
+      const young = "00000000-0000-4000-8000-000000000003.txt.part";
       for (const [entry, seconds] of [
-        [old, 0],
+        [unused, 0],
         [cutShort, 0],
         [young, 24 * 60 * 60],
       ] as const) {
@@ -306,7 +336,7 @@ describe("AttachmentRepository", () => {
       }
 
       yield* files.sweep;
-      assert.deepEqual(yield* storedFiles, [young]);
+      assert.deepEqual(yield* storedFiles, [young, unused]);
     }).pipe(Effect.provide(Attachments.layer)),
   );
 });

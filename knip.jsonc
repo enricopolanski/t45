@@ -23,7 +23,7 @@
       "ignoreDependencies": ["@shadcn/lint", "@effect/language-service"],
     },
     "apps/server": {
-      "entry": ["src/bin.ts"],
+      "entry": ["src/bin.ts", "scripts/move-attachments-to-s3.ts"],
       // Keep the transitive Effect runtime pinned for standalone npm installs.
       // The Vite+ web build prerequisite.
       "ignoreDependencies": ["@effect/platform-node-shared", "@t45/web"],

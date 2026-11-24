@@ -15,16 +15,13 @@ import {
   Layout,
   fieldValueProblem,
   LayoutFieldId,
+  RecordTableColumns as CollectionColumnOrder,
   valuesProblem,
 } from "./Field.ts";
 import type { Role, State } from "./User.ts";
 import { StringId, Title, TrimmedNonEmptyString } from "./primitives.ts";
 
-/** The record's update time is a column alongside the collection's own fields. */
-export const UPDATED_AT_COLUMN = "$updatedAt";
-export const CollectionColumnOrder = Schema.UniqueArray(
-  Schema.Union([FieldPathSegment, Schema.Literal(UPDATED_AT_COLUMN)]),
-);
+export { CollectionColumnOrder };
 
 /** A collection's primary key is one of its own top-level text or link fields. */
 export const primaryKeyRefusal = (collection: {

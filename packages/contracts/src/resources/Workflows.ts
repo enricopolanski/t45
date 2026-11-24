@@ -10,6 +10,14 @@ import { RunStatus } from "../models/ChatOrigin.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { Collection } from "../models/Collection.ts";
+import { CalculatorLabels } from "../models/StepCalculator.ts";
+import {
+  CalculationEdits,
+  CalculationPreviewChanges,
+  CalculationReview,
+} from "../models/CalculationReview.ts";
+import { StepPreviewColumns, StepPreviewLink } from "../models/StepPreview.ts";
+import { StepResultValue, StepResultVersion } from "../models/StepResultHistory.ts";
 import {
   ComparisonFields,
   Field,
@@ -19,12 +27,14 @@ import {
   FieldValues,
   Layout,
   RecordEntryReview,
+  RecordTableColumns,
 } from "../models/Field.ts";
 import { CollectionRecordView } from "./Collections.ts";
 
 import {
   Comment,
   Proposal,
+  ProposalFilter,
   Refused as WorkflowRefused,
   Slug,
   Step,
@@ -77,12 +87,24 @@ export type ProjectView = typeof ProjectView.Type;
 
 const idOrSlug = { idOrSlug: TrimmedNonEmptyString };
 
+const CalculatorOption = Schema.Struct({
+  id: AutomationId,
+  title: TrimmedNonEmptyString,
+  inputs: Schema.Array(TrimmedNonEmptyString),
+  outputs: Schema.Array(TrimmedNonEmptyString),
+  hasExport: Schema.optionalKey(Schema.Literal(true)),
+  review: Schema.optionalKey(Schema.Literal(true)),
+});
+export type CalculatorOption = typeof CalculatorOption.Type;
+
 /** A workflow with its newest version: the draft a save changes, or the frozen one it follows. */
 export const WorkflowView = Schema.Struct({
   workflow: Workflow,
   version: WorkflowVersion,
   canEdit: Schema.Boolean,
   canSetEditors: Schema.Boolean,
+  calculators: Schema.Array(CalculatorOption),
+  availablePreviewColumns: Schema.Record(StringId, StepPreviewColumns),
 });
 export type WorkflowView = typeof WorkflowView.Type;
 
@@ -120,12 +142,19 @@ export const ProjectBoardView = Schema.Struct({
   /** The adopted version, and the others while they have open tickets the viewer sees. */
   versions: Schema.Array(VersionNameView),
   tickets: Schema.Array(TicketSummaryView),
+  previews: Schema.Array(StepPreviewLink),
   canStartTicket: Schema.Boolean,
 });
 export type ProjectBoardView = typeof ProjectBoardView.Type;
 
 const ticket = { ticketId: StringId };
 const step = { stepId: StringId };
+const stepPreview = { ...ticket, stepDefinitionId: StringId };
+const recordAssociation = {
+  ...step,
+  fieldKey: TrimmedNonEmptyString,
+  recordKey: TrimmedNonEmptyString,
+};
 
 /** The file a field holds. */
 const FieldFileView = Schema.Struct(Struct.pick(Attachment.fields, ["id", "name"]));
@@ -157,6 +186,7 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     /** A select field's choices, else empty. */
     options: Schema.Array(Schema.String),
     value: Schema.Json,
+    isReadOnly: Schema.optionalKey(Schema.Boolean),
     /** A number field's decimal places to show, when it sets them. */
     decimals: Schema.optionalKey(FieldDecimals),
     /** A number field's unit, when it has one. */
@@ -172,6 +202,7 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     /** Whether agents only propose its value, for a member to approve. */
     isReviewed: Schema.optionalKey(Schema.Boolean),
     comparisonFields: Schema.optionalKey(ComparisonFields),
+    recordTableColumns: Schema.optionalKey(RecordTableColumns),
     /** A sibling URL displayed on this field; its value is still kept in that URL field. */
     linkUrl: Schema.optionalKey(Schema.String),
     /** A link field's collection, whose record its value keys. */
@@ -210,6 +241,46 @@ export class FieldView extends Schema.Opaque<FieldView>()(
   }),
 ) {}
 
+export const StepPreview = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("fields"),
+    ...StepPreviewLink.fields,
+    sourceStepId: Schema.optionalKey(StringId),
+    fields: Schema.Array(FieldView),
+    history: Schema.optionalKey(
+      Schema.Struct({
+        key: TrimmedNonEmptyString,
+        latestId: Schema.Int,
+        labels: CalculatorLabels,
+      }),
+    ),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("table"),
+    ...StepPreviewLink.fields,
+    sourceStepId: Schema.optionalKey(StringId),
+    columns: StepPreviewColumns,
+    labels: CalculatorLabels,
+    rows: Schema.Array(
+      Schema.Struct({
+        key: TrimmedNonEmptyString,
+        label: Schema.String,
+        thumbnail: Schema.optionalKey(FieldFileView),
+        historyId: Schema.optionalKey(Schema.Int),
+        cells: Schema.Record(
+          TrimmedNonEmptyString,
+          Schema.Struct({
+            values: Schema.Array(StepResultValue),
+            note: Schema.optionalKey(Schema.String),
+          }),
+        ),
+      }),
+    ),
+  }),
+  Schema.Struct({ type: Schema.Literal("entered"), stepId: StringId }),
+]);
+export type StepPreview = typeof StepPreview.Type;
+
 const StepFieldSelection = Schema.Struct({
   key: FieldPathSegment,
   /** For an input, disambiguates the same field key from multiple source steps. */
@@ -218,8 +289,24 @@ const StepFieldSelection = Schema.Struct({
   recordKeys: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   /** Collection field keys to include in each record's values. An empty list returns keys only. */
   recordFields: Schema.optionalKey(Schema.Array(FieldPathSegment)),
+  /** Include proposal IDs, scores, rationale and assessments for this reviewed field. */
+  includeProposalDetails: Schema.optionalKey(Schema.Boolean),
 });
 export type StepFieldSelection = typeof StepFieldSelection.Type;
+
+const StepFieldProposal = Schema.Struct({
+  ...Struct.pick(Proposal.fields, ["fieldKey", "value", "isDiscarded"]),
+  id: Schema.optionalKey(Proposal.fields.id),
+  whyYes: Schema.optionalKey(Proposal.fields.whyYes),
+  whyNo: Schema.optionalKey(Proposal.fields.whyNo),
+  score: Proposal.fields.score,
+  comparison: Proposal.fields.comparison,
+  sourceRecordKeys: Proposal.fields.sourceRecordKeys,
+});
+
+const ProposalFilterInput = Schema.Struct(
+  Struct.pick(ProposalFilter.fields, ["question", "driftSummary", "items"]),
+);
 
 const ComparisonSources = Schema.Struct({
   recordsIndex: NonNegativeInt,
@@ -278,6 +365,31 @@ export const StepView = Schema.Struct({
   completedStep: Schema.optionalKey(Schema.Literals(["snapshot", "legacy"])),
   /** The fields of earlier steps this step reads. */
   inputs: Schema.Array(FieldView),
+  preview: Schema.optionalKey(StepPreviewLink),
+  fileExport: Schema.optionalKey(
+    Schema.Struct({ label: Schema.optionalKey(TrimmedNonEmptyString) }),
+  ),
+  calculatedReview: Schema.optionalKey(
+    Schema.Struct({
+      outputFields: Schema.Array(FieldPathSegment),
+      labels: CalculatorLabels,
+      result: Schema.NullOr(
+        Schema.Struct({
+          ...CalculationReview.fields,
+          revision: TrimmedNonEmptyString,
+          isPending: Schema.Boolean,
+          isApproved: Schema.Boolean,
+        }),
+      ),
+    }),
+  ),
+  previewChanges: Schema.optionalKey(CalculationPreviewChanges),
+  associationFields: Schema.optionalKey(
+    Schema.Record(
+      TrimmedNonEmptyString,
+      Schema.Array(Schema.Struct({ key: TrimmedNonEmptyString, label: Schema.String })),
+    ),
+  ),
   /** Review information only when both fields are inputs from the same step. */
   comparisonSources: Schema.optionalKey(Schema.Record(Schema.String, ComparisonSources)),
   inputRecordReviews: Schema.optionalKey(
@@ -548,6 +660,41 @@ export const Workflows = RpcGroup.make(
   Rpc.make("watchStep", { payload: step, success: StepView, error: WorkflowErrors, stream: true }),
   /** The step as the web shows it, once; an automation reads its own step. */
   Rpc.make("getStep", { payload: step, success: StepView, error: WorkflowErrors }),
+  Rpc.make("getStepResultHistory", {
+    payload: { ...stepPreview, resultKey: TrimmedNonEmptyString },
+    success: Schema.Array(StepResultVersion),
+    error: WorkflowErrors,
+  }),
+  Rpc.make("exportStepResult", {
+    payload: step,
+    success: FieldFileView,
+    error: WorkflowErrors,
+  }),
+  Rpc.make("getStepPreview", { payload: stepPreview, success: StepPreview, error: WorkflowErrors }),
+  Rpc.make("watchStepPreview", {
+    payload: stepPreview,
+    success: StepPreview,
+    error: WorkflowErrors,
+    stream: true,
+  }),
+  Rpc.make("setCalculatedStepRow", {
+    payload: {
+      ...step,
+      rowId: FieldPathSegment,
+      revision: TrimmedNonEmptyString,
+      values: CalculationEdits,
+    },
+    error: WorkflowErrors,
+  }),
+  Rpc.make("approveCalculatedStep", {
+    payload: { ...step, revision: TrimmedNonEmptyString },
+    error: WorkflowErrors,
+  }),
+  Rpc.make("setRecordAssociation", {
+    payload: { ...recordAssociation, sourceRecordKeys: Schema.UniqueArray(TrimmedNonEmptyString) },
+    error: WorkflowErrors,
+  }),
+  Rpc.make("removeAssociatedRecord", { payload: recordAssociation, error: WorkflowErrors }),
   Rpc.make("getStepFields", {
     payload: {
       ...step,
@@ -557,14 +704,17 @@ export const Workflows = RpcGroup.make(
     success: Schema.Struct({
       inputs: Schema.Array(Schema.Struct({ ...StepFieldData.fields, sourceStepId: StringId })),
       fields: Schema.Array(StepFieldData),
-      proposals: Schema.Array(
-        Schema.Struct(Struct.pick(Proposal.fields, ["fieldKey", "value", "isDiscarded"])),
-      ),
+      proposals: Schema.Array(StepFieldProposal),
     }),
     error: WorkflowErrors,
   }),
   Rpc.make("setStepField", {
-    payload: { ...step, fieldKey: TrimmedNonEmptyString, value: FieldValue },
+    payload: {
+      ...step,
+      fieldKey: TrimmedNonEmptyString,
+      value: FieldValue,
+      sourceRecordKeys: Proposal.fields.sourceRecordKeys,
+    },
     error: WorkflowErrors,
   }),
   /**
@@ -576,7 +726,13 @@ export const Workflows = RpcGroup.make(
       ...step,
       fieldKey: TrimmedNonEmptyString,
       value: FieldValue,
-      ...Struct.pick(Proposal.fields, ["whyYes", "whyNo", "score", "comparison"]),
+      ...Struct.pick(Proposal.fields, [
+        "whyYes",
+        "whyNo",
+        "score",
+        "comparison",
+        "sourceRecordKeys",
+      ]),
     },
     error: WorkflowErrors,
   }),
@@ -588,6 +744,25 @@ export const Workflows = RpcGroup.make(
   /** A member turns the proposal down; nobody can propose its value again. */
   Rpc.make("discardProposal", {
     payload: { ...step, proposalId: StringId },
+    error: WorkflowErrors,
+  }),
+  /** A member approves and/or turns down multiple open proposals on one field atomically. */
+  Rpc.make("reviewProposals", {
+    payload: {
+      ...step,
+      fieldKey: TrimmedNonEmptyString,
+      approveIds: Schema.Array(StringId),
+      discardIds: Schema.Array(StringId),
+    },
+    error: WorkflowErrors,
+  }),
+  /** Replaces the discrepancy-filter questions for a reviewed field's open proposals. */
+  Rpc.make("setProposalFilters", {
+    payload: {
+      ...step,
+      fieldKey: TrimmedNonEmptyString,
+      filters: Schema.Array(ProposalFilterInput),
+    },
     error: WorkflowErrors,
   }),
   /** A member saves and confirms one group entry for a linked record. */
@@ -602,7 +777,11 @@ export const Workflows = RpcGroup.make(
     },
     error: WorkflowErrors,
   }),
-  Rpc.make("markStepDone", { payload: step, error: WorkflowErrors }),
+  Rpc.make("markStepDone", {
+    payload: step,
+    success: Schema.Struct({ nextStepId: Schema.NullOr(StringId) }),
+    error: WorkflowErrors,
+  }),
   Rpc.make("runStepAutomation", {
     payload: { ...step, automationId: AutomationId },
     error: Schema.Union([WorkflowErrors, ChatRefused]),

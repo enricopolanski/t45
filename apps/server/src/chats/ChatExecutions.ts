@@ -8,7 +8,6 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -59,7 +58,6 @@ export const make = Effect.gen(function* () {
   const skills = yield* SkillRepository;
   const capabilities = yield* CapabilityRepository;
   const attachments = yield* AttachmentRepository;
-  const fileSystem = yield* FileSystem.FileSystem;
   const scope = yield* Effect.scope;
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const endHandler = yield* Deferred.make<(chatId: ChatId) => Effect.Effect<void>>();
@@ -70,10 +68,15 @@ export const make = Effect.gen(function* () {
 
   const filesOf = (ids: ReadonlyArray<AttachmentId>) =>
     Effect.forEach(ids, (id) =>
-      fileSystem
-        .readFile(attachments.path(id))
-        .pipe(Effect.map((content) => [PromptService.attachmentFile(id), content] as const)),
-    ).pipe(Effect.map(Object.fromEntries), Effect.orDie);
+      Effect.gen(function* () {
+        const stored = yield* attachments.read(id);
+        if (stored === null) return yield* Effect.die(new Error(`Attachment ${id} has no bytes.`));
+        return [
+          PromptService.attachmentFile(id),
+          yield* Stream.mkUint8Array(stored.stream),
+        ] as const;
+      }),
+    ).pipe(Effect.map(Object.fromEntries));
 
   const clearQuestions = (chatId: ChatId) =>
     Effect.gen(function* () {
@@ -153,6 +156,7 @@ export const make = Effect.gen(function* () {
                 "hosts",
                 "secrets",
                 "note",
+                "skill",
               ]),
             ),
           skills: (yield* skills.listForAgent(agent.id)).map((skill) =>

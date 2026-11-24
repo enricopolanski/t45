@@ -473,7 +473,7 @@ function Entries({ field }: { readonly field: FieldView }) {
   );
 }
 
-/** The records a records field links, in the collection's own table. */
+/** The records a records field links, using the field's chosen columns when set. */
 function LinkedRecords({
   field,
   renderStatus,
@@ -518,6 +518,7 @@ function LinkedRecords({
           label={field.label}
           collection={field.collection}
           records={field.records}
+          columnIds={field.recordTableColumns}
           onView={(record) => setOpenedKey(record.key)}
           renderStatus={renderStatus}
         />

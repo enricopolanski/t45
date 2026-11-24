@@ -49,6 +49,13 @@ export class CollectionRecordRepository extends Context.Service<
   CollectionRecordRepository,
   {
     readonly get: (collectionId: string, key: string) => Effect.Effect<CollectionRecord | null>;
+    readonly listByKeys: (
+      collectionId: string,
+      keys: ReadonlyArray<string>,
+    ) => Effect.Effect<ReadonlyArray<CollectionRecord>>;
+    readonly observeChanges: (
+      onChange: (collectionId: string, key: string) => void,
+    ) => Effect.Effect<void, never, import("effect/Scope").Scope>;
     readonly hasAny: (collectionId: string) => Effect.Effect<boolean>;
     /** Whether any record holds a value of the top-level field, or within it for a group. */
     readonly holdsField: (collectionId: string, fieldId: string) => Effect.Effect<boolean>;
@@ -79,6 +86,13 @@ export const layer = Layer.effect(
   CollectionRecordRepository,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const observers = new Set<(collectionId: string, key: string) => void>();
+    const publishChange = (collectionId: string, key: string) =>
+      sql.afterCommit(
+        Effect.sync(() => {
+          for (const observer of observers) observer(collectionId, key);
+        }),
+      );
     const recordJson = sql.literal(`json_object('collectionId', collection_id, 'key', key,
       'values', json(field_values), 'createdAt', created_at, 'updatedAt', updated_at)`);
     const read = (where: Fragment) =>
@@ -281,6 +295,20 @@ export const layer = Layer.effect(
 
     return CollectionRecordRepository.of({
       transaction,
+      listByKeys: (collectionId, keys) =>
+        keys.length === 0
+          ? Effect.succeed([])
+          : read(sql`collection_id = ${collectionId} AND ${sql.in("key", keys)}`),
+      observeChanges: (observe) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            observers.add(observe);
+          }),
+          () =>
+            Effect.sync(() => {
+              observers.delete(observe);
+            }),
+        ),
       get: (collectionId, key) =>
         read(sql`collection_id = ${collectionId} AND key = ${key}`).pipe(
           Effect.map(([record]) => record ?? null),
@@ -318,7 +346,7 @@ export const layer = Layer.effect(
       },
       remove: (collectionId, key) =>
         sql`DELETE FROM collection_records WHERE collection_id = ${collectionId} AND key = ${key}`.pipe(
-          Effect.asVoid,
+          Effect.andThen(publishChange(collectionId, key)),
           Effect.orDie,
         ),
       save: (record) =>
@@ -331,7 +359,9 @@ export const layer = Layer.effect(
             ON CONFLICT (collection_id, key) DO UPDATE SET field_values = excluded.field_values,
               updated_at = excluded.updated_at
             RETURNING ${recordJson} AS record`;
-          return (yield* decodeRecords([saved!.record]))[0]!;
+          const decoded = (yield* decodeRecords([saved!.record]))[0]!;
+          yield* publishChange(record.collectionId, record.key);
+          return decoded;
         }).pipe(Effect.orDie),
     });
   }),

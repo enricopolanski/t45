@@ -129,6 +129,9 @@ export function ProjectBoardPage({ projectId }: { readonly projectId: string }) 
                 ? [{ ticket, step: ticket.currentStep }]
                 : [],
             );
+            const previews = board.previews.filter(
+              (preview) => preview.stepDefinitionId === column.id,
+            );
             return (
               <section
                 key={column.id}
@@ -136,10 +139,23 @@ export function ProjectBoardPage({ projectId }: { readonly projectId: string }) 
                 className="flex w-72 shrink-0 flex-col gap-2 rounded-xl border border-border bg-card p-3"
               >
                 <h2 className="text-xs font-medium text-muted-foreground">
-                  {column.name} · {cards.length}
+                  {column.name} · {cards.length + previews.length}
                 </h2>
                 {cards.map((card) => (
                   <BoardCard key={card.ticket.id} ticket={card.ticket} step={card.step} />
+                ))}
+                {previews.map(({ ticketId, ticketTitle, stepDefinitionId }) => (
+                  <Link
+                    key={ticketId}
+                    to="/my-work/preview/$ticketId/$stepDefinitionId"
+                    params={{ ticketId, stepDefinitionId }}
+                    className="flex flex-col items-start gap-1.5 rounded-lg border border-dashed bg-background px-3 py-2.5 hover:bg-muted"
+                  >
+                    <span className="text-sm font-medium">{ticketTitle}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t("Preliminary results")}
+                    </span>
+                  </Link>
                 ))}
               </section>
             );

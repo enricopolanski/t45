@@ -19,20 +19,24 @@ import {
   isCollectionOnly,
   isUrlFieldValue,
   type Layout,
+  type RecordTableColumns,
   recordKeys,
   rowIds,
   valuesProblem,
 } from "./Field.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "./primitives.ts";
+import {
+  CalculatorInput,
+  CalculatorLabels,
+  StepCalculation,
+  StepCalculator,
+} from "./StepCalculator.ts";
+import { StepPreviewColumns } from "./StepPreview.ts";
 
 /** A field of an earlier step that a step reads: the whole field, a group with all its rows. */
-export const StepInput = Schema.Struct({
-  stepId: StringId.annotate({
-    description: "The earlier step, or sub-step, that fills the field.",
-  }),
-  fieldId: FieldPathSegment.annotate({ description: "One of that step's own fields." }),
-});
+export const StepInput = CalculatorInput;
 export type StepInput = typeof StepInput.Type;
+const PreviewFields = Schema.Array(StepInput);
 
 /** A step as it is stored and sent, where a step may leave out its inputs and automations. */
 export interface StepDefinitionEncoded {
@@ -44,6 +48,8 @@ export interface StepDefinitionEncoded {
   readonly inputs?: ReadonlyArray<StepInput>;
   readonly automationIds?: ReadonlyArray<string>;
   readonly isDoneWhenApproved?: boolean;
+  readonly calculator?: StepCalculator;
+  readonly previewFields?: ReadonlyArray<StepInput>;
 }
 
 export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition")({
@@ -68,6 +74,9 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
   automationIds: Schema.UniqueArray(AutomationId).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
   ),
+  calculator: Schema.optionalKey(StepCalculator),
+  /** Ordered fields shown in a read-only preview during the preceding step. */
+  previewFields: Schema.optionalKey(PreviewFields),
   isDoneWhenApproved: Schema.optionalKey(
     Schema.Boolean.annotate({
       description:
@@ -76,7 +85,7 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
   ),
 }) {}
 
-const stepNodes = (
+export const stepNodes = (
   steps: ReadonlyArray<StepDefinition>,
   parentId: string | null = null,
 ): ReadonlyArray<{ readonly step: StepDefinition; readonly parentId: string | null }> =>
@@ -119,16 +128,42 @@ const topLevelIndexOf = (steps: ReadonlyArray<StepDefinition>, id: string) =>
 
 /** Every input is a field of a step under an earlier step of the workflow, never a sibling's. */
 export const hasValidInputs = (steps: ReadonlyArray<StepDefinition>) =>
-  stepNodes(steps).every(({ step }) =>
-    step.inputs.every((input) => {
-      const source = topLevelIndexOf(steps, input.stepId);
-      return (
-        source >= 0 &&
-        source < topLevelIndexOf(steps, step.id) &&
-        findStep(steps, input.stepId)!.step.fields.some((field) => field.id === input.fieldId)
-      );
-    }),
+  stepNodes(steps).every(
+    ({ step }) =>
+      step.inputs.every((input) => {
+        const source = topLevelIndexOf(steps, input.stepId);
+        return (
+          source >= 0 &&
+          source < topLevelIndexOf(steps, step.id) &&
+          findStep(steps, input.stepId)!.step.fields.some((field) => field.id === input.fieldId)
+        );
+      }) &&
+      step.fields.every((field) => {
+        const source = field.type === "records" ? field.recordAssociationSource : undefined;
+        return (
+          source === undefined ||
+          (step.inputs.some(isSameInput(source)) &&
+            findStep(steps, source.stepId)?.step.fields.some(
+              ({ id, type }) => id === source.fieldId && type === "records",
+            ) === true)
+        );
+      }),
   );
+
+const hasValidPreviewFields = (steps: ReadonlyArray<StepDefinition>) =>
+  stepNodes(steps).every(({ step, parentId }) => {
+    const fields = step.previewFields ?? [];
+    if (fields.length === 0) return true;
+    if (parentId !== null || steps.findIndex(({ id }) => id === step.id) < 1) return false;
+    return fields.every(
+      (field, index) =>
+        !fields.slice(0, index).some(isSameInput(field)) &&
+        (field.stepId === step.id
+          ? Object.values(step.calculator?.outputs ?? {}).includes(field.fieldId) &&
+            step.fields.some(({ id }) => id === field.fieldId)
+          : step.inputs.some(isSameInput(field))),
+    );
+  });
 
 /** A project's name in URLs: lowercase letters and digits, joined by single hyphens. */
 export const Slug = TrimmedNonEmptyString.check(
@@ -164,6 +199,10 @@ const Steps = Schema.Array(StepDefinition).check(
     (steps) => stepNodes(steps).every(({ step }) => !step.fields.some(isCollectionOnly)),
     { expected: "no link or multiple-choice fields, which only collections hold" },
   ),
+  Schema.makeFilter(hasValidPreviewFields, {
+    expected:
+      "ordered, distinct preview fields selected from the step's inputs and calculated outputs",
+  }),
 );
 
 /**
@@ -298,6 +337,7 @@ export const Proposal = Schema.Struct({
   /** The field's value; for a records field, the key of one more record to link. */
   value: Schema.Json,
   comparison: Schema.optionalKey(RecordComparison),
+  sourceRecordKeys: Schema.optionalKey(Schema.UniqueArray(TrimmedNonEmptyString)),
   whyYes: TrimmedNonEmptyString,
   whyNo: Schema.String,
   /** How well it fits, from 0 to 100; the best are reviewed first. */
@@ -309,6 +349,22 @@ export const Proposal = Schema.Struct({
   createdAt: Schema.DateTimeUtcFromString,
 });
 export type Proposal = typeof Proposal.Type;
+
+const ProposalFilterItem = Schema.Struct({
+  proposalId: StringId,
+  reason: TrimmedNonEmptyString,
+});
+type ProposalFilterItem = typeof ProposalFilterItem.Type;
+
+/** One single-decision discrepancy question over open proposals of a reviewed field. */
+export const ProposalFilter = Schema.Struct({
+  id: StringId,
+  fieldKey: TrimmedNonEmptyString,
+  question: TrimmedNonEmptyString,
+  driftSummary: TrimmedNonEmptyString,
+  items: Schema.Array(ProposalFilterItem).check(Schema.isMinLength(1)),
+});
+export type ProposalFilter = typeof ProposalFilter.Type;
 
 /** One step or sub-step of one ticket. */
 export class Step extends Schema.Opaque<Step>()(
@@ -323,6 +379,15 @@ export class Step extends Schema.Opaque<Step>()(
     values: FieldValues,
     /** The values proposed for its reviewed fields, open or discarded. */
     proposals: Schema.optionalKey(Schema.Array(Proposal)),
+    recordAssociations: Schema.optionalKey(
+      Schema.Record(
+        TrimmedNonEmptyString,
+        Schema.Record(TrimmedNonEmptyString, Schema.UniqueArray(TrimmedNonEmptyString)),
+      ),
+    ),
+    calculation: Schema.optionalKey(StepCalculation),
+    /** Ordered discrepancy-filter questions over open proposals, by reviewed field. */
+    proposalFilters: Schema.optionalKey(Schema.Array(ProposalFilter)),
     /** Confirmed group entries, by group field and row id. */
     confirmedReviewRows: Schema.optionalKey(Schema.UniqueArray(TrimmedNonEmptyString)),
     /** The automations entering the step was to start that didn't start, each with why. */
@@ -387,6 +452,190 @@ export const openProposals = <P extends Proposal>(proposals: ReadonlyArray<P> = 
   proposals
     .filter((proposal) => !proposal.isDiscarded)
     .toSorted((one, other) => (other.score ?? -1) - (one.score ?? -1));
+
+/** Why `filters` can't be saved for `field` at `fieldKey` on `step`. Null when valid. */
+export const proposalFiltersRefusal = (
+  step: Step,
+  field: Field,
+  fieldKey: string,
+  filters: ReadonlyArray<Pick<ProposalFilter, "items">>,
+): string | null => {
+  if (!isReviewedField(field)) return `${fieldKey} isn't reviewed.`;
+  const openIds = new Set(
+    (step.proposals ?? [])
+      .filter((proposal) => !proposal.isDiscarded && proposal.fieldKey === fieldKey)
+      .map((proposal) => proposal.id),
+  );
+  for (const filter of filters) {
+    if (filter.items.length === 0) return "Each filter question needs at least one open proposal.";
+    const ids = filter.items.map((item) => item.proposalId);
+    if (!hasDistinctIds(ids)) return "List each proposal at most once per filter question.";
+    if (ids.some((id) => !openIds.has(id)))
+      return `Every filter item must reference an open proposal on ${fieldKey}.`;
+  }
+  return null;
+};
+
+/**
+ * Applies a batch of proposal approvals and discards on `fieldKey`, returning the updated step and
+ * next field value (when any proposal is approved), or why the batch can't be applied.
+ */
+export const withReviewedProposals = (
+  step: Step,
+  field: Field,
+  fieldKey: string,
+  decisions: {
+    readonly approveIds: ReadonlyArray<string>;
+    readonly discardIds: ReadonlyArray<string>;
+  },
+): { readonly step: Step; readonly approvedValue?: Schema.Json } | string => {
+  const { approveIds, discardIds } = decisions;
+  if (approveIds.length === 0 && discardIds.length === 0)
+    return "Choose at least one proposal to approve or discard.";
+  if (!hasDistinctIds([...approveIds, ...discardIds])) return "List each proposal at most once.";
+  if (field.type !== "records" && approveIds.length > 1)
+    return `${fieldKey} takes one value at a time.`;
+  const openById = new Map(
+    (step.proposals ?? [])
+      .filter((proposal) => !proposal.isDiscarded && proposal.fieldKey === fieldKey)
+      .map((proposal) => [proposal.id, proposal]),
+  );
+  if ([...approveIds, ...discardIds].some((id) => !openById.has(id)))
+    return "One or more selected proposals are no longer open.";
+  const approvedSet = new Set(approveIds);
+  const discardedSet = new Set(discardIds);
+  const nextValue: Schema.Json | undefined =
+    approveIds.length === 0
+      ? undefined
+      : field.type === "records"
+        ? [
+            ...new Set([
+              ...recordKeys(step.values[fieldKey]),
+              ...approveIds.map((id) => openById.get(id)!.value as string),
+            ]),
+          ]
+        : approvedValue(field, step.values[fieldKey], openById.get(approveIds[0]!)!);
+  const nextProposals = (step.proposals ?? []).flatMap((proposal) => {
+    if (approvedSet.has(proposal.id)) return [];
+    if (discardedSet.has(proposal.id)) return [{ ...proposal, isDiscarded: true }];
+    return [proposal];
+  });
+  return {
+    step:
+      field.type === "records"
+        ? approveIds.reduce<Step>(
+            (next, id) => {
+              const proposal = openById.get(id)!;
+              const sources = getProposalSourceKeys(proposal);
+              return sources.length === 0
+                ? next
+                : withRecordAssociation(next, fieldKey, proposal.value as string, sources);
+            },
+            { ...step, proposals: nextProposals },
+          )
+        : { ...step, proposals: nextProposals },
+    ...(nextValue !== undefined ? { approvedValue: nextValue } : {}),
+  };
+};
+
+/** Older proposals already recorded the one source record to which their assessment belongs. */
+export const getProposalSourceKeys = (
+  proposal: Pick<Proposal, "sourceRecordKeys" | "comparison">,
+) =>
+  proposal.sourceRecordKeys ??
+  (proposal.comparison === undefined ? [] : [proposal.comparison.sourceRecordKey]);
+
+export const withRecordAssociation = (
+  step: Step,
+  fieldKey: string,
+  recordKey: string,
+  sourceKeys: ReadonlyArray<string>,
+): Step => ({
+  ...step,
+  recordAssociations: {
+    ...step.recordAssociations,
+    [fieldKey]: {
+      ...step.recordAssociations?.[fieldKey],
+      [recordKey]: [...new Set(sourceKeys)].toSorted(),
+    },
+  },
+});
+
+export const retainRecordAssociations = (
+  step: Step,
+  fieldKey: string,
+  keys: ReadonlyArray<string>,
+): Step => {
+  const current = step.recordAssociations?.[fieldKey];
+  if (current === undefined) return step;
+  return {
+    ...step,
+    recordAssociations: {
+      ...step.recordAssociations,
+      [fieldKey]: Object.fromEntries(Object.entries(current).filter(([key]) => keys.includes(key))),
+    },
+  };
+};
+
+export interface ProposalFilterDraftAnswer {
+  readonly decision: "accept" | "exclude";
+  /** The exact live proposal IDs shown when this question was answered. */
+  readonly shownIds: ReadonlyArray<string>;
+  /** Checked proposal IDs when `decision` is `"exclude"`; empty when `"accept"`. */
+  readonly excludedIds: ReadonlyArray<string>;
+}
+
+export interface EvaluatedProposalFilterStep {
+  readonly filter: ProposalFilter;
+  /** Items whose proposals are still open and not excluded by an earlier valid answer. */
+  readonly liveItems: ReadonlyArray<ProposalFilterItem>;
+  /** The saved answer when its `shownIds` still match `liveItems`, otherwise null. */
+  readonly answer: ProposalFilterDraftAnswer | null;
+  /** True when a prior answer was invalidated because its affected proposals changed. */
+  readonly isInvalidated: boolean;
+}
+
+const sameIdSet = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) => {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((id) => rightSet.has(id));
+};
+
+/**
+ * Evaluates ordered discrepancy filters against open proposals and draft answers. Exclusions are
+ * derived purely from the union of checked IDs in valid answered exclusion steps; any downstream
+ * answer whose affected proposals changed is invalidated so the reviewer sees it again.
+ */
+export const evaluateProposalFilterCascade = (
+  open: ReadonlyArray<Pick<Proposal, "id">>,
+  filters: ReadonlyArray<ProposalFilter>,
+  draftAnswers: Readonly<Record<string, ProposalFilterDraftAnswer>>,
+) => {
+  const openIds = new Set(open.map((proposal) => proposal.id));
+  const excluded = new Set<string>();
+  const steps: Array<EvaluatedProposalFilterStep> = [];
+  for (const filter of filters) {
+    const liveItems = filter.items.filter(
+      (item) => openIds.has(item.proposalId) && !excluded.has(item.proposalId),
+    );
+    if (liveItems.length === 0) continue;
+    const liveIds = liveItems.map((item) => item.proposalId);
+    const liveSet = new Set(liveIds);
+    const raw = draftAnswers[filter.id] ?? null;
+    const isValid = raw !== null && sameIdSet(raw.shownIds, liveIds);
+    const answer = isValid ? raw : null;
+    if (answer?.decision === "exclude") {
+      for (const id of answer.excludedIds) {
+        if (liveSet.has(id)) excluded.add(id);
+      }
+    }
+    steps.push({ filter, liveItems, answer, isInvalidated: raw !== null && !isValid });
+  }
+  const excludedIds = [...excluded];
+  const inPlayIds = open.map((proposal) => proposal.id).filter((id) => !excluded.has(id));
+  const nextUnansweredIndex = steps.findIndex((step) => step.answer === null);
+  return { steps, nextUnansweredIndex, excludedIds, inPlayIds };
+};
 
 const TicketStatus = Schema.Union([
   Schema.Struct({
@@ -488,7 +737,16 @@ const REFUSALS = {
   field_reviewed:
     "Agents only propose this field's value, saying why it fits and why not: use propose_value.",
   invalid_proposal: "That value can't be proposed.",
+  invalid_proposal_filters: "Those proposal filters can't be saved.",
   invalid_attachment: "That file can't be attached here.",
+  invalid_calculator: "The calculator and its mapped fields do not fit this workflow version.",
+  calculated_field: "This field is written by the step calculator.",
+  calculation_pending: "The current calculation has no result yet.",
+  file_export_failed: "The file couldn't be generated.",
+  invalid_calculator_edit: "These changes do not fit a calculation row.",
+  calculation_not_ready: "The current result is not ready to approve.",
+  calculation_changed:
+    "The calculation has changed. Review the current results before sending them.",
   invalid_automations:
     "An automation is archived, or its agent can't work on steps or is private to someone other than you and this workflow's creator. Choose another.",
 };
@@ -622,6 +880,8 @@ export const getComparisonRefusal = (
   const ids = comparison.assessments.map((item) => item.criterionId);
   if (!hasDistinctIds(ids) || ids.some((id) => !source.criteria.some((row) => row.id === id)))
     return "Use each criterion id from the selected source at most once.";
+  if (ids.length !== source.criteria.length)
+    return "Assess every criterion from the selected source. Use missing with a reason for unavailable evidence.";
   if (comparison.assessments.some((item) => item.status !== "missing" && !item.value))
     return "Provide the candidate value and its evidence for each assessed criterion.";
   return null;
@@ -944,6 +1204,26 @@ export const WorkflowEdit = Schema.Union([
     name: TrimmedNonEmptyString,
   }),
   Schema.Struct({ type: Schema.Literal("remove_step"), ...stepRef }),
+  Schema.Struct({
+    type: Schema.Literal("set_step_calculator"),
+    ...stepRef,
+    calculator: Schema.NullOr(StepCalculator),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("set_step_preview"),
+    ...stepRef,
+    fields: Schema.NullOr(PreviewFields),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("set_calculator_preview_columns"),
+    ...stepRef,
+    columns: StepPreviewColumns,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("set_calculator_labels"),
+    ...stepRef,
+    labels: CalculatorLabels,
+  }),
   Schema.Struct({ type: Schema.Literal("rename_step"), ...stepRef, name: TrimmedNonEmptyString }),
   /** Moves the step among its siblings. */
   Schema.Struct({ type: Schema.Literal("move_step"), ...stepRef, index: NonNegativeInt }),
@@ -1043,6 +1323,32 @@ const applyWorkflowEdit = (steps: StepList, edit: WorkflowEdit): StepList | null
             return subSteps === null ? null : { subSteps };
           });
     }
+    case "set_step_calculator":
+      return changeSiblings(steps, edit.stepId, (siblings, index) => {
+        const { calculator: _, ...definition } = siblings[index]!;
+        return siblings.with(
+          index,
+          edit.calculator === null ? definition : { ...definition, calculator: edit.calculator },
+        );
+      });
+    case "set_step_preview":
+      return changeSiblings(steps, edit.stepId, (siblings, index) => {
+        const { previewFields: _, ...step } = siblings[index]!;
+        return siblings.with(
+          index,
+          edit.fields === null ? step : { ...step, previewFields: edit.fields },
+        );
+      });
+    case "set_calculator_preview_columns":
+      return changeStep(steps, edit.stepId, ({ calculator }) =>
+        calculator === undefined
+          ? null
+          : { calculator: { ...calculator, previewColumns: edit.columns } },
+      );
+    case "set_calculator_labels":
+      return changeStep(steps, edit.stepId, ({ calculator }) =>
+        calculator === undefined ? null : { calculator: { ...calculator, labels: edit.labels } },
+      );
     case "remove_step":
       return changeSiblings(steps, edit.stepId, (siblings, index) => siblings.toSpliced(index, 1));
     case "move_step":
@@ -1127,41 +1433,61 @@ export const applyWorkflowEdits = (
 
 const encodeSteps = Schema.encodeSync(Steps);
 
-/** Each group's layout in the steps, by its step's id and the ids of the fields leading to it. */
-const groupLayouts = (steps: StepList): ReadonlyMap<string, Layout | undefined> => {
+type FieldLayout = {
+  readonly layout?: Layout | undefined;
+  readonly columns?: RecordTableColumns | undefined;
+};
+
+/** Each table's presentation, by the field path and, for records, the linked collection. */
+const recordLayoutKey = (path: string, field: Extract<Field, { type: "records" }>) =>
+  `records:${path}/${field.id}/${field.collectionId}`;
+
+const fieldLayouts = (steps: StepList): ReadonlyMap<string, FieldLayout> => {
   const ofFields = (
     fields: ReadonlyArray<Field>,
     path: string,
-  ): ReadonlyArray<readonly [string, Layout | undefined]> =>
-    fields.flatMap((field) =>
-      field.type === "group"
-        ? [[`${path}/${field.id}`, field.layout], ...ofFields(field.fields, `${path}/${field.id}`)]
-        : [],
-    );
+  ): ReadonlyArray<readonly [string, FieldLayout]> =>
+    fields.flatMap<readonly [string, FieldLayout]>((field) => {
+      if (field.type === "records")
+        return [[recordLayoutKey(path, field), { columns: field.recordTableColumns }]];
+      if (field.type !== "group") return [];
+      const key = `${path}/${field.id}`;
+      return [[key, { layout: field.layout }], ...ofFields(field.fields, key)];
+    });
   return new Map(stepNodes(steps).flatMap(({ step }) => ofFields(step.fields, step.id)));
 };
 
-/** The groups whose layout `edited` changes from `saved`'s, each with its new layout. */
+/** The fields whose layout `edited` changes from `saved`'s, each with its new layout. */
 export const changedLayouts = (saved: StepList, edited: StepList) => {
-  const was = groupLayouts(saved);
+  const was = fieldLayouts(saved);
   return new Map(
-    [...groupLayouts(edited)].filter(
-      ([key, layout]) => JSON.stringify(layout) !== JSON.stringify(was.get(key)),
+    [...fieldLayouts(edited)].filter(
+      ([key, layout]) => JSON.stringify(layout) !== JSON.stringify(was.get(key) ?? {}),
     ),
   );
 };
 
-/** The steps with each group in `layouts` taking the layout given there, none when undefined. */
+/** The steps with each field in `layouts` taking the presentation given there. */
 export const setLayouts = (
   steps: StepList,
-  layouts: ReadonlyMap<string, Layout | undefined>,
+  layouts: ReadonlyMap<string, FieldLayout>,
 ): StepList => {
+  if (layouts.size === 0) return steps;
   const ofFields = (fields: ReadonlyArray<Field>, path: string): ReadonlyArray<Field> =>
     fields.map((field) => {
+      if (field.type === "records") {
+        const selection = layouts.get(recordLayoutKey(path, field));
+        if (selection === undefined) return field;
+        const { recordTableColumns: _, ...rest } = field;
+        return selection.columns === undefined
+          ? rest
+          : { ...rest, recordTableColumns: selection.columns };
+      }
       if (field.type !== "group") return field;
       const key = `${path}/${field.id}`;
       const { layout, ...rest } = field;
-      const next = layouts.has(key) ? layouts.get(key) : layout;
+      const selection = layouts.get(key);
+      const next = selection === undefined ? layout : selection.layout;
       return { ...rest, fields: ofFields(field.fields, key), ...(next && { layout: next }) };
     });
   const ofSteps = (list: StepList): StepList =>
@@ -1173,10 +1499,108 @@ export const setLayouts = (
   return Option.getOrThrow(decodeSteps(ofSteps(steps)));
 };
 
+type CalculatorPresentation = {
+  readonly labels?: CalculatorLabels | undefined;
+  readonly previewColumns?: StepPreviewColumns | undefined;
+  readonly exportAutomationId?: StepCalculator["exportAutomationId"];
+  readonly exportTemplateId?: StepCalculator["exportTemplateId"];
+};
+
+const calculatorPresentationOf = (steps: StepList) =>
+  new Map(
+    stepNodes(steps).flatMap(({ step: { id, calculator } }) =>
+      calculator === undefined
+        ? []
+        : [
+            [
+              JSON.stringify([id, calculator.id, calculator.version]),
+              {
+                labels: calculator.labels,
+                previewColumns: calculator.previewColumns,
+                exportAutomationId: calculator.exportAutomationId,
+                exportTemplateId: calculator.exportTemplateId,
+              },
+            ] as const,
+          ],
+    ),
+  );
+
+export const changedCalculatorPresentation = (saved: StepList, edited: StepList) => {
+  const before = calculatorPresentationOf(saved);
+  const changes = new Map<string, CalculatorPresentation>();
+  for (const [key, after] of calculatorPresentationOf(edited)) {
+    const previous = before.get(key);
+    const hasChangedLabels = JSON.stringify(previous?.labels) !== JSON.stringify(after.labels);
+    const hasChangedColumns =
+      JSON.stringify(previous?.previewColumns) !== JSON.stringify(after.previewColumns);
+    const hasChangedExport =
+      previous?.exportAutomationId !== after.exportAutomationId ||
+      previous?.exportTemplateId !== after.exportTemplateId;
+    if (hasChangedLabels || hasChangedColumns || hasChangedExport)
+      changes.set(key, {
+        ...(hasChangedLabels && { labels: after.labels }),
+        ...(hasChangedColumns && { previewColumns: after.previewColumns }),
+        ...(hasChangedExport && {
+          exportAutomationId: after.exportAutomationId,
+          exportTemplateId: after.exportTemplateId,
+        }),
+      });
+  }
+  return changes;
+};
+
+export const setCalculatorPresentation = (
+  steps: StepList,
+  changes: ReadonlyMap<string, CalculatorPresentation>,
+): StepList => {
+  if (changes.size === 0) return steps;
+  const ofSteps = (list: StepList): StepList =>
+    list.map((step) => {
+      const calculator = step.calculator;
+      const subSteps = ofSteps(step.subSteps);
+      if (calculator === undefined) return { ...step, subSteps };
+      const key = JSON.stringify([step.id, calculator.id, calculator.version]);
+      const next = changes.get(key);
+      if (next === undefined) return { ...step, subSteps };
+      const { labels, previewColumns, exportAutomationId, exportTemplateId, ...binding } =
+        calculator;
+      const presentation = {
+        labels,
+        previewColumns,
+        exportAutomationId,
+        exportTemplateId,
+        ...next,
+      };
+      return {
+        ...step,
+        subSteps,
+        calculator: {
+          ...binding,
+          ...(presentation.labels === undefined ? {} : { labels: presentation.labels }),
+          ...(presentation.previewColumns === undefined
+            ? {}
+            : { previewColumns: presentation.previewColumns }),
+          ...(presentation.exportAutomationId === undefined
+            ? {}
+            : { exportAutomationId: presentation.exportAutomationId }),
+          ...(presentation.exportTemplateId === undefined
+            ? {}
+            : { exportTemplateId: presentation.exportTemplateId }),
+        },
+      };
+    });
+  return Option.getOrThrow(decodeSteps(ofSteps(steps)));
+};
+
 /**
- * Whether `edited` changes nothing of `saved` but the layout of its groups. A layout is how
- * entries show, not what a step holds, so it changes in place on every version.
+ * Layouts and calculator settings control presentation across versions of the same step.
  */
 export const isLayoutChangeOnly = (saved: StepList, edited: StepList) =>
-  JSON.stringify(encodeSteps(setLayouts(edited, groupLayouts(saved)))) ===
-  JSON.stringify(encodeSteps(saved));
+  JSON.stringify(
+    encodeSteps(
+      setCalculatorPresentation(
+        setLayouts(edited, fieldLayouts(saved)),
+        calculatorPresentationOf(saved),
+      ),
+    ),
+  ) === JSON.stringify(encodeSteps(saved));
