@@ -14,6 +14,13 @@ const isFieldPathSegment = Schema.isPattern(/^[A-Za-z0-9_-]+$/);
 /** A field or row ID; dots separate these IDs in field paths. */
 export const FieldPathSegment = StringId.check(isFieldPathSegment);
 
+/** The record's update time is a column alongside the collection's own fields. */
+export const UPDATED_AT_COLUMN = "$updatedAt";
+export const RecordTableColumns = Schema.UniqueArray(
+  Schema.Union([FieldPathSegment, Schema.Literal(UPDATED_AT_COLUMN)]),
+);
+export type RecordTableColumns = typeof RecordTableColumns.Type;
+
 export const hasDistinctIds = (ids: ReadonlyArray<string>) => new Set(ids).size === ids.length;
 
 const FieldBase = {
@@ -203,6 +210,11 @@ const RecordsField = Schema.Struct({
   ...FieldBase,
   type: Schema.Literal("records"),
   collectionId: StringId.annotate({ description: "The collection whose records it links." }),
+  recordTableColumns: Schema.optionalKey(
+    RecordTableColumns.annotate({
+      description: "The visible columns in order. Without a selection, use the collection's table.",
+    }),
+  ),
   comparisonFields: Schema.optionalKey(ComparisonFields),
   comparisonCriteria: Schema.optionalKey(ComparisonCriteria),
 });

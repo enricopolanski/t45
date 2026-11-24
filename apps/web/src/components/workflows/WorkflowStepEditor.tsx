@@ -26,6 +26,7 @@ import { ComparisonCriteriaEditor } from "./ComparisonCriteriaEditor";
 import { ComparisonFieldsEditor } from "./ComparisonFieldsEditor";
 import { GroupLayoutButton } from "./GroupLayout";
 import { RecordReviewSettings } from "./RecordReviewSettings";
+import { RecordTableColumnsEditor } from "./RecordTableColumnsEditor";
 import { blankStep, listEntries } from "./workflowLogic";
 
 /** What a step holds, shown beside its title, e.g. "5 fields · 1 sub-step". */
@@ -175,23 +176,36 @@ export function WorkflowStepEditor({
               areColumns={false}
               collections={collections}
               areReviewable
-              comparisonFieldsEditor={(field, setField) => {
+              recordsSettings={(field, setField) => {
                 const collection = collections.find(({ id }) => id === field.collectionId);
                 if (collection === undefined) return null;
                 return (
-                  <div className="flex flex-wrap gap-2">
-                    <ComparisonFieldsEditor
+                  <div className="flex flex-wrap items-start gap-2">
+                    <RecordTableColumnsEditor
                       collection={collection}
-                      inputCollections={inputCollections}
-                      fields={field.comparisonFields}
-                      onChange={(comparisonFields) => {
-                        const { comparisonFields: _, ...rest } = field;
+                      columns={field.recordTableColumns}
+                      onChange={(recordTableColumns) => {
+                        const { recordTableColumns: _, ...rest } = field;
                         setField(
-                          comparisonFields === undefined ? rest : { ...rest, comparisonFields },
+                          recordTableColumns === undefined ? rest : { ...rest, recordTableColumns },
                         );
                       }}
                       disabled={disabled}
                     />
+                    {field.isReviewed && (
+                      <ComparisonFieldsEditor
+                        collection={collection}
+                        inputCollections={inputCollections}
+                        fields={field.comparisonFields}
+                        onChange={(comparisonFields) => {
+                          const { comparisonFields: _, ...rest } = field;
+                          setField(
+                            comparisonFields === undefined ? rest : { ...rest, comparisonFields },
+                          );
+                        }}
+                        disabled={disabled}
+                      />
+                    )}
                     {step.fields.some((f) => f.id === field.id) && field.isReviewed && (
                       <ComparisonCriteriaEditor
                         sources={inputSources.filter((source) =>

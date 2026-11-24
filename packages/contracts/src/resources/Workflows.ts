@@ -19,6 +19,7 @@ import {
   FieldValues,
   Layout,
   RecordEntryReview,
+  RecordTableColumns,
 } from "../models/Field.ts";
 import { CollectionRecordView } from "./Collections.ts";
 
@@ -173,6 +174,7 @@ export class FieldView extends Schema.Opaque<FieldView>()(
     /** Whether agents only propose its value, for a member to approve. */
     isReviewed: Schema.optionalKey(Schema.Boolean),
     comparisonFields: Schema.optionalKey(ComparisonFields),
+    recordTableColumns: Schema.optionalKey(RecordTableColumns),
     /** A sibling URL displayed on this field; its value is still kept in that URL field. */
     linkUrl: Schema.optionalKey(Schema.String),
     /** A link field's collection, whose record its value keys. */

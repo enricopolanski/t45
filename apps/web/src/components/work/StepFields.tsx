@@ -167,7 +167,12 @@ export function FieldValue({ field }: { readonly field: FieldView }) {
     return field.collection === null || field.records.length === 0 ? (
       <span className="text-sm text-muted-foreground">{t("No records")}</span>
     ) : (
-      <RecordTable label={field.label} collection={field.collection} records={field.records} />
+      <RecordTable
+        label={field.label}
+        collection={field.collection}
+        records={field.records}
+        columnIds={field.recordTableColumns}
+      />
     );
   }
   if (field.type === "group") {
@@ -703,6 +708,7 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
               onOpen={hasShowcase ? undefined : setOpened}
               onView={hasShowcase ? (record) => setViewedKey(record.key) : undefined}
               onEdit={setOpened}
+              columnIds={field.recordTableColumns}
               renderStatus={renderStatus}
               remove={(record) => ({
                 label: t("Unlink record {0}", record.key),

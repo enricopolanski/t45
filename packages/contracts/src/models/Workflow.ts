@@ -19,6 +19,7 @@ import {
   isCollectionOnly,
   isUrlFieldValue,
   type Layout,
+  type RecordTableColumns,
   recordKeys,
   rowIds,
   valuesProblem,
@@ -1339,41 +1340,61 @@ export const applyWorkflowEdits = (
 
 const encodeSteps = Schema.encodeSync(Steps);
 
-/** Each group's layout in the steps, by its step's id and the ids of the fields leading to it. */
-const groupLayouts = (steps: StepList): ReadonlyMap<string, Layout | undefined> => {
+type FieldLayout = {
+  readonly layout?: Layout | undefined;
+  readonly columns?: RecordTableColumns | undefined;
+};
+
+/** Each table's presentation, by the field path and, for records, the linked collection. */
+const recordLayoutKey = (path: string, field: Extract<Field, { type: "records" }>) =>
+  `records:${path}/${field.id}/${field.collectionId}`;
+
+const fieldLayouts = (steps: StepList): ReadonlyMap<string, FieldLayout> => {
   const ofFields = (
     fields: ReadonlyArray<Field>,
     path: string,
-  ): ReadonlyArray<readonly [string, Layout | undefined]> =>
-    fields.flatMap((field) =>
-      field.type === "group"
-        ? [[`${path}/${field.id}`, field.layout], ...ofFields(field.fields, `${path}/${field.id}`)]
-        : [],
-    );
+  ): ReadonlyArray<readonly [string, FieldLayout]> =>
+    fields.flatMap<readonly [string, FieldLayout]>((field) => {
+      if (field.type === "records")
+        return [[recordLayoutKey(path, field), { columns: field.recordTableColumns }]];
+      if (field.type !== "group") return [];
+      const key = `${path}/${field.id}`;
+      return [[key, { layout: field.layout }], ...ofFields(field.fields, key)];
+    });
   return new Map(stepNodes(steps).flatMap(({ step }) => ofFields(step.fields, step.id)));
 };
 
-/** The groups whose layout `edited` changes from `saved`'s, each with its new layout. */
+/** The fields whose layout `edited` changes from `saved`'s, each with its new layout. */
 export const changedLayouts = (saved: StepList, edited: StepList) => {
-  const was = groupLayouts(saved);
+  const was = fieldLayouts(saved);
   return new Map(
-    [...groupLayouts(edited)].filter(
-      ([key, layout]) => JSON.stringify(layout) !== JSON.stringify(was.get(key)),
+    [...fieldLayouts(edited)].filter(
+      ([key, layout]) => JSON.stringify(layout) !== JSON.stringify(was.get(key) ?? {}),
     ),
   );
 };
 
-/** The steps with each group in `layouts` taking the layout given there, none when undefined. */
+/** The steps with each field in `layouts` taking the presentation given there. */
 export const setLayouts = (
   steps: StepList,
-  layouts: ReadonlyMap<string, Layout | undefined>,
+  layouts: ReadonlyMap<string, FieldLayout>,
 ): StepList => {
+  if (layouts.size === 0) return steps;
   const ofFields = (fields: ReadonlyArray<Field>, path: string): ReadonlyArray<Field> =>
     fields.map((field) => {
+      if (field.type === "records") {
+        const selection = layouts.get(recordLayoutKey(path, field));
+        if (selection === undefined) return field;
+        const { recordTableColumns: _, ...rest } = field;
+        return selection.columns === undefined
+          ? rest
+          : { ...rest, recordTableColumns: selection.columns };
+      }
       if (field.type !== "group") return field;
       const key = `${path}/${field.id}`;
       const { layout, ...rest } = field;
-      const next = layouts.has(key) ? layouts.get(key) : layout;
+      const selection = layouts.get(key);
+      const next = selection === undefined ? layout : selection.layout;
       return { ...rest, fields: ofFields(field.fields, key), ...(next && { layout: next }) };
     });
   const ofSteps = (list: StepList): StepList =>
@@ -1385,10 +1406,7 @@ export const setLayouts = (
   return Option.getOrThrow(decodeSteps(ofSteps(steps)));
 };
 
-/**
- * Whether `edited` changes nothing of `saved` but the layout of its groups. A layout is how
- * entries show, not what a step holds, so it changes in place on every version.
- */
+/** Whether only the field layouts changed, which applies in place across versions. */
 export const isLayoutChangeOnly = (saved: StepList, edited: StepList) =>
-  JSON.stringify(encodeSteps(setLayouts(edited, groupLayouts(saved)))) ===
+  JSON.stringify(encodeSteps(setLayouts(edited, fieldLayouts(saved)))) ===
   JSON.stringify(encodeSteps(saved));

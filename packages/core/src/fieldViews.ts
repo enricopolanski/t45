@@ -58,6 +58,9 @@ export const buildFieldViews = (
       ...(field.type === "records" && field.comparisonFields !== undefined
         ? { comparisonFields: field.comparisonFields }
         : {}),
+      ...(field.type === "records" && field.recordTableColumns !== undefined
+        ? { recordTableColumns: field.recordTableColumns }
+        : {}),
       repeatable: field.type === "group" && field.repeatable,
       rowFields: field.type === "group" && field.repeatable ? field.fields : [],
       collection: null,
