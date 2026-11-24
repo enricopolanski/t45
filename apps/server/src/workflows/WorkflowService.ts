@@ -58,11 +58,12 @@ import {
   occupiedStep,
   stepCompletionRefusal,
   lastAdminRefusal,
-  approvedValue,
   isReviewedField,
   proposalFiltersRefusal,
   proposalRefusal,
   withReviewedProposals,
+  getProposalSourceKeys,
+  retainRecordAssociations,
   recordReviewsOf,
   getComparisonSources,
   getComparisonRefusal,
@@ -1489,6 +1490,9 @@ const make = Effect.gen(function* () {
             whyYes: proposal.whyYes,
             whyNo: proposal.whyNo,
             ...(proposal.score === undefined ? {} : { score: proposal.score }),
+            ...(getProposalSourceKeys(proposal).length === 0
+              ? {}
+              : { sourceRecordKeys: getProposalSourceKeys(proposal) }),
             ...(proposal.comparison === undefined ? {} : { comparison: proposal.comparison }),
           },
         ];
@@ -1699,7 +1703,11 @@ const make = Effect.gen(function* () {
           : null;
     if (problem !== null)
       return yield* new WorkflowRefused({ reason: "invalid_field_value", detail: problem });
-    if (field.type === "records") yield* requireRecords(caller, field, recordKeys(value));
+    if (field.type === "records") {
+      const keys = recordKeys(value);
+      yield* requireRecords(caller, field, keys);
+      step = retainRecordAssociations(step, fieldKey, keys);
+    }
     if (field.type === "group") {
       const before = rowIds(step.values[fieldKey]);
       const added = rowIds(value).filter((rowId) => !before.includes(rowId));
@@ -1746,13 +1754,32 @@ const make = Effect.gen(function* () {
     const { work, step, actorId } = yield* loadStepFor(caller, input.stepId);
     yield* requireWorkingStep(work, step);
     const field = yield* resolveField(work, step, input.fieldKey);
+    const inputs = stepInputFields(work.version.steps, work.ticket, definitionOf(work, step));
+    if (input.sourceRecordKeys !== undefined) {
+      const sources =
+        field.type === "records" && field.comparisonCriteria
+          ? (getComparisonSources(field.comparisonCriteria, inputs)?.records.map(
+              ({ recordKey }) => recordKey,
+            ) ?? [])
+          : inputs.flatMap(({ source, field }) =>
+              field.type === "records" ? recordKeys(source.values[field.id]) : [],
+            );
+      if (
+        field.type !== "records" ||
+        input.sourceRecordKeys.length === 0 ||
+        !input.sourceRecordKeys.every((key) => sources.includes(key)) ||
+        (input.comparison !== undefined &&
+          !input.sourceRecordKeys.includes(input.comparison.sourceRecordKey))
+      )
+        return yield* new WorkflowRefused({
+          reason: "invalid_proposal",
+          detail:
+            "Choose keys from the step's source records, including the one used in the comparison.",
+        });
+    }
     const refusal =
       proposalRefusal(step, field, input.fieldKey, input.value) ??
-      getComparisonRefusal(
-        field,
-        stepInputFields(work.version.steps, work.ticket, definitionOf(work, step)),
-        input.comparison,
-      );
+      getComparisonRefusal(field, inputs, input.comparison);
 
     if (refusal !== null)
       return yield* new WorkflowRefused({ reason: "invalid_proposal", detail: refusal });
@@ -1801,9 +1828,20 @@ const make = Effect.gen(function* () {
       input.stepId,
       input.proposalId,
     );
-    const value = approvedValue(field, step.values[proposal.fieldKey], proposal);
-    const rest = step.proposals!.filter((each) => each.id !== proposal.id);
-    yield* writeField(actorId, work, { ...step, proposals: rest }, field, proposal.fieldKey, value);
+    const reviewed = withReviewedProposals(step, field, proposal.fieldKey, {
+      approveIds: [proposal.id],
+      discardIds: [],
+    });
+    if (typeof reviewed === "string")
+      return yield* new WorkflowRefused({ reason: "invalid_proposal", detail: reviewed });
+    yield* writeField(
+      actorId,
+      work,
+      reviewed.step,
+      field,
+      proposal.fieldKey,
+      reviewed.approvedValue!,
+    );
     yield* save(work);
     yield* record("workflows.approveProposal", actorId, targetOf(work, step), {
       fieldKey: proposal.fieldKey,

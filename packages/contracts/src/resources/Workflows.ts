@@ -231,6 +231,7 @@ const StepFieldProposal = Schema.Struct({
   whyNo: Schema.optionalKey(Proposal.fields.whyNo),
   score: Proposal.fields.score,
   comparison: Proposal.fields.comparison,
+  sourceRecordKeys: Proposal.fields.sourceRecordKeys,
 });
 
 const ProposalFilterInput = Schema.Struct(
@@ -590,7 +591,13 @@ export const Workflows = RpcGroup.make(
       ...step,
       fieldKey: TrimmedNonEmptyString,
       value: FieldValue,
-      ...Struct.pick(Proposal.fields, ["whyYes", "whyNo", "score", "comparison"]),
+      ...Struct.pick(Proposal.fields, [
+        "whyYes",
+        "whyNo",
+        "score",
+        "comparison",
+        "sourceRecordKeys",
+      ]),
     },
     error: WorkflowErrors,
   }),

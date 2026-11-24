@@ -298,6 +298,7 @@ export const Proposal = Schema.Struct({
   /** The field's value; for a records field, the key of one more record to link. */
   value: Schema.Json,
   comparison: Schema.optionalKey(RecordComparison),
+  sourceRecordKeys: Schema.optionalKey(Schema.UniqueArray(TrimmedNonEmptyString)),
   whyYes: TrimmedNonEmptyString,
   whyNo: Schema.String,
   /** How well it fits, from 0 to 100; the best are reviewed first. */
@@ -339,6 +340,12 @@ export class Step extends Schema.Opaque<Step>()(
     values: FieldValues,
     /** The values proposed for its reviewed fields, open or discarded. */
     proposals: Schema.optionalKey(Schema.Array(Proposal)),
+    recordAssociations: Schema.optionalKey(
+      Schema.Record(
+        TrimmedNonEmptyString,
+        Schema.Record(TrimmedNonEmptyString, Schema.UniqueArray(TrimmedNonEmptyString)),
+      ),
+    ),
     /** Ordered discrepancy-filter questions over open proposals, by reviewed field. */
     proposalFilters: Schema.optionalKey(Schema.Array(ProposalFilter)),
     /** Confirmed group entries, by group field and row id. */
@@ -474,8 +481,59 @@ export const withReviewedProposals = (
     return [proposal];
   });
   return {
-    step: { ...step, proposals: nextProposals },
+    step:
+      field.type === "records"
+        ? approveIds.reduce<Step>(
+            (next, id) => {
+              const proposal = openById.get(id)!;
+              const sources = getProposalSourceKeys(proposal);
+              return sources.length === 0
+                ? next
+                : withRecordAssociation(next, fieldKey, proposal.value as string, sources);
+            },
+            { ...step, proposals: nextProposals },
+          )
+        : { ...step, proposals: nextProposals },
     ...(nextValue !== undefined ? { approvedValue: nextValue } : {}),
+  };
+};
+
+/** Older proposals already recorded the one source record to which their assessment belongs. */
+export const getProposalSourceKeys = (
+  proposal: Pick<Proposal, "sourceRecordKeys" | "comparison">,
+) =>
+  proposal.sourceRecordKeys ??
+  (proposal.comparison === undefined ? [] : [proposal.comparison.sourceRecordKey]);
+
+export const withRecordAssociation = (
+  step: Step,
+  fieldKey: string,
+  recordKey: string,
+  sourceKeys: ReadonlyArray<string>,
+): Step => ({
+  ...step,
+  recordAssociations: {
+    ...step.recordAssociations,
+    [fieldKey]: {
+      ...step.recordAssociations?.[fieldKey],
+      [recordKey]: [...new Set(sourceKeys)].toSorted(),
+    },
+  },
+});
+
+export const retainRecordAssociations = (
+  step: Step,
+  fieldKey: string,
+  keys: ReadonlyArray<string>,
+): Step => {
+  const current = step.recordAssociations?.[fieldKey];
+  if (current === undefined) return step;
+  return {
+    ...step,
+    recordAssociations: {
+      ...step.recordAssociations,
+      [fieldKey]: Object.fromEntries(Object.entries(current).filter(([key]) => keys.includes(key))),
+    },
   };
 };
 

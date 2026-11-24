@@ -1,32 +1,5 @@
-import type { Page } from "@playwright/test";
-
 import { expect, test } from "../fixtures.ts";
-
-interface RpcExit {
-  readonly _tag: string;
-  readonly exit?: {
-    readonly _tag: "Success" | "Failure";
-    readonly value?: unknown;
-    readonly cause?: unknown;
-  };
-}
-
-/** Calls one T45 HTTP RPC endpoint with the signed-in browser context's cookies and instance header. */
-async function rpc<T = unknown>(page: Page, tag: string, payload: unknown): Promise<T> {
-  const response = await page.request.post("/api/rpc", {
-    headers: { "content-type": "application/x-ndjson" },
-    data: `${JSON.stringify({ _tag: "Request", id: "1", tag, payload, headers: [] })}\n`,
-  });
-  expect(response.ok(), `HTTP ${response.status()} for ${tag}`).toBe(true);
-  const lines = (await response.text())
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as RpcExit);
-  const exit = lines.find((line) => line._tag === "Exit")?.exit;
-  expect(exit?._tag, `RPC failure for ${tag}: ${JSON.stringify(exit?.cause)}`).toBe("Success");
-  return exit?.value as T;
-}
+import { expectRpcFailure, rpc } from "../rpc.ts";
 
 test("filters overlapping tape discrepancies via Phase 2 reads and discards only confirmed exclusions", async ({
   signIn,
@@ -70,9 +43,27 @@ test("filters overlapping tape discrepancies via Phase 2 reads and discards only
       edits: [
         {
           type: "add_step",
-          stepId: "market_analysis",
+          stepId: "source_data",
           parentStepId: null,
           index: 0,
+          name: "Source data",
+        },
+        {
+          type: "add_field",
+          stepId: "source_data",
+          index: 0,
+          field: {
+            id: "source_records",
+            label: "Source records",
+            type: "records",
+            collectionId: collection.id,
+          },
+        },
+        {
+          type: "add_step",
+          stepId: "market_analysis",
+          parentStepId: null,
+          index: 1,
           name: "Market analysis",
         },
         {
@@ -87,6 +78,11 @@ test("filters overlapping tape discrepancies via Phase 2 reads and discards only
             isReviewed: true,
           },
         },
+        {
+          type: "bind_input",
+          stepId: "market_analysis",
+          input: { stepId: "source_data", fieldId: "source_records" },
+        },
       ],
     },
   );
@@ -97,20 +93,38 @@ test("filters overlapping tape discrepancies via Phase 2 reads and discards only
     workflowId,
     name: "Tape Proposal Review",
   });
-  await rpc(page, "workflows.addStepMember", {
-    projectId,
-    stepId: "market_analysis",
-    userId: session.userId,
-  });
+  for (const stepId of ["source_data", "market_analysis"]) {
+    await rpc(page, "workflows.addStepMember", { projectId, stepId, userId: session.userId });
+  }
   await rpc(page, "workflows.adoptWorkflowVersion", {
     projectId,
     versionId: version.id,
     revision: version.revision,
   });
-  const { stepId } = await rpc<{ readonly stepId: string }>(page, "workflows.startTicket", {
+  const sourceKeys = ["source-large", "source-small"];
+  for (const key of sourceKeys) {
+    await rpc(page, "collections.saveRecord", {
+      collectionId: collection.id,
+      values: { record_key: key, product_title: key },
+    });
+  }
+  const initial = await rpc<{ readonly stepId: string }>(page, "workflows.startTicket", {
     projectId,
     title: "Masking Tape",
   });
+  await rpc(page, "workflows.setStepField", {
+    ...initial,
+    fieldKey: "source_records",
+    value: sourceKeys,
+  });
+  const { ticket } = await rpc<{ ticket: { id: string } }>(page, "workflows.getStep", initial);
+  await rpc(page, "workflows.markStepDone", initial);
+  const { steps } = await rpc<{ steps: ReadonlyArray<{ id: string; stepDefinitionId: string }> }>(
+    page,
+    "workflows.getTicket",
+    { ticketId: ticket.id },
+  );
+  const stepId = steps.find((entry) => entry.stepDefinitionId === "market_analysis")!.id;
 
   // Phase 1 proposes two 90 °C tapes with different adhesives.
   await rpc(page, "workflows.proposeStepField", {
@@ -121,13 +135,23 @@ test("filters overlapping tape discrepancies via Phase 2 reads and discards only
     whyNo: "Rated 90 °C instead of 100 °C; acrylic adhesive instead of natural rubber.",
     score: 68,
   });
-  await rpc(page, "workflows.proposeStepField", {
+  const rubberProposal = {
     stepId,
     fieldKey: "competitor_products",
     value: "tape-rubber-90",
     whyYes: "Exact 38 mm width, 50 m roll, natural rubber adhesive.",
     whyNo: "Rated 90 °C instead of 100 °C.",
     score: 76,
+  };
+  await expectRpcFailure(
+    page,
+    "workflows.proposeStepField",
+    { ...rubberProposal, sourceRecordKeys: ["outside-ticket"] },
+    "invalid_proposal",
+  );
+  await rpc(page, "workflows.proposeStepField", {
+    ...rubberProposal,
+    sourceRecordKeys: sourceKeys,
   });
 
   // Phase 1 compact read omits proposal ids and rationale.
@@ -148,6 +172,7 @@ test("filters overlapping tape discrepancies via Phase 2 reads and discards only
       readonly id: string;
       readonly value: string;
       readonly score?: number;
+      readonly sourceRecordKeys?: ReadonlyArray<string>;
       readonly whyYes: string;
       readonly whyNo: string;
       readonly isDiscarded: boolean;
@@ -162,6 +187,7 @@ test("filters overlapping tape discrepancies via Phase 2 reads and discards only
   expect(rubber?.id).toBeTruthy();
   expect(acrylic?.whyNo).toContain("acrylic adhesive");
   expect(rubber?.score).toBe(76);
+  expect(rubber?.sourceRecordKeys).toEqual(sourceKeys);
 
   // Phase 2 saves overlapping discrepancy questions using the returned proposal ids.
   await rpc(page, "workflows.setProposalFilters", {
@@ -234,4 +260,8 @@ test("filters overlapping tape discrepancies via Phase 2 reads and discards only
   expect(afterReload.proposals.find((p) => p.value === "tape-acrylic-90")?.isDiscarded).toBe(true);
   expect(afterReload.proposals.find((p) => p.value === "tape-rubber-90")).toBeUndefined();
   expect(JSON.stringify(afterReload.fields[0]?.value)).toContain("tape-rubber-90");
+  const { step } = await rpc<{
+    step: { recordAssociations: Record<string, Record<string, ReadonlyArray<string>>> };
+  }>(page, "workflows.getStep", { stepId });
+  expect(step.recordAssociations.competitor_products).toEqual({ "tape-rubber-90": sourceKeys });
 });

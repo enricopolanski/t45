@@ -27,6 +27,8 @@ import {
   proposalFiltersRefusal,
   proposalRefusal,
   withReviewedProposals,
+  retainRecordAssociations,
+  withRecordAssociation,
   evaluateProposalFilterCascade,
   type ProposalFilter,
   confirmRecordEntry,
@@ -618,6 +620,59 @@ describe("proposing a value", () => {
     assert.deepStrictEqual(approvedValue(listings, ["B0LINKED"], linked!), ["B0LINKED", "B0OPEN"]);
     assert.deepStrictEqual(approvedValue(listings, undefined, linked!), ["B0OPEN"]);
     assert.strictEqual(approvedValue(brand, "Tesa", named!), "Scotch");
+  });
+
+  it("keeps every article association when approving and removes only the unlinked record's associations", () => {
+    const fieldKey = "f_listings";
+    const proposed: Step = {
+      ...step,
+      values: { [fieldKey]: ["already-linked"] },
+      recordAssociations: { [fieldKey]: { "already-linked": ["article-c"] } },
+      proposals: [
+        proposal("shared-offer", fieldKey, "shared-record", {
+          sourceRecordKeys: ["article-b", "article-a"],
+        }),
+        proposal("legacy-offer", fieldKey, "legacy-record", {
+          comparison: { sourceRecordKey: "article-b", assessments: [] },
+        }),
+        proposal("rejected-offer", fieldKey, "rejected-record", {
+          sourceRecordKeys: ["article-a", "article-b"],
+        }),
+      ],
+    };
+    const approved = withReviewedProposals(proposed, listings, fieldKey, {
+      approveIds: ["shared-offer"],
+      discardIds: [],
+    });
+    assert.isNotString(approved);
+    if (typeof approved === "string") return;
+    assert.deepEqual(approved.approvedValue, ["already-linked", "shared-record"]);
+    assert.deepEqual(approved.step.recordAssociations?.[fieldKey], {
+      "already-linked": ["article-c"],
+      "shared-record": ["article-a", "article-b"],
+    });
+
+    const batch = withReviewedProposals(proposed, listings, fieldKey, {
+      approveIds: ["shared-offer", "legacy-offer"],
+      discardIds: ["rejected-offer"],
+    });
+    assert.isNotString(batch);
+    if (typeof batch === "string") return;
+    assert.deepEqual(batch.approvedValue, ["already-linked", "shared-record", "legacy-record"]);
+    assert.deepEqual(batch.step.recordAssociations?.[fieldKey], {
+      "already-linked": ["article-c"],
+      "shared-record": ["article-a", "article-b"],
+      "legacy-record": ["article-b"],
+    });
+    const corrected = withRecordAssociation(batch.step, fieldKey, "legacy-record", ["article-a"]);
+    const unlinked = retainRecordAssociations(corrected, fieldKey, [
+      "shared-record",
+      "legacy-record",
+    ]);
+    assert.deepEqual(unlinked.recordAssociations?.[fieldKey], {
+      "shared-record": ["article-a", "article-b"],
+      "legacy-record": ["article-a"],
+    });
   });
 
   it("reviews the open proposals best first, unscored last", () => {
