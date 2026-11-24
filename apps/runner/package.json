@@ -6,7 +6,10 @@
     "dev": "node --watch src/bin.ts",
     "start": "node src/bin.ts",
     "image": "sh image/build-local.sh",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p cloudflare",
+    "cloudflare:dev": "wrangler dev",
+    "cloudflare:deploy": "wrangler deploy",
+    "cloudflare:types": "wrangler types cloudflare/worker-configuration.d.ts"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
@@ -18,7 +21,9 @@
     "microsandbox": "0.7.8"
   },
   "devDependencies": {
-    "@types/node": "catalog:"
+    "@cloudflare/sandbox": "1.0.3",
+    "@types/node": "catalog:",
+    "wrangler": "4.166.0"
   },
   "engines": {
     "node": "^24.21.0"

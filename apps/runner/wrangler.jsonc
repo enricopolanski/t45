@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "t45-runner-experiment",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-11-19",
+  // Effect and the Sandbox SDK's Files use Node APIs.
+  "compatibility_flags": ["nodejs_compat"],
+  "secrets": { "required": ["T45_RUNNER_TOKEN"] },
+  "durable_objects": {
+    "bindings": [{ "name": "CALCULATION", "class_name": "Calculation" }],
+  },
+  "containers": [
+    {
+      "class_name": "Calculation",
+      "scheduling_policy": "durable_object",
+      "images": { "calculation": { "dockerfile": "./cloudflare/Dockerfile" } },
+    },
+  ],
+  "exports": {
+    "Calculation": { "type": "durable-object", "storage": "sqlite" },
+  },
+  "observability": { "enabled": true },
+}

@@ -13,6 +13,7 @@ packages:
 allowBuilds:
   esbuild: true
   msw: false
+  workerd: true
 
 catalog:
   "@playwright/test": 1.65.0
