@@ -202,6 +202,8 @@ export const ComparisonFields = Schema.Union([
 });
 export type ComparisonFields = typeof ComparisonFields.Type;
 
+export const StepFieldReference = Schema.Struct({ stepId: StringId, fieldId: FieldPathSegment });
+
 /**
  * Records of a collection that belong here, as the list of their keys: the records stay in the
  * collection, shared with every step and ticket that links them.
@@ -217,6 +219,7 @@ const RecordsField = Schema.Struct({
   ),
   comparisonFields: Schema.optionalKey(ComparisonFields),
   comparisonCriteria: Schema.optionalKey(ComparisonCriteria),
+  recordAssociationSource: Schema.optionalKey(StepFieldReference),
 });
 
 /**

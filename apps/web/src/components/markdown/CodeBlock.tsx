@@ -1,5 +1,5 @@
 import { useTranslation, translate } from "~/i18n/locale";
-import type { DiffsHighlighter } from "@pierre/diffs";
+import type { HighlighterCore } from "@shikijs/core";
 import { CatchBoundary } from "@tanstack/react-router";
 import DOMPurify from "dompurify";
 import { toHtml } from "hast-util-to-html";
@@ -346,7 +346,7 @@ function UncachedHighlightedCode({
   );
 }
 
-type HighlightedRoot = ReturnType<DiffsHighlighter["codeToHast"]>;
+type HighlightedRoot = ReturnType<HighlighterCore["codeToHast"]>;
 type HighlightedNode = HighlightedRoot["children"][number];
 
 /** Shiki's output is always `pre > code > lines`. */
@@ -363,13 +363,13 @@ function preAndCode(root: HighlightedRoot) {
  * multiline strings, comments, and embedded languages continue to highlight as
  * they do in a full pass. The current line is always highlighted again.
  */
-function createIncrementalHighlightedDocument(highlighter: DiffsHighlighter, language: string) {
+function createIncrementalHighlightedDocument(highlighter: HighlighterCore, language: string) {
   const options = { lang: language, theme: CODE_THEME_NAME };
   const newline = { type: "text" as const, value: "\n" };
   let cached:
     | {
         prefix: string;
-        state: ReturnType<DiffsHighlighter["getLastGrammarState"]>;
+        state: ReturnType<HighlighterCore["getLastGrammarState"]>;
         children: ReturnType<typeof preAndCode>["code"]["children"];
       }
     | undefined;

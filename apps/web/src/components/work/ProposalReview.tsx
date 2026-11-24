@@ -6,6 +6,7 @@ import {
   type ProposalFilterDraftAnswer,
 } from "@t45/contracts/models/Workflow";
 import type { FieldView, StepView } from "@t45/contracts/resources/Workflows";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { formatRecordValue } from "../collections/Records";
@@ -370,6 +371,20 @@ export function ProposalReview({
                     : `${t("{0} left", remaining.length)}${postponed.length > 0 ? t(" · {0} postponed", postponed.length) : ""}`}
                 </span>
               </DialogTitle>
+              {view.preview && (
+                <Link
+                  to="/my-work/preview/$ticketId/$stepDefinitionId"
+                  params={{
+                    ticketId: view.preview.ticketId,
+                    stepDefinitionId: view.preview.stepDefinitionId,
+                  }}
+                  target="_blank"
+                  rel="noopener"
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  {t("Preliminary results")}
+                </Link>
+              )}
               {isCascadeMode && !isConfirming ? (
                 <Button
                   type="button"

@@ -1,12 +1,21 @@
 import { expect, it } from "vite-plus/test";
 
-import { getSyntaxHighlighterPromise } from "./syntaxHighlighting";
+import { CODE_THEME_NAME, getSyntaxHighlighterPromise } from "./syntaxHighlighting";
 
-it("caches the recovered text highlighter for unsupported languages", async () => {
-  const first = getSyntaxHighlighterPromise("unsupported-test-language");
+it("renders excluded languages as plain text", async () => {
+  const first = getSyntaxHighlighterPromise("wolfram");
   const textHighlighter = await getSyntaxHighlighterPromise("text");
   await expect(first).resolves.toBe(textHighlighter);
-  const second = getSyntaxHighlighterPromise("unsupported-test-language");
+  expect(getSyntaxHighlighterPromise("emacs-lisp")).toBe(first);
+  expect(textHighlighter.getLoadedLanguages()).not.toContain("wolfram");
+});
 
-  expect(second).toBe(first);
+it("highlights shell commands and TypeScript fences", async () => {
+  const shell = await getSyntaxHighlighterPromise("shellscript");
+  const typescript = await getSyntaxHighlighterPromise("ts");
+  expect(typescript).toBe(shell);
+  expect(shell.getLoadedLanguages()).toEqual(expect.arrayContaining(["bash", "ts"]));
+  expect(
+    shell.codeToTokens("echo 'hello'", { lang: "bash", theme: CODE_THEME_NAME }).tokens[0],
+  ).toEqual(expect.arrayContaining([expect.objectContaining({ content: "'hello'" })]));
 });

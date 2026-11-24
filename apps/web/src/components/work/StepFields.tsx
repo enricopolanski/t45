@@ -16,7 +16,11 @@ import {
   type TableColumn,
 } from "@t45/contracts/models/Layout";
 import { AccessDenied } from "@t45/contracts/resources/errors";
-import type { FieldValue as StepFieldValue, FieldView } from "@t45/contracts/resources/Workflows";
+import type {
+  FieldValue as StepFieldValue,
+  FieldView,
+  StepView,
+} from "@t45/contracts/resources/Workflows";
 import { ChevronDownIcon, LinkIcon, PaperclipIcon, PlusIcon, XIcon } from "lucide-react";
 import { type ComponentProps, type ReactNode, useId, useRef, useState } from "react";
 
@@ -39,6 +43,7 @@ import { MarkdownInput } from "../fields/MarkdownInput";
 import { MarkdownText } from "../markdown/MarkdownText";
 import { OptionValue } from "../fields/OptionValue";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
   Dialog,
@@ -222,7 +227,18 @@ export function FieldValue({ field }: { readonly field: FieldView }) {
   );
 }
 
-type EditorProps = {
+type RecordAssociationProps = {
+  readonly associationFields?: StepView["associationFields"];
+  readonly recordAssociations?: StepView["step"]["recordAssociations"];
+  readonly onAssociate?: (
+    fieldKey: string,
+    recordKey: string,
+    sourceRecordKeys: ReadonlyArray<string>,
+  ) => Promise<string | null>;
+  readonly onUnlink?: (fieldKey: string, recordKey: string) => void | Promise<unknown>;
+};
+
+type EditorProps = RecordAssociationProps & {
   readonly field: FieldView;
   /** Paths of the fields to flag as still empty. */
   readonly missing: ReadonlySet<string>;
@@ -594,9 +610,13 @@ function FieldInputs({
     <div className="flex flex-col gap-5">
       {runs.map((run) => (
         <div key={run.map((field) => field.key).join()} className="flex flex-col gap-2">
-          {run.map((field) => (
-            <FieldEditor key={field.key} {...props} field={field} />
-          ))}
+          {run.map((field) =>
+            field.isReadOnly ? (
+              <ReadOnlyFields key={field.key} fields={[field]} />
+            ) : (
+              <FieldEditor key={field.key} {...props} field={field} />
+            ),
+          )}
         </div>
       ))}
     </div>
@@ -668,7 +688,17 @@ function GroupEditor({ field, ...props }: EditorProps) {
  * A records field: the collection's records it links, listed as the collection lists them. A
  * record opens to edit it; others are linked from the collection, or added to it and linked.
  */
-function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: EditorProps) {
+function LinkedRecords({
+  field,
+  missing,
+  onSave,
+  onRecordSaved,
+  recordStatus,
+  associationFields,
+  recordAssociations,
+  onAssociate,
+  onUnlink,
+}: EditorProps) {
   const t = useTranslation();
   const [opened, setOpened] = useState<{
     readonly values: FieldValues;
@@ -677,13 +707,52 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
   const [viewedKey, setViewedKey] = useState<string | null>(null);
   const showcasePopup = useRef<HTMLDivElement>(null);
   const [isPicking, setIsPicking] = useState(false);
+  const [associationKey, setAssociationKey] = useState<string | null>(null);
   const { collection } = field;
   const hasShowcase = collection?.layout?.page?.template === "showcase";
   const viewed = field.records.find((record) => record.key === viewedKey);
   const renderStatus = recordStatus?.(field);
   const canPickRecord = renderStatus === undefined;
   const keys = recordKeys(field.value);
-  const link = (key: string) => onSave(field.key, [...keys, key]);
+  const sourceRecords = associationFields?.[field.key];
+  const associations = recordAssociations?.[field.key];
+  const link = (key: string) => {
+    if (sourceRecords !== undefined && onAssociate !== undefined) setAssociationKey(key);
+    else onSave(field.key, [...keys, key]);
+  };
+  const renderRecordStatus =
+    sourceRecords === undefined || onAssociate === undefined
+      ? renderStatus
+      : (record: FieldView["records"][number]) => {
+          const assigned = new Set(associations?.[record.key]);
+          const sources = sourceRecords.filter(({ key }) => assigned.has(key));
+          return (
+            <div className="flex flex-col items-start gap-1">
+              {renderStatus?.(record)}
+              {sources.length === 0 ? (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setAssociationKey(record.key);
+                  }}
+                >
+                  {t("Assign source records")}
+                </Button>
+              ) : (
+                <ul className="w-44 space-y-1 text-sm leading-5 font-medium whitespace-normal sm:w-56">
+                  {sources.map(({ key, label }) => (
+                    <li key={key} className="break-words">
+                      {label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        };
   return (
     <div data-field-key={field.key} className="col-span-full flex flex-col gap-2">
       <GroupHeading field={field}>
@@ -709,14 +778,18 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
               onView={hasShowcase ? (record) => setViewedKey(record.key) : undefined}
               onEdit={setOpened}
               columnIds={field.recordTableColumns}
-              renderStatus={renderStatus}
+              renderStatus={renderRecordStatus}
               remove={(record) => ({
                 label: t("Unlink record {0}", record.key),
-                onRemove: () =>
-                  onSave(
-                    field.key,
-                    keys.filter((key) => key !== record.key),
-                  ),
+                onRemove: () => {
+                  if (sourceRecords !== undefined && onUnlink !== undefined)
+                    void onUnlink(field.key, record.key);
+                  else
+                    onSave(
+                      field.key,
+                      keys.filter((key) => key !== record.key),
+                    );
+                },
               })}
             />
           ) : null}
@@ -781,6 +854,15 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
               }}
             />
           )}
+          {associationKey !== null && sourceRecords !== undefined && onAssociate !== undefined && (
+            <RecordAssociationDialog
+              key={associationKey}
+              sources={sourceRecords}
+              selectedKeys={associations?.[associationKey]}
+              onClose={() => setAssociationKey(null)}
+              onSave={(selected) => onAssociate(field.key, associationKey, selected)}
+            />
+          )}
           {canPickRecord && isPicking ? (
             <RecordPicker
               label={field.label}
@@ -796,6 +878,93 @@ function LinkedRecords({ field, missing, onSave, onRecordSaved, recordStatus }: 
         </>
       )}
     </div>
+  );
+}
+
+function RecordAssociationDialog({
+  sources,
+  selectedKeys,
+  onClose,
+  onSave,
+}: {
+  readonly sources: ReadonlyArray<{ readonly key: string; readonly label: string }>;
+  readonly selectedKeys: ReadonlyArray<string> | undefined;
+  readonly onClose: () => void;
+  readonly onSave: (keys: ReadonlyArray<string>) => Promise<string | null>;
+}) {
+  const t = useTranslation();
+  const [selected, setSelected] = useState(
+    () => new Set(selectedKeys ?? (sources.length === 1 ? [sources[0]!.key] : [])),
+  );
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const keys = sources.flatMap(({ key }) => (selected.has(key) ? [key] : []));
+  const save = async () => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const failure = await onSave(keys);
+      if (failure === null) onClose();
+      else setError(failure);
+    } catch (cause) {
+      setError(describeFailure(cause));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !isSaving) onClose();
+      }}
+    >
+      <DialogPopup>
+        <DialogHeader>
+          <DialogTitle>{t("Choose source records")}</DialogTitle>
+        </DialogHeader>
+        <DialogPanel>
+          <div className="flex flex-col gap-3">
+            {error !== null && <ErrorText text={error} />}
+            {sources.length === 0 && (
+              <p className="text-sm text-muted-foreground">{t("No source records are linked.")}</p>
+            )}
+            {sources.map(({ key, label }) => (
+              <Label key={key} className="items-start">
+                <Checkbox
+                  checked={selected.has(key)}
+                  disabled={isSaving}
+                  onCheckedChange={(checked) =>
+                    setSelected((previous) => {
+                      const next = new Set(previous);
+                      if (checked) next.add(key);
+                      else next.delete(key);
+                      return next;
+                    })
+                  }
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span>{label}</span>
+                  {label !== key && <span className="text-xs text-muted-foreground">{key}</span>}
+                </span>
+              </Label>
+            ))}
+          </div>
+        </DialogPanel>
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={isSaving} onClick={onClose}>
+            {t("Cancel")}
+          </Button>
+          <Button
+            type="button"
+            disabled={isSaving || keys.length === 0}
+            onClick={() => void save()}
+          >
+            {t("Save")}
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -1296,7 +1465,8 @@ export function StepFields({
   recordStatus,
   holdOpen = false,
   review,
-}: {
+  ...recordAssociationProps
+}: RecordAssociationProps & {
   readonly fields: ReadonlyArray<FieldView>;
   readonly editable: boolean;
   /** Shown first: the review of the values proposed for the fields. */
@@ -1322,6 +1492,7 @@ export function StepFields({
           onUpload={onUpload}
           onRecordSaved={onRecordSaved}
           recordStatus={recordStatus}
+          {...recordAssociationProps}
         />
       ) : (
         <ReadOnlyFields fields={fields} />

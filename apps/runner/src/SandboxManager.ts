@@ -1,6 +1,13 @@
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { Config as OpenCodeConfig } from "@opencode/schema/config";
 import { CAPABILITIES_DIR } from "@t45/contracts/models/Capability";
+import { generateId } from "@t45/contracts/models/primitives";
+import {
+  ExecutionFailed,
+  SCRIPT_INPUT_FILE,
+  ScriptOutputs,
+  ScriptRequest,
+} from "@t45/contracts/resources/Runner";
 import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -182,6 +189,67 @@ const write = (vm: Microvm, target: string, content: string | Uint8Array) => {
     Effect.andThen(sdk("write", () => fs.write(target, content))),
   );
 };
+
+const decodeScriptOutputs = Schema.decodeUnknownEffect(Schema.fromJsonString(ScriptOutputs));
+const encodeScriptInputs = Schema.encodeSync(Schema.fromJsonString(ScriptRequest.fields.inputs));
+
+export const runScript = Effect.fn("SandboxManager.runScript")(
+  function* (request: ScriptRequest) {
+    if (
+      !Object.hasOwn(request.files, request.entrypoint) ||
+      !/\.(?:js|mjs|ts)$/u.test(request.entrypoint)
+    )
+      return yield* new ExecutionFailed({
+        reason: "Choose a JavaScript or TypeScript file from the calculation files.",
+      });
+
+    const vm = yield* Effect.acquireRelease(
+      sdk("create", () =>
+        Microvm.builder(`calculation-${generateId()}`)
+          .image(IMAGE)
+          .pullPolicy("if-missing")
+          .user("agent")
+          .security("restricted")
+          .cpus(1)
+          .memory(512)
+          .ephemeral(true)
+          .network((settings) =>
+            settings.policyFromBuilder(
+              NetworkPolicy.builder().defaultEgress("deny").defaultIngress("deny"),
+            ),
+          )
+          .create(),
+      ),
+      (vm) => sdk("remove", () => vm.destroy()).pipe(Effect.catch(Effect.logWarning)),
+    );
+    const input = `/work/${SCRIPT_INPUT_FILE}`;
+    yield* write(vm, input, encodeScriptInputs(request.inputs));
+    for (const [path, content] of Object.entries(request.files))
+      yield* write(vm, `/work/${path}`, content);
+    const output = yield* sdk("run script", () =>
+      vm.execWith("node", (exec) =>
+        exec
+          .args([`/work/${request.entrypoint}`, input])
+          .cwd("/work")
+          .timeout(30_000),
+      ),
+    );
+    if (!output.success)
+      return yield* new ExecutionFailed({
+        reason: `The calculation exited with code ${output.code}.`,
+      });
+    return yield* decodeScriptOutputs(output.stdout()).pipe(
+      Effect.mapError(
+        () =>
+          new ExecutionFailed({ reason: "The calculation must print a JSON object of numbers." }),
+      ),
+    );
+  },
+  Effect.scoped,
+  Effect.mapError((error) =>
+    error._tag === "ExecutionFailed" ? error : new ExecutionFailed({ reason: error.message }),
+  ),
+);
 
 const writeAgentSetup = Effect.fn("SandboxManager.writeAgentSetup")(function* (
   vm: Microvm,

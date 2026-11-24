@@ -181,9 +181,9 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
     setError(null);
     if (empty.length === 0 && incomplete.length === 0 && pendingReviews.length === 0) {
       void act(async () => {
-        await api("workflows.markStepDone", step);
-        // Done, a step of the workflow leaves its members' sight: back to their work.
-        if (view.parents.length === 0) await navigate({ to: "/my-work" });
+        const { nextStepId } = await api("workflows.markStepDone", step);
+        if (nextStepId) await navigate({ to: "/my-work/$stepId", params: { stepId: nextStepId } });
+        else if (view.parents.length === 0) await navigate({ to: "/my-work" });
       });
     }
   };
@@ -246,6 +246,23 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         />
       ) : (
         <StepFields
+          associationFields={view.associationFields}
+          recordAssociations={view.step.recordAssociations}
+          onAssociate={(fieldKey, recordKey, sourceRecordKeys) =>
+            act(
+              () =>
+                api("workflows.setRecordAssociation", {
+                  ...step,
+                  fieldKey,
+                  recordKey,
+                  sourceRecordKeys,
+                }),
+              true,
+            )
+          }
+          onUnlink={(fieldKey, recordKey) =>
+            act(() => api("workflows.removeAssociatedRecord", { ...step, fieldKey, recordKey }))
+          }
           fields={actions.canEditFields ? fields : view.fields}
           editable={actions.canEditFields}
           missing={new Set(missing.map((field) => field.key))}
@@ -391,6 +408,8 @@ const stepperStatus = {
 function StepStepper({ view, rootId }: { readonly view: StepView; readonly rootId: string }) {
   const t = useTranslation();
   const steps = view.stepNavigation ?? [];
+  const preview = view.preview;
+  const previewName = preview && stepNameParts.exec(preview.stepName);
   if (steps.length === 0) return null;
   return (
     <nav aria-label={t("Item steps")} className="min-w-0 rounded-xl border border-border bg-card">
@@ -434,7 +453,7 @@ function StepStepper({ view, rootId }: { readonly view: StepView; readonly rootI
                   </span>
                 </span>
               </Link>
-              {index < steps.length - 1 ? (
+              {index < steps.length - 1 || preview ? (
                 <span
                   aria-hidden
                   className={cn(
@@ -446,6 +465,31 @@ function StepStepper({ view, rootId }: { readonly view: StepView; readonly rootI
             </li>
           );
         })}
+        {preview && (
+          <li className="relative flex min-w-32 flex-1">
+            <Link
+              to="/my-work/preview/$ticketId/$stepDefinitionId"
+              params={{ ticketId: preview.ticketId, stepDefinitionId: preview.stepDefinitionId }}
+              className="flex min-w-0 flex-1 flex-col items-start gap-2 rounded-lg p-2 hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            >
+              <span
+                aria-hidden
+                className="flex size-8 items-center justify-center rounded-full border border-dashed border-primary/60 bg-card text-primary"
+              >
+                <CircleIcon className="size-4" />
+              </span>
+              <span className="flex flex-col gap-0.5">
+                <span className="text-xs text-muted-foreground">
+                  {t("Step {0}", preview.stepNumber)}
+                </span>
+                <span className="text-sm leading-snug font-medium wrap-anywhere">
+                  {previewName?.[2] ?? preview.stepName}
+                </span>
+                <span className="text-xs font-medium text-primary">{t("Preliminary results")}</span>
+              </span>
+            </Link>
+          </li>
+        )}
       </ol>
     </nav>
   );

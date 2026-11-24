@@ -47,6 +47,8 @@ import {
 } from "./Workflow.ts";
 import { defaultValues, Field, fieldValueProblem, type Layout, resolveFieldPath } from "./Field.ts";
 
+const decodeStepDefinitions = Schema.decodeSync(Schema.Array(StepDefinition));
+
 const at = DateTime.makeUnsafe("2026-10-26T12:00:00.000Z");
 const project: Project = {
   id: "project01",
@@ -346,7 +348,7 @@ describe("laying out a group", () => {
       ...(layout && { layout }),
     }) as Field;
   const stepsWith = (field: Field, extra: Partial<StepDefinition> = {}) =>
-    Schema.decodeUnknownSync(Schema.Array(StepDefinition))([
+    decodeStepDefinitions([
       definition("first01", [definition("child01", [], { fields: [field], ...extra })]),
     ]);
   const layoutOf = (steps: ReadonlyArray<StepDefinition>) => {

@@ -407,6 +407,7 @@ export const layer = RunnerRpcs.toLayer(
     });
 
     return RunnerRpcs.of({
+      runScript: SandboxManager.runScript,
       execute: (request) =>
         Stream.callback((queue) =>
           execute(request, (event) => Queue.offer(queue, event).pipe(Effect.asVoid)).pipe(

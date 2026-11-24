@@ -33,7 +33,9 @@ import {
   ticketStartRefusal,
   applyWorkflowEdits,
   changedLayouts,
+  changedCalculatorPresentation,
   isLayoutChangeOnly,
+  setCalculatorPresentation,
   setLayouts,
   canAttachAgent,
   canEditWorkflow,
@@ -63,6 +65,7 @@ import {
   proposalRefusal,
   withReviewedProposals,
   getProposalSourceKeys,
+  withRecordAssociation,
   retainRecordAssociations,
   recordReviewsOf,
   getComparisonSources,
@@ -102,7 +105,7 @@ import type {
   StepSnapshot,
   TicketSummaryView,
 } from "@t45/contracts/resources/Workflows";
-import { StepView } from "@t45/contracts/resources/Workflows";
+import { StepPreview, StepView } from "@t45/contracts/resources/Workflows";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -121,6 +124,8 @@ import { CollectionService } from "../collections/CollectionService.ts";
 import { type CommandLogEntry, CommandLogRepository } from "../persistence/CommandLogRepository.ts";
 import { UserRepository } from "../org/UserRepository.ts";
 import { NotificationRepository } from "./NotificationRepository.ts";
+import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
+import { makeScriptCalculations, SCRIPT_RESULT_KEY } from "./ScriptCalculations.ts";
 import { TicketRepository } from "./TicketRepository.ts";
 import { WorkflowRepository } from "./WorkflowRepository.ts";
 import { ProjectRepository } from "./ProjectRepository.ts";
@@ -155,6 +160,7 @@ const stepFileForChat = (file: Attachment) => ({
 });
 
 const sameStepView = Schema.toEquivalence(StepView);
+const samePreview = Schema.toEquivalence(StepPreview);
 const encodeCompactJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 /** Why a chat refuses to start a step's automation; it refuses a new automation chat for nothing else. */
 const SKIP_REASON_OF_CHAT_REFUSAL: Partial<Record<ChatRefusal, AutomationSkipReason>> = {
@@ -196,6 +202,7 @@ interface Work {
 }
 
 const make = Effect.gen(function* () {
+  const scripts = yield* makeScriptCalculations;
   const workflows = yield* WorkflowRepository;
   const projects = yield* ProjectRepository;
   const tickets = yield* TicketRepository;
@@ -412,7 +419,12 @@ const make = Effect.gen(function* () {
     work.ticket = putTicketStep(work.ticket, step);
   };
 
-  const save = (work: Work) => tickets.update(work.ticket);
+  const save = (work: Work) =>
+    tickets.transaction(
+      tickets
+        .update(work.ticket)
+        .pipe(Effect.andThen(scripts.schedule(work.ticket.id, work.version.steps))),
+    );
   const workOf = Effect.fnUntraced(function* (ticket: Ticket) {
     const project = yield* found(projects.get(ticket.projectId));
     const version = yield* found(workflows.versions.get(ticket.workflowVersionId));
@@ -1017,15 +1029,42 @@ const make = Effect.gen(function* () {
     if (steps.size === 0) return yield* new NotFound();
     if (project.workflowVersionId === null)
       return yield* new WorkflowRefused({ reason: "not_adopted" });
-    const open = (yield* tickets.listOpen(project.id)).filter((ticket) => {
+    const open = yield* tickets.listOpen(project.id);
+    const visible = open.filter((ticket) => {
       const current = currentStep(ticket);
       return current !== null && steps.has(current.stepDefinitionId);
     });
+    const ticketVersions = yield* versionsOf(project.workflowId);
+    const previews = open.flatMap((ticket) => {
+      const version = ticketVersions.find(({ id }) => id === ticket.workflowVersionId);
+      const current = currentStep(ticket);
+      if (version === undefined || current === null) return [];
+      const destination = getStepAfter(version.steps, current.stepDefinitionId);
+      if (
+        destination === undefined ||
+        !steps.has(destination.id) ||
+        steps.has(current.stepDefinitionId)
+      )
+        return [];
+      const available =
+        destination.previewFields === undefined
+          ? destination.calculator?.kind === "script"
+          : destination.previewFields.length > 0;
+      return available
+        ? [
+            {
+              workflowVersionId: version.id,
+              preview: getPreviewLink(ticket, destination, version.steps),
+            },
+          ]
+        : [];
+    });
     const versionIds = new Set([
       project.workflowVersionId,
-      ...open.map((ticket) => ticket.workflowVersionId),
+      ...visible.map((ticket) => ticket.workflowVersionId),
+      ...previews.map(({ workflowVersionId }) => workflowVersionId),
     ]);
-    const versions = (yield* versionsOf(project.workflowId)).filter(({ id }) => versionIds.has(id));
+    const versions = ticketVersions.filter(({ id }) => versionIds.has(id));
     const version = yield* found(
       Effect.succeed(
         versions.find(({ id }) => id === (input.versionId ?? project.workflowVersionId)) ?? null,
@@ -1036,10 +1075,13 @@ const make = Effect.gen(function* () {
       version,
       columns: version.steps.filter((step) => steps.has(step.id)),
       versions: versions.toReversed(),
-      tickets: open.filter((ticket) => ticket.workflowVersionId === version.id).map(summaryOf),
+      tickets: visible.filter((ticket) => ticket.workflowVersionId === version.id).map(summaryOf),
+      previews: previews
+        .filter(({ workflowVersionId }) => workflowVersionId === version.id)
+        .map(({ preview }) => preview),
       canStartTicket: ticketStartRefusal(steps, project, yield* adoptedOf(project)) === null,
     };
-  });
+  }, transaction);
 
   const refuse = (reason: WorkflowRefused["reason"]) => new WorkflowRefused({ reason });
 
@@ -1061,6 +1103,15 @@ const make = Effect.gen(function* () {
     Effect.forEach(
       edits,
       Effect.fnUntraced(function* (edit) {
+        if (edit.type === "set_step_calculator" && edit.calculator?.kind === "script") {
+          if (
+            !(yield* scripts.options(workflow, actorId)).some(
+              ({ id }) => id === edit.calculator?.id,
+            )
+          )
+            return yield* refuse("invalid_calculator");
+          return;
+        }
         if (edit.type !== "attach_automation") return;
         const automation = yield* automations.get(edit.automationId);
         const agent = automation === null ? null : yield* agents.get(automation.agentId);
@@ -1087,6 +1138,7 @@ const make = Effect.gen(function* () {
       editorUserIds: [],
       isArchived: false,
     };
+    if (!(yield* scripts.validate(steps, workflow))) return yield* refuse("invalid_calculator");
     yield* requireAttachable(actorId, workflow, input.edits ?? []);
     yield* workflows.save(workflow);
     yield* workflows.versions.save({
@@ -1154,6 +1206,7 @@ const make = Effect.gen(function* () {
     );
     if (steps === null) return yield* refuse("invalid_edit");
     if (!hasValidInputs(steps)) return yield* refuse("invalid_input");
+    if (!(yield* scripts.validate(steps, workflow))) return yield* refuse("invalid_calculator");
     yield* requireAttachable(actorId, workflow, input.edits);
     const saved: WorkflowVersion =
       latest.isFrozen && !isLayoutChangeOnly(latest.steps, steps)
@@ -1167,12 +1220,16 @@ const make = Effect.gen(function* () {
           }
         : { ...latest, revision: latest.revision + 1, steps };
     yield* workflows.versions.save(saved);
-    // Tickets show a group the way it is laid out now, whatever version they started on.
+    // Tickets use the current presentation of the same fields and calculator.
     const layouts = changedLayouts(latest.steps, steps);
-    if (layouts.size > 0) {
+    const presentation = changedCalculatorPresentation(latest.steps, steps);
+    if (layouts.size > 0 || presentation.size > 0) {
       for (const version of versions) {
         if (version.id !== saved.id)
-          yield* workflows.versions.save({ ...version, steps: setLayouts(version.steps, layouts) });
+          yield* workflows.versions.save({
+            ...version,
+            steps: setCalculatorPresentation(setLayouts(version.steps, layouts), presentation),
+          });
       }
       yield* tickets.publishChange();
     }
@@ -1218,10 +1275,12 @@ const make = Effect.gen(function* () {
     const version = yield* found(workflows.versions.get(input.versionId));
     if (version.workflowId !== project.workflowId) return yield* new NotFound();
     if (project.isArchived) return yield* refuse("project_archived");
-    if ((yield* found(workflows.get(project.workflowId))).isArchived)
-      return yield* refuse("workflow_archived");
+    const workflow = yield* found(workflows.get(project.workflowId));
+    if (workflow.isArchived) return yield* refuse("workflow_archived");
     if (version.revision !== input.revision) return yield* refuse("stale_draft");
     if (version.steps.length === 0) return yield* refuse("no_steps");
+    if (!(yield* scripts.validate(version.steps, workflow)))
+      return yield* refuse("invalid_calculator");
     // Checked in the adoption's own transaction, so no step is adopted without someone to do it.
     const members = yield* projects.members.listForProject(project.id);
     for (const step of version.steps) {
@@ -1422,10 +1481,197 @@ const make = Effect.gen(function* () {
     return { work, step, actorId: yield* resolvePerson(caller, work.project.id) };
   });
 
+  type RecordInterests = Map<string, Set<string>>;
+
+  const getStepAfter = (steps: ReadonlyArray<StepDefinition>, stepId: string) => {
+    const index = steps.findIndex(({ id }) => id === stepId);
+    return index < 0 ? undefined : steps[index + 1];
+  };
+
+  const getPreviewLink = (
+    ticket: Ticket,
+    destination: StepDefinition,
+    steps: ReadonlyArray<StepDefinition>,
+  ) => ({
+    ticketId: ticket.id,
+    ticketTitle: ticket.title,
+    stepDefinitionId: destination.id,
+    stepName: destination.name,
+    stepNumber: steps.findIndex(({ id }) => id === destination.id) + 1,
+  });
+
+  const previewContext = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"getStepPreview">,
+  ) {
+    const work = yield* loadTicket(input.ticketId);
+    const destination = work.version.steps.find(({ id }) => id === input.stepDefinitionId);
+    const binding = destination?.calculator;
+    const members = yield* memberOf(actorId, work.project.id);
+    if (
+      destination === undefined ||
+      (destination.previewFields === undefined && binding?.kind !== "script") ||
+      !members.has(destination.id)
+    )
+      return yield* new NotFound();
+    const step = work.ticket.steps.find(
+      ({ stepDefinitionId }) => stepDefinitionId === destination.id,
+    );
+    if (step !== undefined) {
+      const access = ticketAccess(members, work.version, work.ticket);
+      if (!canSeeStep(access, work.ticket, step) && !canBrowseHistory(work, access, step))
+        return yield* new NotFound();
+      return { type: "entered", stepId: step.id, work, binding } as const;
+    }
+    const current = currentStep(work.ticket);
+    if (
+      work.ticket.status.type !== "open" ||
+      current === null ||
+      getStepAfter(work.version.steps, current.stepDefinitionId)?.id !== destination.id ||
+      destination.previewFields?.length === 0
+    )
+      return yield* new NotFound();
+    return { type: "preview", work, binding, destination, members, current } as const;
+  });
+
+  const watchPreviewFieldRecords = (
+    fields: ReadonlyArray<FieldView>,
+    interests: RecordInterests,
+  ) => {
+    for (const field of fields) {
+      if (field.collection !== null) {
+        const id = field.collection.id;
+        interests.set(id, new Set([...(interests.get(id) ?? []), ...recordKeys(field.value)]));
+      }
+      for (const row of field.rows) watchPreviewFieldRecords(row.fields, interests);
+    }
+  };
+
+  // Two steps can use the same field IDs. The read-only renderer keys its rows and controls by path.
+  const scopePreviewField = (field: FieldView, stepId: string): FieldView => ({
+    ...field,
+    key: `${stepId}.${field.key}`,
+    rows: field.rows.map((row) => ({
+      ...row,
+      fields: row.fields.map((child) => scopePreviewField(child, stepId)),
+    })),
+  });
+
+  const buildPreviewFields = Effect.fnUntraced(function* (
+    work: Work,
+    destination: StepDefinition,
+    interests?: RecordInterests,
+  ) {
+    const selections = destination.previewFields ?? [];
+    const inputs = stepInputFields(work.version.steps, work.ticket, destination);
+    const binding = destination.calculator;
+    interests?.clear();
+    const outputs =
+      binding?.kind === "script" && selections.some(({ stepId }) => stepId === destination.id)
+        ? ((yield* scripts.readValues(work.ticket, destination)) ?? {})
+        : {};
+    const fields = yield* Effect.forEach(selections, (selection) => {
+      const input = inputs.find(
+        ({ source, field }) =>
+          source.stepDefinitionId === selection.stepId && field.id === selection.fieldId,
+      );
+      const field =
+        input?.field ??
+        (selection.stepId === destination.id
+          ? destination.fields.find(({ id }) => id === selection.fieldId)
+          : undefined);
+      return field === undefined
+        ? Effect.succeed([])
+        : buildCurrentStepFieldViews([field], input?.source.values ?? outputs).pipe(
+            Effect.map((views) => views.map((view) => scopePreviewField(view, selection.stepId))),
+          );
+    });
+    const views = fields.flat();
+    if (interests !== undefined) watchPreviewFieldRecords(views, interests);
+    return views;
+  });
+
+  const getPreview = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"getStepPreview">,
+    interests?: RecordInterests,
+  ) {
+    const context = yield* previewContext(actorId, input);
+    if (context.type === "entered") return { type: "entered", stepId: context.stepId } as const;
+    const { work, binding, destination, members, current } = context;
+    const details = {
+      ...getPreviewLink(work.ticket, destination, work.version.steps),
+      ...(members.has(current.stepDefinitionId) ? { sourceStepId: current.id } : {}),
+    };
+    if (destination.previewFields !== undefined)
+      return {
+        type: "fields",
+        ...details,
+        fields: yield* buildPreviewFields(work, destination, interests),
+      } as const;
+    if (binding?.kind !== "script") return yield* new NotFound();
+    const defaults = destination.fields.filter(({ id }) =>
+      Object.values(binding.outputs).includes(id),
+    );
+    const columns = binding.previewColumns ?? defaults.map(({ id, label }) => ({ id, label }));
+    const result = yield* scripts.read(work.ticket, destination);
+    return {
+      type: "table",
+      ...details,
+      columns,
+      labels: {
+        ...Object.fromEntries(defaults.map(({ id, label }) => [`history.field.${id}`, label])),
+        ...binding.labels,
+      },
+      rows:
+        result === null
+          ? []
+          : [
+              {
+                key: SCRIPT_RESULT_KEY,
+                label: destination.name,
+                cells: Object.fromEntries(
+                  result.snapshot.results.map((value) => [value.id, { values: [value] }]),
+                ),
+                historyId: result.id,
+              },
+            ],
+    } as const;
+  }, transaction);
+
+  const observeRecords = (interests: RecordInterests) => (notify: () => void) =>
+    collectionRecords.observeChanges((collectionId, key) => {
+      if (interests.get(collectionId)?.has(key)) notify();
+    });
+
+  const watchStepPreview = (actorId: string, input: Payload<"getStepPreview">) =>
+    Stream.unwrap(
+      Effect.map(found(tickets.get(input.ticketId)), (ticket) => {
+        const interests: RecordInterests = new Map();
+        return tickets.watch(
+          ticket,
+          getPreview(actorId, input, interests),
+          observeRecords(interests),
+        );
+      }),
+    ).pipe(Stream.changesWith(samePreview));
+
+  const previewForStep = Effect.fnUntraced(function* (actorId: string, work: Work, step: Step) {
+    if (currentStep(work.ticket)?.id !== step.id) return {};
+    const destination = getStepAfter(work.version.steps, step.stepDefinitionId);
+    if (destination === undefined) return {};
+    const canReadPreview = (yield* memberOf(actorId, work.project.id)).has(destination.id);
+    return canReadPreview &&
+      ((destination.previewFields?.length ?? 0) > 0 ||
+        (destination.previewFields === undefined && destination.calculator?.kind === "script"))
+      ? { preview: getPreviewLink(work.ticket, destination, work.version.steps) }
+      : {};
+  });
+
   const readStep = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
     const { work, actorId } = yield* loadStepReader(caller, stepId);
     return yield* getStep(actorId, work.ticket.id, stepId);
-  });
+  }, transaction);
 
   const readStepFields = Effect.fnUntraced(function* (
     caller: Caller,
@@ -1534,6 +1780,7 @@ const make = Effect.gen(function* () {
     ticketId: string,
     stepId: string,
     forPage = false,
+    interests?: RecordInterests,
   ) {
     const work = yield* loadTicket(ticketId);
     const step = stepIn(work, stepId);
@@ -1562,8 +1809,21 @@ const make = Effect.gen(function* () {
         ),
       ),
     ]);
+    interests?.clear();
+    const canReadLive = canSee && isOpen && step.status.type !== "completed";
+    const calculated = definitionOf(work, step).calculator;
+    const preview = canReadLive ? yield* previewForStep(actorId, work, step) : {};
+    const associationFields = canReadLive
+      ? yield* readAssociationFields(work, step, interests)
+      : {};
+    const scriptFields = calculated?.kind === "script" ? Object.values(calculated.outputs) : [];
     return {
       ...contents,
+      ...preview,
+      ...(Object.keys(associationFields).length === 0 ? {} : { associationFields }),
+      fields: contents.fields.map((field) =>
+        scriptFields.includes(field.key) ? { ...field, isReadOnly: true } : field,
+      ),
       ticket: work.ticket,
       projectName: work.project.name,
       ...(forPage ? { stepNavigation } : {}),
@@ -1681,6 +1941,70 @@ const make = Effect.gen(function* () {
     }
   });
 
+  const getAssociationSource = (work: Work, step: Step, fieldKey: string) => {
+    const definition = definitionOf(work, step);
+    const target = definition.fields.find(({ id }) => id === fieldKey);
+    if (target?.type !== "records") return null;
+    const mapping = target.recordAssociationSource;
+    if (mapping === undefined) return null;
+    const input = stepInputFields(work.version.steps, work.ticket, definition).find(
+      ({ source, field }) =>
+        source.stepDefinitionId === mapping.stepId && field.id === mapping.fieldId,
+    );
+    return input?.field.type === "records"
+      ? { field: input.field, keys: recordKeys(input.source.values[input.field.id]) }
+      : null;
+  };
+
+  const readAssociationFields = Effect.fnUntraced(function* (
+    work: Work,
+    step: Step,
+    interests?: RecordInterests,
+  ) {
+    const fields = yield* Effect.forEach(
+      definitionOf(work, step).fields,
+      Effect.fnUntraced(function* (field) {
+        const source = getAssociationSource(work, step, field.id);
+        if (source === null) return [];
+        const collectionId = source.field.collectionId;
+        const collection = yield* collections.get(collectionId);
+        if (collection === null) return [];
+        const title = resolveRecordDisplay(collection).title?.id;
+        const records = yield* collectionRecords.listByKeys(collectionId, source.keys);
+        interests?.set(
+          collectionId,
+          new Set([...(interests.get(collectionId) ?? []), ...source.keys]),
+        );
+        const labels = new Map(
+          records.map((record) => {
+            const value = title === undefined ? undefined : record.values[title];
+            const label =
+              typeof value === "string" && value.trim()
+                ? value
+                : typeof value === "number"
+                  ? String(value)
+                  : record.key;
+            return [record.key, label] as const;
+          }),
+        );
+        return [
+          [field.id, source.keys.map((key) => ({ key, label: labels.get(key) ?? key }))] as const,
+        ];
+      }),
+    );
+    return Object.fromEntries(fields.flat());
+  });
+
+  const checkRecordAssociation = (source: ReadonlyArray<string>, selected: ReadonlyArray<string>) =>
+    selected.length > 0 && selected.every((key) => source.includes(key));
+
+  const guardCalculatedField = (work: Work, step: Step, fieldKey: string) => {
+    const binding = definitionOf(work, step).calculator;
+    return binding !== undefined && Object.values(binding.outputs).includes(fieldKey.split(".")[0]!)
+      ? Effect.fail(refuse("calculated_field"))
+      : Effect.void;
+  };
+
   /** Puts `value` in the field at `fieldKey` of `step`, once it fits; `save` keeps it. */
   const writeField = Effect.fnUntraced(function* (
     caller: Caller,
@@ -1690,6 +2014,7 @@ const make = Effect.gen(function* () {
     fieldKey: string,
     input: Schema.Json,
   ) {
+    yield* guardCalculatedField(work, step, fieldKey);
     const blank =
       (typeof input === "string" && input.trim() === "") ||
       (Array.isArray(input) && input.length === 0);
@@ -1737,13 +2062,100 @@ const make = Effect.gen(function* () {
   ) {
     const { work, step } = yield* loadStepFor(caller, input.stepId);
     yield* requireWorkingStep(work, step);
+    yield* guardCalculatedField(work, step, input.fieldKey);
     const field = yield* resolveField(work, step, input.fieldKey);
     if (typeof caller !== "string" && isReviewedField(field))
       return yield* new WorkflowRefused({ reason: "field_reviewed" });
-    yield* writeField(caller, work, step, field, input.fieldKey, input.value);
+    let associated = step;
+    const allowed = getAssociationSource(work, step, input.fieldKey)?.keys;
+    if (allowed !== undefined && field.type === "records") {
+      const existing = recordKeys(step.values[input.fieldKey]);
+      const added = recordKeys(input.value).filter((key) => !existing.includes(key));
+      if (added.length > 0) {
+        const selected = input.sourceRecordKeys ?? (allowed.length === 1 ? allowed : []);
+        if (added.length !== 1 || !checkRecordAssociation(allowed, selected))
+          return yield* new WorkflowRefused({
+            reason: "invalid_field_value",
+            detail: "Choose source records for each linked record.",
+          });
+        associated = withRecordAssociation(step, input.fieldKey, added[0]!, selected);
+      }
+    }
+    yield* writeField(caller, work, associated, field, input.fieldKey, input.value);
     yield* save(work);
     yield* record("workflows.setStepField", caller, targetOf(work, step), {
       fieldKey: input.fieldKey,
+    });
+  }, transaction);
+
+  const setRecordAssociation = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"setRecordAssociation">,
+  ) {
+    const { work, step } = yield* loadForCommand(actorId, input.stepId);
+    yield* requireActionable(step);
+    const field = yield* resolveField(work, step, input.fieldKey);
+    const allowed = getAssociationSource(work, step, input.fieldKey)?.keys;
+    if (
+      field.type !== "records" ||
+      allowed === undefined ||
+      !checkRecordAssociation(allowed, input.sourceRecordKeys)
+    )
+      return yield* new WorkflowRefused({
+        reason: "invalid_field_value",
+        detail: "Choose source records linked to this ticket.",
+      });
+    const existing = recordKeys(step.values[input.fieldKey]);
+    const associated = withRecordAssociation(
+      {
+        ...step,
+        ...(step.proposals === undefined
+          ? {}
+          : {
+              proposals: step.proposals.filter(
+                (proposal) =>
+                  proposal.isDiscarded ||
+                  proposal.fieldKey !== input.fieldKey ||
+                  proposal.value !== input.recordKey,
+              ),
+            }),
+      },
+      input.fieldKey,
+      input.recordKey,
+      input.sourceRecordKeys,
+    );
+    yield* writeField(actorId, work, associated, field, input.fieldKey, [
+      ...new Set([...existing, input.recordKey]),
+    ]);
+    yield* save(work);
+    yield* record("workflows.setRecordAssociation", actorId, targetOf(work, step), {
+      fieldKey: input.fieldKey,
+      recordKey: input.recordKey,
+      sourceRecordKeys: input.sourceRecordKeys,
+    });
+  }, transaction);
+
+  const removeAssociatedRecord = Effect.fnUntraced(function* (
+    actorId: string,
+    input: Payload<"removeAssociatedRecord">,
+  ) {
+    const { work, step } = yield* loadForCommand(actorId, input.stepId);
+    yield* requireActionable(step);
+    const field = yield* resolveField(work, step, input.fieldKey);
+    if (field.type !== "records" || getAssociationSource(work, step, input.fieldKey) === null)
+      return yield* refuse("invalid_field_value");
+    yield* writeField(
+      actorId,
+      work,
+      step,
+      field,
+      input.fieldKey,
+      recordKeys(step.values[input.fieldKey]).filter((key) => key !== input.recordKey),
+    );
+    yield* save(work);
+    yield* record("workflows.removeAssociatedRecord", actorId, targetOf(work, step), {
+      fieldKey: input.fieldKey,
+      recordKey: input.recordKey,
     });
   }, transaction);
 
@@ -1753,30 +2165,30 @@ const make = Effect.gen(function* () {
   ) {
     const { work, step, actorId } = yield* loadStepFor(caller, input.stepId);
     yield* requireWorkingStep(work, step);
+    yield* guardCalculatedField(work, step, input.fieldKey);
     const field = yield* resolveField(work, step, input.fieldKey);
     const inputs = stepInputFields(work.version.steps, work.ticket, definitionOf(work, step));
-    if (input.sourceRecordKeys !== undefined) {
-      const sources =
-        field.type === "records" && field.comparisonCriteria
-          ? (getComparisonSources(field.comparisonCriteria, inputs)?.records.map(
-              ({ recordKey }) => recordKey,
-            ) ?? [])
-          : inputs.flatMap(({ source, field }) =>
-              field.type === "records" ? recordKeys(source.values[field.id]) : [],
-            );
-      if (
-        field.type !== "records" ||
-        input.sourceRecordKeys.length === 0 ||
-        !input.sourceRecordKeys.every((key) => sources.includes(key)) ||
+    const allowed =
+      getAssociationSource(work, step, input.fieldKey)?.keys ??
+      (field.type === "records" && field.comparisonCriteria
+        ? (getComparisonSources(field.comparisonCriteria, inputs)?.records.map(
+            ({ recordKey }) => recordKey,
+          ) ?? [])
+        : inputs.flatMap(({ source, field }) =>
+            field.type === "records" ? recordKeys(source.values[field.id]) : [],
+          ));
+    if (
+      input.sourceRecordKeys !== undefined &&
+      (field.type !== "records" ||
+        !checkRecordAssociation(allowed, input.sourceRecordKeys) ||
         (input.comparison !== undefined &&
-          !input.sourceRecordKeys.includes(input.comparison.sourceRecordKey))
-      )
-        return yield* new WorkflowRefused({
-          reason: "invalid_proposal",
-          detail:
-            "Choose keys from the step's source records, including the one used in the comparison.",
-        });
-    }
+          !input.sourceRecordKeys.includes(input.comparison.sourceRecordKey)))
+    )
+      return yield* new WorkflowRefused({
+        reason: "invalid_proposal",
+        detail:
+          "Choose keys from the step's source records, including the one used in the comparison.",
+      });
     const refusal =
       proposalRefusal(step, field, input.fieldKey, input.value) ??
       getComparisonRefusal(field, inputs, input.comparison);
@@ -1970,7 +2382,14 @@ const make = Effect.gen(function* () {
     caller: Caller,
     actorId: string,
   ) {
-    const refusal = stepCompletionRefusal(definitionOf(work, step), work.ticket, step);
+    const definition = definitionOf(work, step);
+    const binding = definition.calculator;
+    if (binding?.kind === "script") {
+      const values = yield* scripts.readValues(work.ticket, definition);
+      if (values === null) return yield* refuse("calculation_pending");
+      step = { ...step, values: { ...step.values, ...values } };
+    }
+    const refusal = stepCompletionRefusal(definition, work.ticket, step);
     if (refusal !== null) return yield* new WorkflowRefused({ reason: refusal });
     const completed = completeTicketStep(
       work.ticket,
@@ -1999,13 +2418,25 @@ const make = Effect.gen(function* () {
     ]);
     yield* tickets.completedSteps.save(work.ticket.id, step.id, snapshot, [...attachments]);
     work.ticket = completed.ticket;
-    if (completed.next !== null)
-      yield* startEnteredAutomations(
-        work,
-        yield* enterStep(work, completed.next, null, step.assignee, actorId),
-      );
+    let nextStepId: string | null = null;
+    if (completed.next !== null) {
+      const entered = yield* enterStep(work, completed.next, null, step.assignee, actorId);
+      if (completed.next.calculator?.kind === "script") {
+        const values = yield* scripts.readValues(work.ticket, completed.next);
+        if (values !== null)
+          putStep(work, { ...entered, values: { ...entered.values, ...values } });
+      }
+      yield* startEnteredAutomations(work, entered);
+      if (
+        completed.next.calculator !== undefined &&
+        typeof caller === "string" &&
+        (yield* isStepMember(work, entered, actorId))
+      )
+        nextStepId = entered.id;
+    }
     yield* save(work);
     yield* record("workflows.markStepDone", caller, targetOf(work, step));
+    return { nextStepId };
   });
   const markStepDone = Effect.fnUntraced(function* (caller: Caller, stepId: string) {
     if (
@@ -2020,7 +2451,7 @@ const make = Effect.gen(function* () {
       });
     const { work, step, actorId } = yield* loadStepFor(caller, stepId);
     yield* requireActionable(step);
-    yield* completeStep(work, step, caller, actorId);
+    return yield* completeStep(work, step, caller, actorId);
   }, transaction);
 
   const setStepAssignee = Effect.fnUntraced(function* (
@@ -2309,9 +2740,20 @@ const make = Effect.gen(function* () {
       stepId: step.stepDefinitionId,
       fieldId: file.fieldKey?.split(".")[0] ?? "",
     });
-    return work.ticket.steps.some(
-      (reader) =>
-        canSeeStep(access, work.ticket, reader) && definitionOf(work, reader).inputs.some(isInput),
+    if (
+      work.ticket.steps.some(
+        (reader) =>
+          canSeeStep(access, work.ticket, reader) &&
+          definitionOf(work, reader).inputs.some(isInput),
+      )
+    )
+      return true;
+    const current = currentStep(work.ticket);
+    if (work.ticket.status.type !== "open" || current === null) return false;
+    const destination = getStepAfter(work.version.steps, current.stepDefinitionId);
+    return (
+      destination?.previewFields?.some(isInput) === true &&
+      (yield* memberOf(userId, work.project.id)).has(destination.id)
     );
   });
   const completedStepFileAccess = Effect.fnUntraced(function* (userId: string, id: AttachmentId) {
@@ -2348,11 +2790,14 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const workflow = yield* found(workflows.get(workflowId));
         const actor = yield* actorOf(actorId);
+        const version = yield* latestOf(workflowId);
+        const canEdit = canEditWorkflow(actor, workflow);
         return {
           workflow,
-          version: yield* latestOf(workflowId),
-          canEdit: canEditWorkflow(actor, workflow),
+          version,
+          canEdit,
           canSetEditors: canSetWorkflowEditors(actor, workflow),
+          calculators: canEdit ? yield* scripts.options(workflow, actorId) : [],
         };
       }),
     listProjects,
@@ -2378,10 +2823,44 @@ const make = Effect.gen(function* () {
     readStepFields,
     watchStep: (actorId: string, stepId: string) =>
       Stream.unwrap(
-        Effect.map(found(tickets.getByStepId(stepId)), (ticket) =>
-          tickets.watch(ticket, getStep(actorId, ticket.id, stepId, true)),
-        ),
+        Effect.map(found(tickets.getByStepId(stepId)), (ticket) => {
+          const interests: RecordInterests = new Map();
+          return tickets.watch(
+            ticket,
+            transaction(getStep(actorId, ticket.id, stepId, true, interests)),
+            observeRecords(interests),
+          );
+        }),
       ).pipe(Stream.changesWith(sameStepView)),
+    getStepPreview: getPreview,
+    getStepResultHistory: Effect.fnUntraced(function* (
+      actorId: string,
+      input: Payload<"getStepResultHistory">,
+    ) {
+      const work = yield* loadTicket(input.ticketId);
+      const step = work.ticket.steps.find(
+        ({ stepDefinitionId }) => stepDefinitionId === input.stepDefinitionId,
+      );
+      if (step === undefined) {
+        yield* previewContext(actorId, input);
+      } else {
+        const members = yield* memberOf(actorId, work.project.id);
+        const access = ticketAccess(members, work.version, work.ticket);
+        if (
+          !members.has(input.stepDefinitionId) ||
+          (!canSeeStep(access, work.ticket, step) && !canBrowseHistory(work, access, step))
+        )
+          return yield* new NotFound();
+      }
+      return yield* tickets.resultHistory.list(
+        input.ticketId,
+        input.stepDefinitionId,
+        input.resultKey,
+      );
+    }, transaction),
+    watchStepPreview,
+    setRecordAssociation,
+    removeAssociatedRecord,
     setStepField,
     proposeStepField,
     approveProposal,

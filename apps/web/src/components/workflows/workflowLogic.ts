@@ -42,6 +42,31 @@ function placeEntries<A extends { readonly id: string }>(
   });
 }
 
+function calculatorEdits(
+  stepId: string,
+  saved: StepDefinition["calculator"],
+  edited: StepDefinition["calculator"],
+): ReadonlyArray<WorkflowEdit> {
+  const binding = (calculator: StepDefinition["calculator"]) => {
+    if (calculator === undefined) return undefined;
+    const { labels: _labels, previewColumns: _columns, ...mapping } = calculator;
+    return mapping;
+  };
+  if (JSON.stringify(binding(saved)) !== JSON.stringify(binding(edited)))
+    return [{ type: "set_step_calculator", stepId, calculator: edited ?? null }];
+
+  const labels = edited?.labels;
+  const columns = edited?.previewColumns;
+  return [
+    ...(columns !== undefined && JSON.stringify(columns) !== JSON.stringify(saved?.previewColumns)
+      ? [{ type: "set_calculator_preview_columns" as const, stepId, columns }]
+      : []),
+    ...(labels !== undefined && JSON.stringify(labels) !== JSON.stringify(saved?.labels)
+      ? [{ type: "set_calculator_labels" as const, stepId, labels }]
+      : []),
+  ];
+}
+
 /**
  * The edits that turn the saved steps `was` into `now`. A step or field in both keeps its id; what
  * `now` lacks is removed, and what it adds is added under the id the editor gave it.
@@ -111,6 +136,10 @@ export function editsBetween(
       ...step.inputs
         .filter((input) => !old?.inputs.some(isSameInput(input)))
         .map((input) => ({ type: "bind_input" as const, stepId, input })),
+      ...calculatorEdits(stepId, old?.calculator, step.calculator),
+      ...(JSON.stringify(step.previewFields) !== JSON.stringify(old?.previewFields)
+        ? [{ type: "set_step_preview" as const, stepId, fields: step.previewFields ?? null }]
+        : []),
       ...(old?.automationIds ?? [])
         .filter((automationId) => !step.automationIds.includes(automationId))
         .map((automationId) => ({ type: "detach_automation" as const, stepId, automationId })),

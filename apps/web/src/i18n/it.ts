@@ -1,6 +1,12 @@
 import type { Message } from "./de";
 
 export const it = {
+  "Source records": "Record di origine",
+  "Calculation automation": "Automazione di calcolo",
+  "No calculation": "Nessun calcolo",
+  "Calculation input {0}": "Input del calcolo {0}",
+  "Calculation output {0}": "Output del calcolo {0}",
+  "Choose a field": "Scegli un campo",
   "Add label": "Aggiungi etichetta",
   "Label key": "Chiave dell’etichetta",
   "Result history": "Cronologia dei risultati",

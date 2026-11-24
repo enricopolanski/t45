@@ -9,7 +9,7 @@ import * as Struct from "effect/Struct";
 
 import { Agent, AGENT_SETUP_PATHS } from "../models/Agent.ts";
 import { Capability } from "../models/Capability.ts";
-import { FilesByPath } from "../models/primitives.ts";
+import { FilesByPath, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { Skill } from "../models/Skill.ts";
 
 /** Files by their path under /work. */
@@ -57,6 +57,17 @@ export const ExecutionRequest = Schema.Struct({
   messages: Schema.Array(Message),
 });
 export type ExecutionRequest = typeof ExecutionRequest.Type;
+
+export const SCRIPT_INPUT_FILE = ".t45-input.json";
+
+export const ScriptRequest = Schema.Struct({
+  entrypoint: TrimmedNonEmptyString,
+  files: FilesByPath([...AGENT_SETUP_PATHS, SCRIPT_INPUT_FILE]),
+  inputs: Schema.Record(TrimmedNonEmptyString, Schema.Json),
+});
+export type ScriptRequest = typeof ScriptRequest.Type;
+
+export const ScriptOutputs = Schema.Record(TrimmedNonEmptyString, Schema.Finite);
 
 export const ExecutionUpdate = Schema.Union([
   Schema.TaggedStruct("sessions", { sessions: Schema.Array(Session.Info) }),
@@ -107,6 +118,7 @@ const question = { rootId: Session.ID, sessionId: Session.ID, formId: Form.ID };
 
 /** One execution per root session at a time; it lasts as long as its `execute` call. */
 export const RunnerRpcs = RpcGroup.make(
+  Rpc.make("runScript", { payload: ScriptRequest, success: ScriptOutputs, error: ExecutionFailed }),
   Rpc.make("execute", {
     payload: ExecutionRequest,
     success: ExecutionUpdate,

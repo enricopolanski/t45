@@ -25,15 +25,13 @@ import {
   valuesProblem,
 } from "./Field.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "./primitives.ts";
+import { CalculatorInput, CalculatorLabels, StepCalculator } from "./StepCalculator.ts";
+import { StepPreviewColumns } from "./StepPreview.ts";
 
 /** A field of an earlier step that a step reads: the whole field, a group with all its rows. */
-export const StepInput = Schema.Struct({
-  stepId: StringId.annotate({
-    description: "The earlier step, or sub-step, that fills the field.",
-  }),
-  fieldId: FieldPathSegment.annotate({ description: "One of that step's own fields." }),
-});
+export const StepInput = CalculatorInput;
 export type StepInput = typeof StepInput.Type;
+const PreviewFields = Schema.Array(StepInput);
 
 /** A step as it is stored and sent, where a step may leave out its inputs and automations. */
 export interface StepDefinitionEncoded {
@@ -45,6 +43,8 @@ export interface StepDefinitionEncoded {
   readonly inputs?: ReadonlyArray<StepInput>;
   readonly automationIds?: ReadonlyArray<string>;
   readonly isDoneWhenApproved?: boolean;
+  readonly calculator?: StepCalculator;
+  readonly previewFields?: ReadonlyArray<StepInput>;
 }
 
 export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition")({
@@ -69,6 +69,9 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
   automationIds: Schema.UniqueArray(AutomationId).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
   ),
+  calculator: Schema.optionalKey(StepCalculator),
+  /** Ordered fields shown in a read-only preview during the preceding step. */
+  previewFields: Schema.optionalKey(PreviewFields),
   isDoneWhenApproved: Schema.optionalKey(
     Schema.Boolean.annotate({
       description:
@@ -77,7 +80,7 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
   ),
 }) {}
 
-const stepNodes = (
+export const stepNodes = (
   steps: ReadonlyArray<StepDefinition>,
   parentId: string | null = null,
 ): ReadonlyArray<{ readonly step: StepDefinition; readonly parentId: string | null }> =>
@@ -120,16 +123,42 @@ const topLevelIndexOf = (steps: ReadonlyArray<StepDefinition>, id: string) =>
 
 /** Every input is a field of a step under an earlier step of the workflow, never a sibling's. */
 export const hasValidInputs = (steps: ReadonlyArray<StepDefinition>) =>
-  stepNodes(steps).every(({ step }) =>
-    step.inputs.every((input) => {
-      const source = topLevelIndexOf(steps, input.stepId);
-      return (
-        source >= 0 &&
-        source < topLevelIndexOf(steps, step.id) &&
-        findStep(steps, input.stepId)!.step.fields.some((field) => field.id === input.fieldId)
-      );
-    }),
+  stepNodes(steps).every(
+    ({ step }) =>
+      step.inputs.every((input) => {
+        const source = topLevelIndexOf(steps, input.stepId);
+        return (
+          source >= 0 &&
+          source < topLevelIndexOf(steps, step.id) &&
+          findStep(steps, input.stepId)!.step.fields.some((field) => field.id === input.fieldId)
+        );
+      }) &&
+      step.fields.every((field) => {
+        const source = field.type === "records" ? field.recordAssociationSource : undefined;
+        return (
+          source === undefined ||
+          (step.inputs.some(isSameInput(source)) &&
+            findStep(steps, source.stepId)?.step.fields.some(
+              ({ id, type }) => id === source.fieldId && type === "records",
+            ) === true)
+        );
+      }),
   );
+
+const hasValidPreviewFields = (steps: ReadonlyArray<StepDefinition>) =>
+  stepNodes(steps).every(({ step, parentId }) => {
+    const fields = step.previewFields ?? [];
+    if (fields.length === 0) return true;
+    if (parentId !== null || steps.findIndex(({ id }) => id === step.id) < 1) return false;
+    return fields.every(
+      (field, index) =>
+        !fields.slice(0, index).some(isSameInput(field)) &&
+        (field.stepId === step.id
+          ? Object.values(step.calculator?.outputs ?? {}).includes(field.fieldId) &&
+            step.fields.some(({ id }) => id === field.fieldId)
+          : step.inputs.some(isSameInput(field))),
+    );
+  });
 
 /** A project's name in URLs: lowercase letters and digits, joined by single hyphens. */
 export const Slug = TrimmedNonEmptyString.check(
@@ -165,6 +194,10 @@ const Steps = Schema.Array(StepDefinition).check(
     (steps) => stepNodes(steps).every(({ step }) => !step.fields.some(isCollectionOnly)),
     { expected: "no link or multiple-choice fields, which only collections hold" },
   ),
+  Schema.makeFilter(hasValidPreviewFields, {
+    expected:
+      "ordered, distinct preview fields selected from the step's inputs and calculated outputs",
+  }),
 );
 
 /**
@@ -700,6 +733,9 @@ const REFUSALS = {
   invalid_proposal: "That value can't be proposed.",
   invalid_proposal_filters: "Those proposal filters can't be saved.",
   invalid_attachment: "That file can't be attached here.",
+  invalid_calculator: "The calculator and its mapped fields do not fit this workflow version.",
+  calculated_field: "This field is written by the step calculator.",
+  calculation_pending: "The current calculation has no result yet.",
   invalid_automations:
     "An automation is archived, or its agent can't work on steps or is private to someone other than you and this workflow's creator. Choose another.",
 };
@@ -1157,6 +1193,26 @@ export const WorkflowEdit = Schema.Union([
     name: TrimmedNonEmptyString,
   }),
   Schema.Struct({ type: Schema.Literal("remove_step"), ...stepRef }),
+  Schema.Struct({
+    type: Schema.Literal("set_step_calculator"),
+    ...stepRef,
+    calculator: Schema.NullOr(StepCalculator),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("set_step_preview"),
+    ...stepRef,
+    fields: Schema.NullOr(PreviewFields),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("set_calculator_preview_columns"),
+    ...stepRef,
+    columns: StepPreviewColumns,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("set_calculator_labels"),
+    ...stepRef,
+    labels: CalculatorLabels,
+  }),
   Schema.Struct({ type: Schema.Literal("rename_step"), ...stepRef, name: TrimmedNonEmptyString }),
   /** Moves the step among its siblings. */
   Schema.Struct({ type: Schema.Literal("move_step"), ...stepRef, index: NonNegativeInt }),
@@ -1256,6 +1312,32 @@ const applyWorkflowEdit = (steps: StepList, edit: WorkflowEdit): StepList | null
             return subSteps === null ? null : { subSteps };
           });
     }
+    case "set_step_calculator":
+      return changeSiblings(steps, edit.stepId, (siblings, index) => {
+        const { calculator: _, ...definition } = siblings[index]!;
+        return siblings.with(
+          index,
+          edit.calculator === null ? definition : { ...definition, calculator: edit.calculator },
+        );
+      });
+    case "set_step_preview":
+      return changeSiblings(steps, edit.stepId, (siblings, index) => {
+        const { previewFields: _, ...step } = siblings[index]!;
+        return siblings.with(
+          index,
+          edit.fields === null ? step : { ...step, previewFields: edit.fields },
+        );
+      });
+    case "set_calculator_preview_columns":
+      return changeStep(steps, edit.stepId, ({ calculator }) =>
+        calculator === undefined
+          ? null
+          : { calculator: { ...calculator, previewColumns: edit.columns } },
+      );
+    case "set_calculator_labels":
+      return changeStep(steps, edit.stepId, ({ calculator }) =>
+        calculator === undefined ? null : { calculator: { ...calculator, labels: edit.labels } },
+      );
     case "remove_step":
       return changeSiblings(steps, edit.stepId, (siblings, index) => siblings.toSpliced(index, 1));
     case "move_step":
@@ -1406,7 +1488,84 @@ export const setLayouts = (
   return Option.getOrThrow(decodeSteps(ofSteps(steps)));
 };
 
-/** Whether only the field layouts changed, which applies in place across versions. */
+type CalculatorPresentation = {
+  readonly labels?: CalculatorLabels | undefined;
+  readonly previewColumns?: StepPreviewColumns | undefined;
+};
+
+const calculatorPresentationOf = (steps: StepList) =>
+  new Map(
+    stepNodes(steps).flatMap(({ step: { id, calculator } }) =>
+      calculator === undefined
+        ? []
+        : [
+            [
+              JSON.stringify([id, calculator.id, calculator.version]),
+              {
+                labels: calculator.labels,
+                previewColumns: calculator.previewColumns,
+              },
+            ] as const,
+          ],
+    ),
+  );
+
+export const changedCalculatorPresentation = (saved: StepList, edited: StepList) => {
+  const before = calculatorPresentationOf(saved);
+  const changes = new Map<string, CalculatorPresentation>();
+  for (const [key, after] of calculatorPresentationOf(edited)) {
+    const previous = before.get(key);
+    const hasChangedLabels = JSON.stringify(previous?.labels) !== JSON.stringify(after.labels);
+    const hasChangedColumns =
+      JSON.stringify(previous?.previewColumns) !== JSON.stringify(after.previewColumns);
+    if (hasChangedLabels || hasChangedColumns)
+      changes.set(key, {
+        ...(hasChangedLabels && { labels: after.labels }),
+        ...(hasChangedColumns && { previewColumns: after.previewColumns }),
+      });
+  }
+  return changes;
+};
+
+export const setCalculatorPresentation = (
+  steps: StepList,
+  changes: ReadonlyMap<string, CalculatorPresentation>,
+): StepList => {
+  if (changes.size === 0) return steps;
+  const ofSteps = (list: StepList): StepList =>
+    list.map((step) => {
+      const calculator = step.calculator;
+      const subSteps = ofSteps(step.subSteps);
+      if (calculator === undefined) return { ...step, subSteps };
+      const key = JSON.stringify([step.id, calculator.id, calculator.version]);
+      const next = changes.get(key);
+      if (next === undefined) return { ...step, subSteps };
+      const { labels, previewColumns, ...binding } = calculator;
+      const presentation = { labels, previewColumns, ...next };
+      return {
+        ...step,
+        subSteps,
+        calculator: {
+          ...binding,
+          ...(presentation.labels === undefined ? {} : { labels: presentation.labels }),
+          ...(presentation.previewColumns === undefined
+            ? {}
+            : { previewColumns: presentation.previewColumns }),
+        },
+      };
+    });
+  return Option.getOrThrow(decodeSteps(ofSteps(steps)));
+};
+
+/**
+ * Layouts and calculator settings control presentation across versions of the same step.
+ */
 export const isLayoutChangeOnly = (saved: StepList, edited: StepList) =>
-  JSON.stringify(encodeSteps(setLayouts(edited, fieldLayouts(saved)))) ===
-  JSON.stringify(encodeSteps(saved));
+  JSON.stringify(
+    encodeSteps(
+      setCalculatorPresentation(
+        setLayouts(edited, fieldLayouts(saved)),
+        calculatorPresentationOf(saved),
+      ),
+    ),
+  ) === JSON.stringify(encodeSteps(saved));

@@ -42,6 +42,7 @@ import { Route as SettingsWorkflowsWorkflowIdStepsRouteImport } from './routes/s
 import { Route as SettingsCollectionsCollectionIdEditRouteImport } from './routes/settings_.collections.$collectionId_.edit'
 import { Route as SettingsAgentsSkillsNewRouteImport } from './routes/settings_.agents.skills.new'
 import { Route as SettingsAgentsSkillsSkillIdRouteImport } from './routes/settings_.agents.skills.$skillId'
+import { Route as MyWorkPreviewTicketIdStepDefinitionIdRouteImport } from './routes/my-work.preview.$ticketId.$stepDefinitionId'
 import { Route as MyWorkStepIdRunsChatIdRouteImport } from './routes/my-work.$stepId_.runs.$chatId'
 import { Route as CollectionsCollectionIdRecordsRecordKeyRouteImport } from './routes/collections.$collectionId_.records.$recordKey'
 import { Route as SettingsProjectsProjectIdEditIndexRouteImport } from './routes/settings_.projects.$projectId.edit.index'
@@ -220,6 +221,12 @@ const SettingsAgentsSkillsSkillIdRoute =
     path: '/settings/agents/skills/$skillId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const MyWorkPreviewTicketIdStepDefinitionIdRoute =
+  MyWorkPreviewTicketIdStepDefinitionIdRouteImport.update({
+    id: '/my-work/preview/$ticketId/$stepDefinitionId',
+    path: '/my-work/preview/$ticketId/$stepDefinitionId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const MyWorkStepIdRunsChatIdRoute = MyWorkStepIdRunsChatIdRouteImport.update({
   id: '/my-work/$stepId_/runs/$chatId',
   path: '/my-work/$stepId/runs/$chatId',
@@ -275,6 +282,7 @@ export interface FileRoutesByFullPath {
   '/settings/workflows/': typeof SettingsWorkflowsIndexRoute
   '/collections/$collectionId/records/$recordKey': typeof CollectionsCollectionIdRecordsRecordKeyRoute
   '/my-work/$stepId/runs/$chatId': typeof MyWorkStepIdRunsChatIdRoute
+  '/my-work/preview/$ticketId/$stepDefinitionId': typeof MyWorkPreviewTicketIdStepDefinitionIdRoute
   '/settings/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
   '/settings/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
   '/settings/collections/$collectionId/edit': typeof SettingsCollectionsCollectionIdEditRoute
@@ -314,6 +322,7 @@ export interface FileRoutesByTo {
   '/settings/workflows': typeof SettingsWorkflowsIndexRoute
   '/collections/$collectionId/records/$recordKey': typeof CollectionsCollectionIdRecordsRecordKeyRoute
   '/my-work/$stepId/runs/$chatId': typeof MyWorkStepIdRunsChatIdRoute
+  '/my-work/preview/$ticketId/$stepDefinitionId': typeof MyWorkPreviewTicketIdStepDefinitionIdRoute
   '/settings/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
   '/settings/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
   '/settings/collections/$collectionId/edit': typeof SettingsCollectionsCollectionIdEditRoute
@@ -354,6 +363,7 @@ export interface FileRoutesById {
   '/settings_/workflows/': typeof SettingsWorkflowsIndexRoute
   '/collections/$collectionId_/records/$recordKey': typeof CollectionsCollectionIdRecordsRecordKeyRoute
   '/my-work/$stepId_/runs/$chatId': typeof MyWorkStepIdRunsChatIdRoute
+  '/my-work/preview/$ticketId/$stepDefinitionId': typeof MyWorkPreviewTicketIdStepDefinitionIdRoute
   '/settings_/agents/skills/$skillId': typeof SettingsAgentsSkillsSkillIdRoute
   '/settings_/agents/skills/new': typeof SettingsAgentsSkillsNewRoute
   '/settings_/collections/$collectionId_/edit': typeof SettingsCollectionsCollectionIdEditRoute
@@ -395,6 +405,7 @@ export interface FileRouteTypes {
     | '/settings/workflows/'
     | '/collections/$collectionId/records/$recordKey'
     | '/my-work/$stepId/runs/$chatId'
+    | '/my-work/preview/$ticketId/$stepDefinitionId'
     | '/settings/agents/skills/$skillId'
     | '/settings/agents/skills/new'
     | '/settings/collections/$collectionId/edit'
@@ -434,6 +445,7 @@ export interface FileRouteTypes {
     | '/settings/workflows'
     | '/collections/$collectionId/records/$recordKey'
     | '/my-work/$stepId/runs/$chatId'
+    | '/my-work/preview/$ticketId/$stepDefinitionId'
     | '/settings/agents/skills/$skillId'
     | '/settings/agents/skills/new'
     | '/settings/collections/$collectionId/edit'
@@ -473,6 +485,7 @@ export interface FileRouteTypes {
     | '/settings_/workflows/'
     | '/collections/$collectionId_/records/$recordKey'
     | '/my-work/$stepId_/runs/$chatId'
+    | '/my-work/preview/$ticketId/$stepDefinitionId'
     | '/settings_/agents/skills/$skillId'
     | '/settings_/agents/skills/new'
     | '/settings_/collections/$collectionId_/edit'
@@ -508,6 +521,7 @@ export interface RootRouteChildren {
   SettingsWorkflowsIndexRoute: typeof SettingsWorkflowsIndexRoute
   CollectionsCollectionIdRecordsRecordKeyRoute: typeof CollectionsCollectionIdRecordsRecordKeyRoute
   MyWorkStepIdRunsChatIdRoute: typeof MyWorkStepIdRunsChatIdRoute
+  MyWorkPreviewTicketIdStepDefinitionIdRoute: typeof MyWorkPreviewTicketIdStepDefinitionIdRoute
   SettingsAgentsSkillsSkillIdRoute: typeof SettingsAgentsSkillsSkillIdRoute
   SettingsAgentsSkillsNewRoute: typeof SettingsAgentsSkillsNewRoute
   SettingsCollectionsCollectionIdEditRoute: typeof SettingsCollectionsCollectionIdEditRoute
@@ -750,6 +764,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAgentsSkillsSkillIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/my-work/preview/$ticketId/$stepDefinitionId': {
+      id: '/my-work/preview/$ticketId/$stepDefinitionId'
+      path: '/my-work/preview/$ticketId/$stepDefinitionId'
+      fullPath: '/my-work/preview/$ticketId/$stepDefinitionId'
+      preLoaderRoute: typeof MyWorkPreviewTicketIdStepDefinitionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/my-work/$stepId_/runs/$chatId': {
       id: '/my-work/$stepId_/runs/$chatId'
       path: '/my-work/$stepId/runs/$chatId'
@@ -828,6 +849,8 @@ const rootRouteChildren: RootRouteChildren = {
   CollectionsCollectionIdRecordsRecordKeyRoute:
     CollectionsCollectionIdRecordsRecordKeyRoute,
   MyWorkStepIdRunsChatIdRoute: MyWorkStepIdRunsChatIdRoute,
+  MyWorkPreviewTicketIdStepDefinitionIdRoute:
+    MyWorkPreviewTicketIdStepDefinitionIdRoute,
   SettingsAgentsSkillsSkillIdRoute: SettingsAgentsSkillsSkillIdRoute,
   SettingsAgentsSkillsNewRoute: SettingsAgentsSkillsNewRoute,
   SettingsCollectionsCollectionIdEditRoute:

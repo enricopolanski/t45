@@ -23,7 +23,7 @@ export const apiHeaders = {
   ...(process.env.T45_TOOL_INSTANCE ? { "x-instance-id": process.env.T45_TOOL_INSTANCE } : {}),
 };
 export const apiUrl = (path: string) => new URL(path, process.env.T45_SERVER_URL).toString();
-const operations = Workflows.omit("workflows.watchStep")
+const operations = Workflows.omit("workflows.watchStep", "workflows.watchStepPreview")
   .add(ReportProgress)
   .merge(CollectionOperations)
   .middleware(Authorization);

@@ -1,4 +1,10 @@
 export const de = {
+  "Source records": "Quelldatensätze",
+  "Calculation automation": "Berechnungsautomatisierung",
+  "No calculation": "Keine Berechnung",
+  "Calculation input {0}": "Berechnungseingabe {0}",
+  "Calculation output {0}": "Berechnungsergebnis {0}",
+  "Choose a field": "Feld auswählen",
   "Add label": "Beschriftung hinzufügen",
   "Label key": "Beschriftungsschlüssel",
   "Result history": "Ergebnisverlauf",
