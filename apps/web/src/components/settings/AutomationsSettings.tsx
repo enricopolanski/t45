@@ -20,6 +20,7 @@ import {
 import { type ReactNode, useState } from "react";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
+import { useRowKeys } from "../../hooks/useRowKeys";
 import { describeFailure } from "../../lib/failures";
 import { api } from "../../rpc/api";
 import { agentsList, stepAutomationList } from "../../state/agents";
@@ -429,6 +430,7 @@ function AutomationEditorDialog({
   const [draft, setDraft] = useState<DraftState>(
     automation === null ? EMPTY_DRAFT : draftOf(automation),
   );
+  const phaseRows = useRowKeys(draft.nextPhases?.length ?? 0);
   const patch = (change: Partial<DraftState>) => setDraft((current) => ({ ...current, ...change }));
   const [saving, setSaving] = useState(false);
   const stepContextItems = [
@@ -550,7 +552,7 @@ function AutomationEditorDialog({
                   nextPhases: (draft.nextPhases ?? []).with(index, { ...phase, ...changed }),
                 });
               return (
-                <Field key={index} label={t("Phase {0}", number)}>
+                <Field key={phaseRows.keys[index]} label={t("Phase {0}", number)}>
                   <div className="flex w-full items-center gap-2">
                     <Select
                       value={phase.agentId}
@@ -579,11 +581,12 @@ function AutomationEditorDialog({
                       size="icon-sm"
                       variant="ghost"
                       aria-label={t("Remove phase {0}", number)}
-                      onClick={() =>
+                      onClick={() => {
+                        phaseRows.remove(index);
                         patch({
                           nextPhases: (draft.nextPhases ?? []).filter((_, at) => at !== index),
-                        })
-                      }
+                        });
+                      }}
                     >
                       <XIcon />
                     </Button>
