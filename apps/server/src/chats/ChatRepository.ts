@@ -28,14 +28,11 @@ import {
 } from "@t45/contracts/models/Chat";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import * as ServerConfig from "../config.ts";
 import type { Member } from "./ChatService.ts";
 import { inputMessageId, isInputMessage, rootSessionId } from "./ChatIds.ts";
 
@@ -173,16 +170,8 @@ const encodeSessionInfo = Schema.encodeSync(Schema.fromJsonString(Session.Info))
 
 const encodeMessage = Schema.encodeSync(Schema.fromJsonString(SessionMessage.Info));
 
-/** Where chats' disks are kept, under the server's state folder. */
-const DISKS_DIRECTORY = "chat-disks";
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const stateDir = yield* ServerConfig.stateDir;
-  const disksDir = path.join(stateDir, DISKS_DIRECTORY);
-  const diskFile = (chatId: ChatId) => path.join(disksDir, `${chatId}.tgz`);
 
   const origins = yield* makeOrigins;
   const chatColumns = sql.literal(CHAT_COLUMNS);
@@ -417,26 +406,6 @@ const make = Effect.gen(function* () {
         else questions.set(chatId, forms);
         return changed;
       }),
-
-    readDisk: (chatId: ChatId) =>
-      fileSystem.readFile(diskFile(chatId)).pipe(
-        Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
-        Effect.orDie,
-      ),
-    saveDisk: (chatId: ChatId, content: Uint8Array) =>
-      Effect.gen(function* () {
-        const target = diskFile(chatId);
-        yield* fileSystem.makeDirectory(disksDir, { recursive: true });
-        // Written beside it first, so a save cut short leaves the last good one.
-        yield* fileSystem.writeFile(`${target}.part`, content);
-        yield* fileSystem.rename(`${target}.part`, target);
-      }).pipe(Effect.orDie),
-    deleteDisk: (chatId: ChatId) =>
-      Effect.gen(function* () {
-        const target = diskFile(chatId);
-        yield* fileSystem.remove(target, { force: true });
-        yield* fileSystem.remove(`${target}.part`, { force: true });
-      }).pipe(Effect.orDie),
   };
 });
 

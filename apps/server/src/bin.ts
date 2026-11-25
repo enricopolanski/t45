@@ -13,89 +13,35 @@ import * as References from "effect/References";
 import type * as Types from "effect/Types";
 import { FetchHttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
-import * as AppRpc from "./AppRpc.ts";
+import * as BlobStore from "./attachments/BlobStore.ts";
 import * as BuiltIns from "./BuiltIns.ts";
-import * as AgentRepository from "./agents/AgentRepository.ts";
-import * as SkillRepository from "./agents/SkillRepository.ts";
-import * as AttachmentRepository from "./attachments/AttachmentRepository.ts";
-import * as AttachmentsHttp from "./attachments/http.ts";
-import * as Authentication from "./auth/Authentication.ts";
-import * as AuthHttp from "./auth/http.ts";
-import * as AutomationRepository from "./automations/AutomationRepository.ts";
-import * as CapabilityRepository from "./capabilities/CapabilityRepository.ts";
-import * as ChatRepository from "./chats/ChatRepository.ts";
-import { ChatService } from "./chats/ChatService.ts";
-import * as CollectionRecordRepository from "./collections/CollectionRecordRepository.ts";
-import * as CollectionRepository from "./collections/CollectionRepository.ts";
-import * as CollectionService from "./collections/CollectionService.ts";
 import * as ServerConfig from "./config.ts";
 import * as HttpServer from "./http.ts";
-import * as OrgHttp from "./org/http.ts";
-import * as OrganizationRepository from "./org/OrganizationRepository.ts";
-import * as UserRepository from "./org/UserRepository.ts";
-import { UserService } from "./org/UserService.ts";
-import * as CommandLogRepository from "./persistence/CommandLogRepository.ts";
+import * as ChatDisks from "./chats/ChatDisks.ts";
+import * as Restarts from "./chats/Restarts.ts";
+import * as Instance from "./Instance.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
-import { RunnerService } from "./runner/RunnerService.ts";
-import * as NotificationRepository from "./workflows/NotificationRepository.ts";
-import * as TicketRepository from "./workflows/TicketRepository.ts";
-import * as WorkflowRepository from "./workflows/WorkflowRepository.ts";
-import * as ProjectRepository from "./workflows/ProjectRepository.ts";
-import * as WorkflowService from "./workflows/WorkflowService.ts";
+import * as OwnApi from "./runner/OwnApi.ts";
 
-const Store = BuiltIns.layer.pipe(
-  Layer.provideMerge(
+/**
+ * An instance keeps its database, chat disks and attachments in its data directory (attachments in
+ * a bucket when one is configured), applies the built-ins file at every start, and answers relayed
+ * agent requests over loopback.
+ */
+const InstanceDependencies = Instance.Dependencies.pipe(
+  Layer.provideMerge(SqlitePersistence.layer),
+  Layer.provide(
     Layer.mergeAll(
-      UserRepository.layer,
-      ChatRepository.layer,
-      AttachmentRepository.layer,
-      AgentRepository.layer,
-      SkillRepository.layer,
-      CapabilityRepository.layer,
-    ).pipe(Layer.provideMerge(SqlitePersistence.layer)),
+      BlobStore.layer,
+      BuiltIns.layerFile,
+      ChatDisks.layerDirectory,
+      OwnApi.layerLoopback,
+      Restarts.layerNode,
+    ),
   ),
 );
 
-const WorkflowRepositories = Layer.mergeAll(
-  WorkflowRepository.layer,
-  ProjectRepository.layer,
-  TicketRepository.layer,
-  NotificationRepository.layer,
-  CommandLogRepository.layer,
-);
-
-const ChatServices = ChatService.layer.pipe(
-  Layer.provideMerge(RunnerService.layer),
-  Layer.provideMerge(WorkflowRepositories),
-  Layer.provideMerge(Store),
-);
-
-const Org = OrganizationRepository.layer.pipe(Layer.provideMerge(ChatServices));
-
-const Collections = CollectionService.layer.pipe(
-  Layer.provideMerge(Layer.mergeAll(CollectionRepository.layer, CollectionRecordRepository.layer)),
-);
-
-/**
- * Groups the resources and services owned by one isolated app instance.
- * They get built afresh under a common separate data instance:
- * database, session state, execution state, background jobs
- */
-const InstanceDependencies = Layer.effect(UserService, UserService.make).pipe(
-  Layer.provide(Authentication.layer),
-  Layer.provideMerge(WorkflowService.layer),
-  Layer.provideMerge(Collections),
-  Layer.provideMerge(AutomationRepository.layer),
-  Layer.provideMerge(Org),
-);
-
-const Routes = Layer.mergeAll(
-  AuthHttp.layer,
-  OrgHttp.layer,
-  AttachmentsHttp.layer,
-  HttpServer.layer,
-  AppRpc.layer,
-);
+const Routes = Layer.merge(Instance.ApiRoutes, HttpServer.clientLayer);
 
 const makeInstance = (dataDir: string, instanceId: string) =>
   // `fresh` builds the instance layer ex-novo, doesn't reuse existing

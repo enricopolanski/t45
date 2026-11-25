@@ -9,7 +9,6 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as HttpBody from "effect/http/HttpBody";
-import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpMethod from "effect/http/HttpMethod";
 import * as Redacted from "effect/Redacted";
@@ -22,11 +21,14 @@ import { AgentRepository } from "../agents/AgentRepository.ts";
 import { SkillRepository } from "../agents/SkillRepository.ts";
 import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
 import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
+import { OwnApi } from "../runner/OwnApi.ts";
 import { RunnerService } from "../runner/RunnerService.ts";
+import { ChatDisks } from "./ChatDisks.ts";
 import { ChatEvents } from "./ChatEvents.ts";
 import { inputMessageId, rootSessionId } from "./ChatIds.ts";
 import { ChatRepository } from "./ChatRepository.ts";
 import * as PromptService from "./PromptService.ts";
+import { Restarts } from "./Restarts.ts";
 import * as ServerConfig from "../config.ts";
 
 const encodeInputMetadata = Schema.encodeSync(InputMetadata);
@@ -54,7 +56,9 @@ export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const crypto = yield* Crypto.Crypto;
   const serverUrl = yield* ServerConfig.serverUrl;
-  const httpClient = yield* HttpClient.HttpClient;
+  const ownApi = yield* OwnApi;
+  const restarts = yield* Restarts;
+  const disks = yield* ChatDisks;
   const toolInstance = yield* ServerConfig.toolInstance;
   const repository = yield* ChatRepository;
   const changes = yield* ChatEvents;
@@ -118,7 +122,7 @@ export const make = Effect.gen(function* () {
           yield* settleMessages(chatId);
           if (disk !== undefined) {
             // SQL rollback cannot undo this replacement; a failed commit can leave the disk ahead of the rows.
-            yield* repository.saveDisk(chatId, disk);
+            yield* disks.save(chatId, disk);
             yield* repository.commit(chatId);
             if ((yield* repository.pendingInputs(chatId)).length > 0) return;
           }
@@ -174,21 +178,13 @@ export const make = Effect.gen(function* () {
         rootId: rootSessionId(chat.id),
         title: titleOf(chat),
         allowQuestions: origin?.kind === "conversation",
-        disk: yield* repository.readDisk(chat.id),
+        disk: yield* disks.read(chat.id),
         files: yield* filesOf(
           inputs.flatMap((input) => input.payload.attachments.map((file) => file.id)),
         ),
         messages: inputs.map((input) => messageOf(chat.id, input)),
       } satisfies ExecutionRequest;
     });
-
-  /** Where this server answers itself; a wildcard bind answers on loopback too. */
-  const ownOrigin = Effect.gen(function* () {
-    const host = yield* ServerConfig.host;
-    const port = yield* ServerConfig.port;
-    if (host === "0.0.0.0" || host === "::") return `http://127.0.0.1:${port}`;
-    return `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
-  });
 
   /**
    * Sends a request the agent made to this server, for a runner whose sandboxes can't reach it, and
@@ -202,8 +198,8 @@ export const make = Effect.gen(function* () {
       const method = event.method;
       if (!event.path.startsWith("/api/") || !HttpMethod.isHttpMethod(method))
         return { status: 404, headers: {}, body: new Uint8Array() };
-      const response = yield* httpClient.execute(
-        HttpClientRequest.make(method)(`${yield* ownOrigin}${event.path}`, {
+      const response = yield* ownApi.execute(
+        HttpClientRequest.make(method)(event.path, {
           headers: event.headers,
           ...(method === "GET" || method === "HEAD"
             ? {}
@@ -355,6 +351,7 @@ export const make = Effect.gen(function* () {
       if (!owners.has(chatId)) {
         const owner: Owner = { stop: Deferred.makeUnsafe<void>(), token };
         owners.set(chatId, owner);
+        yield* restarts.whileRunning;
         return yield* Effect.forkIn(own(chatId, owner), scope).pipe(Effect.asVoid);
       }
       if (posted === undefined) return;
@@ -375,6 +372,13 @@ export const make = Effect.gen(function* () {
     filesOf,
     onEnd: (handler: (chatId: ChatId) => Effect.Effect<void>) =>
       Deferred.succeed(endHandler, handler),
+    /** Hands a run that ended with no owner to the end handler, once one is set. */
+    ended: (chatId: ChatId) =>
+      Deferred.await(endHandler).pipe(
+        Effect.flatMap((onEnd) => onEnd(chatId)),
+        Effect.forkIn(scope),
+        Effect.asVoid,
+      ),
     chatForToken: (token: string) =>
       [...owners].find(([, owner]) => owner.token === token)?.[0] ?? null,
     /** The owner runs again only for an input posted since. */

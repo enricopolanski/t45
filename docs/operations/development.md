@@ -89,6 +89,16 @@ Built-in MCP tools call the server’s regular workflow RPCs and attachment uplo
 
 Without `/dev/kvm` every chat's VM fails to start, and the runner's log names the reason.
 
+### The Cloudflare server
+
+`apps/server/cloudflare` serves the same server from a Worker: its static assets are the web client (`apps/web/dist`), and `/api/*` goes to a SQLite Durable Object per instance, which holds that instance's database, sockets and runs. `src/Instance.ts` is what both servers share; each provides its own layers for the database, built-ins, chat disks, attachment bytes, the API that relayed agent requests reach, and restarts. The Node server stays the development default.
+
+- **Settings:** `T45_INSTANCE` names the instance's object; `RUNNER_URL` and `SERVER_URL` as vars, `RUNNER_TOKEN` as a secret. A release sets `BUILD_SHA` and `AUTH_CLERK_PUBLISHABLE_KEY`, the same values the web client is built with. Without `BUILD_SHA` an instance refuses to start unless `T45_DEVELOPMENT=true`, which, as in Node development, signs in any typed email and lets `x-instance-id` pick an instance.
+- **Buckets:** `BUILT_INS` holds `built-ins.json`, uploaded before each deploy; an instance applies each version once. `FILES` holds chat disks and attachment bytes under the instance's name; uploads stream through a staging object, so a file never sits in memory whole.
+- **Runs:** the object holds the runner's stream for a run, as the Node server does. Cloudflare evicts an object after 70–140 s with no incoming request or event, so while a chat runs an alarm wakes it every 30 s; one deployed 20-minute run held this way, which is all the evidence so far. A run cut short by a restart, including a deploy (active objects adopt new code within about 5 minutes), ends interrupted with a report at the next start, and its step's assignee is notified: the Cloudflare runner keeps no disk, and running it again could repeat what its tools did.
+- **Commands:** with the web client built, `pnpm --filter t45 cloudflare:dev --var T45_DEVELOPMENT:true --var RUNNER_URL:<runner>` and `RUNNER_TOKEN` in `--env-file`; `cloudflare:types` regenerates the binding types after a `wrangler.jsonc` change.
+- **Not yet:** attachment downloads go through the instance (no signed bucket links), an execution's files travel to the runner in memory, and a calculation pending at a restart waits until something schedules its ticket again.
+
 ## Release builds
 
 The `build:bundle` task cleans `apps/server/dist` and builds `dist/bin.mjs`. The full build also depends on the web build and only replaces `dist/client`; cached bundle outputs exclude the client. Build `@t45/capabilities` separately and deploy its `dist/built-ins.json` as data, setting `BUILT_INS_FILE` to its path when starting the server. The server has no dependency on the capability package. Rebuilding or switching a checkout used by a running built server removes that server's assets, so build a release in a separate checkout before switching to it.

@@ -44,6 +44,8 @@ import { RunnerService } from "../runner/RunnerService.ts";
 import * as ChatEvents from "./ChatEvents.ts";
 import * as ChatExecutions from "./ChatExecutions.ts";
 import { inputMessageId, rootSessionId } from "./ChatIds.ts";
+import { ChatDisks } from "./ChatDisks.ts";
+import { Restarts } from "./Restarts.ts";
 import * as ChatRepository from "./ChatRepository.ts";
 import * as PromptService from "./PromptService.ts";
 
@@ -133,6 +135,8 @@ const make = Effect.gen(function* () {
   const transaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     sql.withTransaction(effect).pipe(Effect.catchTags({ SqlError: Effect.die }));
   const repository = yield* ChatRepository.ChatRepository;
+  const disks = yield* ChatDisks;
+  const restarts = yield* Restarts;
   const changes = yield* ChatEvents.ChatEvents;
   const runner = yield* RunnerService;
   const agents = yield* AgentRepository.AgentRepository;
@@ -230,7 +234,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* executions.stop(chatId);
       yield* attachments.release(chatId);
-      yield* repository.deleteDisk(chatId);
+      yield* disks.remove(chatId);
       yield* repository.finishDelete(chatId);
     }).pipe(
       Effect.catchCause((cause) =>
@@ -350,7 +354,20 @@ const make = Effect.gen(function* () {
       };
     });
 
-  for (const chatId of yield* repository.owed) yield* executions.deliver(chatId);
+  /**
+   * A run the instance can't continue after it restarted ends as interrupted, saying why, and is
+   * handed on as a run that ended, so its step's assignee hears of it.
+   */
+  const interruptAtStart = Effect.fnUntraced(function* (chatId: ChatId) {
+    yield* repository.appendReport(chatId, {
+      message: "Interrupted: the server restarted during the run. Run it again.",
+      at: yield* DateTime.now,
+    });
+    if (yield* requestStop(chatId)) yield* sql.afterCommit(executions.ended(chatId));
+  }, transaction);
+
+  for (const chatId of yield* repository.owed)
+    yield* restarts.continuesRunning ? executions.deliver(chatId) : interruptAtStart(chatId);
 
   const remove = Effect.fnUntraced(function* (chatId: ChatId) {
     yield* repository.markDeleted(chatId, yield* nowIso);

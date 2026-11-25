@@ -11,6 +11,7 @@ import { AttachmentRepository } from "../attachments/AttachmentRepository.ts";
 import { FakeRunner } from "../runner/FakeRunner.testkit.ts";
 import * as WorkflowService from "../workflows/WorkflowService.ts";
 import { inputMessageId, rootSessionId } from "./ChatIds.ts";
+import { ChatDisks } from "./ChatDisks.ts";
 import * as ChatRepository from "./ChatRepository.ts";
 import { ChatService } from "./ChatService.ts";
 import * as Fixture from "./Chats.testkit.ts";
@@ -50,6 +51,7 @@ const setup = Effect.gen(function* () {
     agentId,
     root: rootSessionId(chatId),
     repository: yield* ChatRepository.ChatRepository,
+    disks: yield* ChatDisks,
     events,
     ended,
     deliver,
@@ -82,7 +84,8 @@ describe("a chat's execution", () => {
     "runs a send with the agent's setup and the input's files, shows members the agent's work, then saves the disk",
     () =>
       Effect.gen(function* () {
-        const { runner, chats, chatId, agentId, root, repository, events, ended } = yield* setup;
+        const { runner, chats, chatId, agentId, root, repository, disks, events, ended } =
+          yield* setup;
         const sql = yield* SqlClient.SqlClient;
         yield* sql`UPDATE agents SET instructions = 'Use the policy.',
           model = 'opencode-go/other-model', network = 'open',
@@ -140,7 +143,7 @@ describe("a chat's execution", () => {
         );
         runner.finish(chatId, { disk });
         assert.isNull(yield* ended);
-        assert.deepEqual(yield* repository.readDisk(chatId), disk);
+        assert.deepEqual(yield* disks.read(chatId), disk);
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 
@@ -167,7 +170,7 @@ describe("a chat's execution", () => {
     "retains a failed execution's output and saved disk, clears questions, and ends without retrying",
     () =>
       Effect.gen(function* () {
-        const { runner, chats, chatId, root, repository, events, ended, deliver, converse } =
+        const { runner, chats, chatId, root, repository, disks, events, ended, deliver, converse } =
           yield* setup;
         const reply = yield* converse("input-1", "Sum the receipts.");
         yield* deliver("input-2", "Then email it.");
@@ -198,7 +201,7 @@ describe("a chat's execution", () => {
         );
         yield* runner.ended(chatId);
         assert.lengthOf(runner.executions, 2);
-        assert.deepEqual(yield* repository.readDisk(chatId), disk);
+        assert.deepEqual(yield* disks.read(chatId), disk);
       }).pipe(Effect.scoped, Effect.provide(Fixture.layer)),
   );
 

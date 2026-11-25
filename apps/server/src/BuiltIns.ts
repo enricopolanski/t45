@@ -1,4 +1,5 @@
 import { BuiltIns } from "@t45/contracts/resources/BuiltIns";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -13,16 +14,35 @@ import * as ServerConfig from "./config.ts";
 
 const decodeBuiltIns = Schema.decodeUnknownEffect(Schema.fromJsonString(BuiltIns));
 
+/** This deployment's built-ins as JSON, or none when an instance has none to apply. */
+export class Source extends Context.Service<
+  Source,
+  { readonly read: Effect.Effect<Option.Option<string>> }
+>()("t45/BuiltIns/Source") {}
+
+/** The file `BUILT_INS_FILE` names, applied at every start. */
+export const layerFile = Layer.effect(
+  Source,
+  Effect.gen(function* () {
+    const file = yield* ServerConfig.builtInsFile;
+    const fs = yield* FileSystem.FileSystem;
+    return {
+      read: Option.isNone(file)
+        ? Effect.succeedNone
+        : fs.readFileString(file.value).pipe(Effect.asSome, Effect.orDie),
+    };
+  }),
+);
+
 /**
- * Every start replaces the supplied capabilities and agents with this deployment's, before any
+ * Replaces the supplied capabilities and agents with this deployment's at start, before the
  * instance serves requests, so a release's tools reach existing databases.
  */
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
-    const file = yield* ServerConfig.builtInsFile;
-    if (Option.isNone(file)) return;
-    const fs = yield* FileSystem.FileSystem;
-    const builtIns = yield* fs.readFileString(file.value).pipe(Effect.flatMap(decodeBuiltIns));
+    const json = yield* (yield* Source).read;
+    if (Option.isNone(json)) return;
+    const builtIns = yield* decodeBuiltIns(json.value);
     const agents = yield* AgentRepository;
     const capabilities = yield* CapabilityRepository;
     const sql = yield* SqlClient.SqlClient;
