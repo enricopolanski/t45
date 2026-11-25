@@ -6,7 +6,14 @@
 import type * as Schema from "effect/Schema";
 
 import type { Collection } from "./Collection.ts";
-import { type Field, type FieldValues, groupRows, holdsData, type Layout } from "./Field.ts";
+import {
+  type Field,
+  type FieldValues,
+  groupRows,
+  holdsData,
+  type Layout,
+  UPDATED_AT_COLUMN,
+} from "./Field.ts";
 
 type TableLayout = NonNullable<Layout["table"]>;
 type FormLayout = NonNullable<Layout["form"]>;
@@ -53,6 +60,36 @@ export const resolveTableLayout = (
 };
 
 export type TableColumn = ReturnType<typeof resolveTableLayout>["columns"][number];
+
+type RecordShape = Pick<Collection, "fields" | "primaryKeyFieldId" | "columnOrder">;
+
+/** Every column of the records table in the column order, the last update included. */
+export const listColumnOrder = (collection: RecordShape) => [
+  ...new Set([
+    ...(collection.columnOrder ?? []),
+    ...collection.fields.map((field) => field.id),
+    UPDATED_AT_COLUMN,
+  ]),
+];
+
+/**
+ * The fields the records table lists when its layout lists none, in the column order: the primary
+ * key always, and each field shown in the table but a group that neither repeats nor shows a link.
+ */
+export const listDefaultColumns = (collection: RecordShape) =>
+  listColumnOrder(collection).flatMap((id) =>
+    collection.fields.filter(
+      (field) =>
+        field.id === id &&
+        (field.id === collection.primaryKeyFieldId ||
+          (isTableColumn(field) &&
+            (field.type !== "group" ||
+              field.repeatable ||
+              collection.fields.some(
+                (source) => source.type === "url" && source.displayLinkOn === field.id,
+              )))),
+    ),
+  );
 
 /** How much of a form's row a field takes unless its layout says: text all of it, as it grows. */
 const getDefaultSpan = (field: Field): NonNullable<FormLayout["fields"]>[number]["span"] =>

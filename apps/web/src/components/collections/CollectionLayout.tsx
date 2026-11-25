@@ -1,5 +1,6 @@
 import { useTranslation } from "~/i18n/locale";
 import type { Collection } from "@t45/contracts/models/Collection";
+import { listDefaultColumns } from "@t45/contracts/models/Layout";
 import type { CollectionRecordView } from "@t45/contracts/resources/Collections";
 import { buildFieldViews } from "@t45/core/fieldViews";
 import { useEffect, useState } from "react";
@@ -12,7 +13,7 @@ import { Checkbox } from "../ui/checkbox";
 import { layOutForm } from "../work/StepFields";
 import { ReadOnlyForm } from "../work/StepInputs";
 import { makeCollectionViews } from "./CollectionViews";
-import { listDefaultColumns, RecordTable } from "./Records";
+import { RecordTable } from "./Records";
 
 /** Edits how a collection's records show, previewed with its first 50; saving stores it. */
 function CollectionLayoutDialog({

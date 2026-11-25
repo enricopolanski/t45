@@ -9,7 +9,8 @@ import {
   withFieldValue,
 } from "@t45/contracts/models/Field";
 import {
-  isTableColumn,
+  listColumnOrder,
+  listDefaultColumns,
   resolveTableLayout,
   sortRows,
   type TableColumn,
@@ -170,34 +171,6 @@ const findLongText = (
     (field.type === "select" && field.tones?.[value] === undefined))
     ? value
     : undefined;
-
-/** Every column of the records table in the column order, the last update included. */
-const listColumnOrder = (collection: RecordShape) => [
-  ...new Set([
-    ...(collection.columnOrder ?? []),
-    ...collection.fields.map((field) => field.id),
-    UPDATED_AT_COLUMN,
-  ]),
-];
-
-/**
- * The fields the records table lists when its layout lists none, in the column order: the primary
- * key always, and each field shown in the table but a group that neither repeats nor shows a link.
- */
-export const listDefaultColumns = (collection: RecordShape) =>
-  listColumnOrder(collection).flatMap((id) =>
-    collection.fields.filter(
-      (field) =>
-        field.id === id &&
-        (field.id === collection.primaryKeyFieldId ||
-          (isTableColumn(field) &&
-            (field.type !== "group" ||
-              field.repeatable ||
-              collection.fields.some(
-                (source) => source.type === "url" && source.displayLinkOn === field.id,
-              )))),
-    ),
-  );
 
 export function resolveRecordTable(
   collection: RecordShape,
