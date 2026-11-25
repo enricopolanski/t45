@@ -43,8 +43,8 @@ const SERVER_ORIGIN = "http://t45.internal";
 /** Cloudflare re-signs intercepted HTTPS with this authority. */
 const CA_PATH = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 const PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-/** The local agent VM's CPU and memory. */
-const INSTANCE = { vcpu: 2, memoryMib: 2048, diskMb: 8000 };
+/** The largest container Cloudflare allows by default, so an agent never waits on CPU or memory. */
+const INSTANCE = { vcpu: 4, memoryMib: 12_288, diskMb: 20_000 };
 /** How long a relayed request waits for the server's answer. */
 const RELAY_TIMEOUT_MS = 10 * 60 * 1000;
 /** Set by the connection itself, not forwarded with a relayed request. */

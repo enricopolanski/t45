@@ -9,8 +9,8 @@ import { log, toIsoTime, writeFiles } from "./container.ts";
 const MAX_STDOUT_BYTES = 1024 * 1024;
 const TIMEOUT_MS = 30_000;
 const WORK = "/work";
-/** The local calculation VM's CPU and memory. */
-const INSTANCE = { vcpu: 1, memoryMib: 512, diskMb: 4000 };
+/** The largest container Cloudflare allows by default, so a calculation never waits on CPU or memory. */
+const INSTANCE = { vcpu: 4, memoryMib: 12_288, diskMb: 20_000 };
 
 /** What the script printed and the file it wrote, if asked for one; `reason` when it failed. */
 export type ScriptResult = { stdout: string; output: Uint8Array | null } | { reason: string };
