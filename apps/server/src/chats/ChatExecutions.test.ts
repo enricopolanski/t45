@@ -84,8 +84,7 @@ describe("a chat's execution", () => {
     "runs a send with the agent's setup and the input's files, shows members the agent's work, then saves the disk",
     () =>
       Effect.gen(function* () {
-        const { runner, chats, chatId, agentId, root, repository, disks, events, ended } =
-          yield* setup;
+        const { runner, chats, chatId, agentId, root, disks, events, ended } = yield* setup;
         const sql = yield* SqlClient.SqlClient;
         yield* sql`UPDATE agents SET instructions = 'Use the policy.',
           model = 'opencode-go/other-model', network = 'open',

@@ -22,6 +22,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 
 import * as BlobStore from "./BlobStore.ts";
+import { inJsonList, jsonList } from "../persistence/JsonList.ts";
 
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const isAttachmentId = Schema.is(AttachmentId);
@@ -218,7 +219,7 @@ const make = Effect.gen(function* () {
     upload,
 
     forIds: (ids) =>
-      select(sql.in("id", ids)).pipe(
+      select(inJsonList(sql, "id", ids)).pipe(
         Effect.map((found) => ids.flatMap((id) => found.filter((file) => file.id === id))),
       ),
 
@@ -244,7 +245,7 @@ const make = Effect.gen(function* () {
             WHERE c.attachment_id = attachments.id AND c.chat_id = ${chatId}) AS "bound",
           EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id) AS "held",
           NOT (${notHeldByWorkflow}) AS "workflowHeld"
-        FROM attachments WHERE ${sql.in("id", ids)}`.pipe(Effect.orDie);
+        FROM attachments WHERE ${inJsonList(sql, "id", ids)}`.pipe(Effect.orDie);
       for (const file of files) {
         const row = rows.find((each) => each.id === file.id);
         if (row === undefined || row.sizeBytes !== file.sizeBytes) return yield* unavailable();
@@ -259,9 +260,10 @@ const make = Effect.gen(function* () {
               row.uploaderId === from;
         if (!usable) return yield* unavailable();
       }
-      yield* sql`INSERT INTO chat_attachments ${sql.insert(
-        ids.map((id) => ({ chat_id: chatId, attachment_id: id })),
-      )} ON CONFLICT DO NOTHING`.pipe(Effect.orDie);
+      // The SELECT needs a WHERE before an upsert clause.
+      yield* sql`INSERT INTO chat_attachments (chat_id, attachment_id)
+        SELECT ${chatId}, value FROM json_each(${jsonList(ids)}) WHERE true
+        ON CONFLICT DO NOTHING`.pipe(Effect.orDie);
     }),
 
     chatsHolding: (id) =>
@@ -333,7 +335,7 @@ const make = Effect.gen(function* () {
             const bound = yield* sql<{ readonly id: string }>`DELETE FROM chat_attachments
               WHERE chat_id = ${chatId} RETURNING attachment_id AS id`;
             const ids = bound.map((row) => row.id);
-            yield* sql`DELETE FROM attachments WHERE ${sql.in("id", ids)} AND ${unheld}`;
+            yield* sql`DELETE FROM attachments WHERE ${inJsonList(sql, "id", ids)} AND ${unheld}`;
           }),
         )
         .pipe(Effect.orDie),

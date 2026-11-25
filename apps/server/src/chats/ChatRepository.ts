@@ -35,6 +35,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import type { Member } from "./ChatService.ts";
 import { inputMessageId, isInputMessage, rootSessionId } from "./ChatIds.ts";
+import { inJsonList } from "../persistence/JsonList.ts";
 
 const SessionRow = Schema.Struct({
   sessionId: Schema.String,
@@ -378,7 +379,7 @@ const make = Effect.gen(function* () {
     messages: (chatId: ChatId, sessionId: string, messageIds: ReadonlyArray<string>) =>
       sql<MessageRow>`SELECT ${messageColumns} FROM chat_messages
         WHERE chat_id = ${chatId} AND session_id = ${sessionId}
-          AND ${sql.in("message_id", messageIds)}
+          AND ${inJsonList(sql, "message_id", messageIds)}
         ORDER BY ordinal`.pipe(Effect.orDie),
     page: (chatId: ChatId, sessionId: string, beforeOrdinal: number | null, limit: number) =>
       sql<MessageRow>`SELECT ${messageColumns}

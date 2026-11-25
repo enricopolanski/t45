@@ -13,6 +13,8 @@ import type { Scope } from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { inJsonList } from "../persistence/JsonList.ts";
+
 const Row = Schema.Struct({
   ...Ticket.fields,
   status: Schema.fromJsonString(Ticket.fields.status),
@@ -267,7 +269,7 @@ const make = Effect.gen(function* () {
             VALUES (${stepId}, ${ticketId}, ${encoded})`;
           if (attachmentIds.length > 0)
             yield* sql`INSERT INTO completed_step_files (step_id, attachment_id)
-              SELECT ${stepId}, id FROM attachments WHERE ${sql.in("id", attachmentIds)}`;
+              SELECT ${stepId}, id FROM attachments WHERE ${inJsonList(sql, "id", attachmentIds)}`;
         }).pipe(Effect.orDie),
       holdingFile: (attachmentId: AttachmentId) =>
         sql<{ readonly stepId: string; readonly ticketId: string }>`

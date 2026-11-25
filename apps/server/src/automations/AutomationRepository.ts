@@ -6,6 +6,8 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { inJsonList } from "../persistence/JsonList.ts";
+
 const Row = Schema.Struct({
   ...Automation.fields,
   nextPhases: Schema.optionalKey(Schema.fromJsonString(Schema.Array(Phase))),
@@ -53,7 +55,7 @@ const make = Effect.gen(function* () {
     listByIds: (ids: ReadonlyArray<AutomationId>) =>
       ids.length === 0
         ? Effect.succeed([])
-        : sql`SELECT ${columns} FROM automations WHERE ${sql.in("id", ids)}`.pipe(
+        : sql`SELECT ${columns} FROM automations WHERE ${inJsonList(sql, "id", ids)}`.pipe(
             Effect.flatMap(decodeAutomations),
             Effect.orDie,
           ),

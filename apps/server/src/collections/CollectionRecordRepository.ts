@@ -6,8 +6,25 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { Fragment } from "effect/sql/Statement";
 
+import { inJsonList } from "../persistence/JsonList.ts";
+
 const decodeRecords = Schema.decodeUnknownEffect(
   Schema.Array(Schema.fromJsonString(CollectionRecord)),
+);
+const decodeRecordList = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(CollectionRecord)),
+);
+/** A menu's choices, as `[value, count, link]` in the order the search sorted them. */
+const decodeChoices = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Tuple([
+        Schema.Union([Schema.String, Schema.Number]),
+        Schema.Number,
+        Schema.NullOr(Schema.String),
+      ]),
+    ),
+  ),
 );
 const encodeRecord = Schema.encodeEffect(
   Schema.Struct({
@@ -39,11 +56,6 @@ type ValueField = {
 type CountedValue = { readonly value: string | number; readonly count: number };
 type FilterChoice = CountedValue & { readonly link?: string };
 type ValueCountRow = CountedValue & { readonly link: string | null };
-
-type SearchRow =
-  | { readonly kind: "record"; readonly value: string }
-  | { readonly kind: "matchCount" | "totalCount"; readonly count: number }
-  | ({ readonly kind: "choice"; readonly fieldId: string } & ValueCountRow);
 
 export class CollectionRecordRepository extends Context.Service<
   CollectionRecordRepository,
@@ -237,7 +249,8 @@ export const layer = Layer.effect(
             selected,
           );
           choices.push(
-            sql`UNION ALL SELECT 'choice', ${fieldId}, value, count, link FROM (${counts})`,
+            sql`, (SELECT json_group_array(json_array(value, count, link)) FROM (${counts}))
+              AS ${sql(`choices_${choices.length}`)}`,
           );
         }
       }
@@ -252,44 +265,38 @@ export const layer = Layer.effect(
       const matchSource = hasCriteria
         ? sql`matching_keys`
         : sql`collection_records WHERE ${inCollection}`;
-      // A single read statement keeps page, counts and menus on one SQLite snapshot.
-      const rows = yield* sql<SearchRow>`WITH ${sql.csv(ctes)}
-        SELECT 'record' AS kind, NULL AS fieldId, record AS value, NULL AS count, NULL AS link
-        FROM (SELECT ${recordJson} AS record FROM collection_records
-          WHERE ${inCollection} AND key IN (SELECT key FROM page) ORDER BY key)
-        UNION ALL SELECT 'matchCount', NULL, NULL, count(*), NULL FROM ${matchSource}
-        ${
-          hasCriteria
-            ? sql`UNION ALL SELECT 'totalCount', NULL, NULL, count(*), NULL
-          FROM collection_records WHERE ${inCollection}`
-            : sql``
-        }
+      // A single read statement keeps page, counts and menus on one SQLite snapshot. Each part is a
+      // column of its own, not a UNION ALL term: a Durable Object allows five terms per compound SELECT.
+      const [row] = yield* sql<{
+        readonly records: string;
+        readonly matchCount: number;
+        readonly totalCount: number | null;
+        readonly [choices: `choices_${number}`]: string;
+      }>`WITH ${sql.csv(ctes)}
+        SELECT
+          (SELECT json_group_array(json(record)) FROM (SELECT ${recordJson} AS record
+            FROM collection_records
+            WHERE ${inCollection} AND key IN (SELECT key FROM page) ORDER BY key)) AS records,
+          (SELECT count(*) FROM ${matchSource}) AS "matchCount",
+          ${
+            hasCriteria
+              ? sql`(SELECT count(*) FROM collection_records WHERE ${inCollection})`
+              : sql`NULL`
+          } AS "totalCount"
         ${sql.join(" ", false)(choices)}`;
-
-      const found: Array<string> = [];
-      const filterChoices = new Map(fields.map(({ fieldId }) => [fieldId, [] as FilterChoice[]]));
-      let matchCount = 0;
-      let totalCount = 0;
-      for (const row of rows) {
-        switch (row.kind) {
-          case "record":
-            found.push(row.value);
-            break;
-          case "matchCount":
-            matchCount = row.count;
-            break;
-          case "totalCount":
-            totalCount = row.count;
-            break;
-          case "choice":
-            filterChoices.get(row.fieldId)!.push(asChoice(row));
-        }
+      const matchCount = row?.matchCount ?? 0;
+      const filterChoices: Record<string, ReadonlyArray<FilterChoice>> = {};
+      for (const [index, { fieldId }] of fields.entries()) {
+        const counted = yield* decodeChoices(row?.[`choices_${index}`] ?? "[]");
+        filterChoices[fieldId] = counted.map(([value, count, link]) =>
+          asChoice({ value, count, link }),
+        );
       }
       return {
-        records: yield* decodeRecords(found),
+        records: yield* decodeRecordList(row?.records ?? "[]"),
         matchCount,
-        totalCount: hasCriteria ? totalCount : matchCount,
-        filterChoices: Object.fromEntries(filterChoices),
+        totalCount: hasCriteria ? (row?.totalCount ?? 0) : matchCount,
+        filterChoices,
       };
     }, Effect.orDie);
 
@@ -298,7 +305,7 @@ export const layer = Layer.effect(
       listByKeys: (collectionId, keys) =>
         keys.length === 0
           ? Effect.succeed([])
-          : read(sql`collection_id = ${collectionId} AND ${sql.in("key", keys)}`),
+          : read(sql`collection_id = ${collectionId} AND ${inJsonList(sql, "key", keys)}`),
       observeChanges: (observe) =>
         Effect.acquireRelease(
           Effect.sync(() => {
