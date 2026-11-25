@@ -9,6 +9,8 @@ import {
   QuestionGone,
   RunnerRpcs,
 } from "@t45/contracts/resources/Runner";
+import type * as Config from "effect/Config";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -270,30 +272,47 @@ const isExecutionFailed = Schema.is(ExecutionFailed);
 /** The runner calls that drive an execution; scripts and relayed server requests are the runner's own. */
 const ExecutionRpcs = RunnerRpcs.omit("runScript", "runScriptForFile", "respond");
 
+export class SandboxError extends Schema.TaggedError<SandboxError>()("SandboxError", {
+  operation: Schema.String,
+  cause: Schema.Defect(),
+}) {
+  override get message(): string {
+    return `The sandbox's ${this.operation} failed: ${String(this.cause)}`;
+  }
+}
+
 /** A started sandbox: where its OpenCode answers, and how to add files and save its disk. */
-export interface Sandbox<E> {
+export interface Sandbox {
   readonly url: string;
   readonly password: Redacted.Redacted;
-  readonly write: (path: string, content: Uint8Array) => Effect.Effect<void, E>;
-  readonly save: Effect.Effect<Uint8Array, E>;
+  readonly write: (path: string, content: Uint8Array) => Effect.Effect<void, SandboxError>;
+  readonly save: Effect.Effect<Uint8Array, SandboxError>;
 }
 
 /**
- * The runner calls that drive OpenCode in a sandbox `start` makes for each execution, whatever
- * runs the sandbox. `emit` receives the execution's updates; the sandbox lasts as long as its scope.
+ * Where executions run: microsandbox VMs for the local runner, Cloudflare containers for the
+ * Worker. `start` gives an execution its sandbox, which lasts as long as the scope; `emit` receives
+ * the execution's updates.
  */
-export const makeExecutions = <E extends { readonly _tag: string }, R>(
-  start: (
-    request: ExecutionRequest,
-    agent: AgentSetup,
-    emit: (event: ExecutionUpdate) => Effect.Effect<void>,
-  ) => Effect.Effect<Sandbox<E>, E, R | Scope.Scope>,
-) => {
+export class Sandboxes extends Context.Service<
+  Sandboxes,
+  {
+    readonly start: (
+      request: ExecutionRequest,
+      agent: AgentSetup,
+      emit: (event: ExecutionUpdate) => Effect.Effect<void>,
+    ) => Effect.Effect<Sandbox, SandboxError | ExecutionFailed | Config.ConfigError, Scope.Scope>;
+  }
+>()("@t45/runner/ExecutionOrchestrator/Sandboxes") {}
+
+/** The runner calls that drive OpenCode in the sandbox of each execution. */
+export const makeExecutions = Effect.gen(function* () {
+  const { start } = yield* Sandboxes;
   const activeExecutions = new Map<
     string,
     {
       readonly opencodeClient: OpencodeClient;
-      readonly writeFiles: (files: ExecutionRequest["files"]) => Effect.Effect<void, E>;
+      readonly writeFiles: (files: ExecutionRequest["files"]) => Effect.Effect<void, SandboxError>;
     }
   >();
 
@@ -488,4 +507,4 @@ export const makeExecutions = <E extends { readonly _tag: string }, R>(
           );
       }),
   });
-};
+});

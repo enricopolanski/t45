@@ -1,14 +1,9 @@
 // @effect-diagnostics globalConsole:off globalDate:off globalTimers:off
 import { Files } from "@cloudflare/sandbox";
 import { ATTACHMENT_MAX_FILE_BYTES } from "@t45/contracts/models/Attachment";
-import { CAPABILITIES_DIR } from "@t45/contracts/models/Capability";
-import {
-  SCRIPT_INPUT_FILE,
-  SCRIPT_OUTPUT_FILE,
-  SCRIPT_TEMPLATE_FILE,
-} from "@t45/contracts/resources/Runner";
 import { DurableObject } from "cloudflare:workers";
 
+import type { Script } from "../src/Scripts.ts";
 import { log, toIsoTime, writeFiles } from "./container.ts";
 
 const MAX_STDOUT_BYTES = 1024 * 1024;
@@ -17,16 +12,8 @@ const WORK = "/work";
 /** The local calculation VM's CPU and memory. */
 const INSTANCE = { vcpu: 1, memoryMib: 512, diskMb: 4000 };
 
-/** A calculation script with its encoded inputs and files, as the Worker hands it to the sandbox. */
-export type Script = {
-  entrypoint: string;
-  input: string;
-  files: Record<string, string>;
-  /** For a script that fills a template: the template and its capabilities' files. */
-  template?: { content: Uint8Array; capabilityFiles: Record<string, string> };
-};
-/** The script's stdout, or the file it wrote for a template; `reason` when it failed. */
-export type ScriptResult = { stdout: string } | { file: Uint8Array } | { reason: string };
+/** What the script printed and the file it wrote, if asked for one; `reason` when it failed. */
+export type ScriptResult = { stdout: string; output: Uint8Array | null } | { reason: string };
 
 class ScriptFailure extends Error {}
 
@@ -53,22 +40,18 @@ const readStdout = async (stream: ReadableStream<Uint8Array>) => {
   return new TextDecoder().decode(bytes);
 };
 
-const readOutputFile = async (files: Files) => {
-  const path = `${WORK}/${SCRIPT_OUTPUT_FILE}`;
-  const failure = new ScriptFailure(
-    `The script must write a file to ${SCRIPT_OUTPUT_FILE} within the attachment size limit.`,
-  );
+/** The file at `path`, or null when it is missing, empty or over the attachment size limit. */
+const readOutputFile = async (files: Files, path: string) => {
   const info = await files.stat(path).catch(() => null);
-  if (info === null || info.type !== "file" || info.size === 0n) throw failure;
-  if (info.size > BigInt(ATTACHMENT_MAX_FILE_BYTES)) throw failure;
+  if (info === null || info.type !== "file" || info.size === 0n) return null;
+  if (info.size > BigInt(ATTACHMENT_MAX_FILE_BYTES)) return null;
   const bytes = new Uint8Array(await (await files.readFile(path)).arrayBuffer());
-  if (BigInt(bytes.byteLength) !== info.size) throw failure;
-  return bytes;
+  return BigInt(bytes.byteLength) === info.size ? bytes : null;
 };
 
 /** One container per calculation; the method destroys it before returning. */
 export class Calculation extends DurableObject<Env> {
-  async run(script: Script): Promise<ScriptResult> {
+  async run({ files: entries, command, outputPath }: Script): Promise<ScriptResult> {
     const container = this.ctx.container;
     if (container === undefined) return { reason: "The container binding is missing." };
     const sandboxId = this.ctx.id.toString();
@@ -88,18 +71,7 @@ export class Calculation extends DurableObject<Env> {
           enableInternet: false,
           instance: INSTANCE,
         });
-        await writeFiles(files, [
-          [`${WORK}/${SCRIPT_INPUT_FILE}`, script.input],
-          ...Object.entries(script.files).map(
-            ([path, content]) => [`${WORK}/${path}`, content] as const,
-          ),
-          ...Object.entries(script.template?.capabilityFiles ?? {}).map(
-            ([path, content]) => [`${CAPABILITIES_DIR}/${path}`, content] as const,
-          ),
-          ...(script.template === undefined
-            ? []
-            : [[`${WORK}/${SCRIPT_TEMPLATE_FILE}`, script.template.content] as const]),
-        ]);
+        await writeFiles(files, entries);
       } catch (error) {
         throw new ScriptFailure(
           container.running
@@ -117,7 +89,7 @@ export class Calculation extends DurableObject<Env> {
       );
       timer = setTimeout(() => deadline.abort(), TIMEOUT_MS);
       const process = await Promise.race([
-        container.exec(["node", `${WORK}/${script.entrypoint}`, `${WORK}/${SCRIPT_INPUT_FILE}`], {
+        container.exec([...command], {
           cwd: WORK,
           user: "agent",
           signal: deadline.signal,
@@ -134,9 +106,10 @@ export class Calculation extends DurableObject<Env> {
       result =
         exitCode !== 0
           ? { reason: `The calculation exited with code ${exitCode}.` }
-          : script.template === undefined
-            ? { stdout }
-            : { file: await readOutputFile(files) };
+          : {
+              stdout,
+              output: outputPath === null ? null : await readOutputFile(files, outputPath),
+            };
     } catch (error) {
       finishedAt ??= Date.now();
       result = {

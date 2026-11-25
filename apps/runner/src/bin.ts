@@ -12,28 +12,20 @@ import * as Schema from "effect/Schema";
 import { FetchHttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 
-import * as ExecutionOrchestrator from "./ExecutionOrchestrator.ts";
+import { makeExecutions } from "./ExecutionOrchestrator.ts";
 import * as SandboxManager from "./SandboxManager.ts";
+import { makeScripts } from "./Scripts.ts";
 
 const handlers = RunnerRpcs.toLayer(
-  Effect.sync(() =>
-    RunnerRpcs.of({
-      runScript: SandboxManager.runScript,
-      runScriptForFile: SandboxManager.runScriptForFile,
-      ...ExecutionOrchestrator.makeExecutions((request, agent) =>
-        SandboxManager.start(
-          request.rootId,
-          agent,
-          request.disk,
-          request.serverUrl,
-          request.toolToken,
-        ),
-      ),
+  Effect.gen(function* () {
+    return RunnerRpcs.of({
+      ...(yield* makeScripts),
+      ...(yield* makeExecutions),
       // Microsandbox VMs reach the server themselves, so this runner relays no requests.
       respond: () => Effect.void,
-    }),
-  ),
-);
+    });
+  }),
+).pipe(Layer.provide(SandboxManager.layer));
 
 /** Only T45 calls the runner, with its bearer token. */
 const routes = Layer.unwrap(

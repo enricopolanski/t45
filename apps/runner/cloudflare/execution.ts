@@ -26,7 +26,12 @@ import {
   TOOL_TOKEN_ENV,
   TOOL_TOKEN_PLACEHOLDER,
 } from "../src/AgentSetup.ts";
-import * as ExecutionOrchestrator from "../src/ExecutionOrchestrator.ts";
+import {
+  makeExecutions,
+  type Sandbox,
+  SandboxError,
+  Sandboxes,
+} from "../src/ExecutionOrchestrator.ts";
 import { log, toIsoTime, writeFiles } from "./container.ts";
 
 type RunnerRpc = RpcGroup.Rpcs<typeof RunnerRpcs>;
@@ -124,17 +129,8 @@ export class Outbound extends WorkerEntrypoint<Env, OutboundPolicy> {
   }
 }
 
-class ContainerError extends Schema.TaggedError<ContainerError>()("ContainerError", {
-  operation: Schema.String,
-  cause: Schema.Defect(),
-}) {
-  override get message(): string {
-    return `the container's ${this.operation} failed: ${String(this.cause)}`;
-  }
-}
-
 const attempt = <A>(operation: string, run: () => Promise<A>) =>
-  Effect.tryPromise({ try: run, catch: (cause) => new ContainerError({ operation, cause }) });
+  Effect.tryPromise({ try: run, catch: (cause) => new SandboxError({ operation, cause }) });
 
 /** Crosses into the Durable Object as JSON, which a binding call can always carry. */
 export const ExecutionRequestJson = Schema.fromJsonString(Schema.toCodecJson(ExecutionRequest));
@@ -158,8 +154,10 @@ export class Execution extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#container = ctx.container!;
-    this.#executions = ExecutionOrchestrator.makeExecutions((request, agent, emit) =>
-      this.#start(request, agent, emit),
+    this.#executions = Effect.runSync(
+      Effect.provideService(makeExecutions, Sandboxes, {
+        start: (request, agent, emit) => this.#start(request, agent, emit),
+      }),
     );
   }
 
@@ -274,7 +272,7 @@ export class Execution extends DurableObject<Env> {
         write: (path: string, content: Uint8Array) =>
           attempt("write", () => writeFiles(files, [[`/work/${path}`, content]])),
         save: Effect.succeed(new Uint8Array()),
-      } satisfies ExecutionOrchestrator.Sandbox<ContainerError>;
+      } satisfies Sandbox;
     });
   }
 
