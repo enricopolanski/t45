@@ -18,6 +18,7 @@ import type { NotFound } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
+import { FetchHttpClient } from "effect/http";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -87,6 +88,8 @@ const layerPersistence = Layer.effectDiscard(seedPresets).pipe(
       Layer.provideMerge(Sqlite.testLayer),
       Layer.provideMerge(ServerConfig.testLayer("t3-chats-")),
       Layer.provideMerge(NodeServices.layer),
+      // The fake runner relays no requests, so the client is never called.
+      Layer.provideMerge(FetchHttpClient.layer),
     ),
   ),
 );

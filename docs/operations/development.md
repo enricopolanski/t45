@@ -72,7 +72,17 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 - **The agent image**, built with Docker and loaded into microsandbox as `t45-agent:dev`: `vp run --filter @t45/runner image`. Rebuild after changing `apps/runner/image`. Without it, chats fail and the server log names the reason, as in production.
 - **`mkfs.ext4` (e2fsprogs) and GNU tar** on the host, which make and pack VM disks. On macOS, install `e2fsprogs` and `gnu-tar` with Homebrew and put their `sbin` and `gnubin` folders first on `PATH`.
 
-Built-in MCP tools call the server’s regular workflow RPCs and attachment upload API with an execution token. `SERVER_URL` sets the server address reachable from agent VMs; by default it is `http://host.microsandbox.internal:<server port>`. Set it to a reachable server address when using a remote runner.
+Built-in MCP tools call the server’s regular workflow RPCs and attachment upload API with an execution token. `SERVER_URL` sets the server address reachable from agent VMs; by default it is `http://host.microsandbox.internal:<server port>`. Set it to a reachable server address when using a remote runner whose sandboxes call the server directly; the Cloudflare runner doesn't need it.
+
+### The Cloudflare runner
+
+`apps/runner/cloudflare` is a Worker that serves the same runner calls from Cloudflare Containers, for a server and web app that run anywhere, including locally. Each script and each execution gets a new container from the agent image (`apps/runner/image`), destroyed when it ends. Point the server at it with `RUNNER_URL=https://<worker>.workers.dev` and `RUNNER_TOKEN`.
+
+- **Secrets:** `T45_RUNNER_TOKEN` (the token the server sends), `OPENCODE_API_KEY` and each `CAPABILITY_SECRET_<NAME>`, as Worker secrets (`wrangler secret put`, or `--secrets-file` on deploy). Containers only hold placeholders: an outbound handler in the Worker adds the real values on the way to their hosts.
+- **Network:** a provider-only agent reaches the provider and its capabilities' hosts over ports 80 and 443, and nothing else; an open agent reaches the internet directly.
+- **Calls to the server:** the agent's tools call `http://t45.internal`, and the runner relays those requests to the server over the execution's own connection, so the server needs no public address.
+- **No chat resume:** the runner keeps no disk, so it refuses an execution of a chat that ran before. Automations, whose phases each start a new chat, are unaffected.
+- **Commands:** `pnpm --filter @t45/runner cloudflare:dev` runs it locally with Docker (secrets from `--env-file`); `cloudflare:deploy` deploys it to the account Wrangler is logged in to, on Workers Paid; `cloudflare:types` regenerates its binding types after a `wrangler.jsonc` change.
 
 `packages/capabilities` builds the supplied MCP programs and exports `dist/capabilities.json` and `dist/built-ins.json`. Development builds these before startup and passes `BUILT_INS_FILE` to the server. Every server start replaces the supplied capabilities and agent presets with the file's, so changed tools reach existing databases after a restart. Import other bundles through the admin-only `capabilities.import` RPC with `{ capabilities: <contents of capabilities.json> }`; an import that uses a supplied capability's ID lasts until the next start. Agents select those stored definitions, and dispatch sends their content to the runner, which applies it without a catalogue. Changing a capability needs no server or image rebuild.
 

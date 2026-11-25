@@ -8,6 +8,10 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as HttpBody from "effect/http/HttpBody";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpMethod from "effect/http/HttpMethod";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -50,6 +54,7 @@ export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const crypto = yield* Crypto.Crypto;
   const serverUrl = yield* ServerConfig.serverUrl;
+  const httpClient = yield* HttpClient.HttpClient;
   const toolInstance = yield* ServerConfig.toolInstance;
   const repository = yield* ChatRepository;
   const changes = yield* ChatEvents;
@@ -177,6 +182,59 @@ export const make = Effect.gen(function* () {
       } satisfies ExecutionRequest;
     });
 
+  /** Where this server answers itself; a wildcard bind answers on loopback too. */
+  const ownOrigin = Effect.gen(function* () {
+    const host = yield* ServerConfig.host;
+    const port = yield* ServerConfig.port;
+    if (host === "0.0.0.0" || host === "::") return `http://127.0.0.1:${port}`;
+    return `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
+  });
+
+  /**
+   * Sends a request the agent made to this server, for a runner whose sandboxes can't reach it, and
+   * returns the answer to the runner. Only the API is reachable, as it is from the agent's tools.
+   */
+  const relay = (
+    rootId: ExecutionRequest["rootId"],
+    event: Extract<ExecutionUpdate, { _tag: "serverRequest" }>,
+  ) =>
+    Effect.gen(function* () {
+      const method = event.method;
+      if (!event.path.startsWith("/api/") || !HttpMethod.isHttpMethod(method))
+        return { status: 404, headers: {}, body: new Uint8Array() };
+      const response = yield* httpClient.execute(
+        HttpClientRequest.make(method)(`${yield* ownOrigin}${event.path}`, {
+          headers: event.headers,
+          ...(method === "GET" || method === "HEAD"
+            ? {}
+            : { body: HttpBody.uint8Array(event.body, event.headers["content-type"]) }),
+        }),
+      );
+      const {
+        "content-encoding": _encoding,
+        "content-length": _length,
+        ...headers
+      } = response.headers;
+      return {
+        status: response.status,
+        headers,
+        body: new Uint8Array(yield* response.arrayBuffer),
+      };
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Relaying an agent's request failed", { rootId, error }).pipe(
+          Effect.as({ status: 502, headers: {}, body: new Uint8Array() }),
+        ),
+      ),
+      Effect.flatMap((response) =>
+        runner.respond({ rootId, requestId: event.requestId, ...response }),
+      ),
+      Effect.catchTags({
+        RpcClientError: (error) =>
+          Effect.logWarning("Answering an agent's request failed", { rootId, error }),
+      }),
+    );
+
   /** Atomic with posts: one that commits after this finds no owner and starts one. */
   const owed = (chatId: ChatId) =>
     sql
@@ -234,6 +292,9 @@ export const make = Effect.gen(function* () {
               );
           case "heartbeat":
             return Effect.void;
+          case "serverRequest":
+            // Concurrent: the agent's tools can wait on several answers while the run goes on.
+            return relay(request.rootId, event).pipe(Effect.forkChild, Effect.asVoid);
           case "finished":
             return end(chatId, onEnd, event.outcome, event.disk);
         }

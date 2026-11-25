@@ -13,6 +13,27 @@ import { FetchHttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } fr
 import { RpcSerialization, RpcServer } from "effect/rpc";
 
 import * as ExecutionOrchestrator from "./ExecutionOrchestrator.ts";
+import * as SandboxManager from "./SandboxManager.ts";
+
+const handlers = RunnerRpcs.toLayer(
+  Effect.sync(() =>
+    RunnerRpcs.of({
+      runScript: SandboxManager.runScript,
+      runScriptForFile: SandboxManager.runScriptForFile,
+      ...ExecutionOrchestrator.makeExecutions((request, agent) =>
+        SandboxManager.start(
+          request.rootId,
+          agent,
+          request.disk,
+          request.serverUrl,
+          request.toolToken,
+        ),
+      ),
+      // Microsandbox VMs reach the server themselves, so this runner relays no requests.
+      respond: () => Effect.void,
+    }),
+  ),
+);
 
 /** Only T45 calls the runner, with its bearer token. */
 const routes = Layer.unwrap(
@@ -39,7 +60,7 @@ const routes = Layer.unwrap(
 const layer = HttpRouter.serve(routes).pipe(
   // Binary, so a VM disk travels as bytes: JSON's base64 for one of a few hundred MB exhausts the heap.
   Layer.provide(RpcSerialization.layerSchemaBinary({ maxFrameSize: "unbounded" })),
-  Layer.provide(ExecutionOrchestrator.layer),
+  Layer.provide(handlers),
   Layer.provide(
     NodeHttpServer.layerConfig(() => NodeHttp.createServer(), {
       host: Config.schema(Schema.NonEmptyString, "T45_RUNNER_HOST"),

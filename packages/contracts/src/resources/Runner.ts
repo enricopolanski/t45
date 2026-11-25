@@ -105,6 +105,17 @@ export const ExecutionUpdate = Schema.Union([
   Schema.TaggedStruct("questions", { forms: Schema.Array(Form.Info) }),
   /** Keeps the call's connection from going idle while the agent waits. */
   Schema.TaggedStruct("heartbeat", {}),
+  /**
+   * An HTTP request the agent sent to the T45 server, from a runner whose sandboxes can't reach the
+   * server themselves; the server answers it with `respond`.
+   */
+  Schema.TaggedStruct("serverRequest", {
+    requestId: Schema.String,
+    method: Schema.String,
+    path: Schema.String,
+    headers: Schema.Record(Schema.String, Schema.String),
+    body: Schema.Uint8Array,
+  }),
   Schema.TaggedStruct("finished", {
     outcome: Schema.NullOr(Schema.Literal("failed")),
     disk: Schema.Uint8Array,
@@ -157,4 +168,13 @@ export const RunnerRpcs = RpcGroup.make(
   }),
   Rpc.make("dismiss", { payload: question, error: QuestionGone }),
   Rpc.make("cancel", { payload: { rootId: Session.ID, messageId: SessionMessage.ID } }),
+  Rpc.make("respond", {
+    payload: {
+      rootId: Session.ID,
+      requestId: Schema.String,
+      status: Schema.Int,
+      headers: Schema.Record(Schema.String, Schema.String),
+      body: Schema.Uint8Array,
+    },
+  }),
 );
