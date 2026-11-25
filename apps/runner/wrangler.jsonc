@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "t45-runner-experiment",
+  "name": "t45-runner",
   "main": "cloudflare/worker.ts",
   "compatibility_date": "2026-11-19",
   // Effect, OpenCode's client and the Sandbox SDK's Files use Node APIs.
