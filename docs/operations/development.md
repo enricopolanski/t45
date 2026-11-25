@@ -72,11 +72,33 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 - **The agent image**, built with Docker and loaded into microsandbox as `t45-agent:dev`: `vp run --filter @t45/runner image`. Rebuild after changing `apps/runner/image`. Without it, chats fail and the server log names the reason, as in production.
 - **`mkfs.ext4` (e2fsprogs) and GNU tar** on the host, which make and pack VM disks. On macOS, install `e2fsprogs` and `gnu-tar` with Homebrew and put their `sbin` and `gnubin` folders first on `PATH`.
 
-Built-in MCP tools call the server’s regular workflow RPCs and attachment upload API with an execution token. `SERVER_URL` sets the server address reachable from agent VMs; by default it is `http://host.microsandbox.internal:<server port>`. Set it to a reachable server address when using a remote runner.
+Built-in MCP tools call the server’s regular workflow RPCs and attachment upload API with an execution token. `SERVER_URL` sets the server address reachable from agent VMs; by default it is `http://host.microsandbox.internal:<server port>`. Set it to a reachable server address when using a remote runner whose sandboxes call the server directly; the Cloudflare runner doesn't need it.
+
+### The Cloudflare runner
+
+`apps/runner/cloudflare` is a Worker that serves the same runner calls from Cloudflare Containers, for a server and web app that run anywhere, including locally. Each script and each execution gets a new container from the agent image (`apps/runner/image`), destroyed when it ends. Point the server at it with `RUNNER_URL=https://<worker>.workers.dev` and `RUNNER_TOKEN`.
+
+- **Secrets:** `T45_RUNNER_TOKEN` (the token the server sends), `OPENCODE_API_KEY` and each `CAPABILITY_SECRET_<NAME>`, as Worker secrets (`wrangler secret put`, or `--secrets-file` on deploy). Containers only hold placeholders: an outbound handler in the Worker adds the real values on the way to their hosts.
+- **Network:** a provider-only agent reaches the provider and its capabilities' hosts over ports 80 and 443, and nothing else; an open agent reaches the internet directly.
+- **Calls to the server:** the agent's tools call `http://t45.internal`, and the runner relays those requests to the server over the execution's own connection, so the server needs no public address.
+- **No chat resume:** the runner keeps no disk, so it refuses an execution of a chat that ran before. Automations, whose phases each start a new chat, are unaffected.
+- **No WebSockets to secret hosts:** a WebSocket through the outbound handler never opens (the Worker logs `responseStreamDisconnected`), so the Web browser capability can't reach Browserless. Secrets over plain HTTPS work.
+- **Commands:** `pnpm --filter @t45/runner cloudflare:dev` runs it locally with Docker (secrets from `--env-file`); `cloudflare:deploy` deploys it to the account Wrangler is logged in to, on Workers Paid; `cloudflare:types` regenerates its binding types after a `wrangler.jsonc` change.
 
 `packages/capabilities` builds the supplied MCP programs and exports `dist/capabilities.json` and `dist/built-ins.json`. Development builds these before startup and passes `BUILT_INS_FILE` to the server. Every server start replaces the supplied capabilities and agent presets with the file's, so changed tools reach existing databases after a restart. Import other bundles through the admin-only `capabilities.import` RPC with `{ capabilities: <contents of capabilities.json> }`; an import that uses a supplied capability's ID lasts until the next start. Agents select those stored definitions, and dispatch sends their content to the runner, which applies it without a catalogue. Changing a capability needs no server or image rebuild.
 
 Without `/dev/kvm` every chat's VM fails to start, and the runner's log names the reason.
+
+### The Cloudflare server
+
+`apps/server/cloudflare` serves the same server from a Worker: its static assets are the web client (`apps/web/dist`), and `/api/*` goes to a SQLite Durable Object per instance, which holds that instance's database, sockets and runs. `src/Instance.ts` is what both servers share; each provides its own layers for the database, built-ins, chat disks, attachment bytes, the API that relayed agent requests reach, and restarts. The Node server stays the development default.
+
+- **Settings:** `T45_INSTANCE` names the instance's object; `RUNNER_URL` and `SERVER_URL` as vars, `RUNNER_TOKEN` as a secret. A release sets `BUILD_SHA` and `AUTH_CLERK_PUBLISHABLE_KEY`, the same values the web client is built with. Without `BUILD_SHA` an instance refuses to start unless `T45_DEVELOPMENT=true`, which, as in Node development, signs in any typed email and lets `x-instance-id` pick an instance.
+- **Buckets:** `BUILT_INS` holds `built-ins.json`, uploaded before each deploy; an instance applies each version once. `ATTACHMENTS` is the bucket the Node server's `T45_ATTACHMENTS_S3_*` names: attachment bytes by blob key at its root, so both servers read the same files; uploads stream through a `staging/` object, so a file never sits in memory whole. `FILES` holds chat disks under the instance's name.
+- **Runs:** the object holds the runner's stream for a run, as the Node server does. Cloudflare evicts an object after 70–140 s with no incoming request or event, so while a chat runs an alarm wakes it every 30 s; one deployed 20-minute run held this way, which is all the evidence so far. A run cut short by a restart, including a deploy (active objects adopt new code within about 5 minutes), ends interrupted with a report at the next start, and its step's assignee is notified: the Cloudflare runner keeps no disk, and running it again could repeat what its tools did.
+- **Moving an instance:** `apps/server/scripts/transfer-to-cloudflare.ts <copy.sqlite>` copies a Node instance's database (take the copy with `sqlite3 statev2.sqlite ".backup copy.sqlite"`) into an object that has never started, while the Worker has a `T45_IMPORT_TOKEN` secret: the source's own schema and migration ledger, every value with its storage class, then a check of every table at both ends. A rerun resumes; `--activate` opens the instance once everything matches. Until then the object answers 503.
+- **Commands:** with the web client built, `pnpm --filter t45 cloudflare:dev --var T45_DEVELOPMENT:true --var RUNNER_URL:<runner>` and `RUNNER_TOKEN` in `--env-file`; `cloudflare:types` regenerates the binding types after a `wrangler.jsonc` change.
+- **Not yet:** attachment downloads go through the instance (no signed bucket links), an execution's files travel to the runner in memory, and a calculation pending at a restart waits until something schedules its ticket again.
 
 ## Release builds
 

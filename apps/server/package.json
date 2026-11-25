@@ -4,11 +4,14 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p cloudflare",
+    "cloudflare:dev": "wrangler dev",
+    "cloudflare:types": "wrangler types cloudflare/worker-configuration.d.ts"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",
+    "@effect/sql-sqlite-do": "catalog:",
     "@effect/sql-sqlite-node": "catalog:",
     "@opencode/schema": "catalog:",
     "aws4fetch": "catalog:",
@@ -22,7 +25,8 @@
     "@t45/core": "workspace:*",
     "@t45/web": "workspace:*",
     "@types/node": "catalog:",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "wrangler": "4.166.0"
   },
   "engines": {
     "node": "^24.21.0"

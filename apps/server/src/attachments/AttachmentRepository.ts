@@ -1,5 +1,4 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 
 import {
@@ -15,17 +14,15 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 
-import * as ServerConfig from "../config.ts";
 import * as BlobStore from "./BlobStore.ts";
+import { inJsonList, jsonList } from "../persistence/JsonList.ts";
 
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const isAttachmentId = Schema.is(AttachmentId);
@@ -142,9 +139,6 @@ const decodeAttachment = Schema.decodeUnknownEffect(Attachment);
 const decodeAttachments = Schema.decodeUnknownEffect(Schema.Array(Attachment));
 
 const make = Effect.gen(function* () {
-  const attachmentsDir = yield* ServerConfig.attachmentsDir;
-  const fileSystem = yield* FileSystem.FileSystem;
-  yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
   const blobs = yield* BlobStore.BlobStore;
@@ -177,31 +171,12 @@ const make = Effect.gen(function* () {
           ? attachmentFileExtension(input.name)
           : IMAGE_ATTACHMENT_EXTENSIONS[input.mimeType];
       const id = `${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}.${extension}`;
-      // The bytes arrive in a file of their own, so the blob key is known before anything is stored.
-      const partPath = NodePath.resolve(attachmentsDir, `${id}.part`);
-      const blobKey = yield* Effect.gen(function* () {
-        const hash = NodeCrypto.createHash("sha256");
-        let receivedBytes = 0;
-        yield* Stream.run(
-          body.pipe(
-            Stream.takeWhile((chunk) => {
-              receivedBytes += chunk.byteLength;
-              return receivedBytes <= input.sizeBytes;
-            }),
-            Stream.tap((chunk) => Effect.sync(() => hash.update(chunk))),
-          ),
-          fileSystem.sink(partPath),
-        ).pipe(Effect.catchTags({ PlatformError: Effect.die }));
-        if (receivedBytes !== input.sizeBytes) {
-          return yield* new AttachmentSizeError({
-            expected: input.sizeBytes,
-            received: receivedBytes,
-          });
-        }
-        const key = hash.digest("hex");
-        if ((yield* blobs.readSize(key)) === null) yield* blobs.put(key, partPath);
-        return key;
-      }).pipe(Effect.ensuring(fileSystem.remove(partPath, { force: true }).pipe(Effect.ignore)));
+      const blobKey = yield* blobs.store(body, input.sizeBytes).pipe(
+        // The body's own failures are of any type, so the mismatch is told apart by its schema.
+        Effect.catchIf(Schema.is(BlobStore.SizeMismatch), ({ received }) =>
+          Effect.fail(new AttachmentSizeError({ expected: input.sizeBytes, received })),
+        ),
+      );
       return yield* sql`INSERT INTO attachments (id, name, mime_type, size_bytes, uploader_id, created_at, blob_key)
       VALUES (${id}, ${name}, ${input.mimeType}, ${input.sizeBytes}, ${uploader}, ${yield* nowIso}, ${blobKey})
       RETURNING ${columns}`.pipe(
@@ -217,23 +192,7 @@ const make = Effect.gen(function* () {
     yield* sql`DELETE FROM attachments WHERE created_at < ${cutoff} AND ${unheld}`.pipe(
       Effect.orDie,
     );
-    const entries = yield* fileSystem
-      .readDirectory(attachmentsDir)
-      .pipe(Effect.orElseSucceed(() => []));
-    yield* Effect.forEach(
-      entries,
-      Effect.fnUntraced(function* (entry) {
-        if (!entry.endsWith(".part")) return;
-        const path = NodePath.join(attachmentsDir, entry);
-        const info = yield* fileSystem.stat(path).pipe(Effect.option);
-        // An upload's bytes arrive in a `.part` file; a day-old one was cut short.
-        const old = Option.exists(info, (stat) =>
-          Option.exists(stat.mtime, (mtime) => now - mtime.getTime() > PENDING_MAX_AGE_MS),
-        );
-        if (old) yield* fileSystem.remove(path, { force: true }).pipe(Effect.orDie);
-      }),
-      { discard: true },
-    );
+    yield* blobs.sweep(now - PENDING_MAX_AGE_MS);
   });
   yield* sweep.pipe(
     Effect.catchDefect((cause) => Effect.logWarning("Sweeping attachments failed", { cause })),
@@ -260,7 +219,7 @@ const make = Effect.gen(function* () {
     upload,
 
     forIds: (ids) =>
-      select(sql.in("id", ids)).pipe(
+      select(inJsonList(sql, "id", ids)).pipe(
         Effect.map((found) => ids.flatMap((id) => found.filter((file) => file.id === id))),
       ),
 
@@ -286,7 +245,7 @@ const make = Effect.gen(function* () {
             WHERE c.attachment_id = attachments.id AND c.chat_id = ${chatId}) AS "bound",
           EXISTS (SELECT 1 FROM chat_attachments c WHERE c.attachment_id = attachments.id) AS "held",
           NOT (${notHeldByWorkflow}) AS "workflowHeld"
-        FROM attachments WHERE ${sql.in("id", ids)}`.pipe(Effect.orDie);
+        FROM attachments WHERE ${inJsonList(sql, "id", ids)}`.pipe(Effect.orDie);
       for (const file of files) {
         const row = rows.find((each) => each.id === file.id);
         if (row === undefined || row.sizeBytes !== file.sizeBytes) return yield* unavailable();
@@ -301,9 +260,10 @@ const make = Effect.gen(function* () {
               row.uploaderId === from;
         if (!usable) return yield* unavailable();
       }
-      yield* sql`INSERT INTO chat_attachments ${sql.insert(
-        ids.map((id) => ({ chat_id: chatId, attachment_id: id })),
-      )} ON CONFLICT DO NOTHING`.pipe(Effect.orDie);
+      // The SELECT needs a WHERE before an upsert clause.
+      yield* sql`INSERT INTO chat_attachments (chat_id, attachment_id)
+        SELECT ${chatId}, value FROM json_each(${jsonList(ids)}) WHERE true
+        ON CONFLICT DO NOTHING`.pipe(Effect.orDie);
     }),
 
     chatsHolding: (id) =>
@@ -375,11 +335,12 @@ const make = Effect.gen(function* () {
             const bound = yield* sql<{ readonly id: string }>`DELETE FROM chat_attachments
               WHERE chat_id = ${chatId} RETURNING attachment_id AS id`;
             const ids = bound.map((row) => row.id);
-            yield* sql`DELETE FROM attachments WHERE ${sql.in("id", ids)} AND ${unheld}`;
+            yield* sql`DELETE FROM attachments WHERE ${inJsonList(sql, "id", ids)} AND ${unheld}`;
           }),
         )
         .pipe(Effect.orDie),
   });
 });
 
-export const layer = Layer.effect(AttachmentRepository, make).pipe(Layer.provide(BlobStore.layer));
+/** Keeps bytes in the `BlobStore` its platform provides. */
+export const layer = Layer.effect(AttachmentRepository, make);

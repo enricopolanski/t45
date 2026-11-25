@@ -14,6 +14,7 @@ import * as TicketRepository from "../workflows/TicketRepository.ts";
 import * as WorkflowRepository from "../workflows/WorkflowRepository.ts";
 import * as ProjectRepository from "../workflows/ProjectRepository.ts";
 import * as AttachmentRepository from "./AttachmentRepository.ts";
+import * as BlobStore from "./BlobStore.ts";
 
 export const layer = Layer.mergeAll(
   UserRepository.layer,
@@ -24,6 +25,7 @@ export const layer = Layer.mergeAll(
   TicketRepository.layer,
 ).pipe(
   Layer.provideMerge(Sqlite.testLayer),
+  Layer.provideMerge(BlobStore.layer),
   Layer.provideMerge(ServerConfig.testLayer("t3-attachments-")),
   Layer.provideMerge(NodeServices.layer),
 );

@@ -23,10 +23,18 @@
       "ignoreDependencies": ["@shadcn/lint", "@effect/language-service"],
     },
     "apps/server": {
-      "entry": ["src/bin.ts", "scripts/move-attachments-to-s3.ts"],
-      // Keep the transitive Effect runtime pinned for standalone npm installs.
+      "entry": [
+        "src/bin.ts",
+        "scripts/move-attachments-to-s3.ts",
+        "scripts/transfer-to-cloudflare.ts",
+      ],
       // The Vite+ web build prerequisite.
-      "ignoreDependencies": ["@effect/platform-node-shared", "@t45/web"],
+      // `cloudflare:workers` is a module of the Workers runtime, not a package.
+      "ignoreDependencies": ["@t45/web", "cloudflare"],
+    },
+    "apps/runner": {
+      // `cloudflare:workers` is a module of the Workers runtime, not a package.
+      "ignoreDependencies": ["cloudflare"],
     },
     "apps/web": {
       // The tsconfig plugin name is read by the Effect diagnostics that `effect-tsgo patch` adds to tsgo.

@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
@@ -12,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
@@ -26,8 +28,14 @@ export class BlobStore extends Context.Service<
   {
     /** The size of the stored bytes, or null when the store has none under `key`. */
     readonly readSize: (key: string) => Effect.Effect<number | null>;
-    /** Stores the file at `path` under `key`, the sha256 hex of its bytes; may move the file. */
-    readonly put: (key: string, path: string) => Effect.Effect<void>;
+    /**
+     * Stores `body`, which must be `sizeBytes` long, under the sha256 hex of its bytes unless a
+     * blob already has them, and answers that key. Bytes of another length store nothing.
+     */
+    readonly store: <E>(
+      body: Stream.Stream<Uint8Array, E>,
+      sizeBytes: number,
+    ) => Effect.Effect<string, SizeMismatch | E>;
     /** The stored bytes and their size, or null when the store has none under `key`. */
     readonly read: (key: string) => Effect.Effect<StoredBytes | null>;
     /**
@@ -35,8 +43,15 @@ export class BlobStore extends Context.Service<
      * headers, or null when the bytes are only served through the app.
      */
     readonly link: (key: string, response: LinkResponse) => Effect.Effect<string | null>;
+    /** Removes what uploads cut short before `before`, in epoch milliseconds, left behind. */
+    readonly sweep: (before: number) => Effect.Effect<void>;
   }
 >()("t45/attachments/BlobStore") {}
+
+/** A body that wasn't the length its upload announced. */
+export class SizeMismatch extends Schema.TaggedError<SizeMismatch>()("SizeMismatch", {
+  received: Schema.Number,
+}) {}
 
 export interface LinkResponse {
   readonly contentType: string;
@@ -48,10 +63,14 @@ export interface StoredBytes {
   readonly stream: Stream.Stream<Uint8Array>;
 }
 
-/** Blobs as files named by their key in the attachments directory. */
+/**
+ * Blobs as files named by their key in the attachments directory. An upload's bytes arrive in a
+ * `.part` file of their own first, so the key is known before anything is stored.
+ */
 const makeDirectoryStore = Effect.gen(function* () {
   const attachmentsDir = yield* ServerConfig.attachmentsDir;
   const fileSystem = yield* FileSystem.FileSystem;
+  yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true }).pipe(Effect.orDie);
   const pathOf = (key: string) => NodePath.join(attachmentsDir, key);
   const readSize = (key: string) =>
     fileSystem.stat(pathOf(key)).pipe(
@@ -59,16 +78,70 @@ const makeDirectoryStore = Effect.gen(function* () {
       Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
       Effect.orDie,
     );
-  return BlobStore.of({
+  /** Writes the body to a `.part` file, then hands its key and path to `keep`; removes the file after. */
+  const staged = <E, A>(
+    body: Stream.Stream<Uint8Array, E>,
+    sizeBytes: number,
+    keep: (key: string, path: string) => Effect.Effect<A>,
+  ) =>
+    Effect.gen(function* () {
+      const partPath = pathOf(`${NodeCrypto.randomUUID()}.part`);
+      return yield* Effect.gen(function* () {
+        const hash = NodeCrypto.createHash("sha256");
+        let receivedBytes = 0;
+        yield* Stream.run(
+          body.pipe(
+            Stream.takeWhile((chunk) => {
+              receivedBytes += chunk.byteLength;
+              return receivedBytes <= sizeBytes;
+            }),
+            Stream.tap((chunk) => Effect.sync(() => hash.update(chunk))),
+          ),
+          fileSystem.sink(partPath),
+        ).pipe(Effect.catchTags({ PlatformError: Effect.die }));
+        if (receivedBytes !== sizeBytes)
+          return yield* new SizeMismatch({ received: receivedBytes });
+        const key = hash.digest("hex");
+        return yield* keep(key, partPath);
+      }).pipe(Effect.ensuring(fileSystem.remove(partPath, { force: true }).pipe(Effect.ignore)));
+    });
+  const sweep = Effect.fnUntraced(function* (before: number) {
+    const entries = yield* fileSystem
+      .readDirectory(attachmentsDir)
+      .pipe(Effect.orElseSucceed(() => []));
+    yield* Effect.forEach(
+      entries,
+      Effect.fnUntraced(function* (entry) {
+        if (!entry.endsWith(".part")) return;
+        const path = pathOf(entry);
+        const info = yield* fileSystem.stat(path).pipe(Effect.option);
+        const old = Option.exists(info, (stat) =>
+          Option.exists(stat.mtime, (mtime) => mtime.getTime() < before),
+        );
+        if (old) yield* fileSystem.remove(path, { force: true }).pipe(Effect.orDie);
+      }),
+      { discard: true },
+    );
+  });
+  const store = BlobStore.of({
     readSize,
-    put: (key, path) => fileSystem.rename(path, pathOf(key)).pipe(Effect.orDie),
+    store: (body, sizeBytes) =>
+      staged(body, sizeBytes, (key, path) =>
+        Effect.gen(function* () {
+          if ((yield* readSize(key)) === null)
+            yield* fileSystem.rename(path, pathOf(key)).pipe(Effect.orDie);
+          return key;
+        }),
+      ),
     read: Effect.fnUntraced(function* (key) {
       const sizeBytes = yield* readSize(key);
       if (sizeBytes === null) return null;
       return { sizeBytes, stream: fileSystem.stream(pathOf(key)).pipe(Stream.orDie) };
     }),
     link: () => Effect.succeed(null),
+    sweep,
   });
+  return { store, staged };
 });
 
 const HOUR_SECONDS = 3600;
@@ -83,7 +156,7 @@ export const layerS3 = (bucket: {
   Layer.effect(
     BlobStore,
     Effect.gen(function* () {
-      const directory = yield* makeDirectoryStore;
+      const { store: directory, staged } = yield* makeDirectoryStore;
       // R2 takes the region "auto". The client retries 5xx and 429 answers.
       const client = new AwsClient({
         accessKeyId: bucket.accessKeyId,
@@ -103,26 +176,33 @@ export const layerS3 = (bucket: {
       const dieWithStatus = (response: Response, key: string) =>
         Effect.die(new Error(`The bucket answered ${response.status} for blob ${key}.`));
 
-      return BlobStore.of({
-        readSize: Effect.fnUntraced(function* (key) {
-          const response = yield* send(key, { method: "HEAD" });
-          if (response.status === 404) return null;
-          if (response.status !== 200) return yield* dieWithStatus(response, key);
-          return Number(response.headers.get("content-length"));
-        }),
+      const readSize = Effect.fnUntraced(function* (key: string) {
+        const response = yield* send(key, { method: "HEAD" });
+        if (response.status === 404) return null;
+        if (response.status !== 200) return yield* dieWithStatus(response, key);
+        return Number(response.headers.get("content-length"));
+      });
 
-        put: Effect.fnUntraced(function* (key, path) {
-          // A file-backed body streams from disk and is read afresh for each retry.
-          const body = yield* Effect.promise(() => NodeFS.openAsBlob(path));
-          // The key is the body's sha256, so a bucket that checks the payload hash refuses bytes
-          // that don't match it.
-          const response = yield* send(key, {
-            method: "PUT",
-            body,
-            headers: { "x-amz-content-sha256": key },
-          });
-          if (response.status !== 200) return yield* dieWithStatus(response, key);
-        }),
+      return BlobStore.of({
+        readSize,
+
+        store: (body, sizeBytes) =>
+          staged(body, sizeBytes, (key, path) =>
+            Effect.gen(function* () {
+              if ((yield* readSize(key)) !== null) return key;
+              // A file-backed body streams from disk and is read afresh for each retry.
+              const file = yield* Effect.promise(() => NodeFS.openAsBlob(path));
+              // The key is the body's sha256, so a bucket that checks the payload hash refuses
+              // bytes that don't match it.
+              const response = yield* send(key, {
+                method: "PUT",
+                body: file,
+                headers: { "x-amz-content-sha256": key },
+              });
+              if (response.status !== 200) return yield* dieWithStatus(response, key);
+              return key;
+            }),
+          ),
 
         read: Effect.fnUntraced(function* (key) {
           // Transition: attachments stored before the bucket keep their bytes in the attachments
@@ -169,6 +249,8 @@ export const layerS3 = (bucket: {
           );
           return signed.url;
         }),
+
+        sweep: directory.sweep,
       });
     }),
   );
@@ -179,6 +261,9 @@ export const layer = Layer.unwrap(
     const bucket = yield* ServerConfig.attachmentsS3;
     return Option.isSome(bucket)
       ? layerS3(bucket.value)
-      : Layer.effect(BlobStore, makeDirectoryStore);
+      : Layer.effect(
+          BlobStore,
+          Effect.map(makeDirectoryStore, ({ store }) => store),
+        );
   }),
 );

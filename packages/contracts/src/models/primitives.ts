@@ -46,10 +46,7 @@ const ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456
 
 /** Generates a 21-character URL-safe identifier. */
 export const generateId = () =>
-  Array.from(
-    globalThis.crypto.getRandomValues(new Uint8Array(21)),
-    (byte) => ID_ALPHABET[byte & 63],
-  ).join("");
+  Array.from(crypto.getRandomValues(new Uint8Array(21)), (byte) => ID_ALPHABET[byte & 63]).join("");
 
 export const StringId = Object.assign(StringIdSchema, {
   /** Generates an id only when omitted during construction, never during decoding. */

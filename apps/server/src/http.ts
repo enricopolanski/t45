@@ -36,7 +36,8 @@ const isSameOrigin = (request: HttpServerRequest.HttpServerRequest) => {
   return URL.canParse(origin) && new URL(origin).host === request.headers.host;
 };
 
-const sameOrigin = HttpRouter.middleware(
+/** Refuses a request from another site that could change something. */
+export const sameOrigin = HttpRouter.middleware(
   (httpEffect) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
@@ -50,8 +51,8 @@ const sameOrigin = HttpRouter.middleware(
 
 const clientDir = `${import.meta.dirname}/client`;
 
-/** Serves the web client and applies compression and the same-origin guard to every route. */
-export const layer = Layer.mergeAll(
+/** Serves the web client from the bundle's folder and compresses every route's answers. */
+export const clientLayer = Layer.mergeAll(
   HttpStaticServer.layer({ root: clientDir, spa: true, cacheControl: "no-cache" }),
   HttpStaticServer.layer({
     root: `${clientDir}/assets`,
@@ -59,5 +60,4 @@ export const layer = Layer.mergeAll(
     cacheControl: "public, max-age=31536000, immutable",
   }),
   compression,
-  sameOrigin,
 );

@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // nodejs_compat provides the Node globals the server uses; the Workers globals come from the included types.
+    "types": ["node"],
+    "lib": ["ESNext"]
+  },
+  "include": ["worker.ts", "worker-configuration.d.ts"]
+}

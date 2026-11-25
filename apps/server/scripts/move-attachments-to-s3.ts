@@ -74,7 +74,7 @@ const moveAll = Effect.gen(function* () {
     const key = yield* hashFile(path);
     let storedSize = yield* blobs.readSize(key);
     if (storedSize === null) {
-      yield* blobs.put(key, path);
+      yield* blobs.store(fileSystem.stream(path), size).pipe(Effect.orDie);
       progress.uploaded += 1;
       storedSize = yield* blobs.readSize(key);
     }

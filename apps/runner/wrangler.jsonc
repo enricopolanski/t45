@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "t45-runner",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-11-19",
+  // Effect, OpenCode's client and the Sandbox SDK's Files use Node APIs.
+  "compatibility_flags": ["nodejs_compat"],
+  // The provider key and capability secrets stay in the Worker; containers hold placeholders.
+  "secrets": {
+    "required": ["T45_RUNNER_TOKEN", "OPENCODE_API_KEY", "CAPABILITY_SECRET_BROWSERLESS_TOKEN"],
+  },
+  // An execution's Durable Object calls its OpenCode for every update it reads.
+  "limits": { "subrequests": 100000 },
+  "durable_objects": {
+    "bindings": [
+      { "name": "CALCULATION", "class_name": "Calculation" },
+      { "name": "EXECUTION", "class_name": "Execution" },
+    ],
+  },
+  "containers": [
+    {
+      "class_name": "Calculation",
+      "scheduling_policy": "durable_object",
+      "images": { "agent": { "dockerfile": "./image/Dockerfile" } },
+    },
+    {
+      "class_name": "Execution",
+      "scheduling_policy": "durable_object",
+      "images": { "agent": { "dockerfile": "./image/Dockerfile" } },
+    },
+  ],
+  "exports": {
+    "Calculation": { "type": "durable-object", "storage": "sqlite" },
+    "Execution": { "type": "durable-object", "storage": "sqlite" },
+  },
+  "observability": { "enabled": true },
+}

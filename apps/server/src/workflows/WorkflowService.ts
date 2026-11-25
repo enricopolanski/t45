@@ -130,7 +130,11 @@ import { CollectionService } from "../collections/CollectionService.ts";
 import { type CommandLogEntry, CommandLogRepository } from "../persistence/CommandLogRepository.ts";
 import { UserRepository } from "../org/UserRepository.ts";
 import { NotificationRepository } from "./NotificationRepository.ts";
-import { resolveRecordDisplay } from "@t45/contracts/models/Layout";
+import {
+  listDefaultColumns,
+  resolveRecordDisplay,
+  resolveTableLayout,
+} from "@t45/contracts/models/Layout";
 import { acceptsCalculationEdits } from "@t45/contracts/models/CalculationReview";
 import { makeScriptCalculations, SCRIPT_RESULT_KEY } from "./ScriptCalculations.ts";
 import { TicketRepository } from "./TicketRepository.ts";
@@ -554,6 +558,38 @@ const make = Effect.gen(function* () {
     return stopped;
   });
 
+  /**
+   * The linked records an automation's first message shows: an input's with only the columns its
+   * table shows, none of the step's own. Its tools read the rest.
+   */
+  const summarizeRecords = (views: ReadonlyArray<FieldView>, isInput: boolean): Array<FieldView> =>
+    views.map((view) => {
+      const { collection } = view;
+      const columns =
+        view.recordTableColumns ??
+        (collection === null
+          ? []
+          : resolveTableLayout(
+              collection.fields,
+              collection.layout,
+              listDefaultColumns(collection),
+            ).columns.map((column) => column.field.id));
+      return {
+        ...view,
+        rows: view.rows.map((row) => ({ ...row, fields: summarizeRecords(row.fields, isInput) })),
+        records: isInput
+          ? view.records.map((record) => ({
+              ...record,
+              values: Object.fromEntries(
+                Object.entries(record.values).filter(([path]) =>
+                  columns.some((column) => path === column || path.startsWith(`${column}.`)),
+                ),
+              ),
+            }))
+          : [],
+      };
+    });
+
   const buildAutomationContext = Effect.fnUntraced(function* (work: Work, step: Step) {
     const definition = definitionOf(work, step);
     const containing = ancestorSteps(work.ticket, step);
@@ -567,8 +603,8 @@ const make = Effect.gen(function* () {
         name: nameOf(work, parent),
         instructions: definitionOf(work, parent).instructions,
       })),
-      inputs: (yield* buildInputs(work, step)).inputs,
-      fields: yield* buildStepFieldViews(work, step),
+      inputs: summarizeRecords((yield* buildInputs(work, step)).inputs, true),
+      fields: summarizeRecords(yield* buildStepFieldViews(work, step), false),
       comments: (yield* tickets.comments(step.id)).map(({ author, body, createdAt }) => ({
         author,
         body,
@@ -588,7 +624,7 @@ const make = Effect.gen(function* () {
     );
 
   const formatAutomationContext = (brief: unknown) =>
-    ["```json", JSON.stringify(brief, null, 2), "```"].join("\n");
+    ["```json", JSON.stringify(brief), "```"].join("\n");
 
   const describeField = ({ id: key, label, type }: Field) => ({ key, label, type });
   const listAutomationFields = (work: Work, step: Step) => ({
@@ -631,7 +667,7 @@ const make = Effect.gen(function* () {
     return {
       text: [
         `You contribute to ${subject} of "${brief.ticketTitle}" in the project "${brief.projectName}". The step is below as JSON: its instructions, the fields of earlier steps it reads as inputs, its own fields, its comments and its files. That is all you can see of this ticket.`,
-        "Fill the step's fields with step_set_field, using each field's key and type below; a repeatable group's rowFields name the fields of its rows; a records field shows its collection and the records it links, and takes the keys of all the records it links, so save a new record with the collection tools before you add its key. Read the step again with step_get_step, report progress with progress_report, share results with step_comment, and attach files with step_attach. Each tool returns the actual operation result, or exactly why it refused. When your contribution is finished, end the conversation.",
+        "Fill the step's fields with step_set_field, using each field's key and type below; a repeatable group's rowFields name the fields of its rows; a records field shows its collection and the keys of the records it links, an input's records with only the columns of its table (read more of them with step_get_fields), and takes the keys of all the records it links, so save a new record with the collection tools before you add its key. Read the step again with step_get_step, report progress with progress_report, share results with step_comment, and attach files with step_attach. Each tool returns the actual operation result, or exactly why it refused. When your contribution is finished, end the conversation.",
         "Step comments and text fields marked isMarkdown are rendered as Markdown. Use short paragraphs separated by blank lines, lists for separate points, and labelled links for sources. Use actual newline characters in the saved text, not literal backslash-n sequences. Send Markdown directly, without an enclosing code fence; keep plain text in fields not marked isMarkdown.",
         "You work in a folder of your own. Follow AGENTS.md if it is there.",
         instructions ? `Instructions for this step:\n${instructions}` : "",

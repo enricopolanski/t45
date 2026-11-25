@@ -19,6 +19,8 @@ packages/*/dist
 __screenshots__/
 # TanStack Router dev cache.
 .tanstack
+# Wrangler's local state.
+.wrangler/
 # Local run state.
 .run/
 

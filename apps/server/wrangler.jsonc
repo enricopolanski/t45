@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "t45",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-11-19",
+  // Effect and the server's code use Node APIs.
+  "compatibility_flags": ["nodejs_compat"],
+  // The web client, built by `@t45/web`; requests to the API go to the instance first.
+  "assets": {
+    "directory": "../web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+  // Also set RUNNER_URL and SERVER_URL, and for a release BUILD_SHA and AUTH_CLERK_PUBLISHABLE_KEY;
+  // without BUILD_SHA it signs in with any email.
+  "vars": { "T45_INSTANCE": "default" },
+  "secrets": { "required": ["RUNNER_TOKEN"] },
+  // BUILT_INS holds the release's built-in capabilities and agents as built-ins.json, uploaded before
+  // each deploy. ATTACHMENTS holds attachment bytes by blob key, the bucket the Node server's
+  // T45_ATTACHMENTS_S3_* names, so both read the same files. FILES holds chats' disks under each
+  // instance's name.
+  "r2_buckets": [
+    { "binding": "BUILT_INS", "bucket_name": "t45-built-ins" },
+    { "binding": "ATTACHMENTS", "bucket_name": "t45-attachments" },
+    { "binding": "FILES", "bucket_name": "t45-files" },
+  ],
+  "durable_objects": { "bindings": [{ "name": "INSTANCE", "class_name": "Instance" }] },
+  "exports": { "Instance": { "type": "durable-object", "storage": "sqlite" } },
+  "observability": { "enabled": true },
+}

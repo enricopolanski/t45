@@ -18,6 +18,7 @@ import type { NotFound } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
+import { FetchHttpClient } from "effect/http";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -26,6 +27,7 @@ import * as AgentRepository from "../agents/AgentRepository.ts";
 import * as SkillRepository from "../agents/SkillRepository.ts";
 import * as CapabilityRepository from "../capabilities/CapabilityRepository.ts";
 import * as AttachmentRepository from "../attachments/AttachmentRepository.ts";
+import * as BlobStore from "../attachments/BlobStore.ts";
 import * as CollectionRecordRepository from "../collections/CollectionRecordRepository.ts";
 import * as CollectionRepository from "../collections/CollectionRepository.ts";
 import * as CollectionService from "../collections/CollectionService.ts";
@@ -40,6 +42,9 @@ import * as TicketRepository from "../workflows/TicketRepository.ts";
 import * as ProjectRepository from "../workflows/ProjectRepository.ts";
 
 import * as WorkflowService from "../workflows/WorkflowService.ts";
+import * as OwnApi from "../runner/OwnApi.ts";
+import * as ChatDisks from "./ChatDisks.ts";
+import * as Restarts from "./Restarts.ts";
 
 export const testChatId = (n: number) =>
   ChatId.make(`00000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
@@ -85,8 +90,14 @@ const layerPersistence = Layer.effectDiscard(seedPresets).pipe(
       CollectionRecordRepository.layer,
     ).pipe(
       Layer.provideMerge(Sqlite.testLayer),
+      Layer.provideMerge(ChatDisks.layerDirectory),
+      Layer.provideMerge(BlobStore.layer),
+      Layer.provideMerge(Restarts.layerNode),
+      // The fake runner relays no requests, so its own API is never called.
+      Layer.provideMerge(OwnApi.layerLoopback),
       Layer.provideMerge(ServerConfig.testLayer("t3-chats-")),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(FetchHttpClient.layer),
     ),
   ),
 );
