@@ -30,6 +30,8 @@ export type NavLink = {
     | "/settings/automations"
     | "/settings/organization"
     | "/settings/people";
+  /** Shown but not yet open. */
+  readonly isWorkInProgress?: boolean;
   /** Pages listed below it, always shown. */
   readonly children?: ReadonlyArray<{
     readonly label: Message;
@@ -40,7 +42,7 @@ export type NavLink = {
 /** Everyone's areas. */
 const MAIN_LINKS: ReadonlyArray<NavLink> = [
   { label: "My work", icon: <InboxIcon />, to: "/my-work" },
-  { label: "Chat", icon: <MessagesSquareIcon />, to: "/chats" },
+  { label: "Chat", icon: <MessagesSquareIcon />, to: "/chats", isWorkInProgress: true },
   { label: "Boards", icon: <KanbanSquareIcon />, to: "/boards" },
 ];
 
@@ -94,6 +96,14 @@ export function NavLinks({ links }: { readonly links: ReadonlyArray<NavLink> }) 
   return links.map((link) =>
     link.to === "/boards" ? (
       <BoardsItem key={link.to} link={link} onNavigate={closeMobileSidebar} />
+    ) : link.isWorkInProgress === true ? (
+      <SidebarMenuItem key={link.to}>
+        <SidebarMenuButton disabled>
+          {link.icon}
+          <span>{t(link.label)}</span>
+          <span className="ml-auto text-xs font-normal">{t("Work in progress")}</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
     ) : (
       <SidebarMenuItem key={link.to}>
         <SidebarMenuButton onClick={closeMobileSidebar} render={<Link to={link.to} />}>

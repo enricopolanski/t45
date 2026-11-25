@@ -284,6 +284,7 @@ export const it = {
   Chat: "Chat",
   "Chat actions for {0}": "Azioni della chat per {0}",
   "Chat deleted, but navigation failed": "Chat eliminata, ma la navigazione non è riuscita",
+  "Work in progress": "Lavori in corso",
   "Chat title": "Titolo della chat",
   "Chat title cannot be empty": "Il titolo della chat non può essere vuoto",
   "Chat with {0}": "Chat con {0}",

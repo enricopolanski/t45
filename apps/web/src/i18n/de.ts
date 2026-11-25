@@ -283,6 +283,7 @@ export const de = {
   "Chat actions for {0}": "Chataktionen für {0}",
   "Chat deleted, but navigation failed": "Chat gelöscht, aber Navigation fehlgeschlagen",
   "Chat title": "Chattitel",
+  "Work in progress": "In Arbeit",
   "Chat title cannot be empty": "Der Chattitel darf nicht leer sein",
   "Chat with {0}": "Chat mit {0}",
   "Check and correct the values before confirming.":
