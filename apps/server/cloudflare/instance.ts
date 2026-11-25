@@ -27,6 +27,7 @@ import * as ServerConfig from "../src/config.ts";
 import * as Instance from "../src/Instance.ts";
 import { OwnApi } from "../src/runner/OwnApi.ts";
 import * as Files from "./Files.ts";
+import * as Import from "./Import.ts";
 import * as Sqlite from "./Sqlite.ts";
 
 /** Names the object of a development instance, chosen by `x-instance-id` as on Node. */
@@ -152,7 +153,7 @@ const start = (state: DurableObjectState, env: Env, own: { handler?: Handler }) 
           Layer.mergeAll(
             builtInsSource(state, env, builtIns),
             Files.chatDisks(env.FILES, name),
-            Files.blobs(env.FILES, name),
+            Files.blobs(env.ATTACHMENTS),
             ownApi(own),
             restarts(state),
           ),
@@ -182,14 +183,20 @@ export class InstanceObject extends DurableObject<Env> {
   private readonly own: { handler?: Handler } = {};
   private services: Context.Context<ChatRepository> | undefined;
 
-  constructor(state: DurableObjectState, env: Env) {
-    super(state, env);
-    void state.blockConcurrencyWhile(async () => {
-      this.services = await Effect.runPromise(start(state, env, this.own));
+  private started: Promise<void> | undefined;
+
+  /** Starts the instance on its first request or alarm, unless an import is filling its database. */
+  private ready() {
+    if (Import.isImporting(this.ctx.storage)) return Promise.resolve(false);
+    this.started ??= this.ctx.blockConcurrencyWhile(async () => {
+      this.services = await Effect.runPromise(start(this.ctx, this.env, this.own));
     });
+    return this.started.then(() => true);
   }
 
   override async fetch(request: Request) {
+    if (!(await this.ready()))
+      return new Response("This instance is being imported.", { status: 503 });
     const handler = this.own.handler!;
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return handler(request);
     const { 0: client, 1: server } = new WebSocketPair();
@@ -204,6 +211,7 @@ export class InstanceObject extends DurableObject<Env> {
 
   /** Waking up started the instance, which settled the runs it held; wakes again while one runs. */
   override async alarm() {
+    if (!(await this.ready())) return;
     const state = this.ctx;
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -212,5 +220,10 @@ export class InstanceObject extends DurableObject<Env> {
         if (running.length > 0) yield* armAlarm(state);
       }).pipe(Effect.provideContext(this.services!)),
     );
+  }
+
+  /** One step of filling this instance's database from another's; it starts once activated. */
+  transfer(request: Import.TransferRequest) {
+    return Import.transfer(this.ctx.storage, request);
   }
 }

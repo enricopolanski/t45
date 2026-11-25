@@ -23,11 +23,14 @@
       "ignoreDependencies": ["@shadcn/lint", "@effect/language-service"],
     },
     "apps/server": {
-      "entry": ["src/bin.ts", "scripts/move-attachments-to-s3.ts"],
-      // Keep the transitive Effect runtime pinned for standalone npm installs.
+      "entry": [
+        "src/bin.ts",
+        "scripts/move-attachments-to-s3.ts",
+        "scripts/transfer-to-cloudflare.ts",
+      ],
       // The Vite+ web build prerequisite.
       // `cloudflare:workers` is a module of the Workers runtime, not a package.
-      "ignoreDependencies": ["@effect/platform-node-shared", "@t45/web", "cloudflare"],
+      "ignoreDependencies": ["@t45/web", "cloudflare"],
     },
     "apps/runner": {
       // `cloudflare:workers` is a module of the Workers runtime, not a package.

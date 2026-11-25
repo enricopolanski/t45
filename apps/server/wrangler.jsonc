@@ -16,9 +16,12 @@
   "vars": { "T45_INSTANCE": "default" },
   "secrets": { "required": ["RUNNER_TOKEN"] },
   // BUILT_INS holds the release's built-in capabilities and agents as built-ins.json, uploaded before
-  // each deploy; FILES holds the instances' files under each instance's name: chats' disks.
+  // each deploy. ATTACHMENTS holds attachment bytes by blob key, the bucket the Node server's
+  // T45_ATTACHMENTS_S3_* names, so both read the same files. FILES holds chats' disks under each
+  // instance's name.
   "r2_buckets": [
     { "binding": "BUILT_INS", "bucket_name": "t45-built-ins" },
+    { "binding": "ATTACHMENTS", "bucket_name": "t45-attachments" },
     { "binding": "FILES", "bucket_name": "t45-files" },
   ],
   "durable_objects": { "bindings": [{ "name": "INSTANCE", "class_name": "Instance" }] },

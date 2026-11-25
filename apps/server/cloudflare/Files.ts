@@ -24,21 +24,19 @@ const hex = (bytes: ArrayBuffer) =>
   Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 
 /**
- * Attachment bytes in the files bucket, under the instance's name, by blob key. An upload streams
- * to a staging object while its length and sha256 are taken, so it never sits in memory whole; the
- * bucket has no rename, so it is then copied under its key and the staging object removed.
+ * Attachment bytes in the attachments bucket, by blob key at its root: the layout the Node server's
+ * S3 store writes, so a Worker reads the files it stored. An upload streams to a staging object
+ * while its length and sha256 are taken, so it never sits in memory whole; the bucket has no rename,
+ * so it is then copied under its key and the staging object removed.
  */
-export const blobs = (bucket: R2Bucket, instance: string) =>
+export const blobs = (bucket: R2Bucket) =>
   Layer.effect(
     BlobStore.BlobStore,
     Effect.gen(function* () {
       const random = yield* Crypto.Crypto;
-      const keyOf = (key: string) => `${instance}/attachments/${key}`;
-      const stagingPrefix = `${instance}/staging/`;
+      const stagingPrefix = "staging/";
       const readSize = (key: string) =>
-        Effect.promise(() => bucket.head(keyOf(key))).pipe(
-          Effect.map((object) => object?.size ?? null),
-        );
+        Effect.promise(() => bucket.head(key)).pipe(Effect.map((object) => object?.size ?? null));
 
       /** Streams the body to `staging`; answers its sha256, or how many bytes came when they don't fit. */
       const stage = <E>(staging: string, body: Stream.Stream<Uint8Array, E>, sizeBytes: number) =>
@@ -81,19 +79,15 @@ export const blobs = (bucket: R2Bucket, instance: string) =>
                 const staged = await bucket.get(staging);
                 if (staged === null) throw new Error(`The staged upload ${staging} is gone.`);
                 // The bucket checks the copy against the key, the sha256 of the staged bytes.
-                await bucket.put(
-                  keyOf(key),
-                  staged.body.pipeThrough(new FixedLengthStream(staged.size)),
-                  {
-                    sha256: key,
-                  },
-                );
+                await bucket.put(key, staged.body.pipeThrough(new FixedLengthStream(staged.size)), {
+                  sha256: key,
+                });
               });
               return key;
             }).pipe(Effect.ensuring(Effect.promise(() => bucket.delete(staging))));
           }),
         read: (key) =>
-          Effect.promise(() => bucket.get(keyOf(key))).pipe(
+          Effect.promise(() => bucket.get(key)).pipe(
             Effect.map((object) =>
               object === null
                 ? null
