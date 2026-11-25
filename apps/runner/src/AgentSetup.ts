@@ -118,13 +118,17 @@ const notePath = (index: number) => `${CAPABILITIES_DIR}/notes/${index}.md`;
 /**
  * Removed so the agent never sees their tools: T45 has no desktop app for OpenCode's browser
  * plugin to attach to, web search first asks the member through an OpenCode form to allow a
- * search provider, and an agent kept to its provider can't fetch pages. Denying them here would
- * not hold, since the session allows every tool.
+ * search provider, an agent kept to its provider can't fetch pages, and OpenCode's own tools
+ * (sessions, worktrees, models, MCP resources) were the only Code Mode tools: the prompt lists them
+ * as the complete catalog, and models concluded T45's tools, called directly, didn't exist.
+ * Denying them here would not hold, since the session allows every tool.
  */
 const openCodeConfig = (agent: AgentSetup): typeof OpenCodeConfig.Info.Encoded => ({
   $schema: "https://opencode.ai/config.json",
   plugins: [
     "-opencode.browser",
+    "-opencode.tools",
+    "-opencode.tools.mcp-resources",
     "-opencode.tool.websearch",
     ...(agent.permissions.network === "provider" ? ["-opencode.tool.webfetch"] : []),
   ],
