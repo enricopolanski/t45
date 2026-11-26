@@ -169,16 +169,10 @@ const decodeRevoked = Schema.decodeUnknownEffect(
 const makeSessions = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
-  const stateDir = yield* ServerConfig.stateDir;
   const revocations = yield* PubSub.unbounded<AuthSessionId>();
 
   const sha256 = (value: string) =>
     crypto.digest("SHA-256", new TextEncoder().encode(value)).pipe(Effect.map(Base64Url.encode));
-
-  // Cookies are scoped by host, not port, so every server that can be live on
-  // one hostname (parallel dev servers) needs its own cookie name, or signing in
-  // to one signs you out of the others.
-  const cookieName = `t45_session_${(yield* sha256(stateDir)).slice(0, 12)}`;
 
   const publishRevoked = Effect.fnUntraced(function* (rows: ReadonlyArray<unknown>) {
     const revoked = yield* decodeRevoked(rows);
@@ -238,7 +232,6 @@ const makeSessions = Effect.gen(function* () {
     `.pipe(Effect.flatMap(publishRevoked), Effect.orDie);
 
   return {
-    cookieName,
     issue,
     authenticate,
     revoke,

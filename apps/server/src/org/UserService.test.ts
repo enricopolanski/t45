@@ -26,7 +26,6 @@ import {
 
 import { AdminOnly } from "../auth/Authorization.ts";
 import * as AuthHttp from "../auth/http.ts";
-import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as AutomationRepository from "../automations/AutomationRepository.ts";
 import * as UserRepository from "./UserRepository.ts";
@@ -222,7 +221,6 @@ describe("UserService", () => {
         ),
         Layer.provideMerge(UserRepository.layer),
         Layer.provideMerge(SqlitePersistence.testLayer),
-        Layer.provide(ServerConfig.testLayer("t3-user-auth-")),
       );
 
     /** The identity as an earlier sign-in registered it, with `changes` made since. */
@@ -366,18 +364,16 @@ describe("UserService", () => {
         `;
       });
 
-    const layerSessionStore = (stateDirPrefix = "t3-session-store-") =>
-      Layer.effect(UserService, UserService.make).pipe(
-        Layer.provide(
-          Layer.succeed(Authentication.IdentityTokenValidator, {
-            validate: ({ token }) =>
-              Effect.succeed({ subject: token, email: `${token}@example.test`, name: token }),
-          }),
-        ),
-        Layer.provideMerge(UserRepository.layer),
-        Layer.provideMerge(SqlitePersistence.testLayer),
-        Layer.provide(ServerConfig.testLayer(stateDirPrefix)),
-      );
+    const layerSessionStore = Layer.effect(UserService, UserService.make).pipe(
+      Layer.provide(
+        Layer.succeed(Authentication.IdentityTokenValidator, {
+          validate: ({ token }) =>
+            Effect.succeed({ subject: token, email: `${token}@example.test`, name: token }),
+        }),
+      ),
+      Layer.provideMerge(UserRepository.layer),
+      Layer.provideMerge(SqlitePersistence.testLayer),
+    );
 
     it.effect("authenticates a token with the user's current role and state", () =>
       Effect.gen(function* () {
@@ -396,7 +392,7 @@ describe("UserService", () => {
           role: "admin",
           state: "active",
         });
-      }).pipe(Effect.provide(layerSessionStore())),
+      }).pipe(Effect.provide(layerSessionStore)),
     );
 
     it.effect("refuses unknown tokens and expired sessions", () =>
@@ -411,7 +407,7 @@ describe("UserService", () => {
         yield* TestClock.adjust("31 days");
         const expired = yield* Effect.flip(sessions.authenticate(token));
         expect(expired._tag).toBe("SessionInvalidError");
-      }).pipe(Effect.provide(layerSessionStore())),
+      }).pipe(Effect.provide(layerSessionStore)),
     );
 
     it.effect("signs out elsewhere while keeping this session and other users signed in", () =>
@@ -453,7 +449,7 @@ describe("UserService", () => {
           "SessionInvalidError",
         );
         expect((yield* sessions.authenticate(bobs.token)).userId).toBe("user-bob");
-      }).pipe(Effect.provide(layerSessionStore())),
+      }).pipe(Effect.provide(layerSessionStore)),
     );
 
     it.effect("signs out the current session without affecting other sessions", () =>
@@ -480,21 +476,7 @@ describe("UserService", () => {
         expect((yield* sessions.authenticate(other.token)).userId).toBe("user-ada");
         expect((yield* sessions.authenticate(bobs.token)).userId).toBe("user-bob");
         expect(yield* PubSub.takeAll(revoked)).toEqual([currentSession.sessionId]);
-      }).pipe(Effect.provide(layerSessionStore())),
-    );
-
-    it.effect("names the cookie after the server's state directory", () =>
-      Effect.gen(function* () {
-        const cookieName = (prefix: string) =>
-          UserService.pipe(
-            Effect.map((sessions) => sessions.cookieName),
-            Effect.provide(layerSessionStore(prefix)),
-          );
-        const one = yield* cookieName("t3-session-one-");
-        const two = yield* cookieName("t3-session-two-");
-        expect(one).toMatch(/^t45_session_[\w-]{12}$/);
-        expect(one).not.toBe(two);
-      }),
+      }).pipe(Effect.provide(layerSessionStore)),
     );
   });
 
@@ -529,7 +511,6 @@ describe("UserService", () => {
       const layer = Layer.effect(UserService, UserService.make).pipe(
         Layer.provide(identityTokenValidatorLayer),
         Layer.provideMerge(layerUsers),
-        Layer.provide(ServerConfig.testLayer("t3-members-test-")),
         Layer.provideMerge(SqlitePersistence.testLayer),
       );
       return { layer };
@@ -905,13 +886,10 @@ describe("UserService", () => {
       },
     };
 
-    const layerConfig = ServerConfig.testLayer("t3-auth-http-test-");
-
     const layerServices = Layer.effect(UserService, UserService.make).pipe(
       Layer.provide(Layer.succeed(Authentication.IdentityTokenValidator, identityTokenValidator)),
       Layer.provideMerge(UserRepository.layer),
       Layer.provideMerge(SqlitePersistence.testLayer),
-      Layer.provideMerge(layerConfig),
     );
 
     // The handler runs in its own runtime, outside it.effect's silenced console.
@@ -967,7 +945,7 @@ describe("UserService", () => {
                   });
                   expect(response.status).toBe(204);
                   const cookie = response.headers.getSetCookie()[0]?.split(";", 1)[0] ?? "";
-                  expect(cookie).toMatch(/^t45_session_/);
+                  expect(cookie).toMatch(/^t45_session=/);
                   return cookie;
                 },
                 sessionState: async (cookie) => {
@@ -993,8 +971,6 @@ describe("UserService", () => {
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
-    const deployVersion = process.env.BUILD_SHA || "development";
-
     it.effect("exchanges an identity token for a browser session cookie", () =>
       withRoutes(async ({ signIn }) => {
         const response = await signIn("clerk-token", {
@@ -1006,7 +982,7 @@ describe("UserService", () => {
         expect(response.headers.get("cache-control")).toBe("no-store");
         const cookies = response.headers.getSetCookie();
         expect(cookies).toHaveLength(1);
-        expect(cookies[0]).toMatch(/^t45_session_[\w-]+=[^;]+;/);
+        expect(cookies[0]).toMatch(/^t45_session=[^;]+;/);
         expect(cookies[0]).toContain("HttpOnly");
         expect(cookies[0]).toContain("SameSite=Lax");
         expect(await response.text()).toBe("");
@@ -1043,14 +1019,14 @@ describe("UserService", () => {
         withRoutes(async ({ login, sessionState }) => {
           expect(await sessionState()).toEqual({
             isAuthenticated: false,
-            deployVersion,
+            deployVersion: "development",
           });
           expect(await sessionState(await login())).toEqual({
             isAuthenticated: true,
             userId: "user_1",
             role: "admin",
             state: "active",
-            deployVersion,
+            deployVersion: "development",
           });
         }),
     );
@@ -1094,7 +1070,6 @@ describe("UserService", () => {
       Layer.provideMerge(UserRepository.layer),
       Layer.provideMerge(AutomationRepository.layer),
       Layer.provideMerge(SqlitePersistence.testLayer),
-      Layer.provide(ServerConfig.testLayer("t3-users-handlers-")),
     );
 
     const insertUser = (id: string, role: "admin" | "member") =>

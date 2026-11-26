@@ -16,6 +16,7 @@ import { RpcSchema } from "effect/rpc";
 
 import { ChatService } from "../chats/ChatService.ts";
 import { UserService } from "../org/UserService.ts";
+import { SESSION_COOKIE_NAME } from "./http.ts";
 
 /** What an execution token reaches; each operation checks what the agent may do with it. */
 const isAgentOperation = (tag: string) =>
@@ -34,7 +35,7 @@ export const Authorization = {
         Effect.gen(function* () {
           // TODO: Why is this defaulted to an empty string?
           const cookie = Option.getOrElse(Headers.get(headers, "cookie"), () => "");
-          const token = Cookies.parseHeader(cookie)[sessions.cookieName];
+          const token = Cookies.parseHeader(cookie)[SESSION_COOKIE_NAME];
           if (token === undefined) return yield* denied;
           const session = yield* sessions.authenticate(token).pipe(
             Effect.catchTags({

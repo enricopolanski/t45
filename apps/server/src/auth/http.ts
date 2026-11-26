@@ -15,6 +15,7 @@ const CREDENTIAL_RESPONSE_HEADERS = {
   pragma: "no-cache",
 } as const;
 
+export const SESSION_COOKIE_NAME = "t45_session";
 const SESSION_COOKIE_OPTIONS = { httpOnly: true, path: "/", sameSite: "lax" } as const;
 
 const AUTH_FAILURE_STATUS = {
@@ -36,7 +37,7 @@ const failed = (cause: unknown) =>
 const readSession = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const sessions = yield* UserService;
-  const token = request.cookies[sessions.cookieName];
+  const token = request.cookies[SESSION_COOKIE_NAME];
   if (!token) return null;
   return yield* sessions
     .authenticate(token)
@@ -102,7 +103,7 @@ const loginRoute = HttpRouter.add(
         Effect.flatMap((login) =>
           HttpServerResponse.setCookie(
             HttpServerResponse.empty({ headers: CREDENTIAL_RESPONSE_HEADERS }),
-            sessions.cookieName,
+            SESSION_COOKIE_NAME,
             login.token,
             { ...SESSION_COOKIE_OPTIONS, expires: DateTime.toDate(login.expiresAt) },
           ),
@@ -131,7 +132,7 @@ const logoutRoute = HttpRouter.add(
         Effect.andThen(
           HttpServerResponse.expireCookie(
             HttpServerResponse.empty({ headers: CREDENTIAL_RESPONSE_HEADERS }),
-            sessions.cookieName,
+            SESSION_COOKIE_NAME,
             SESSION_COOKIE_OPTIONS,
           ),
         ),

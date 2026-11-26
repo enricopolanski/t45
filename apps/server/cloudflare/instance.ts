@@ -130,8 +130,6 @@ const restarts = (state: DurableObjectState) =>
 const configOf = (env: Env, name: string) =>
   ConfigProvider.fromUnknown({
     ...Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string")),
-    // Names the instance's session cookie, as a data directory does on Node.
-    DATA_DIR: `/t45/${name}`,
     TOOL_INSTANCE: name.startsWith(DEV_INSTANCE_PREFIX)
       ? name.slice(DEV_INSTANCE_PREFIX.length)
       : "",

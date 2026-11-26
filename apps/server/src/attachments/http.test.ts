@@ -17,6 +17,7 @@ import { HttpRouter } from "effect/http";
 
 import { UserService } from "../org/UserService.ts";
 import { SessionInvalidError } from "../auth/Authentication.ts";
+import { SESSION_COOKIE_NAME } from "../auth/http.ts";
 import * as Fixture from "../chats/Chats.testkit.ts";
 import * as CollectionRecordRepository from "../collections/CollectionRecordRepository.ts";
 import * as CollectionRepository from "../collections/CollectionRepository.ts";
@@ -120,7 +121,6 @@ describe("downloadContentDisposition", () => {
 describe("attachment routes", () => {
   // The session cookie names whether the test session is an approved member or awaits approval.
   const layerAuth = Layer.mock(UserService)({
-    cookieName: "session",
     authenticate: (token) =>
       ["member", "pending", "other", "admin"].includes(token)
         ? Effect.succeed({
@@ -177,7 +177,7 @@ describe("attachment routes", () => {
                   new Request(`http://127.0.0.1${path}`, {
                     ...init,
                     headers: {
-                      ...(session ? { cookie: `session=${session}` } : {}),
+                      ...(session ? { cookie: `${SESSION_COOKIE_NAME}=${session}` } : {}),
                       // Browsers send the length of a file body; a web Request leaves it out.
                       ...(typeof init.body === "string"
                         ? { "content-length": String(new TextEncoder().encode(init.body).length) }
