@@ -26,7 +26,6 @@ export default defineConfig({
       "**/.repos/**",
       "**/e2e/**",
       "**/.t45/**",
-      "**/.t3/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/.{idea,git,cache,output,temp}/**",

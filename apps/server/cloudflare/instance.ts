@@ -86,9 +86,14 @@ const ownApi = (own: { handler?: Handler }) =>
     OwnApi,
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
-      // The fetch client reads its fetch from the calling fiber, so each request brings this one.
-      const fetch: typeof globalThis.fetch = (input, init) =>
-        own.handler!(new Request(input, init));
+      // The fetch client reads its fetch from the calling fiber, so each request brings this one. A
+      // request off the network states its body's length, which uploads require; this one has none yet.
+      const fetch: typeof globalThis.fetch = (input, init) => {
+        const headers = new Headers(init?.headers);
+        if (init?.body instanceof Uint8Array && !headers.has("content-length"))
+          headers.set("content-length", String(init.body.byteLength));
+        return own.handler!(new Request(input, { ...init, headers }));
+      };
       return client.pipe(
         HttpClient.mapRequest(HttpClientRequest.prependUrl("http://instance")),
         HttpClient.transformResponse(Effect.provideService(FetchHttpClient.Fetch, fetch)),

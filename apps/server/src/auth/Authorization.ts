@@ -32,6 +32,7 @@ export const Authorization = {
       const chats = yield* ChatService;
       const authenticate = (headers: Headers.Headers) =>
         Effect.gen(function* () {
+          // TODO: Why is this defaulted to an empty string?
           const cookie = Option.getOrElse(Headers.get(headers, "cookie"), () => "");
           const token = Cookies.parseHeader(cookie)[sessions.cookieName];
           if (token === undefined) return yield* denied;

@@ -1,6 +1,8 @@
 # T45
 
-T45 is a web app for collaborative working assisted by agents. You can define workflows, projects, automations, assign to coworkers and/or delegate to agents (instructions, model, skills, MCP servers).
+T45 is the application where humans and robots collaborate together. A Jira, focused on collaborative working.
+
+In T45 you can define workflows, projects, automations, views, assign to coworkers and delegate to agents (instructions, model, skills, MCP servers).
 
 ## How it works
 

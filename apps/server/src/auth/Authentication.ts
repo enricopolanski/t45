@@ -253,6 +253,20 @@ export const make = Effect.gen(function* () {
   const users = yield* UserRepository;
   const sql = yield* SqlClient.SqlClient;
 
+  const getOrRegisterUser = (identity: ValidatedIdentity, now: DateTime.Utc) =>
+    users.get(identity.subject).pipe(
+      Effect.andThen((maybeUser) =>
+        maybeUser
+          ? Effect.succeed(maybeUser)
+          : users.register({
+              id: identity.subject,
+              email: identity.email,
+              displayName: identity.name?.trim() || identity.email.trim() || identity.subject,
+              createdAt: now,
+            }),
+      ),
+    );
+
   const loginWithIdentityToken = Effect.fnUntraced(function* (
     input: Parameters<IdentityTokenValidator["Service"]["validate"]>[0],
   ) {
@@ -264,20 +278,15 @@ export const make = Effect.gen(function* () {
       .withTransaction(
         Effect.gen(function* () {
           const now = yield* DateTime.now;
-          const user =
-            (yield* users.get(identity.subject)) ??
-            (yield* users.register({
-              id: identity.subject,
-              email: identity.email,
-              displayName: identity.name?.trim() || identity.email.trim() || identity.subject,
-              createdAt: now,
-            }));
+          const user = yield* getOrRegisterUser(identity, now);
 
           if (user.state === "deactivated") {
             return yield* new UserDeactivatedError({ userId: user.id });
           }
 
-          // Sign-in refreshes the email; the name and avatar stay the user's.
+          // The external provider (GitHub, Google, Azure Entra, etc) tell us the email of the user.
+          // If the user changed email on those platforms, we also update it here.
+          // But we keep the other information unchanged.
           if (user.email !== identity.email) {
             yield* users.update({
               ...user,

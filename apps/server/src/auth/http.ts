@@ -90,6 +90,7 @@ const loginRoute = HttpRouter.add(
       Effect.option,
     );
     if (Option.isNone(token)) return refuse("invalid_credential");
+    // TODO: Can origin be even not here?
     const origin = (yield* HttpServerRequest.HttpServerRequest).headers.origin;
     const sessions = yield* UserService;
     return yield* sessions

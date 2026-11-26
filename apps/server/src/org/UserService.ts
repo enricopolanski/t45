@@ -19,6 +19,7 @@ import { UserRepository } from "./UserRepository.ts";
 type Target = { readonly userId: string };
 type RoleChange = Target & { readonly role: Role };
 
+// TODO: Use more JSDocs and more types, etc
 const make = Effect.gen(function* () {
   const authentication = yield* Authentication.make;
   const sql = yield* SqlClient.SqlClient;
