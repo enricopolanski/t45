@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off - Injected tools run as plain Node programs.
 import * as NodeReadline from "node:readline";
-import { Authorization } from "@t45/contracts/Authorization";
+import { Authorization } from "@t45/contracts/auth/Authorization";
 import { ReportProgress } from "@t45/contracts/resources/Chats";
 import { CollectionOperations } from "@t45/contracts/resources/Collections";
 import { Workflows } from "@t45/contracts/resources/Workflows";

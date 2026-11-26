@@ -1,5 +1,5 @@
 import { type Skill } from "@t45/contracts/models/Skill";
-import { Authorization } from "@t45/contracts/Authorization";
+import { Authorization } from "@t45/contracts/auth/Authorization";
 import { NotFound } from "@t45/contracts/resources/errors";
 import { Skills } from "@t45/contracts/resources/Skills";
 import * as Crypto from "effect/Crypto";

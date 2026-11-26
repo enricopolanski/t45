@@ -2,7 +2,7 @@ import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 
-import { AdminOnly } from "../Authorization.ts";
+import { AdminOnly } from "../auth/Authorization.ts";
 import { Capability } from "../models/Capability.ts";
 import { StringId } from "../models/primitives.ts";
 import { NotFound } from "./errors.ts";

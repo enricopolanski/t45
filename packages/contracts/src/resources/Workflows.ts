@@ -46,7 +46,8 @@ import {
   WorkflowVersion,
 } from "../models/Workflow.ts";
 import { Refused as ChatRefused } from "../models/Chat.ts";
-import { AccessDenied, NotFound } from "./errors.ts";
+import { AccessDenied } from "../auth/Authorization.ts";
+import { NotFound } from "./errors.ts";
 
 export const WorkflowErrors = Schema.Union([WorkflowRefused, NotFound, AccessDenied]);
 

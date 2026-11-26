@@ -1,5 +1,5 @@
 import { Organization } from "@t45/contracts/resources/Organization";
-import { Authorization } from "@t45/contracts/Authorization";
+import { Authorization } from "@t45/contracts/auth/Authorization";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 

@@ -1,11 +1,11 @@
 import {
+  AccessDenied,
   AdminOnly as AdminOnlyMiddleware,
   Authorization as AuthorizationMiddleware,
   CurrentUser,
   CurrentActor,
-} from "@t45/contracts/Authorization";
+} from "@t45/contracts/auth/Authorization";
 import { CollectionOperations } from "@t45/contracts/resources/Collections";
-import { AccessDenied } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";

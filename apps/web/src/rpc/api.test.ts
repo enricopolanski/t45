@@ -1,4 +1,4 @@
-import { AccessDenied } from "@t45/contracts/resources/errors";
+import { AccessDenied } from "@t45/contracts/auth/Authorization";
 import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";

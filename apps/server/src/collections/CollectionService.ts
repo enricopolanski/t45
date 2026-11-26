@@ -1,4 +1,4 @@
-import type { CurrentActor } from "@t45/contracts/Authorization";
+import { AccessDenied, type CurrentActor } from "@t45/contracts/auth/Authorization";
 import type { Attachment } from "@t45/contracts/models/Attachment";
 import {
   canEditRecords,
@@ -27,7 +27,7 @@ import {
   EXTRACTION_SAVING_CAPABILITY_ID,
 } from "@t45/contracts/resources/AgentTools";
 import type { Collections } from "@t45/contracts/resources/Collections";
-import { AccessDenied, NotFound } from "@t45/contracts/resources/errors";
+import { NotFound } from "@t45/contracts/resources/errors";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";

@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import { Refused, Skill } from "../models/Skill.ts";
-import { AdminOnly } from "../Authorization.ts";
+import { AdminOnly } from "../auth/Authorization.ts";
 import { NotFound } from "./errors.ts";
 import { StringId } from "../models/primitives.ts";
 

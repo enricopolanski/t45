@@ -1,6 +1,6 @@
 import { translate } from "~/i18n/locale";
 import { RpcApi } from "@t45/contracts/resources/RpcApi";
-import { AccessDenied } from "@t45/contracts/resources/errors";
+import { AccessDenied } from "@t45/contracts/auth/Authorization";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

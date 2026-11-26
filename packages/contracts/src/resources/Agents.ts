@@ -5,7 +5,8 @@ import * as Struct from "effect/Struct";
 
 import { Agent, AgentModel, Refused } from "../models/Agent.ts";
 import { StringId } from "../models/primitives.ts";
-import { AccessDenied, NotFound } from "./errors.ts";
+import { AccessDenied } from "../auth/Authorization.ts";
+import { NotFound } from "./errors.ts";
 
 class SaveAgentRequest extends Schema.Opaque<SaveAgentRequest>()(
   Schema.Struct(

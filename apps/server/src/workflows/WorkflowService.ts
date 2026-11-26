@@ -1,6 +1,6 @@
 import { type Automation, AutomationId } from "@t45/contracts/models/Automation";
 import { AutomationRepository } from "../automations/AutomationRepository.ts";
-import type { CurrentActor } from "@t45/contracts/Authorization";
+import { AccessDenied, type CurrentActor } from "@t45/contracts/auth/Authorization";
 import { ChatService } from "../chats/ChatService.ts";
 import * as ProjectAssistant from "./ProjectAssistant.ts";
 import type { Workflows } from "@t45/contracts/resources/Workflows";
@@ -102,7 +102,7 @@ import {
   readScriptResultValues,
 } from "@t45/contracts/models/StepCalculator";
 import { buildFieldViews } from "@t45/core/fieldViews";
-import { AccessDenied, NotFound } from "@t45/contracts/resources/errors";
+import { NotFound } from "@t45/contracts/resources/errors";
 import { STEP_COMPLETION_CAPABILITY_ID } from "@t45/contracts/resources/AgentTools";
 import type { NotificationView } from "@t45/contracts/resources/Notifications";
 import type {

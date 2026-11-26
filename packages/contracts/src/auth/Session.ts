@@ -1,10 +1,7 @@
 import * as Schema from "effect/Schema";
 
-import { StringId, makeId, TrimmedNonEmptyString } from "../models/primitives.ts";
+import { StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { Locale, Role, State } from "../models/User.ts";
-
-export const AuthSessionId = makeId("AuthSessionId");
-export type AuthSessionId = typeof AuthSessionId.Type;
 
 /** Git commit baked into the running server, or "development" in source mode. */
 const DeployVersion = TrimmedNonEmptyString;

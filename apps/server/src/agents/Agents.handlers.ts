@@ -1,7 +1,7 @@
 import { type Agent, canManage, canUse, isBuiltIn, Refused } from "@t45/contracts/models/Agent";
 import { NotFound } from "@t45/contracts/resources/errors";
 import { Agents, AgentSummary } from "@t45/contracts/resources/Agents";
-import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
+import { Authorization, CurrentUser } from "@t45/contracts/auth/Authorization";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

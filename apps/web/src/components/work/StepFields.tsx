@@ -15,7 +15,7 @@ import {
   sortRows,
   type TableColumn,
 } from "@t45/contracts/models/Layout";
-import { AccessDenied } from "@t45/contracts/resources/errors";
+import { AccessDenied } from "@t45/contracts/auth/Authorization";
 import type {
   FieldValue as StepFieldValue,
   FieldView,

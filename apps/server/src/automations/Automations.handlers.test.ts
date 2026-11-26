@@ -1,9 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import { type Automation, AutomationId } from "@t45/contracts/models/Automation";
-import { AuthSessionId } from "@t45/contracts/resources/Session";
-
-import { Authorization, CurrentActor } from "@t45/contracts/Authorization";
+import { Authorization, AuthSessionId, CurrentActor } from "@t45/contracts/auth/Authorization";
 import { Automations } from "@t45/contracts/resources/Automations";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

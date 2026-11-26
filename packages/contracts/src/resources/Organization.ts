@@ -5,7 +5,7 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import { Avatar, InvalidAvatar } from "../models/Avatar.ts";
 import { Organization as OrganizationModel } from "../models/Organization.ts";
 import { TrimmedNonEmptyString } from "../models/primitives.ts";
-import { AdminOnly } from "../Authorization.ts";
+import { AdminOnly } from "../auth/Authorization.ts";
 
 export const UpdateOrganizationRequest = Schema.Struct({
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),

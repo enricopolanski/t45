@@ -1,6 +1,6 @@
 import { translate } from "~/i18n/locale";
 import { canManageUsers } from "@t45/contracts/models/User";
-import { AuthFailure, AuthSessionState } from "@t45/contracts/resources/Session";
+import { AuthFailure, AuthSessionState } from "@t45/contracts/auth/Session";
 import { redirect } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 

@@ -1,10 +1,9 @@
 import { assert, it } from "@effect/vitest";
 import { Form } from "@opencode/schema/form";
 import { SessionMessage } from "@opencode/schema/session-message";
-import { AuthSessionId } from "@t45/contracts/resources/Session";
 import type { ChatId } from "@t45/contracts/models/Chat";
 import { type Role } from "@t45/contracts/models/User";
-import { Authorization, CurrentActor } from "@t45/contracts/Authorization";
+import { Authorization, AuthSessionId, CurrentActor } from "@t45/contracts/auth/Authorization";
 import { Chats } from "@t45/contracts/resources/Chats";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

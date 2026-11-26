@@ -3,7 +3,7 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { AdminOnly } from "../Authorization.ts";
+import { AccessDenied, AdminOnly } from "../auth/Authorization.ts";
 import { Attachment } from "../models/Attachment.ts";
 import {
   Collection,
@@ -15,7 +15,7 @@ import {
 } from "../models/Collection.ts";
 import { FieldPathSegment, FieldValues } from "../models/Field.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
-import { AccessDenied, NotFound } from "./errors.ts";
+import { NotFound } from "./errors.ts";
 
 const CollectionErrors = Schema.Union([Refused, NotFound, AccessDenied]);
 

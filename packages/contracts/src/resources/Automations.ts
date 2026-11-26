@@ -7,8 +7,8 @@ import { ChatId, Refused as ChatRefused, Report } from "../models/Chat.ts";
 import { RunStatus } from "../models/ChatOrigin.ts";
 import { StringId } from "../models/primitives.ts";
 import { Refused as AutomationRefused, Automation, AutomationId } from "../models/Automation.ts";
-import { AdminOnly } from "../Authorization.ts";
-import { AccessDenied, NotFound } from "./errors.ts";
+import { AccessDenied, AdminOnly } from "../auth/Authorization.ts";
+import { NotFound } from "./errors.ts";
 
 const Settings = Struct.pick(Automation.fields, [
   "title",

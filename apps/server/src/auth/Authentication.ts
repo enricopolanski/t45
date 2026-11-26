@@ -1,5 +1,5 @@
 import { StringId } from "@t45/contracts/models/primitives";
-import { AuthSessionId } from "@t45/contracts/resources/Session";
+import { AuthSessionId } from "@t45/contracts/auth/Authorization";
 import { Locale, Role, State } from "@t45/contracts/models/User";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";

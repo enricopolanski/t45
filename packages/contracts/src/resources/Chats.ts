@@ -18,7 +18,8 @@ import {
   Report,
 } from "../models/Chat.ts";
 import { StringId, Title } from "../models/primitives.ts";
-import { AccessDenied, NotFound } from "./errors.ts";
+import { AccessDenied } from "../auth/Authorization.ts";
+import { NotFound } from "./errors.ts";
 
 /**
  * What T45 keeps in the native user message an input becomes, under its `metadata`: the input as

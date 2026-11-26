@@ -1,5 +1,9 @@
-import { Authorization, CurrentActor, CurrentUser } from "@t45/contracts/Authorization";
-import { AccessDenied } from "@t45/contracts/resources/errors";
+import {
+  AccessDenied,
+  Authorization,
+  CurrentActor,
+  CurrentUser,
+} from "@t45/contracts/auth/Authorization";
 import { Chats } from "@t45/contracts/resources/Chats";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";

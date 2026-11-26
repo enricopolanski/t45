@@ -1,4 +1,4 @@
-import { Authorization, CurrentActor, CurrentUser } from "@t45/contracts/Authorization";
+import { Authorization, CurrentActor, CurrentUser } from "@t45/contracts/auth/Authorization";
 import { Workflows } from "@t45/contracts/resources/Workflows";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";

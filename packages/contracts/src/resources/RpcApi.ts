@@ -1,6 +1,6 @@
 import { Agents } from "./Agents.ts";
 import { Assignments } from "./Assignments.ts";
-import { Authorization } from "../Authorization.ts";
+import { Authorization } from "../auth/Authorization.ts";
 import { Capabilities } from "./Capabilities.ts";
 import { Chats } from "./Chats.ts";
 import { Collections } from "./Collections.ts";

@@ -5,8 +5,8 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import { StringId, NonNegativeInt } from "../models/primitives.ts";
 import { Avatar, InvalidAvatar } from "../models/Avatar.ts";
 import { DisplayName, Locale, Refused, Role, User } from "../models/User.ts";
-import { AdminOnly } from "../Authorization.ts";
-import { AccessDenied, NotFound } from "./errors.ts";
+import { AccessDenied, AdminOnly } from "../auth/Authorization.ts";
+import { NotFound } from "./errors.ts";
 
 export const UpdateProfileRequest = Schema.Struct({
   displayName: DisplayName,

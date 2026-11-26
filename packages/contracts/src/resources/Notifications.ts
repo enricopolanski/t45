@@ -4,7 +4,8 @@ import * as Schema from "effect/Schema";
 
 import { Notification, NotificationId, hasValidTarget } from "../models/Notification.ts";
 import { NonNegativeInt, TrimmedNonEmptyString } from "../models/primitives.ts";
-import { AccessDenied, NotFound } from "./errors.ts";
+import { AccessDenied } from "../auth/Authorization.ts";
+import { NotFound } from "./errors.ts";
 
 export const NotificationView = Schema.Struct({
   ...Notification.fields,

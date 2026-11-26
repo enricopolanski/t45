@@ -5,7 +5,7 @@ import {
   AutomationId,
   type Phase,
 } from "@t45/contracts/models/Automation";
-import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
+import { Authorization, CurrentUser } from "@t45/contracts/auth/Authorization";
 import { NotFound } from "@t45/contracts/resources/errors";
 import { Automations } from "@t45/contracts/resources/Automations";
 import * as Crypto from "effect/Crypto";

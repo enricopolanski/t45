@@ -1,4 +1,4 @@
-import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
+import { Authorization, CurrentUser } from "@t45/contracts/auth/Authorization";
 import { Assignments } from "@t45/contracts/resources/Assignments";
 import * as Effect from "effect/Effect";
 

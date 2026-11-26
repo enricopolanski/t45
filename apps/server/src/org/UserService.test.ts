@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, expect, it } from "@effect/vitest";
 import { Refused, type User } from "@t45/contracts/models/User";
-import { Authorization, CurrentActor } from "@t45/contracts/Authorization";
+import { Authorization, CurrentActor } from "@t45/contracts/auth/Authorization";
 import { Users } from "@t45/contracts/resources/Users";
 import type { NotFound } from "@t45/contracts/resources/errors";
 import * as DateTime from "effect/DateTime";

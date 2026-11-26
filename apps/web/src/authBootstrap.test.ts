@@ -1,6 +1,6 @@
 import type { Organization } from "@t45/contracts/models/Organization";
 import { type Role, type State } from "@t45/contracts/models/User";
-import type { AuthFailure, AuthSessionState } from "@t45/contracts/resources/Session";
+import type { AuthFailure, AuthSessionState } from "@t45/contracts/auth/Session";
 import * as DateTime from "effect/DateTime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
