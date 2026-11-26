@@ -21,7 +21,6 @@ export type NavLink = {
   readonly label: Message;
   readonly icon: ReactNode;
   readonly to:
-    | "/boards"
     | "/my-work"
     | "/chats"
     | "/settings/projects"
@@ -43,7 +42,6 @@ export type NavLink = {
 const MAIN_LINKS: ReadonlyArray<NavLink> = [
   { label: "My work", icon: <InboxIcon />, to: "/my-work" },
   { label: "Chat", icon: <MessagesSquareIcon />, to: "/chats", isWorkInProgress: true },
-  { label: "Boards", icon: <KanbanSquareIcon />, to: "/boards" },
 ];
 
 /** The app's main sidebar, with open boards and published collections. */
@@ -55,10 +53,34 @@ export function AppNavSidebar() {
         <AppNavGroup label={null}>
           <NavLinks links={MAIN_LINKS} />
         </AppNavGroup>
+        <OpenBoards />
         <PublishedCollections />
       </SidebarContent>
       <SidebarChromeFooter />
     </>
+  );
+}
+
+/** The boards the viewer can open, under a heading; with none, nothing. */
+function OpenBoards() {
+  const t = useTranslation();
+  const { setOpenMobile } = useSidebar();
+  const boards = useOpenBoards();
+  if (boards.length === 0) return null;
+  return (
+    <AppNavGroup label={t("Boards")}>
+      {boards.map((board) => (
+        <SidebarMenuItem key={board.id}>
+          <SidebarMenuButton
+            onClick={() => setOpenMobile(false)}
+            render={<Link to="/boards/$slug" params={{ slug: board.slug ?? board.id }} />}
+          >
+            <KanbanSquareIcon />
+            <span>{board.name}</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ))}
+    </AppNavGroup>
   );
 }
 
@@ -94,9 +116,7 @@ export function NavLinks({ links }: { readonly links: ReadonlyArray<NavLink> }) 
   const { setOpenMobile } = useSidebar();
   const closeMobileSidebar = () => setOpenMobile(false);
   return links.map((link) =>
-    link.to === "/boards" ? (
-      <BoardsItem key={link.to} link={link} onNavigate={closeMobileSidebar} />
-    ) : link.isWorkInProgress === true ? (
+    link.isWorkInProgress === true ? (
       <SidebarMenuItem key={link.to}>
         <SidebarMenuButton disabled>
           {link.icon}
@@ -123,60 +143,6 @@ export function NavLinks({ links }: { readonly links: ReadonlyArray<NavLink> }) 
         )}
       </SidebarMenuItem>
     ),
-  );
-}
-
-/**
- * Boards, with each board the viewer can open listed below it; a viewer with a single board
- * gets that board in its place.
- */
-function BoardsItem({
-  link,
-  onNavigate,
-}: {
-  readonly link: NavLink;
-  readonly onNavigate: () => void;
-}) {
-  const t = useTranslation();
-  const boards = useOpenBoards();
-  const [only] = boards;
-  if (only !== undefined && boards.length === 1) {
-    return (
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          onClick={onNavigate}
-          render={<Link to="/boards/$slug" params={{ slug: only.slug ?? only.id }} />}
-        >
-          {link.icon}
-          <span>{only.name}</span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    );
-  }
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        onClick={onNavigate}
-        render={<Link to={link.to} activeOptions={{ exact: true }} />}
-      >
-        {link.icon}
-        <span>{t(link.label)}</span>
-      </SidebarMenuButton>
-      {boards.length > 0 ? (
-        <SidebarMenuSub>
-          {boards.map((board) => (
-            <SidebarMenuItem key={board.id}>
-              <SidebarMenuButton
-                onClick={onNavigate}
-                render={<Link to="/boards/$slug" params={{ slug: board.slug ?? board.id }} />}
-              >
-                <span>{board.name}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenuSub>
-      ) : null}
-    </SidebarMenuItem>
   );
 }
 
