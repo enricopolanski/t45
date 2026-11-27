@@ -417,7 +417,6 @@ export const de = {
   Density: "Dichte",
   Descending: "Absteigend",
   Description: "Beschreibung",
-  "Description (optional)": "Beschreibung (optional)",
   Details: "Details",
   "Details of entry {0} of {1}": "Details zu Eintrag {0} von {1}",
   "Development servers sign you in as any email you enter.":
@@ -1120,8 +1119,6 @@ export const de = {
   "What should the agent do each time this runs?": "Was soll der Agent bei jedem Lauf tun?",
   "What this agent does, how it works, and what it hands back":
     "Was der Agent macht, wie er vorgeht und welche Ergebnisse er liefert",
-  "What this item is about, for everyone who works on it":
-    "Worum es in diesem Ticket geht, für alle Beteiligten",
   "When to run": "Wann ausführen",
   "When to run {0} in {1}": "Wann {0} in {1} ausführen",
   "When to use it, e.g. Extracts tables from .xlsx files":
@@ -1206,6 +1203,31 @@ export const de = {
   "Include {0} in approval": "{0} in die Freigabe einbeziehen",
   Candidate: "Kandidat",
   Discrepancy: "Abweichung",
+  "Add files": "Dateien hinzufügen",
+  "{0} (optional)": "{0} (optional)",
+  "What people give when they start an item, such as its documents. They can change it while this step is open.":
+    "Was Personen beim Anlegen eines Tickets angeben, etwa seine Dokumente. Solange dieser Schritt offen ist, können sie es ändern.",
+  "Required to start: {0}": "Zum Anlegen erforderlich: {0}",
+  "a title": "einen Titel",
+  "at least one file": "mindestens eine Datei",
+  "Add {0} to start.": "Fügen Sie {0} hinzu, um zu starten.",
+  "Step 1 will read 1 file.": "Schritt 1 liest 1 Datei.",
+  "Step 1 will read {0} files.": "Schritt 1 liest {0} Dateien.",
+  "Start Step 1": "Schritt 1 starten",
+  "Uploaded files": "Hochgeladene Dateien",
+  "Uploading…": "Wird hochgeladen…",
+  "Add more files, or": "Weitere Dateien hinzufügen oder",
+  "Drop files here, or": "Dateien hier ablegen oder",
+  browse: "durchsuchen",
+  "Starts right away.": "Startet sofort.",
+  "What this step does, in a line for whoever starts an item":
+    "Was dieser Schritt tut, in einer Zeile für alle, die ein Ticket anlegen",
+  "Optional; a group's description takes Markdown":
+    "Optional; die Beschreibung einer Gruppe unterstützt Markdown",
+  "Example title": "Beispieltitel",
+  "Item creation": "Ticket anlegen",
+  "Gathering the data required to start the process":
+    "Die Daten sammeln, die für den Start des Prozesses nötig sind",
 } as const;
 
 export type Message = keyof typeof de;

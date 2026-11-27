@@ -113,10 +113,18 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
+function DialogTitle({
+  className,
+  size = "default",
+  ...props
+}: DialogPrimitive.Title.Props & { size?: "default" | "lg" }) {
   return (
     <DialogPrimitive.Title
-      className={cn("wrap-anywhere font-semibold text-xl leading-none", className)}
+      className={cn(
+        "wrap-anywhere font-semibold text-xl leading-none",
+        size === "lg" && "text-2xl",
+        className,
+      )}
       data-slot="dialog-title"
       {...props}
     />

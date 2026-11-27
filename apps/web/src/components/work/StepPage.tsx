@@ -2,7 +2,12 @@ import { useTranslation } from "~/i18n/locale";
 import type { AutomationId } from "@t45/contracts/models/Automation";
 import { AutomationSkipReason } from "@t45/contracts/models/Workflow";
 import { StringId } from "@t45/contracts/models/primitives";
-import type { FieldView, StepNameView, StepView } from "@t45/contracts/resources/Workflows";
+import type {
+  FieldValue,
+  FieldView,
+  StepNameView,
+  StepView,
+} from "@t45/contracts/resources/Workflows";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
@@ -50,10 +55,10 @@ import { CardFold } from "./CardFold";
 import { CalculationReviewPanel, ConfirmCalculationInputs } from "./CalculationReviewPanel";
 import { OtherStep } from "./ItemSteps";
 import { ItemDescription } from "./ItemDescription";
-import { StepComments, StepFiles } from "./StepConversation";
+import { StepComments } from "./StepConversation";
 import { ProposalReview } from "./ProposalReview";
 import { RecordEntryReview } from "./RecordEntryReview";
-import { attachStepFile, StepFields } from "./StepFields";
+import { attachStepFile, FieldInputs, type FileEntry, StepFields, uploadFile } from "./StepFields";
 import { ConfirmedRecord, ReadOnlyStepFieldCard } from "./StepInputs";
 import { StepStatus } from "./StepStatus";
 import { StepSubSteps } from "./StepSubSteps";
@@ -67,6 +72,7 @@ import {
   type StepAct,
   type StepActions,
   stepActions,
+  stepNameParts,
 } from "./workLogic";
 import {
   formatChatTimestampTooltip,
@@ -77,6 +83,7 @@ import { useNowMinute } from "../../hooks/useNowMinute";
 import { stepViews, workChanged } from "../../state/work";
 
 const isStepId = Schema.is(StringId);
+const NO_KEYS: ReadonlySet<string> = new Set();
 const isAutomationSkipReason = Schema.is(AutomationSkipReason);
 
 /**
@@ -199,6 +206,28 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
       else complete();
     }
   };
+  const saveField = (fieldKey: string, value: FieldValue) =>
+    void act(() => api("workflows.setStepField", { ...step, fieldKey, value }));
+  const uploadField = (fieldKey: string, file: File) =>
+    void act(() => attachStepFile(view.step.id, file, fieldKey));
+  // The entries appear once their files are uploaded, so a failed upload leaves none empty.
+  const addFileEntries = (
+    groupKey: string,
+    rowIds: ReadonlyArray<string>,
+    added: ReadonlyArray<FileEntry>,
+  ) =>
+    void act(async () => {
+      const uploaded = await Promise.all(
+        added.map(async (entry) => ({ ...entry, attachmentId: await uploadFile(entry.file) })),
+      );
+      await api("workflows.setStepField", {
+        ...step,
+        fieldKey: groupKey,
+        value: [...rowIds, ...uploaded.map(({ rowId }) => rowId)],
+      });
+      for (const { fieldKey, attachmentId } of uploaded)
+        await api("workflows.attachStepFile", { ...step, attachmentId, fieldKey });
+    });
   // The workflow's step this one is, or sits in, shown among all the others.
   const rootId = view.parents[0]?.id ?? view.step.id;
   const recordStatus = (field: FieldView) => {
@@ -230,25 +259,25 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         <MissingRecap missing={missing} unfinished={unfinished} unconfirmed={unconfirmed} />
       ) : null}
       <ItemDescription description={view.ticket.description} />
-      <ReadOnlyStepFieldCard
-        title={t("Inputs")}
-        fields={view.inputs}
-        reviews={inputReviews}
-        defaultOpen={false}
-      />
-      <StepFiles
-        view={view}
-        canWrite={writes}
-        busy={busy}
-        onAttach={(files) =>
-          void act(async () => {
-            for (const file of files) await attachStepFile(view.step.id, file);
-          })
-        }
-        onRemove={(attachmentId) =>
-          void act(() => api("workflows.removeStepFile", { ...step, attachmentId }))
-        }
-      />
+      {view.definition.providedInputs.length > 0 && actions.canEditFields ? (
+        // The first step's inputs are its own values, changed here while it's open.
+        <CardFold title={t("Inputs")}>
+          <FieldInputs
+            fields={view.inputs}
+            missing={NO_KEYS}
+            onSave={saveField}
+            onUpload={uploadField}
+            onAddFileEntries={addFileEntries}
+          />
+        </CardFold>
+      ) : (
+        <ReadOnlyStepFieldCard
+          title={t("Inputs")}
+          fields={view.inputs}
+          reviews={inputReviews}
+          defaultOpen={false}
+        />
+      )}
       {view.fileExport !== undefined && actions.canEditFields && (
         <Button
           type="button"
@@ -298,12 +327,9 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
           editable={actions.canEditFields}
           missing={new Set(missing.map((field) => field.key))}
           holdOpen={unconfirmed.length > 0}
-          onSave={(fieldKey, value) =>
-            void act(() => api("workflows.setStepField", { ...step, fieldKey, value }))
-          }
-          onUpload={(fieldKey, file) =>
-            void act(() => attachStepFile(view.step.id, file, fieldKey))
-          }
+          onSave={saveField}
+          onUpload={uploadField}
+          onAddFileEntries={addFileEntries}
           onRecordSaved={() => void act(() => Promise.resolve())}
           recordStatus={recordStatus}
           review={
@@ -415,7 +441,6 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   );
 }
 
-const stepNameParts = /^Step (\d+)\s+[—–-]\s+(.+)$/iu;
 const stepperStatus = {
   completed: {
     label: "Completed",

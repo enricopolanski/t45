@@ -36,6 +36,8 @@ console.log(JSON.stringify($review.isPreview ? { outputs, preview } : { outputs,
 test("recalculates manual inputs and completes the step with the approved version", async ({
   signIn,
 }) => {
+  // Each recalculation runs the script anew: the test takes about 25 seconds on an idle machine.
+  test.setTimeout(60_000);
   const page = await signIn("reviewer@example.test");
   await rpc(page, "organization.update", {
     name: "Calculation review",

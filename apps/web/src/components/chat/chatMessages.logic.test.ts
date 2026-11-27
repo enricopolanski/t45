@@ -180,7 +180,12 @@ describe("tool parts", () => {
       // A draft names no inputs or automations: its steps start without any.
     ).toEqual({
       ...draft,
-      steps: draft.steps.map((step) => ({ ...step, inputs: [], automationIds: [] })),
+      steps: draft.steps.map((step) => ({
+        ...step,
+        inputs: [],
+        providedInputs: [],
+        automationIds: [],
+      })),
     });
     expect(
       workflowDraftOf(

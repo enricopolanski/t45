@@ -100,7 +100,6 @@ export const layer = Workflows.middleware(Authorization).toLayer(
         Effect.flatMap(caller, (actor) => workflows.attachStepFile(actor, input)),
       "workflows.exportStepResult": (input) =>
         asViewer((id) => workflows.exportStepResult(id, input)),
-      "workflows.removeStepFile": (input) => asViewer((id) => workflows.removeStepFile(id, input)),
     });
   }),
 );

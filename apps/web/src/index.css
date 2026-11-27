@@ -69,6 +69,8 @@
   --accent-foreground: var(--color-zinc-900);
   --destructive: var(--color-red-500);
   --border: var(--color-zinc-200);
+  /* A border that frames a form's card, firmer than a divider's. */
+  --border-strong: var(--color-zinc-400);
   --input: var(--color-zinc-300);
   --ring: var(--primary);
   --destructive-foreground: var(--color-red-700);
@@ -170,6 +172,7 @@ body {
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);

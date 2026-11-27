@@ -23,6 +23,7 @@ import {
   currentStep,
   hasValidInputs,
   occupiedStep,
+  stepInputFields,
   openProposals,
   proposalFiltersRefusal,
   proposalRefusal,
@@ -71,6 +72,7 @@ const definition = (
   fields: [],
   subSteps,
   inputs: [],
+  providedInputs: [],
   automationIds: [],
   ...extra,
 });
@@ -208,6 +210,79 @@ describe("step inputs", () => {
     });
     assert.equal(stepEntryRefusal(steps, filled(0), second), null);
     assert.equal(stepEntryRefusal(steps, filled(null), second), "inputs_missing");
+  });
+});
+
+describe("provided inputs", () => {
+  const documents = {
+    id: "docs01",
+    label: "Documents",
+    type: "group",
+    repeatable: true,
+    fields: [{ id: "file01", label: "File", type: "file" }],
+  } as const;
+  const notes = { id: "notes01", label: "Notes", type: "text" } as const;
+  const first = definition("first01", [], {
+    providedInputs: [
+      { field: documents, isRequired: true },
+      { field: notes, isRequired: false },
+    ],
+  });
+  const second = definition("second01", [], {
+    inputs: [
+      { stepId: first.id, fieldId: documents.id },
+      { stepId: first.id, fieldId: notes.id },
+    ],
+  });
+  const withDocuments = { [documents.id]: ["row001"], [`${documents.id}.row001.file01`]: "a.pdf" };
+  const started = (values: Step["values"]): Ticket => ({
+    ...ticket,
+    steps: [{ ...step, stepDefinitionId: first.id, values }],
+  });
+
+  it("are asked only by the first step, under ids its fields don't repeat, and link no records", () => {
+    assert.isTrue(hasValidInputs([first, second]));
+    assert.isFalse(hasValidInputs([definition("zero01"), first]));
+    assert.isFalse(hasValidInputs([definition("parent01", [first])]));
+    assert.isFalse(hasValidInputs([{ ...first, fields: [notes] }]));
+    const records = { id: "links01", label: "Links", type: "records", collectionId: "c1" } as const;
+    assert.isFalse(
+      hasValidInputs([
+        definition("first01", [], { providedInputs: [{ field: records, isRequired: true }] }),
+      ]),
+    );
+  });
+
+  it("are the first step's own inputs, and later steps take them like its fields", () => {
+    const ticket = started(withDocuments);
+    assert.deepEqual(
+      stepInputFields([first, second], ticket, first).map(({ field }) => field.id),
+      [documents.id, notes.id],
+    );
+    assert.deepEqual(
+      stepInputFields([first, second], ticket, second).map(({ source, field }) => [
+        source.stepDefinitionId,
+        field.id,
+      ]),
+      [
+        [first.id, documents.id],
+        [first.id, notes.id],
+      ],
+    );
+  });
+
+  it("hold back the next step only when required and empty", () => {
+    assert.equal(stepEntryRefusal([first, second], started(withDocuments), second), null);
+    assert.equal(stepEntryRefusal([first, second], started({}), second), "inputs_missing");
+  });
+
+  it("must stay filled, when required, for the first step to be done", () => {
+    const at = (values: Step["values"]) => {
+      const ticket = started(values);
+      return stepCompletionRefusal(first, ticket, ticket.steps[0]!);
+    };
+    assert.equal(at(withDocuments), null);
+    assert.equal(at({ [notes.id]: "Some notes" }), "step_incomplete");
   });
 });
 

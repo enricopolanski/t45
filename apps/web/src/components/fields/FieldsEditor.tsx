@@ -10,6 +10,7 @@ import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Field } from "../ui/field";
 import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { FoldChevron } from "../work/CardFold";
@@ -806,8 +807,8 @@ function FieldCard({
               </div>
             ) : null}
             <Field label={t("Description")} size="xs">
-              <Input
-                placeholder={t("Optional")}
+              <Textarea
+                placeholder={t("Optional; a group's description takes Markdown")}
                 value={field.description ?? ""}
                 onChange={(event) => {
                   const { description: _, ...rest } = field;

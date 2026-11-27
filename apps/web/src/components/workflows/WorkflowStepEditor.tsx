@@ -175,6 +175,8 @@ export function WorkflowStepEditor({
   const collections = useApiQuery(collectionListQuery).data ?? [];
   const calculator = step.calculator;
   const inputs = step.inputs ?? [];
+  // Only the workflow's first step, with no step before it, asks people for its inputs.
+  const isFirst = position !== null && precedingStepId === undefined;
   const inputKey = (input: (typeof inputs)[number]) => `${input.stepId}.${input.fieldId}`;
   const unboundSources = inputSources.filter(({ input }) => !inputs.some(isSameInput(input)));
   const recordSources = inputSources.filter(
@@ -258,6 +260,17 @@ export function WorkflowStepEditor({
       <CollapsiblePanel>
         <div className="flex flex-col gap-4 border-t border-border px-4 py-3.5">
           {position !== null ? title : null}
+          <Field label={t("Summary")} size="xs">
+            <Input
+              placeholder={t("What this step does, in a line for whoever starts an item")}
+              value={step.summary ?? ""}
+              onChange={(event) => {
+                const { summary: _, ...rest } = step;
+                onChange(event.target.value ? { ...rest, summary: event.target.value } : rest);
+              }}
+              disabled={disabled}
+            />
+          </Field>
           <Field label={t("Instructions")} size="xs">
             <Textarea
               placeholder={t("Guidance for a person, or the brief for an agent")}
@@ -396,11 +409,37 @@ export function WorkflowStepEditor({
             <div className="flex flex-col gap-0.5">
               <span className="text-xs font-medium text-muted-foreground">{t("Inputs")}</span>
               <p className="text-xs text-muted-foreground">
-                {t(
-                  "Fields of earlier steps this step reads. Whoever works on it sees nothing else of them.",
-                )}
+                {isFirst
+                  ? t(
+                      "What people give when they start an item, such as its documents. They can change it while this step is open.",
+                    )
+                  : t(
+                      "Fields of earlier steps this step reads. Whoever works on it sees nothing else of them.",
+                    )}
               </p>
             </div>
+            {isFirst ? (
+              <Field label={t("Example title")} size="xs">
+                <Input
+                  placeholder={t("e.g. Customer onboarding")}
+                  value={step.titlePlaceholder ?? ""}
+                  onChange={(event) => {
+                    const { titlePlaceholder: _, ...rest } = step;
+                    onChange(
+                      event.target.value ? { ...rest, titlePlaceholder: event.target.value } : rest,
+                    );
+                  }}
+                  disabled={disabled}
+                />
+              </Field>
+            ) : null}
+            {isFirst ? (
+              <ProvidedInputsEditor
+                inputs={step.providedInputs ?? []}
+                onChange={(providedInputs) => onChange({ ...step, providedInputs })}
+                disabled={disabled}
+              />
+            ) : null}
             {inputs.map((input) => {
               const label =
                 inputSources.find((source) => isSameInput(input)(source.input))?.label ??
@@ -439,25 +478,27 @@ export function WorkflowStepEditor({
                 </div>
               );
             })}
-            <Select
-              value={null}
-              disabled={disabled || unboundSources.length === 0}
-              onValueChange={(key) => {
-                const source = unboundSources.find(({ input }) => inputKey(input) === key);
-                if (source) onChange({ ...step, inputs: [...inputs, source.input] });
-              }}
-            >
-              <SelectTrigger aria-label={t("Add input")}>
-                <SelectValue placeholder={t("Add input")} />
-              </SelectTrigger>
-              <SelectPopup>
-                {unboundSources.map(({ input, label }) => (
-                  <SelectItem key={inputKey(input)} value={inputKey(input)}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+            {isFirst ? null : (
+              <Select
+                value={null}
+                disabled={disabled || unboundSources.length === 0}
+                onValueChange={(key) => {
+                  const source = unboundSources.find(({ input }) => inputKey(input) === key);
+                  if (source) onChange({ ...step, inputs: [...inputs, source.input] });
+                }}
+              >
+                <SelectTrigger aria-label={t("Add input")}>
+                  <SelectValue placeholder={t("Add input")} />
+                </SelectTrigger>
+                <SelectPopup>
+                  {unboundSources.map(({ input, label }) => (
+                    <SelectItem key={inputKey(input)} value={inputKey(input)}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            )}
           </div>
           {precedingStepId !== undefined &&
             (calculators.length > 0 || calculator !== undefined) && (
@@ -636,5 +677,49 @@ export function WorkflowStepEditor({
         </div>
       </CollapsiblePanel>
     </Collapsible>
+  );
+}
+
+/** What people give when they start an item: fields of the first step's own, each required or not. */
+function ProvidedInputsEditor({
+  inputs,
+  onChange,
+  disabled,
+}: {
+  readonly inputs: NonNullable<DraftStep["providedInputs"]>;
+  readonly onChange: (inputs: NonNullable<DraftStep["providedInputs"]>) => void;
+  readonly disabled: boolean;
+}) {
+  const t = useTranslation();
+  return (
+    <>
+      <FieldsEditor
+        fields={inputs.map(({ field }) => field)}
+        depth={0}
+        areColumns={false}
+        onChange={(fields) =>
+          onChange(
+            fields.map((field) => ({
+              field,
+              isRequired: inputs.find((input) => input.field.id === field.id)?.isRequired ?? true,
+            })),
+          )
+        }
+        disabled={disabled}
+      />
+      {inputs.map(({ field, isRequired }, index) => (
+        <label key={field.id} className="flex w-fit items-center gap-2 text-sm">
+          <Switch
+            size="sm"
+            checked={isRequired}
+            onCheckedChange={(checked) =>
+              onChange(inputs.with(index, { field, isRequired: checked }))
+            }
+            disabled={disabled}
+          />
+          {t("Required to start: {0}", field.label)}
+        </label>
+      ))}
+    </>
   );
 }
