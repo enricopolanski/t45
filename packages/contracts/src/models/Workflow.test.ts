@@ -282,7 +282,7 @@ describe("provided inputs", () => {
       return stepCompletionRefusal(first, ticket, ticket.steps[0]!);
     };
     assert.equal(at(withDocuments), null);
-    assert.equal(at({ [notes.id]: "From the supplier" }), "step_incomplete");
+    assert.equal(at({ [notes.id]: "Some notes" }), "step_incomplete");
   });
 });
 
