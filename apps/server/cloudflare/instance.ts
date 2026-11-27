@@ -26,6 +26,7 @@ import { Restarts } from "../src/chats/Restarts.ts";
 import * as ServerConfig from "../src/config.ts";
 import * as Instance from "../src/Instance.ts";
 import { OwnApi } from "../src/runner/OwnApi.ts";
+import * as Export from "./Export.ts";
 import * as Files from "./Files.ts";
 import * as Import from "./Import.ts";
 import * as Sqlite from "./Sqlite.ts";
@@ -225,5 +226,14 @@ export class InstanceObject extends DurableObject<Env> {
   /** One step of filling this instance's database from another's; it starts once activated. */
   transfer(request: Import.TransferRequest) {
     return Import.transfer(this.ctx.storage, request);
+  }
+
+  /** One page of reading this instance's database out, for a backup. */
+  exportDatabase(request: Export.ExportRequest) {
+    return Export.exportDatabase(
+      this.ctx.storage,
+      this.ctx.id.name ?? this.env.T45_INSTANCE,
+      request,
+    );
   }
 }

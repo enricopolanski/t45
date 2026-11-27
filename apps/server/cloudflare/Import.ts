@@ -7,6 +7,7 @@ import {
   digestQuery,
   type Encoded,
   keyAlias,
+  keyOf,
   placeholder,
   quoteName,
   type TableShape,
@@ -42,7 +43,8 @@ export type TransferRequest =
     }
   | { readonly op: "activate" };
 
-const bound = (value: Encoded): Array<unknown> => {
+/** As the object binds an encoded value. */
+export const bound = (value: Encoded): Array<unknown> => {
   if (value === null) return [];
   if (typeof value === "string" || typeof value === "number") return [value];
   if (value[0] === "i") return [value[1]];
@@ -56,11 +58,6 @@ const encodeKey = (value: unknown): Encoded => {
   if (typeof value === "number") return Number.isInteger(value) ? ["i", String(value)] : value;
   if (value instanceof ArrayBuffer) return ["b", NodeBuffer.Buffer.from(value).toString("base64")];
   throw new Error(`Unexpected key value ${String(value)}`);
-};
-
-const keyOf = (table: TableShape, row: ReadonlyArray<Encoded>) => {
-  const columns = travelling(table);
-  return table.key.map((name) => row[columns.indexOf(name)] ?? null);
 };
 
 /** The instance's tables: not SQLite's, Cloudflare's, nor the one `wrangler dev` names objects in. */

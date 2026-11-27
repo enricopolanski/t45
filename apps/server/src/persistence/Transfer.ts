@@ -3,6 +3,9 @@
  * Both ends keep each value's storage class: JSON numbers only carry reals, so integers travel as
  * decimal strings and blobs as base64.
  */
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeBuffer from "node:buffer";
+import type * as NodeSqlite from "node:sqlite";
 
 /** One SQLite value in transit. */
 export type Encoded = null | string | number | readonly ["i", string] | readonly ["b", string];
@@ -21,6 +24,65 @@ export const quoteName = (name: string) => `"${name.replaceAll('"', '""')}"`;
 /** The columns a row of `table` travels with: its rowid first when it has one. */
 export const travelling = (table: TableShape) =>
   table.key[0] === "rowid" ? ["rowid", ...table.columns] : table.columns;
+
+/** The key of a travelling row of `table`. */
+export const keyOf = (table: TableShape, row: ReadonlyArray<Encoded>) => {
+  const columns = travelling(table);
+  return table.key.map((name) => row[columns.indexOf(name)] ?? null);
+};
+
+/** A value's rough size in transit, for sizing batches. */
+export const sizeOf = (value: Encoded) =>
+  value === null
+    ? 4
+    : typeof value === "number"
+      ? 8
+      : typeof value === "string"
+        ? value.length
+        : value[1].length;
+
+/** As a Node database binds an encoded value: integers as decimal text, which the query casts back. */
+export const bindable = (value: Encoded): NodeSqlite.SQLInputValue | undefined => {
+  if (value === null) return undefined;
+  if (typeof value === "string" || typeof value === "number") return value;
+  return value[0] === "i" ? value[1] : NodeBuffer.Buffer.from(value[1], "base64");
+};
+
+/**
+ * A database's tables, and its indexes, views and triggers to create once the rows are in, read
+ * with `query` on either end. SQLite's own tables, Cloudflare's, and the one `wrangler dev` names
+ * objects in stay behind.
+ */
+export const shapesOf = (query: (sql: string) => ReadonlyArray<Record<string, unknown>>) => {
+  const entries = query(
+    `SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL
+      AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'
+      AND name != '__miniflare_do_name'`,
+  ) as ReadonlyArray<{ type: string; name: string; sql: string }>;
+  const tables = entries
+    .filter((entry) => entry.type === "table")
+    .map((entry): TableShape => {
+      const info = query(`PRAGMA table_info(${quoteName(entry.name)})`) as ReadonlyArray<{
+        name: string;
+        pk: number;
+      }>;
+      const withoutRowid = /WITHOUT\s+ROWID\s*$/iu.test(entry.sql.trim());
+      const key = withoutRowid
+        ? info
+            .filter((column) => column.pk > 0)
+            .toSorted((a, b) => a.pk - b.pk)
+            .map((column) => column.name)
+        : ["rowid"];
+      return { name: entry.name, sql: entry.sql, columns: info.map((column) => column.name), key };
+    });
+  // Indexes before views, views before the triggers that may read them, each in the source's order.
+  const order = ["index", "view", "trigger"];
+  const ddl = entries
+    .filter((entry) => entry.type !== "table")
+    .toSorted((a, b) => order.indexOf(a.type) - order.indexOf(b.type))
+    .map(({ name, sql }) => ({ name, sql }));
+  return { tables, ddl };
+};
 
 /** A bound parameter's placeholder: an integer is cast back from its decimal string. */
 export const placeholder = (value: Encoded) =>

@@ -25,6 +25,7 @@
     "apps/server": {
       "entry": [
         "src/bin.ts",
+        "scripts/backup-cloudflare-to-r2.ts",
         "scripts/move-attachments-to-s3.ts",
         "scripts/transfer-to-cloudflare.ts",
       ],

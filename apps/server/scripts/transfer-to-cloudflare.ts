@@ -26,13 +26,15 @@ import * as Schema from "effect/Schema";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
 import {
+  bindable,
   DIGEST_ROWS,
   digestQuery,
   type Encoded,
   keyAlias,
   placeholder,
   quoteName,
-  type TableShape,
+  shapesOf,
+  sizeOf,
   travelling,
 } from "../src/persistence/Transfer.ts";
 
@@ -46,52 +48,6 @@ const encode = (value: unknown): Encoded => {
   if (value instanceof Uint8Array) return ["b", Buffer.from(value).toString("base64")];
   throw new Error(`Unexpected value ${String(value)}`);
 };
-/** As the source binds an encoded key: integers as decimal text, which the query casts back. */
-const bindable = (value: Encoded): NodeSqlite.SQLInputValue | undefined => {
-  if (value === null) return undefined;
-  if (typeof value === "string" || typeof value === "number") return value;
-  return value[0] === "i" ? value[1] : Buffer.from(value[1], "base64");
-};
-const sizeOf = (value: Encoded) =>
-  value === null
-    ? 4
-    : typeof value === "number"
-      ? 8
-      : typeof value === "string"
-        ? value.length
-        : value[1].length;
-
-const shapesOf = (db: NodeSqlite.DatabaseSync) => {
-  const entries = db
-    .prepare(
-      `SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'`,
-    )
-    .all() as Array<{ type: string; name: string; sql: string }>;
-  const tables = entries
-    .filter((entry) => entry.type === "table")
-    .map((entry): TableShape => {
-      const info = db.prepare(`PRAGMA table_info(${quoteName(entry.name)})`).all() as Array<{
-        name: string;
-        pk: number;
-      }>;
-      const withoutRowid = /WITHOUT\s+ROWID\s*$/iu.test(entry.sql.trim());
-      const key = withoutRowid
-        ? info
-            .filter((column) => column.pk > 0)
-            .toSorted((a, b) => a.pk - b.pk)
-            .map((column) => column.name)
-        : ["rowid"];
-      return { name: entry.name, sql: entry.sql, columns: info.map((column) => column.name), key };
-    });
-  // Indexes before views, views before the triggers that may read them, each in the source's order.
-  const order = ["index", "view", "trigger"];
-  const ddl = entries
-    .filter((entry) => entry.type !== "table")
-    .toSorted((a, b) => order.indexOf(a.type) - order.indexOf(b.type))
-    .map(({ name, sql }) => ({ name, sql }));
-  return { tables, ddl };
-};
-
 const Progress = Schema.Struct({
   progress: Schema.Record(Schema.String, Schema.NullOr(Schema.Array(Schema.Unknown))),
 });
@@ -119,7 +75,7 @@ const program = Effect.gen(function* () {
     );
 
   const db = new NodeSqlite.DatabaseSync(source, { readOnly: true });
-  const { tables, ddl } = shapesOf(db);
+  const { tables, ddl } = shapesOf((query) => db.prepare(query).all());
   const { progress } = yield* call(Progress, { op: "begin", tables });
 
   for (const table of tables) {
