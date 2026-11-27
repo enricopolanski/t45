@@ -19,6 +19,7 @@ import {
 import {
   currentStep,
   findStep,
+  ownFields,
   getProposalSourceKeys,
   isSameInput,
   putTicketStep,
@@ -60,8 +61,10 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
 type CalculatorInput = StepCalculator["inputs"][string];
 
-const getInputField = (steps: ReadonlyArray<StepDefinition>, input: CalculatorInput) =>
-  findStep(steps, input.stepId)?.step.fields.find(({ id }) => id === input.fieldId);
+const getInputField = (steps: ReadonlyArray<StepDefinition>, input: CalculatorInput) => {
+  const source = findStep(steps, input.stepId)?.step;
+  return source && ownFields(source).find(({ id }) => id === input.fieldId);
+};
 
 const hasRecordInputs = (binding: StepCalculator) =>
   Object.values(binding.inputs).some(({ records }) => records !== undefined);

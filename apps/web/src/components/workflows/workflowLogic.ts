@@ -108,6 +108,18 @@ export function editsBetween(
       ...((old?.instructions ?? "") !== step.instructions
         ? [{ type: "set_step_instructions" as const, stepId, instructions: step.instructions }]
         : []),
+      ...((old?.summary ?? "") !== (step.summary ?? "")
+        ? [{ type: "set_step_summary" as const, stepId, summary: step.summary ?? "" }]
+        : []),
+      ...((old?.titlePlaceholder ?? "") !== (step.titlePlaceholder ?? "")
+        ? [
+            {
+              type: "set_title_placeholder" as const,
+              stepId,
+              titlePlaceholder: step.titlePlaceholder ?? "",
+            },
+          ]
+        : []),
       ...((old?.isDoneWhenApproved ?? false) !== (step.isDoneWhenApproved ?? false)
         ? [
             {
@@ -130,6 +142,9 @@ export function editsBetween(
           ? []
           : [{ type: "change_field" as const, stepId, field }];
       }),
+      ...(JSON.stringify(old?.providedInputs ?? []) !== JSON.stringify(step.providedInputs)
+        ? [{ type: "set_provided_inputs" as const, stepId, inputs: step.providedInputs }]
+        : []),
       ...(old?.inputs ?? [])
         .filter((input) => !step.inputs.some(isSameInput(input)))
         .map((input) => ({ type: "unbind_input" as const, stepId, input })),
@@ -289,7 +304,7 @@ export function inputSourcesFor(steps: ReadonlyArray<DraftStep>, id: string) {
     readonly label: string;
     readonly field: DraftField;
   }> => [
-    ...step.fields.map((field) => ({
+    ...[...(step.providedInputs ?? []).map(({ field }) => field), ...step.fields].map((field) => ({
       input: { stepId: step.id, fieldId: field.id },
       label: `${path} › ${field.label || "Untitled field"}`,
       field,

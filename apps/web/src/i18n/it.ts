@@ -418,7 +418,6 @@ export const it = {
   Density: "Densità",
   Descending: "Decrescente",
   Description: "Descrizione",
-  "Description (optional)": "Descrizione (facoltativa)",
   Details: "Dettagli",
   "Details of entry {0} of {1}": "Dettagli della voce {0} di {1}",
   "Development servers sign you in as any email you enter.":
@@ -1124,8 +1123,6 @@ export const it = {
   "What should the agent do each time this runs?": "Cosa deve fare l’agente a ogni esecuzione?",
   "What this agent does, how it works, and what it hands back":
     "Cosa fa l’agente, come lavora e quali risultati consegna",
-  "What this item is about, for everyone who works on it":
-    "Di cosa si occupa il ticket, per chi ci lavora",
   "When to run": "Quando eseguire",
   "When to run {0} in {1}": "Quando eseguire {0} in {1}",
   "When to use it, e.g. Extracts tables from .xlsx files":
@@ -1208,4 +1205,29 @@ export const it = {
   "Include {0} in approval": "Includi {0} nell’approvazione",
   Candidate: "Candidato",
   Discrepancy: "Discrepanza",
+  "Add files": "Aggiungi file",
+  "{0} (optional)": "{0} (facoltativo)",
+  "What people give when they start an item, such as its documents. They can change it while this step is open.":
+    "Ciò che le persone forniscono quando aprono un ticket, come i suoi documenti. Possono modificarlo finché questo passaggio è aperto.",
+  "Required to start: {0}": "Obbligatorio per aprire il ticket: {0}",
+  "a title": "un titolo",
+  "at least one file": "almeno un file",
+  "Add {0} to start.": "Aggiungi {0} per iniziare.",
+  "Step 1 will read 1 file.": "Il passaggio 1 leggerà 1 file.",
+  "Step 1 will read {0} files.": "Il passaggio 1 leggerà {0} file.",
+  "Start Step 1": "Avvia il passaggio 1",
+  "Uploaded files": "File caricati",
+  "Uploading…": "Caricamento…",
+  "Add more files, or": "Aggiungi altri file, oppure",
+  "Drop files here, or": "Trascina qui i file, oppure",
+  browse: "sfoglia",
+  "Starts right away.": "Parte subito.",
+  "What this step does, in a line for whoever starts an item":
+    "Cosa fa questo passaggio, in una riga per chi apre un ticket",
+  "Optional; a group's description takes Markdown":
+    "Facoltativa; la descrizione di un gruppo supporta Markdown",
+  "Example title": "Titolo di esempio",
+  "Item creation": "Creazione del ticket",
+  "Gathering the data required to start the process":
+    "Raccolta dei dati necessari per avviare il processo",
 } satisfies Record<Message, string>;

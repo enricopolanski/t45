@@ -28,6 +28,7 @@ import { attachmentUploadUrl, attachmentUrl, decodeUploadResult } from "../../li
 import { api } from "../../rpc/api";
 import { describeFailure } from "../../lib/failures";
 import { cn } from "../../lib/utils";
+import { makeFileDropHandlers } from "../chat/fileDrop";
 import { RecordShowcase } from "../collections/RecordDisplay";
 import { RecordDialog, RecordLink, RecordPicker, RecordTable } from "../collections/Records";
 import { SavedInput, saveTyped } from "../SavedInput";
@@ -82,13 +83,9 @@ export async function uploadFile(file: File) {
   return decodeUploadResult(await response.text()).attachmentId;
 }
 
-/** Uploads a file to the step; with `fieldKey`, it becomes that file field's value. */
-export async function attachStepFile(stepId: string, file: File, fieldKey?: string) {
-  await api("workflows.attachStepFile", {
-    stepId,
-    attachmentId: await uploadFile(file),
-    ...(fieldKey === undefined ? {} : { fieldKey }),
-  });
+/** Uploads a file to the step as the value of its file field `fieldKey`. */
+export async function attachStepFile(stepId: string, file: File, fieldKey: string) {
+  await api("workflows.attachStepFile", { stepId, attachmentId: await uploadFile(file), fieldKey });
 }
 
 /** A download link for a step's file. */
@@ -227,6 +224,9 @@ export function FieldValue({ field }: { readonly field: FieldView }) {
   );
 }
 
+/** A file added to a group of files, in an entry of its own: the entry's row and file field key. */
+export type FileEntry = { readonly rowId: string; readonly fieldKey: string; readonly file: File };
+
 type RecordAssociationProps = {
   readonly associationFields?: StepView["associationFields"];
   readonly recordAssociations?: StepView["step"]["recordAssociations"];
@@ -244,6 +244,13 @@ type EditorProps = RecordAssociationProps & {
   readonly missing: ReadonlySet<string>;
   readonly onSave: (fieldKey: string, value: StepFieldValue) => void;
   readonly onUpload: (fieldKey: string, file: File) => void;
+  /**
+   * Adds an entry per file to the repeatable group at `groupKey`, whose only field is a file, after
+   * the rows `rowIds` it has.
+   */
+  readonly onAddFileEntries?:
+    | ((groupKey: string, rowIds: ReadonlyArray<string>, added: ReadonlyArray<FileEntry>) => void)
+    | undefined;
   /** Shows a linked record as it was just saved. */
   readonly onRecordSaved?: () => void;
   readonly wrapEntryText?: boolean;
@@ -596,7 +603,7 @@ const isSetApart = (field: FieldView | undefined) =>
   field?.type === "group" || field?.type === "records";
 
 /** Fields in order: one after another close together, and each group or record list set apart. */
-function FieldInputs({
+export function FieldInputs({
   fields,
   ...props
 }: Omit<EditorProps, "field"> & { readonly fields: ReadonlyArray<FieldView> }) {
@@ -666,7 +673,7 @@ function GroupHeading({
         {children}
       </div>
       {field.description ? (
-        <p className="text-xs text-muted-foreground">{field.description}</p>
+        <MarkdownText text={field.description} className="text-xs text-muted-foreground" />
       ) : null}
     </div>
   );
@@ -988,11 +995,27 @@ function RemoveEntry({
  */
 function EntriesEditor(props: EditorProps) {
   const t = useTranslation();
-  const { field, missing, onSave } = props;
+  const { field, missing, onSave, onAddFileEntries } = props;
   const isTable = field.rowFields.every((child) => child.type !== "group");
   const [shown, setShown] = useState(isTable ? "table" : "form");
+  const [isDragActive, setIsDragActive] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
   const entries = sortEntries(field);
   const ids = field.rows.flatMap((row) => (row.id === null ? [] : [row.id]));
+  const [only] = field.rowFields;
+  // A group of files only takes several at once, an entry each.
+  const addFiles =
+    onAddFileEntries !== undefined && field.rowFields.length === 1 && only?.type === "file"
+      ? (files: ReadonlyArray<File>) =>
+          onAddFileEntries(
+            field.key,
+            ids,
+            files.map((file) => {
+              const rowId = newKey("row");
+              return { rowId, fieldKey: `${field.key}.${rowId}.${only.id}`, file };
+            }),
+          )
+      : undefined;
   const remove = (at: number) => ({
     label: t("Remove entry {0} of {1}", at + 1, field.label),
     onRemove: () =>
@@ -1008,12 +1031,21 @@ function EntriesEditor(props: EditorProps) {
       onValueChange={setShown}
       className="col-span-full"
     >
-      <div className="flex flex-col gap-2">
+      <div
+        className={cn(
+          "flex flex-col gap-2 rounded-lg",
+          isDragActive && "bg-primary/4 ring-2 ring-primary",
+        )}
+        {...(addFiles === undefined
+          ? {}
+          : makeFileDropHandlers({ setDragActive: setIsDragActive, addFiles }))}
+      >
         <GroupHeading field={field}>
           <span className="text-xs text-muted-foreground">
             {entries.length === 1 ? t("1 entry") : t("{0} entries", entries.length)}
           </span>
-          {isTable ? (
+          {/* A group of files only is a list of files: there's no form to switch to. */}
+          {isTable && addFiles === undefined ? (
             <TabsList size="sm" aria-label={t("Show {0} as", field.label)} className="ml-auto">
               <TabsTab size="sm" value="table">
                 {t("Table")}
@@ -1036,15 +1068,40 @@ function EntriesEditor(props: EditorProps) {
           </>
         ) : null}
         <div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => onSave(field.key, [...ids, newKey("row")])}
-          >
-            <PlusIcon />
-            {t("Add entry")}
-          </Button>
+          {addFiles === undefined ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onSave(field.key, [...ids, newKey("row")])}
+            >
+              <PlusIcon />
+              {t("Add entry")}
+            </Button>
+          ) : (
+            <>
+              <input
+                ref={picker}
+                type="file"
+                multiple
+                hidden
+                onChange={(event) => {
+                  const files = [...(event.target.files ?? [])];
+                  event.target.value = "";
+                  if (files.length > 0) addFiles(files);
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => picker.current?.click()}
+              >
+                <PaperclipIcon />
+                {t("Add files")}
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </Tabs>
@@ -1475,6 +1532,7 @@ export function StepFields({
   readonly missing: ReadonlySet<string>;
   readonly onSave: (fieldKey: string, value: StepFieldValue) => void;
   readonly onUpload: (fieldKey: string, file: File) => void;
+  readonly onAddFileEntries?: EditorProps["onAddFileEntries"];
   readonly onRecordSaved: () => void;
   readonly recordStatus?: EditorProps["recordStatus"];
   readonly holdOpen?: boolean;

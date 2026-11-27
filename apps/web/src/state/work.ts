@@ -16,6 +16,9 @@ export const stepViews = apiWatch("workflows.watchStep", { idleTtlMs: 0 });
 export const useMyWork = () => useLoaded(myWork);
 export const useStartableProjects = () => useLoaded(startable);
 
+/** What starting a ticket asks changes with each version a project adopts. */
+export const refreshStartableProjects = () => appAtomRegistry.refresh(startable);
+
 export function workChanged() {
   appAtomRegistry.refresh(myWork);
   appAtomRegistry.refresh(notifications);

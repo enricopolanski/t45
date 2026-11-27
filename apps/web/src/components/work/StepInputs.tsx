@@ -212,7 +212,7 @@ function BlockHeading({
         {children}
       </div>
       {field.description ? (
-        <p className="text-xs text-muted-foreground">{field.description}</p>
+        <MarkdownText text={field.description} className="text-xs text-muted-foreground" />
       ) : null}
     </div>
   );

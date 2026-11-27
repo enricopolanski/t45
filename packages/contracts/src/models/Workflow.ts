@@ -38,14 +38,28 @@ export const StepInput = CalculatorInput;
 export type StepInput = typeof StepInput.Type;
 const PreviewFields = Schema.Array(StepInput);
 
+/**
+ * A value a person gives when starting a ticket, kept in the first step's values under its
+ * field's id: changed on that step while it's open, read by later steps that take it as an input.
+ */
+export const ProvidedInput = Schema.Struct({
+  field: Field,
+  /** Whether a ticket can start without it. */
+  isRequired: Schema.Boolean,
+});
+export type ProvidedInput = typeof ProvidedInput.Type;
+
 /** A step as it is stored and sent, where a step may leave out its inputs and automations. */
 export interface StepDefinitionEncoded {
   readonly id: string;
   readonly name: string;
+  readonly summary?: string;
   readonly instructions: string;
   readonly fields: ReadonlyArray<typeof Field.Encoded>;
   readonly subSteps: ReadonlyArray<StepDefinitionEncoded>;
   readonly inputs?: ReadonlyArray<StepInput>;
+  readonly providedInputs?: ReadonlyArray<typeof ProvidedInput.Encoded>;
+  readonly titlePlaceholder?: string;
   readonly automationIds?: ReadonlyArray<string>;
   readonly isDoneWhenApproved?: boolean;
   readonly calculator?: StepCalculator;
@@ -57,6 +71,8 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
     description: "Identifier unique across all steps and sub-steps in the workflow.",
   }),
   name: TrimmedNonEmptyString,
+  /** What the step does, in a line for the people starting a ticket; its instructions are for agents. */
+  summary: Schema.optionalKey(Schema.String),
   instructions: Schema.String,
   fields: Fields,
   subSteps: Schema.Array(
@@ -70,6 +86,12 @@ export class StepDefinition extends Schema.Class<StepDefinition>("StepDefinition
    * workflow; none when left out. Nothing else of other steps reaches whoever works on it.
    */
   inputs: Schema.Array(StepInput).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  /** What people give when they start a ticket; only the first step has any. */
+  providedInputs: Schema.Array(ProvidedInput).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
+  /** On the first step, an example of a ticket's title, shown where people type it. */
+  titlePlaceholder: Schema.optionalKey(Schema.String),
   /** The automations people run on this step, the same in every project; none when left out. */
   automationIds: Schema.UniqueArray(AutomationId).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
@@ -122,20 +144,39 @@ const hasNestedReview = (field: Extract<Field, { type: "group" }>): boolean =>
 export const findStep = (steps: ReadonlyArray<StepDefinition>, id: string) =>
   stepNodes(steps).find((node) => node.step.id === id) ?? null;
 
+/** The fields whose values the step keeps: its provided inputs', then its own. */
+export const ownFields = (step: StepDefinition): ReadonlyArray<Field> => [
+  ...step.providedInputs.map(({ field }) => field),
+  ...step.fields,
+];
+
+/** A person types or uploads it before the ticket exists, so it links no records. */
+const isProvidable = (field: Field): boolean =>
+  field.type === "group"
+    ? field.recordReview === undefined && field.fields.every(isProvidable)
+    : field.type !== "records" && !isCollectionOnly(field) && field.isReviewed !== true;
+
 /** The position, among the workflow's own steps, of the one that is or holds the step `id`. */
 const topLevelIndexOf = (steps: ReadonlyArray<StepDefinition>, id: string) =>
   steps.findIndex((step) => stepNodes([step]).some((node) => node.step.id === id));
 
-/** Every input is a field of a step under an earlier step of the workflow, never a sibling's. */
+/**
+ * Every input is a field of a step under an earlier step of the workflow, never a sibling's; only
+ * the first step has provided inputs, whose ids its fields don't repeat.
+ */
 export const hasValidInputs = (steps: ReadonlyArray<StepDefinition>) =>
   stepNodes(steps).every(
     ({ step }) =>
+      (step.providedInputs.length === 0 ||
+        (step === steps[0] &&
+          step.providedInputs.every(({ field }) => isProvidable(field)) &&
+          hasDistinctIds(ownFields(step).map(({ id }) => id)))) &&
       step.inputs.every((input) => {
         const source = topLevelIndexOf(steps, input.stepId);
         return (
           source >= 0 &&
           source < topLevelIndexOf(steps, step.id) &&
-          findStep(steps, input.stepId)!.step.fields.some((field) => field.id === input.fieldId)
+          ownFields(findStep(steps, input.stepId)!.step).some(({ id }) => id === input.fieldId)
         );
       }) &&
       step.fields.every((field) => {
@@ -712,6 +753,7 @@ const REFUSALS = {
   invalid_input:
     "A step's input must be a field of a step that comes earlier in the workflow. Remove the inputs that no longer are.",
   inputs_missing: "The next step can't start: one of its inputs has no value.",
+  required_input_missing: "Fill in every required input to start.",
   invalid_step_history: "Previous step access must point to an earlier step of the workflow.",
   slug_taken: "Another project already has that slug.",
   invalid_people_ref: "That person or agent can no longer be given work.",
@@ -954,21 +996,47 @@ export const confirmRecordEntry = (
 };
 
 /**
- * The fields a step reads of earlier steps, each with the ticket's step that filled it; an input
+ * The fields a step takes of earlier steps, each with the ticket's step that holds it; an input
  * whose step the ticket never entered is left out.
  */
-export const stepInputFields = (
+const referencedInputFields = (
   steps: ReadonlyArray<StepDefinition>,
   ticket: Ticket,
   definition: StepDefinition,
 ) =>
   definition.inputs.flatMap((input) => {
     const source = ticket.steps.find((step) => step.stepDefinitionId === input.stepId);
-    const field = findStep(steps, input.stepId)?.step.fields.find(
-      (candidate) => candidate.id === input.fieldId,
-    );
+    const sourceDefinition = findStep(steps, input.stepId)?.step;
+    const field =
+      sourceDefinition &&
+      ownFields(sourceDefinition).find((candidate) => candidate.id === input.fieldId);
     return source === undefined || field === undefined ? [] : [{ source, field }];
   });
+
+/**
+ * What a step reads, each with the ticket's step that holds it: its own provided inputs, then the
+ * fields it takes of earlier steps.
+ */
+export const stepInputFields = (
+  steps: ReadonlyArray<StepDefinition>,
+  ticket: Ticket,
+  definition: StepDefinition,
+) => {
+  const own = ticket.steps.find((step) => step.stepDefinitionId === definition.id);
+  return [
+    ...(own === undefined
+      ? []
+      : definition.providedInputs.map(({ field }) => ({ source: own, field }))),
+    ...referencedInputFields(steps, ticket, definition),
+  ];
+};
+
+const requiredInputFields = (definition: StepDefinition) =>
+  definition.providedInputs.flatMap(({ field, isRequired }) => (isRequired ? [field] : []));
+
+/** Whether `values` fill every input a ticket can't start without. */
+export const hasRequiredInputs = (definition: StepDefinition, values: Values) =>
+  fieldsComplete(requiredInputFields(definition), values);
 
 /**
  * A step, and the sub-steps that start with it, are entered only when every input has its value;
@@ -980,10 +1048,16 @@ export const stepEntryRefusal = (
   definition: StepDefinition,
 ) =>
   stepNodes([definition]).every(({ step }) => {
-    const filled = stepInputFields(steps, ticket, step);
+    const filled = referencedInputFields(steps, ticket, step);
+    const isOptional = (source: Step, field: Field) =>
+      findStep(steps, source.stepDefinitionId)?.step.providedInputs.some(
+        (input) => input.field.id === field.id && !input.isRequired,
+      ) === true;
     return (
       filled.length === step.inputs.length &&
-      filled.every(({ source, field }) => fieldsComplete([field], source.values))
+      filled.every(
+        ({ source, field }) => fieldsComplete([field], source.values) || isOptional(source, field),
+      )
     );
   })
     ? null
@@ -1049,6 +1123,7 @@ export const stepCompletionRefusal = (
   )
     return "record_review_pending" as const;
   return !fieldsComplete(fields, step.values) ||
+    (definition !== null && !hasRequiredInputs(definition, step.values)) ||
     reviews.some(({ entries }) => entries.some(({ rowId }) => rowId === null)) ||
     ticket.steps.some(
       (child) => child.parentStepId === step.id && child.status.type !== "completed",
@@ -1232,6 +1307,12 @@ export const WorkflowEdit = Schema.Union([
     ...stepRef,
     instructions: Schema.String,
   }),
+  Schema.Struct({ type: Schema.Literal("set_step_summary"), ...stepRef, summary: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("set_title_placeholder"),
+    ...stepRef,
+    titlePlaceholder: Schema.String,
+  }),
   Schema.Struct({
     type: Schema.Literal("set_step_done_when_approved"),
     ...stepRef,
@@ -1261,6 +1342,11 @@ export const WorkflowEdit = Schema.Union([
     type: Schema.Literals(["bind_input", "unbind_input"]),
     ...stepRef,
     input: StepInput,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("set_provided_inputs"),
+    ...stepRef,
+    inputs: Schema.Array(ProvidedInput),
   }),
 ]);
 export type WorkflowEdit = typeof WorkflowEdit.Type;
@@ -1314,6 +1400,7 @@ const applyWorkflowEdit = (steps: StepList, edit: WorkflowEdit): StepList | null
         fields: [],
         subSteps: [],
         inputs: [],
+        providedInputs: [],
         automationIds: [],
       };
       return edit.parentStepId === null
@@ -1359,6 +1446,10 @@ const applyWorkflowEdit = (steps: StepList, edit: WorkflowEdit): StepList | null
       return changeStep(steps, edit.stepId, () => ({ name: edit.name }));
     case "set_step_instructions":
       return changeStep(steps, edit.stepId, () => ({ instructions: edit.instructions }));
+    case "set_step_summary":
+      return changeStep(steps, edit.stepId, () => ({ summary: edit.summary }));
+    case "set_title_placeholder":
+      return changeStep(steps, edit.stepId, () => ({ titlePlaceholder: edit.titlePlaceholder }));
     case "set_step_done_when_approved":
       return changeStep(steps, edit.stepId, () => ({
         isDoneWhenApproved: edit.isDoneWhenApproved,
@@ -1403,6 +1494,8 @@ const applyWorkflowEdit = (steps: StepList, edit: WorkflowEdit): StepList | null
           ? { inputs: inputs.filter((input) => !isSameInput(edit.input)(input)) }
           : null,
       );
+    case "set_provided_inputs":
+      return changeStep(steps, edit.stepId, () => ({ providedInputs: edit.inputs }));
   }
 };
 

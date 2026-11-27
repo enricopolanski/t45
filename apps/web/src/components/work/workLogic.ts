@@ -229,3 +229,6 @@ export function assignablePeople(directory: WorkDirectory) {
     .filter((person) => person.state === "active")
     .map((person) => ({ id: person.id, label: person.displayName }));
 }
+
+/** A step named "Step 2 — Market analysis": its number and its name without it. */
+export const stepNameParts = /^Step (\d+)\s+[—–-]\s+(.+)$/iu;

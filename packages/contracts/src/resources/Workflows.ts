@@ -35,6 +35,7 @@ import {
   Comment,
   Proposal,
   ProposalFilter,
+  ProvidedInput,
   Refused as WorkflowRefused,
   Slug,
   Step,
@@ -420,7 +421,9 @@ export const StepView = Schema.Struct({
   ),
   canCancelTicket: Schema.Boolean,
   step: Step,
-  definition: Schema.Struct(Struct.pick(StepDefinition.fields, ["name", "instructions"])),
+  definition: Schema.Struct(
+    Struct.pick(StepDefinition.fields, ["name", "instructions", "providedInputs"]),
+  ),
   /** The steps a sub-step sits in, outermost first; empty for a step. */
   parents: Schema.Array(StepNameView),
   fields: Schema.Array(FieldView),
@@ -506,9 +509,26 @@ export const Workflows = RpcGroup.make(
     success: Schema.Array(Schema.Struct(Struct.pick(Project.fields, ["id", "name", "slug"]))),
     error: WorkflowErrors,
   }),
-  /** The projects whose first step the caller is a member of. */
+  /** The projects whose first step the caller is a member of, with what starting a ticket asks. */
   Rpc.make("listStartableProjects", {
-    success: Schema.Array(Schema.Struct(Struct.pick(Project.fields, ["id", "name"]))),
+    success: Schema.Array(
+      Schema.Struct({
+        ...Struct.pick(Project.fields, ["id", "name"]),
+        workflowName: TrimmedNonEmptyString,
+        ...Struct.pick(StepDefinition.fields, ["titlePlaceholder"]),
+        providedInputs: Schema.Array(ProvidedInput),
+        /** The workflow's steps the caller is a member of, as the board shows them. */
+        steps: Schema.Array(
+          Schema.Struct({
+            /** Its place among all the workflow's steps, from 1. */
+            number: NonNegativeInt,
+            ...Struct.pick(StepDefinition.fields, ["name", "summary"]),
+          }),
+        ),
+        /** Whether an automation starts on the first step as soon as a ticket starts. */
+        startsOnEntry: Schema.Boolean,
+      }),
+    ),
     error: WorkflowErrors,
   }),
   Rpc.make("getProject", {
@@ -649,6 +669,8 @@ export const Workflows = RpcGroup.make(
       ...project,
       title: TrimmedNonEmptyString,
       description: Schema.optionalKey(Schema.String),
+      /** The first step's provided inputs by field key; a file's value is an uploaded file's id. */
+      values: Schema.optionalKey(FieldValues),
     },
     success: Schema.Struct(step),
     error: WorkflowErrors,
@@ -808,12 +830,9 @@ export const Workflows = RpcGroup.make(
     payload: {
       ...step,
       attachmentId: AttachmentId,
-      fieldKey: Schema.optionalKey(TrimmedNonEmptyString),
+      /** The file field it fills: a step holds files only in its fields and provided inputs. */
+      fieldKey: TrimmedNonEmptyString,
     },
-    error: WorkflowErrors,
-  }),
-  Rpc.make("removeStepFile", {
-    payload: { ...step, attachmentId: AttachmentId },
     error: WorkflowErrors,
   }),
 ).prefix("workflows.");

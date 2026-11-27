@@ -10,12 +10,12 @@ const step = { stepId: process.env.T45_STEP_ID! };
 const attach = rpcTool(
   "attach",
   "workflows.attachStepFile",
-  "Attach a file from your working folder. Give fieldKey to fill a file field.",
+  "Attach a file from your working folder to the file field fieldKey.",
   step,
 );
 const AttachInput = Schema.Struct({
   path: Schema.String,
-  fieldKey: Schema.optionalKey(Schema.String),
+  fieldKey: Schema.String,
 });
 const decodeAttach = Schema.decodeUnknownSync(AttachInput);
 const decodeUpload = Schema.decodeUnknownSync(AttachmentUploadResult);
@@ -91,7 +91,7 @@ serve({
         });
         if (!response.ok) refuse(await response.text());
         const { attachmentId } = decodeUpload(await response.json());
-        return attach.call({ attachmentId, ...(fieldKey === undefined ? {} : { fieldKey }) });
+        return attach.call({ attachmentId, fieldKey });
       },
     },
   ],
