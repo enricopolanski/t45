@@ -601,6 +601,9 @@ function StepAutomations({
   const titles = useApiQuery(stepAutomationList);
   const now = useNowMinute();
   const runnable = view.automations.filter((automation) => automation.runLabel !== null);
+  // While a step's only automation runs, there is nothing to start.
+  const isOnlyAutomationRunning =
+    runnable.length === 1 && runnable[0]?.runs[0]?.status === "running";
   const runs = view.automations
     .flatMap((automation) =>
       automation.runs.map((run) => ({
@@ -750,7 +753,7 @@ function StepAutomations({
           ))}
         </ol>
       )}
-      {runnable.length > 0 && (
+      {runnable.length > 0 && !isOnlyAutomationRunning && (
         <RunAutomation
           automations={runnable.map(({ id }) => ({ id, title: titleOf(id) }))}
           busy={busy}
