@@ -85,27 +85,62 @@ const preparePdf = async ({ id, name }) => {
   };
 };
 
+/** Every sheet of a spreadsheet as CSV, since models read PDFs but not Excel. */
+const SHEETS_AS_CSV = `
+import csv, io, sys
+import openpyxl
+book = openpyxl.load_workbook(sys.argv[1], data_only=True, read_only=True)
+for sheet in book.worksheets:
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\\n")
+    for row in sheet.iter_rows(values_only=True):
+        if any(cell is not None for cell in row):
+            writer.writerow(["" if cell is None else cell for cell in row])
+    print(f"\\f{sheet.title}\\n{out.getvalue()}", end="")
+`;
+
+const isSpreadsheet = ({ name }) => /\.(?:xlsx|xlsm|csv)$/iu.test(name);
+
+const prepareSpreadsheet = async ({ id, name }) => {
+  const file = NodePath.resolve("attachments", id);
+  if (/\.csv$/iu.test(name)) return [{ text: `${name}\n${await NodeFSP.readFile(file, "utf8")}` }];
+  const { stdout } = await run("python3", ["-c", SHEETS_AS_CSV, file], {
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return stdout
+    .split("\f")
+    .filter((sheet) => sheet !== "")
+    .map((sheet) => {
+      const [title, ...rows] = sheet.split("\n");
+      return { text: `${name}, sheet ${title} (as CSV)\n${rows.join("\n").trim()}` };
+    });
+};
+
 export default {
   id: "t45-document-extraction",
   async setup(ctx) {
     await ctx.session.hook("prompt", async ({ metadata, prompt }) => {
-      const pdfs = (metadata?.t45?.attachments ?? []).filter(
-        ({ id, mimeType, name }) =>
-          /^[a-f0-9-]{36}\.[a-z0-9]{1,10}$/u.test(id) &&
-          (mimeType === "application/pdf" || /\.pdf$/iu.test(name)),
+      const attachments = (metadata?.t45?.attachments ?? []).filter(({ id }) =>
+        /^[a-f0-9-]{36}\.[a-z0-9]{1,10}$/u.test(id),
       );
-      if (pdfs.length === 0) {
+      const pdfs = attachments.filter(
+        ({ mimeType, name }) => mimeType === "application/pdf" || /\.pdf$/iu.test(name),
+      );
+      const spreadsheets = attachments.filter(isSpreadsheet);
+      if (pdfs.length === 0 && spreadsheets.length === 0) {
         prompt.text =
-          "Document extraction requires at least one PDF attached to the workflow step. Ask for one and stop.";
+          "Document extraction requires at least one PDF or spreadsheet attached to the workflow step. Ask for one and stop.";
         return;
       }
-      const [instructions, entries, documents, schema] = await Promise.all([
+      const [instructions, entries, documents, sheets, schema] = await Promise.all([
         NodeFSP.readFile("AGENTS.md", "utf8"),
         NodeFSP.readdir(".", { withFileTypes: true }),
         Promise.all(pdfs.map(preparePdf)),
+        Promise.all(spreadsheets.map(prepareSpreadsheet)),
         isReading ? null : run("node", ["/opt/t45/extraction-tools.mjs", "--schema"]),
       ]);
       const pages = documents.flatMap(({ pages }) => pages);
+      const sheetTexts = sheets.flat().map(({ text }) => text);
       const [images, references] = await Promise.all([
         uniqueImages(documents.flatMap(({ images }) => images)),
         Promise.all(
@@ -120,12 +155,13 @@ export default {
         ),
       ]);
       const material = [...pages, ...images];
-      const sources = `Source attachment IDs:\n${pdfs.map(({ name, id }) => `${name}: ${id}`).join("\n")}`;
+      const sources = `Source attachment IDs:\n${[...pdfs, ...spreadsheets].map(({ name, id }) => `${name}: ${id}`).join("\n")}`;
       if (isReading) {
         prompt.text = [
           instructions,
           "You have no tools: the documents are all below, so answer in one message, without calling anything. Read every page image and its selectable text. Answer with everything the documents state, article by article, for the automation that records the articles after you: each code and name, each value with its unit, condition and test method, prices, terms and packaging, which data sheet or specification table covers which articles, and the embedded image references that show each article, citing the document and page of each fact. Report what the documents say; record nothing yourself.",
           sources,
+          ...sheetTexts,
           ...material.map(({ text }) => text),
         ].join("\n\n");
         prompt.files = [...material.map(({ file }) => file), ...references];
@@ -136,6 +172,7 @@ export default {
         `Extraction fields by ID. If the destination has review fields, supply review data. The tool fills every link and database identifier.\n${schema.stdout}`,
         'Read every page image and its selectable text as source evidence. When the instructions describe articles by their category, call extraction_categories, choose each article\'s category, and call extraction_category_schema for each category chosen. Submit one extraction_save_records call when all articles and review fields are ready. Start with {"recordsFieldId": "...", "groups": [{"sharedValues": {}, "sharedReview": {}, "articles": [{"sourceId": "...", "values": {}, "review": {}}]}]}. Each code occurs once, even across groups. Articles the instructions leave out go in skipped, not in groups. Use field IDs and arrays of objects for repeatable groups. The tool supplies identifiers and links. Report only source discrepancies that require a person to resolve them. After saving, reply with one short sentence.',
         sources,
+        ...sheetTexts,
         ...material.map(({ text }) => text),
       ].join("\n\n");
       prompt.files = [...material.map(({ file }) => file), ...references];
