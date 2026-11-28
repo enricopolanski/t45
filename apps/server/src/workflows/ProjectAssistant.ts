@@ -1,4 +1,9 @@
-import { canSeeStep, stepInTicket, ticketAccess } from "@t45/contracts/models/Workflow";
+import {
+  canReadStepHistory,
+  canSeeStep,
+  stepInTicket,
+  ticketAccess,
+} from "@t45/contracts/models/Workflow";
 import { NotFound } from "@t45/contracts/resources/errors";
 import * as Effect from "effect/Effect";
 import { UserRepository } from "../org/UserRepository.ts";
@@ -40,18 +45,25 @@ export const makeAccess = Effect.gen(function* () {
         !project.isArchived && project.workflowVersionId !== null && memberOf.has(project.id),
     );
   });
-  /** Whether `userId` sees the step of the ticket, as the step's page decides it. */
+  /**
+   * Whether `userId` sees the step of the ticket, as the step's page decides it: through the
+   * project's history access too, once the step is completed.
+   */
   const seesStep = Effect.fnUntraced(function* (userId: string, ticketId: string, stepId: string) {
     const ticket = yield* tickets.get(ticketId);
     const step = ticket === null ? null : stepInTicket(ticket, stepId);
     const version =
       ticket === null ? null : yield* workflows.versions.get(ticket.workflowVersionId);
-    if (ticket === null || step === null || version === null) return false;
+    const project = ticket === null ? null : yield* projects.get(ticket.projectId);
+    if (ticket === null || step === null || version === null || project === null) return false;
     const memberOf =
       (yield* users.get(userId))?.state === "active"
         ? yield* projects.members.stepIdsOf(ticket.projectId, userId)
         : [];
-    return canSeeStep(ticketAccess(new Set(memberOf), version, ticket), ticket, step);
+    const access = ticketAccess(new Set(memberOf), version, ticket);
+    return (
+      canSeeStep(access, ticket, step) || canReadStepHistory(access, project, version, ticket, step)
+    );
   });
   return { load, list, seesStep };
 });

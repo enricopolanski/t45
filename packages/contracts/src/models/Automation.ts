@@ -16,6 +16,8 @@ export type StepContext = typeof StepContext.Type;
  * with this prompt and the previous phase's final answer.
  */
 export const Phase = Schema.Struct({
+  /** What its runs are called; the automation's title when absent. */
+  title: Schema.optionalKey(Title),
   agentId: StringId,
   prompt: TrimmedNonEmptyString,
   /** How the phase gets the step; the automation's when absent. */
@@ -32,6 +34,8 @@ export class Automation extends Schema.Opaque<Automation>()(
     stepContext: Schema.optionalKey(StepContext),
     /** The agent each run talks to, in a new chat per run. */
     agentId: StringId,
+    /** What the runs of its first phase are called, once it has next phases; its title when absent. */
+    firstPhaseTitle: Schema.optionalKey(Title),
     /** The phases that follow a step run, in order, each once the one before ends well. */
     nextPhases: Schema.optionalKey(Schema.Array(Phase)),
     /** Archived for good: it runs no more, by hand or on a step. */

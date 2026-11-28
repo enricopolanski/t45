@@ -80,6 +80,7 @@ export const layer = Automations.middleware(Authorization).toLayer(
             stepId: trigger.type === "step" ? trigger.stepId : null,
             ranBy: trigger.effectiveUserId,
             isAutomatic: trigger.type === "step" && trigger.isAutomatic,
+            phase: trigger.type === "step" ? (trigger.phase ?? 1) : 1,
           })),
       }));
     });
@@ -121,7 +122,10 @@ export const layer = Automations.middleware(Authorization).toLayer(
           }
           return (yield* automations.list)
             .filter((automation) => available.has(automation.agentId))
-            .map((automation) => Struct.pick(automation, ["id", "title", "prompt", "agentId"]));
+            .map(({ nextPhases = [], ...automation }) => ({
+              ...Struct.pick(automation, ["id", "title", "prompt", "agentId", "firstPhaseTitle"]),
+              nextPhases: nextPhases.map((phase) => Struct.pick(phase, ["title"])),
+            }));
         }),
       "automations.create": (settings) =>
         Effect.gen(function* () {
@@ -170,7 +174,12 @@ export const layer = Automations.middleware(Authorization).toLayer(
                   )
                     return yield* new Refused({ reason: "attached_agent_unfit" });
                 }
-              return { ...saved, ...settings, updatedAt: yield* DateTime.now };
+              // The settings replace the saved ones, so leaving out the first phase's title clears it.
+              return {
+                ...Struct.omit(saved, ["firstPhaseTitle"]),
+                ...settings,
+                updatedAt: yield* DateTime.now,
+              };
             }),
           )
           .pipe(Effect.flatMap(found)),

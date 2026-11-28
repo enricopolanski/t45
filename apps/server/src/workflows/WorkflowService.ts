@@ -2077,38 +2077,38 @@ const make = Effect.gen(function* () {
               };
             }),
           ),
-      automations: !canSee
-        ? []
-        : yield* Effect.gen(function* () {
-            const attempts = yield* stepRuns(work, step);
-            const isRunnable = isOpen && isActionable(step);
-            const attached = definitionOf(work, step).automationIds;
-            // An archived automation starts no new run.
-            const live = yield* Effect.filter(attached, (id) =>
-              Effect.map(automations.get(id), (automation) => automation !== null),
-            );
-            return attached.map((id) => {
-              const canRun = isRunnable && live.includes(id);
-              const runs = attempts
-                .filter((run) => run.trigger.automationId === id)
-                .map(({ trigger, ...run }) => ({
-                  ...run,
-                  ranBy: trigger.effectiveUserId,
-                  isAutomatic: trigger.type === "step" && trigger.isAutomatic,
-                }))
-                .toReversed();
-              return {
-                id,
-                runs,
-                runLabel: canRun
-                  ? runs.length === 0
-                    ? ("Run" as const)
-                    : ("Run again" as const)
-                  : null,
-                canStop: canRun && runs[0]?.status === "running",
-              };
-            });
-          }),
+      // A completed step read through history access lists its runs, without running any.
+      automations: yield* Effect.gen(function* () {
+        const attempts = yield* stepRuns(work, step);
+        const isRunnable = isOpen && isActionable(step);
+        const attached = definitionOf(work, step).automationIds;
+        // An archived automation starts no new run.
+        const live = yield* Effect.filter(attached, (id) =>
+          Effect.map(automations.get(id), (automation) => automation !== null),
+        );
+        return attached.map((id) => {
+          const canRun = isRunnable && live.includes(id);
+          const runs = attempts
+            .filter((run) => run.trigger.automationId === id)
+            .map(({ trigger, ...run }) => ({
+              ...run,
+              ranBy: trigger.effectiveUserId,
+              isAutomatic: trigger.type === "step" && trigger.isAutomatic,
+              phase: trigger.type === "step" ? (trigger.phase ?? 1) : 1,
+            }))
+            .toReversed();
+          return {
+            id,
+            runs,
+            runLabel: canRun
+              ? runs.length === 0
+                ? ("Run" as const)
+                : ("Run again" as const)
+              : null,
+            canStop: canRun && runs[0]?.status === "running",
+          };
+        });
+      }),
     };
   });
 

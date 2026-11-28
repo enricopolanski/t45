@@ -68,6 +68,7 @@ export const de = {
   "Include in the initial message": "In der ersten Nachricht mitsenden",
   "Read on demand": "Bei Bedarf lesen",
   "Phase {0}": "Phase {0}",
+  "Name of phase {0}": "Name von Phase {0}",
   "Add a phase": "Phase hinzufügen",
   "Remove phase {0}": "Phase {0} entfernen",
   "What should this agent do with what the phase before found?":
@@ -78,10 +79,8 @@ export const de = {
   "The step marks itself done and the ticket moves on as soon as its fields are complete and every record review is confirmed, by a person or an automation.":
     "Der Schritt erledigt sich selbst und das Ticket geht weiter, sobald seine Felder vollständig sind und jede Datensatzprüfung bestätigt ist, von einer Person oder einer Automatisierung.",
   " · {0} postponed": " · {0} zurückgestellt",
-  "· Automatically run for": "· Automatisch gestartet für",
   "· Completed": "· Abgeschlossen",
   "· keyed by": "· Schlüssel",
-  "· Manually run by": "· Manuell gestartet von",
   "· Source record": "· Quelldatensatz",
   "· Version": "· Version",
   "'{0}' could not be read as an image.": "„{0}“ konnte nicht als Bild gelesen werden.",

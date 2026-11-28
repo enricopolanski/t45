@@ -62,13 +62,13 @@ import { attachStepFile, FieldInputs, type FileEntry, StepFields, uploadFile } f
 import { ConfirmedRecord, ReadOnlyStepFieldCard } from "./StepInputs";
 import { StepStatus } from "./StepStatus";
 import { StepSubSteps } from "./StepSubSteps";
-import { useWorkDirectory } from "./useWorkDirectory";
 import { BackLink, WorkFrame } from "./WorkFrame";
 import {
-  actorName,
   AUTOMATION_SKIP_REASONS,
   summarizeHistory,
   missingFields,
+  runNumber,
+  runTitle,
   type StepAct,
   type StepActions,
   stepActions,
@@ -599,23 +599,24 @@ function StepAutomations({
 }) {
   const t = useTranslation();
   const titles = useApiQuery(stepAutomationList);
-  const directory = useWorkDirectory();
   const now = useNowMinute();
   const runnable = view.automations.filter((automation) => automation.runLabel !== null);
   const runs = view.automations
     .flatMap((automation) =>
-      automation.runs.map((run, at) => ({
+      automation.runs.map((run) => ({
         ...run,
         automation,
-        number: automation.runs.length - at,
+        number: runNumber(automation.runs, run),
       })),
     )
     .toSorted((a, b) => DateTime.toEpochMillis(b.startedAt) - DateTime.toEpochMillis(a.startedAt));
   // Entering the step tried them, so they are older than its runs.
   const skipped = view.step.skippedAutomations ?? [];
   if (runs.length === 0 && skipped.length === 0 && runnable.length === 0) return null;
-  const titleOf = (id: AutomationId) =>
-    titles.data?.find((automation) => automation.id === id)?.title ?? t("Unavailable automation");
+  const titleOf = (id: AutomationId, phase = 1) => {
+    const automation = titles.data?.find((each) => each.id === id);
+    return automation === undefined ? t("Unavailable automation") : runTitle(automation, phase);
+  };
   const call = (
     tag: "workflows.runStepAutomation" | "workflows.stopStepAutomation",
     automationId: AutomationId,
@@ -643,7 +644,7 @@ function StepAutomations({
             const { label, Icon, tone } = RUN_STATUSES[run.status];
             return (
               <li
-                key={`${automation.id}-${number}`}
+                key={run.chatId}
                 className={cn(
                   "flex flex-col gap-1 rounded-lg border p-3",
                   run.status === "running" && "border-info/24 bg-info/6",
@@ -653,7 +654,16 @@ function StepAutomations({
                   <span role="img" aria-label={t(label)} className="flex size-4 shrink-0">
                     <Icon aria-hidden className={`size-4 ${tone}`} />
                   </span>
-                  <span className="min-w-0 flex-1 font-semibold">{titleOf(automation.id)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="font-semibold">{titleOf(automation.id, run.phase)}</span>{" "}
+                    <Link
+                      to="/my-work/$stepId/runs/$chatId"
+                      params={{ stepId: view.step.id, chatId: run.chatId }}
+                      className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      #{number}
+                    </Link>
+                  </span>
                   {run.status === "running"
                     ? automation.canStop && (
                         <Button
@@ -692,17 +702,6 @@ function StepAutomations({
                       )}
                 </div>
                 <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  <p className="pl-6">
-                    <Link
-                      to="/my-work/$stepId/runs/$chatId"
-                      params={{ stepId: view.step.id, chatId: run.chatId }}
-                      className="hover:text-foreground hover:underline"
-                    >
-                      #{number}
-                    </Link>{" "}
-                    {run.isAutomatic ? t("· Automatically run for") : t("· Manually run by")}{" "}
-                    {actorName(directory, run.ranBy)}
-                  </p>
                   {run.status !== "running" && run.latestReport !== null && (
                     <p className="pl-6 wrap-break-word text-foreground">
                       {run.latestReport.message}
