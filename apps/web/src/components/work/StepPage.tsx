@@ -17,7 +17,6 @@ import {
   CalendarIcon,
   CheckIcon,
   CircleCheckIcon,
-  CircleDotIcon,
   CircleIcon,
   CircleStopIcon,
   CircleXIcon,
@@ -62,7 +61,7 @@ import { attachStepFile, FieldInputs, type FileEntry, StepFields, uploadFile } f
 import { ConfirmedRecord, ReadOnlyStepFieldCard } from "./StepInputs";
 import { StepStatus } from "./StepStatus";
 import { StepSubSteps } from "./StepSubSteps";
-import { BackLink, WorkFrame } from "./WorkFrame";
+import { WorkFrame } from "./WorkFrame";
 import {
   AUTOMATION_SKIP_REASONS,
   summarizeHistory,
@@ -100,6 +99,9 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   // Set once Mark done is tried; from then on, what's missing shows and clears as it's filled.
   const [triedDone, setTriedDone] = useState(false);
   const [isConfirmingCalculation, setIsConfirmingCalculation] = useState(false);
+  // The tab the viewer picked; until then the step shows its progress while one of its automations
+  // runs or once it's completed, and its data otherwise.
+  const [pickedTab, setPickedTab] = useState<"progress" | "data" | null>(null);
   const navigate = useNavigate();
 
   const act: StepAct = async (run, quiet = false) => {
@@ -148,6 +150,9 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const actions = stepActions(view.ticket, view.step, view.canCancelTicket);
   const step = { stepId: view.step.id };
   const isHistorical = view.completedStep !== undefined;
+  const isAutomationRunning = view.automations.some(
+    (automation) => automation.runs[0]?.status === "running",
+  );
   const writes = view.ticket.status.type === "open" && !isHistorical;
   const incomplete = view.subSteps.filter((step) => step.status.type !== "completed");
   const reviewFields = view.recordReviews.flatMap((review) => {
@@ -199,6 +204,8 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   const markDone = () => {
     setTriedDone(true);
     setError(null);
+    // What's missing shows, and is filled in, on the Data tab.
+    setPickedTab("data");
     if (empty.length === 0 && incomplete.length === 0 && pendingReviews.length === 0) {
       if (view.calculatedReview && !view.calculatedReview.result?.isApproved) {
         setError(t("Approve the current results before completing this step."));
@@ -254,7 +261,6 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
   };
   const open = (
     <section key="open" aria-label={t("Open step")} className="flex flex-col gap-4">
-      {error && <ErrorText text={error} />}
       {missing.length > 0 || unfinished.length > 0 || unconfirmed.length > 0 ? (
         <MissingRecap missing={missing} unfinished={unfinished} unconfirmed={unconfirmed} />
       ) : null}
@@ -358,14 +364,6 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
         />
       )}
       <StepSubSteps view={view} />
-      <StepComments
-        view={view}
-        canWrite={writes}
-        busy={busy}
-        onComment={async (body) =>
-          (await act(() => api("workflows.commentOnStep", { ...step, body }))) === null
-        }
-      />
     </section>
   );
   const hasInstructions = view.definition.instructions !== "";
@@ -391,31 +389,63 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
             onConfirm={complete}
           />
         )}
-        <div className="flex min-w-0 flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-5">
           <ItemHeader view={view} />
-          <StepStepper view={view} rootId={rootId} />
-          {isHistorical ? (
-            <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 px-4 py-3 text-sm">
-              <p>
-                <span className="font-medium">{t("Read-only")}</span> {t("· Completed")}{" "}
-                {formatChatTimestampTooltip(view.step.status.at)}
-              </p>
-              {view.completedStep === "legacy" ? (
-                <p className="text-muted-foreground">
-                  {t(
-                    "This step was completed before snapshots were available. Linked records show current collection data.",
-                  )}
+          <Tabs
+            value={pickedTab ?? (isHistorical || isAutomationRunning ? "progress" : "data")}
+            onValueChange={setPickedTab}
+          >
+            <TabsList variant="underline" aria-label={t("Item sections")}>
+              <TabsTab variant="underline" value="progress">
+                {t("Progress")}
+              </TabsTab>
+              <TabsTab variant="underline" value="data">
+                {t("Data")}
+              </TabsTab>
+            </TabsList>
+            <StepStepper view={view} rootId={rootId} />
+            {isHistorical ? (
+              <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 px-4 py-3 text-sm">
+                <p>
+                  <span className="font-medium">{t("Read-only")}</span> {t("· Completed")}{" "}
+                  {formatChatTimestampTooltip(view.step.status.at)}
                 </p>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="flex flex-col gap-3">
-            {(view.stepNavigation?.length ?? 0) > 1
-              ? open
-              : view.otherSteps.map((entry) =>
-                  entry.step.id === rootId ? open : <OtherStep key={entry.step.id} view={entry} />,
-                )}
-          </div>
+                {view.completedStep === "legacy" ? (
+                  <p className="text-muted-foreground">
+                    {t(
+                      "This step was completed before snapshots were available. Linked records show current collection data.",
+                    )}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {error && <ErrorText text={error} />}
+            <TabsPanel value="progress">
+              <StepRunTimeline view={view} />
+            </TabsPanel>
+            {/* Kept mounted, so the fields keep their state while the Progress tab shows. */}
+            <TabsPanel value="data" keepMounted>
+              <div className="flex flex-col gap-3">
+                {(view.stepNavigation?.length ?? 0) > 1
+                  ? open
+                  : view.otherSteps.map((entry) =>
+                      entry.step.id === rootId ? (
+                        open
+                      ) : (
+                        <OtherStep key={entry.step.id} view={entry} />
+                      ),
+                    )}
+              </div>
+            </TabsPanel>
+          </Tabs>
+          <StepComments
+            view={view}
+            canWrite={writes}
+            busy={busy}
+            onComment={async (body) =>
+              (await act(() => api("workflows.commentOnStep", { ...step, body }))) === null
+            }
+          />
         </div>
         <div className="flex flex-col gap-3">
           <StepStatus view={view} actions={actions} busy={busy} act={act} onMarkDone={markDone} />
@@ -443,31 +473,38 @@ export function StepPage({ stepId }: { readonly stepId: string }) {
 
 const stepperStatus = {
   completed: {
-    label: "Completed",
+    label: "Done",
     Icon: CheckIcon,
-    marker: "border-success-foreground/25 bg-success text-success-foreground",
+    marker: "bg-success/16 text-success-foreground",
     text: "text-success-foreground",
   },
   working: {
     label: "In progress",
-    Icon: CircleDotIcon,
-    marker: "border-primary/60 bg-primary/10 text-primary",
-    text: "text-primary",
+    Icon: LoaderCircleIcon,
+    marker: "bg-info/16 text-info-foreground",
+    text: "text-info-foreground",
   },
   blocked: {
     label: "Blocked",
     Icon: PauseIcon,
-    marker: "border-warning-foreground/30 bg-warning text-warning-foreground",
+    marker: "bg-warning/16 text-warning-foreground",
     text: "text-warning-foreground",
   },
   cancelled: {
     label: "Cancelled",
     Icon: CircleIcon,
-    marker: "border-border bg-muted text-muted-foreground",
+    marker: "bg-muted text-muted-foreground",
     text: "text-muted-foreground",
   },
 } as const;
 
+const STEP_CARD =
+  "flex min-w-0 flex-1 items-center gap-3 rounded-lg border px-3.5 py-3 outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring";
+
+/**
+ * The item's steps side by side, each opening its page: the step in progress stands out, and so
+ * does the one on the page when it's another.
+ */
 function StepStepper({ view, rootId }: { readonly view: StepView; readonly rootId: string }) {
   const t = useTranslation();
   const steps = view.stepNavigation ?? [];
@@ -475,80 +512,86 @@ function StepStepper({ view, rootId }: { readonly view: StepView; readonly rootI
   const previewName = preview && stepNameParts.exec(preview.stepName);
   if (steps.length === 0) return null;
   return (
-    <nav aria-label={t("Item steps")} className="min-w-0 rounded-xl border border-border bg-card">
-      <ol className="flex gap-2 overflow-x-auto rounded-xl p-2 sm:px-3">
-        {steps.map(({ id, name, status }, index) => {
+    <nav aria-label={t("Item steps")} className="card min-w-0 px-6 py-5">
+      <ol className="flex flex-wrap gap-3">
+        {steps.map(({ id, name, status }) => {
           const isSelected = id === rootId;
-          const isCompleted = status === "completed";
           const label = stepNameParts.exec(name);
-          const appearance =
-            stepperStatus[
-              !isCompleted && view.ticket.status.type === "cancelled" ? "cancelled" : status
-            ];
+          const state =
+            status !== "completed" && view.ticket.status.type === "cancelled"
+              ? "cancelled"
+              : status;
+          const appearance = stepperStatus[state];
+          const isViewing = isSelected && state !== "working";
           return (
-            <li key={id} className="relative flex min-w-32 flex-1">
+            <li key={id} className="flex min-w-0 flex-[1_1_12.5rem]">
               <Link
                 to="/my-work/$stepId"
                 params={{ stepId: id }}
                 className={cn(
-                  "flex min-w-0 flex-1 flex-col items-start gap-2 rounded-lg p-2 outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                  isSelected && "bg-accent/80 ring-1 ring-border ring-inset",
+                  STEP_CARD,
+                  state === "working" && "border-info/24 bg-info/6",
+                  isViewing && "border-foreground ring-1 ring-foreground ring-inset",
                 )}
               >
                 <span
                   aria-hidden
                   className={cn(
-                    "flex size-8 shrink-0 items-center justify-center rounded-full border",
+                    "flex size-8 shrink-0 items-center justify-center rounded-full",
                     appearance.marker,
                   )}
                 >
-                  <appearance.Icon className="size-4" />
+                  <appearance.Icon className="size-4.5" />
                 </span>
                 <span className="flex min-w-0 flex-col gap-0.5">
                   {label === null ? null : (
-                    <span className="text-xs text-muted-foreground">{t("Step {0}", label[1])}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t("Step {0}", label[1])}
+                      {isViewing ? ` · ${t("Viewing")}` : null}
+                    </span>
                   )}
-                  <span className="text-sm leading-snug font-medium wrap-anywhere">
+                  <span className="text-sm leading-snug font-semibold wrap-anywhere">
                     {label?.[2] ?? name}
                   </span>
-                  <span className={cn("text-xs font-medium", appearance.text)}>
+                  <span className={cn("text-xs font-semibold", appearance.text)}>
                     {t(appearance.label)}
+                    {isSelected ? null : (
+                      <>
+                        {" · "}
+                        <span className="underline">
+                          {t(status === "completed" ? "See report" : "Go to step")}
+                        </span>
+                      </>
+                    )}
                   </span>
                 </span>
               </Link>
-              {index < steps.length - 1 || preview ? (
-                <span
-                  aria-hidden
-                  className={cn(
-                    "pointer-events-none absolute top-6 -right-2 left-12 h-px bg-border",
-                    isCompleted && "bg-success-foreground/50",
-                  )}
-                />
-              ) : null}
             </li>
           );
         })}
         {preview && (
-          <li className="relative flex min-w-32 flex-1">
+          <li className="flex min-w-0 flex-[1_1_12.5rem]">
             <Link
               to="/my-work/preview/$ticketId/$stepDefinitionId"
               params={{ ticketId: preview.ticketId, stepDefinitionId: preview.stepDefinitionId }}
-              className="flex min-w-0 flex-1 flex-col items-start gap-2 rounded-lg p-2 hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className={STEP_CARD}
             >
               <span
                 aria-hidden
-                className="flex size-8 items-center justify-center rounded-full border border-dashed border-primary/60 bg-card text-primary"
+                className="flex size-8 shrink-0 items-center justify-center rounded-full border-2 border-input text-xs font-semibold text-muted-foreground"
               >
-                <CircleIcon className="size-4" />
+                {preview.stepNumber}
               </span>
-              <span className="flex flex-col gap-0.5">
+              <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="text-xs text-muted-foreground">
                   {t("Step {0}", preview.stepNumber)}
                 </span>
-                <span className="text-sm leading-snug font-medium wrap-anywhere">
+                <span className="text-sm leading-snug font-semibold wrap-anywhere">
                   {previewName?.[2] ?? preview.stepName}
                 </span>
-                <span className="text-xs font-medium text-primary">{t("Preliminary results")}</span>
+                <span className="text-xs font-semibold text-primary underline">
+                  {t("Preliminary results")}
+                </span>
               </span>
             </Link>
           </li>
@@ -587,6 +630,91 @@ export const RUN_STATUSES = {
   stopped: { label: "Stopped", Icon: CircleStopIcon, tone: "text-muted-foreground" },
 } as const;
 
+/** The step's automation runs, newest first, each numbered on its automation; and what a run is called. */
+function useStepRuns(view: StepView) {
+  const t = useTranslation();
+  const titles = useApiQuery(stepAutomationList);
+  const runs = view.automations
+    .flatMap((automation) =>
+      automation.runs.map((run) => ({
+        ...run,
+        automation,
+        number: runNumber(automation.runs, run),
+      })),
+    )
+    .toSorted((a, b) => DateTime.toEpochMillis(b.startedAt) - DateTime.toEpochMillis(a.startedAt));
+  const titleOf = (id: AutomationId, phase = 1) => {
+    const automation = titles.data?.find((each) => each.id === id);
+    return automation === undefined ? t("Unavailable automation") : runTitle(automation, phase);
+  };
+  return { runs, titleOf, titlesError: titles.error };
+}
+
+/** The step's automation runs, oldest first, one under another: how each went and what it reported. */
+function StepRunTimeline({ view }: { readonly view: StepView }) {
+  const t = useTranslation();
+  const now = useNowMinute();
+  const { runs, titleOf } = useStepRuns(view);
+  const name = stepNameParts.exec(view.definition.name);
+  const title = t("{0} automations", name === null ? view.definition.name : t("Step {0}", name[1]));
+  return (
+    <section aria-label={title} className="card flex flex-col gap-3.5 px-5 py-4.5 text-sm">
+      <h3 className="font-semibold text-foreground/80">{title}</h3>
+      {runs.length === 0 ? (
+        <p className="text-muted-foreground">{t("No automation has run on this item yet.")}</p>
+      ) : (
+        <ol className="flex flex-col">
+          {runs.toReversed().map(({ automation, number, ...run }, index) => {
+            const { label, Icon, tone } = RUN_STATUSES[run.status];
+            const isLast = index === runs.length - 1;
+            return (
+              <li key={run.chatId} className="flex gap-3.5">
+                <span className="flex flex-col items-center pt-0.5">
+                  <span role="img" aria-label={t(label)} className="flex">
+                    <Icon aria-hidden className={`size-5.5 ${tone}`} />
+                  </span>
+                  {isLast ? null : (
+                    <span aria-hidden className="mt-1.5 min-h-4 w-0.5 flex-1 bg-border" />
+                  )}
+                </span>
+                <div className={cn("flex min-w-0 flex-1 flex-col gap-1", !isLast && "pb-4.5")}>
+                  <p className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold">{titleOf(automation.id, run.phase)}</span>
+                    <Link
+                      to="/my-work/$stepId/runs/$chatId"
+                      params={{ stepId: view.step.id, chatId: run.chatId }}
+                      className="text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      #{number}
+                    </Link>
+                    {run.status === "running" && <Badge variant="info">{t("Running")}</Badge>}
+                  </p>
+                  {run.endedAt === null ? (
+                    <p className="text-xs text-muted-foreground">
+                      {t("Started {0}", formatRelativeTimeLabel(run.startedAt, now))}
+                    </p>
+                  ) : (
+                    <p className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                      {formatRelativeTimeLabel(run.startedAt, now)}
+                      <span className="flex items-center gap-1">
+                        <TimerIcon aria-hidden className="size-3.5" />
+                        {formatDurationLabel(run.startedAt, run.endedAt)}
+                      </span>
+                    </p>
+                  )}
+                  {run.endedAt !== null && run.latestReport !== null && (
+                    <p className="wrap-break-word text-foreground/80">{run.latestReport.message}</p>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 /** The runs of the automations the workflow gives this step, newest first, and the way to start one. */
 function StepAutomations({
   view,
@@ -598,28 +726,15 @@ function StepAutomations({
   readonly act: StepAct;
 }) {
   const t = useTranslation();
-  const titles = useApiQuery(stepAutomationList);
+  const { runs, titleOf, titlesError } = useStepRuns(view);
   const now = useNowMinute();
   const runnable = view.automations.filter((automation) => automation.runLabel !== null);
   // While a step's only automation runs, there is nothing to start.
   const isOnlyAutomationRunning =
     runnable.length === 1 && runnable[0]?.runs[0]?.status === "running";
-  const runs = view.automations
-    .flatMap((automation) =>
-      automation.runs.map((run) => ({
-        ...run,
-        automation,
-        number: runNumber(automation.runs, run),
-      })),
-    )
-    .toSorted((a, b) => DateTime.toEpochMillis(b.startedAt) - DateTime.toEpochMillis(a.startedAt));
   // Entering the step tried them, so they are older than its runs.
   const skipped = view.step.skippedAutomations ?? [];
   if (runs.length === 0 && skipped.length === 0 && runnable.length === 0) return null;
-  const titleOf = (id: AutomationId, phase = 1) => {
-    const automation = titles.data?.find((each) => each.id === id);
-    return automation === undefined ? t("Unavailable automation") : runTitle(automation, phase);
-  };
   const call = (
     tag: "workflows.runStepAutomation" | "workflows.stopStepAutomation",
     automationId: AutomationId,
@@ -638,7 +753,7 @@ function StepAutomations({
           </Badge>
         )}
       </div>
-      {titles.error && <ErrorText text={titles.error} />}
+      {titlesError && <ErrorText text={titlesError} />}
       {runs.length === 0 && skipped.length === 0 ? (
         <p className="text-muted-foreground">{t("No automation has run on this item yet.")}</p>
       ) : (
@@ -902,9 +1017,9 @@ function MissingRecap({
 }
 
 /**
- * The way back to the project's board, the item's title, and under it the open step with the steps
- * it sits in and the way to its instructions. Then the step the item is in when that isn't the step
- * on the page, and why the item was cancelled or the step blocked.
+ * The item's title, and under it the open step with the steps it sits in and the way to its
+ * instructions. Then the step the item is in when that isn't the step on the page, and why the item
+ * was cancelled or the step blocked.
  */
 function ItemHeader({ view }: { readonly view: StepView }) {
   const t = useTranslation();
@@ -916,11 +1031,8 @@ function ItemHeader({ view }: { readonly view: StepView }) {
     )?.name ?? null;
   return (
     <header className="flex flex-col gap-2">
-      <BackLink to="/boards/$slug" params={{ slug: view.ticket.projectId }}>
-        {view.projectName}
-      </BackLink>
       <div className="flex flex-col gap-1">
-        <h2 className="text-2xl font-semibold tracking-tight wrap-anywhere">{view.ticket.title}</h2>
+        <h2 className="text-3xl font-bold tracking-tight wrap-anywhere">{view.ticket.title}</h2>
         {!hasStepper || view.parents.length > 0 ? (
           <h3 className="text-sm text-muted-foreground">
             {view.parents.map((parent) => (

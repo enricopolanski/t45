@@ -67,3 +67,43 @@ export function makePdfImageReader(attachments: string, pages: string) {
     return Buffer.from(transparent);
   };
 }
+
+/**
+ * A region of a PDF page as a PNG, for a product the PDF shows only within a page: the box is
+ * given as fractions of the page's width and height, from its top left corner.
+ */
+export async function readPdfPageCrop(
+  attachments: string,
+  id: string,
+  page: number,
+  box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+) {
+  const reference = `pdf-page:${id}/page-${page}`;
+  const pdf = `${attachments}/${id}`;
+  const { stdout } = await run("pdfinfo", ["-f", String(page), "-l", String(page), pdf]).catch(() =>
+    refuse(`There is no PDF page ${reference}.`),
+  );
+  const size = new RegExp(`^Page +${page} size: +([\\d.]+) x ([\\d.]+) pts`, "mu").exec(stdout);
+  if (size === null) return refuse(`There is no PDF page ${reference}.`);
+  const isInside = box.x >= 0 && box.y >= 0 && box.width > 0 && box.height > 0;
+  if (!isInside || box.x + box.width > 1 || box.y + box.height > 1)
+    return refuse(`The crop of ${reference} must lie within the page, as fractions from 0 to 1.`);
+  const dpi = 200;
+  const [width, height] = [Number(size[1]), Number(size[2])].map((points) => (points / 72) * dpi);
+  const { stdout: bytes } = await run(
+    "pdftoppm",
+    [
+      ...["-f", String(page), "-l", String(page), "-r", String(dpi), "-png", "-singlefile"],
+      ...["-x", String(Math.round(box.x * width!)), "-y", String(Math.round(box.y * height!))],
+      ...[
+        "-W",
+        String(Math.round(box.width * width!)),
+        "-H",
+        String(Math.round(box.height * height!)),
+      ],
+      pdf,
+    ],
+    { encoding: "buffer", maxBuffer: ATTACHMENT_MAX_FILE_BYTES },
+  );
+  return bytes;
+}

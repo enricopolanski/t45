@@ -67,7 +67,7 @@ On AMD, the October 2026 Windows update **KB5127648** removes nested virtualizat
 
 `vp run dev` starts the runner on loopback next to the server (`runnerUrl=` on the `[dev-runner]` line) and points the server at it, with a token made fresh for each run. To use a shared runner instead, set both `RUNNER_URL` and `RUNNER_TOKEN`; this skips the local runner. The local runner needs three things:
 
-- **`OPENCODE_API_KEY`** in `.env`: the runner's OpenCode Go key. The runner doesn't start without it; the sandbox only sees a placeholder.
+- **`OPENCODE_API_KEY`** in `.env`: the runner's OpenCode Go key, for agents on `opencode-go/` models. **`ANTHROPIC_API_KEY`**, optional, is the Anthropic key for agents on `anthropic/` models; the server lists Anthropic's models only when it has the key too, which it does in development since both read `.env`. A sandbox reaches only its model's provider and only sees a placeholder of that provider's key.
 - **`CAPABILITY_SECRET_BROWSERLESS_TOKEN`** in `.env`, for agents with the Web browser capability: a Browserless Cloud API token. A capability's secret `NAME` comes from the runner's `CAPABILITY_SECRET_NAME` and goes only to the capability's hosts; the sandbox only sees a placeholder.
 - **The agent image**, built with Docker and loaded into microsandbox as `t45-agent:dev`: `vp run --filter @t45/runner image`. Rebuild after changing `apps/runner/image`. Without it, chats fail and the server log names the reason, as in production.
 - **`mkfs.ext4` (e2fsprogs) and GNU tar** on the host, which make and pack VM disks. On macOS, install `e2fsprogs` and `gnu-tar` with Homebrew and put their `sbin` and `gnubin` folders first on `PATH`.
@@ -78,7 +78,7 @@ Built-in MCP tools call the server’s regular workflow RPCs and attachment uplo
 
 `apps/runner/cloudflare` is a Worker that serves the same runner calls from Cloudflare Containers, for a server and web app that run anywhere, including locally. Each script and each execution gets a new container from the agent image (`apps/runner/image`), destroyed when it ends. Point the server at it with `RUNNER_URL=https://<worker>.workers.dev` and `RUNNER_TOKEN`.
 
-- **Secrets:** `T45_RUNNER_TOKEN` (the token the server sends), `OPENCODE_API_KEY` and each `CAPABILITY_SECRET_<NAME>`, as Worker secrets (`wrangler secret put`, or `--secrets-file` on deploy). Containers only hold placeholders: an outbound handler in the Worker adds the real values on the way to their hosts.
+- **Secrets:** `T45_RUNNER_TOKEN` (the token the server sends), `OPENCODE_API_KEY`, `ANTHROPIC_API_KEY` when agents use Anthropic's models (the server Worker needs it too, to list them) and each `CAPABILITY_SECRET_<NAME>`, as Worker secrets (`wrangler secret put`, or `--secrets-file` on deploy). Containers only hold placeholders: an outbound handler in the Worker adds the real values on the way to their hosts.
 - **Network:** a provider-only agent reaches the provider and its capabilities' hosts over ports 80 and 443, and nothing else; an open agent reaches the internet directly.
 - **Calls to the server:** the agent's tools call `http://t45.internal`, and the runner relays those requests to the server over the execution's own connection, so the server needs no public address.
 - **No chat resume:** the runner keeps no disk, so it refuses an execution of a chat that ran before. Automations, whose phases each start a new chat, are unaffected.

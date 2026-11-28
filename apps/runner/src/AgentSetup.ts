@@ -7,10 +7,21 @@ import * as Schema from "effect/Schema";
 const McpServers = Schema.Record(Schema.String, Schema.toEncoded(ConfigMCP.Server));
 const decodeMcpServers = Schema.decodeUnknownSync(Schema.fromJsonString(McpServers));
 
-/** The one host a provider-only network reaches, and the only one the key goes to. */
-export const PROVIDER_HOST = "opencode.ai";
-/** Inside the VM it holds a placeholder. */
-export const KEY_ENV = "OPENCODE_API_KEY";
+/**
+ * The providers an agent's model can name (`provider/model`), each with the one host OpenCode calls
+ * and the variable holding its key. A provider-only network reaches only that host, the only one the
+ * key goes to; inside the VM the variable holds a placeholder.
+ */
+const PROVIDERS: Readonly<Record<string, { readonly host: string; readonly keyEnv: string }>> = {
+  "opencode-go": { host: "opencode.ai", keyEnv: "OPENCODE_API_KEY" },
+  anthropic: { host: "api.anthropic.com", keyEnv: "ANTHROPIC_API_KEY" },
+};
+
+const findProvider = (model: string) => {
+  const provider = PROVIDERS[model.slice(0, model.indexOf("/"))];
+  if (provider === undefined) throw new Error(`No provider for the model ${model}`);
+  return provider;
+};
 
 /** T45's MCP programs read the tool token from it; inside the VM it holds a placeholder. */
 export const TOOL_TOKEN_ENV = "T45_TOOL_TOKEN";
@@ -74,6 +85,7 @@ export const applyCapabilities = (request: ExecutionRequest) => {
     environment: Object.fromEntries(
       [...environment].map(([name, value]) => [name, bind(value)] as const),
     ),
+    provider: findProvider(request.agent.model),
     hosts: [...new Set(request.agent.capabilities.flatMap((capability) => capability.hosts ?? []))],
     secrets,
     notes: request.agent.capabilities.flatMap((capability) => capability.note ?? []),

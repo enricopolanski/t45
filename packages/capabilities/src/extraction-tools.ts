@@ -17,7 +17,7 @@ import { AttachmentUploadResult } from "@t45/contracts/resources/Attachments";
 import type { StepView } from "@t45/contracts/resources/Workflows";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { makePdfImageReader } from "./document-extraction/pdf-images.ts";
+import { makePdfImageReader, readPdfPageCrop } from "./document-extraction/pdf-images.ts";
 import { apiHeaders, apiUrl, callOperation, refuse, serve } from "./mcp-stdio.ts";
 
 const step = { stepId: process.env.T45_STEP_ID! };
@@ -76,6 +76,9 @@ const document = Schema.toJsonSchemaDocument(Batch);
 const decodeUpload = Schema.decodeUnknownSync(AttachmentUploadResult);
 /** An image embedded in one of the step's PDFs, by the PDF's attachment ID. */
 const imageReference = /^pdf-image:([a-f0-9-]{36}\.[a-z0-9]{1,10})\/(image-\d{3,}\.png)$/u;
+/** A region of a page of one of the step's PDFs: left, top, width and height as page fractions. */
+const pageCropReference =
+  /^pdf-page:([a-f0-9-]{36}\.[a-z0-9]{1,10})\/page-(\d+)@([\d.]+),([\d.]+),([\d.]+),([\d.]+)$/u;
 const readSettings = async () => {
   const schema = Schema.fromJsonString(
     Schema.Struct({
@@ -412,6 +415,24 @@ const saveRecords = async ({ recordsFieldId, groups, skipped = [] }: typeof Batc
               mimeType: "image/png",
             })),
           ];
+        const crop = pageCropReference.exec(value);
+        if (crop !== null) {
+          const [x, y, width, height] = crop.slice(3).map(Number);
+          return [
+            readPdfPageCrop("attachments", crop[1]!, Number(crop[2]), {
+              x: x!,
+              y: y!,
+              width: width!,
+              height: height!,
+            }).then((bytes) => ({
+              fieldKey,
+              bytes,
+              name: `page-${crop[2]}-crop.png`,
+              type: "image",
+              mimeType: "image/png",
+            })),
+          ];
+        }
         const stepFile = view.files.find(({ id }) => id === value);
         if (stepFile === undefined) return [];
         return [
@@ -500,7 +521,7 @@ if (process.argv[2] === "--schema") {
       {
         name: "save_records",
         description:
-          'Save all articles once. Put identical family facts in sharedValues and sharedReview, and variant-specific facts in each article. Article values override shared scalar values, and repeatable rows are combined. Give sourceId as the printed article code. Use field IDs in values and review. A repeatable group takes an array of objects, e.g. {"images":[{"image_file":"pdf-image:<attachment ID>/image-000.png"}]}. A file field takes a pdf-image reference, or the attachment ID of one of the source PDFs to keep a copy of it. A review entry takes an object of child fields, including its Brief and characteristics when configured. The tool assigns all row IDs, record keys and configured ticket references. Omit unsupported facts. Finish after the tool reports success.',
+          'Save all articles once. Put identical family facts in sharedValues and sharedReview, and variant-specific facts in each article. Article values override shared scalar values, and repeatable rows are combined. Give sourceId as the printed article code. Use field IDs in values and review. A repeatable group takes an array of objects, e.g. {"images":[{"image_file":"pdf-image:<attachment ID>/image-000.png"}]}. A file field takes a pdf-image reference, a pdf-page crop (pdf-page:<attachment ID>/page-<N>@<left>,<top>,<width>,<height>, as fractions of the page) of a product the PDF shows only within a page, or the attachment ID of one of the source PDFs to keep a copy of it. A review entry takes an object of child fields, including its Brief and characteristics when configured. The tool assigns all row IDs, record keys and configured ticket references. Omit unsupported facts. Finish after the tool reports success.',
         inputSchema: { ...document.schema, $defs: document.definitions },
         call: async (input) => saveRecords(decodeBatch(input)),
       },

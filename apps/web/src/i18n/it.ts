@@ -1,6 +1,14 @@
 import type { Message } from "./de";
 
 export const it = {
+  "Item sections": "Sezioni del ticket",
+  Progress: "Avanzamento",
+  Data: "Dati",
+  "{0} automations": "{0}: automazioni",
+  "Started {0}": "Avviata {0}",
+  Viewing: "In visualizzazione",
+  "See report": "Vedi rapporto",
+  "Go to step": "Vai al passaggio",
   "Source records": "Record di origine",
   "Calculation automation": "Automazione di calcolo",
   "No calculation": "Nessun calcolo",
@@ -599,6 +607,8 @@ export const it = {
   Message: "Messaggio",
   "Messages loading": "Caricamento dei messaggi",
   Model: "Modello",
+  Effort: "Impegno",
+  "Model's default": "Predefinito del modello",
   "Move {0} down": "Sposta {0} verso il basso",
   "Move {0} left": "Sposta {0} a sinistra",
   "Move {0} right": "Sposta {0} a destra",

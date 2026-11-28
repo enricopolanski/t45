@@ -1,6 +1,6 @@
 import { useTranslation } from "~/i18n/locale";
 import type { AgentModels } from "@t45/contracts/resources/Agents";
-import type { Agent } from "@t45/contracts/models/Agent";
+import { type Agent, parseModelReference } from "@t45/contracts/models/Agent";
 import type { Capability } from "@t45/contracts/models/Capability";
 import type { StringId } from "@t45/contracts/models/primitives";
 import type { Skill } from "@t45/contracts/models/Skill";
@@ -117,26 +117,75 @@ function ModelPicker({
   readonly value: string | null;
 }) {
   const t = useTranslation();
+  const [chosen, setChosen] = useState(() => parseModelReference(value ?? ""));
   if (models.reason !== null) {
     return <ErrorText text={t("T45 can't list the models: {0}", models.reason)} />;
   }
+  const efforts = models.models.find((model) => model.slug === chosen.slug)?.efforts ?? [];
   return (
-    <Select name="model" required defaultValue={value}>
-      <SelectTrigger>
-        <SelectValue placeholder={t("Choose a model")}>
-          {(slug: string) => models.models.find((model) => model.slug === slug)?.name ?? slug}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectPopup>
-        {models.models.map((model) => (
-          <SelectItem key={model.slug} value={model.slug}>
-            {model.name}
-          </SelectItem>
-        ))}
-      </SelectPopup>
-    </Select>
+    <>
+      <input
+        type="hidden"
+        name="model"
+        value={chosen.effort === null ? chosen.slug : `${chosen.slug}#${chosen.effort}`}
+      />
+      <Field label={t("Model")}>
+        <Select
+          required
+          value={chosen.slug === "" ? null : chosen.slug}
+          onValueChange={(slug: string | null) => {
+            const offered = models.models.find((model) => model.slug === slug)?.efforts ?? [];
+            setChosen({
+              slug: slug ?? "",
+              effort:
+                chosen.effort !== null && offered.includes(chosen.effort) ? chosen.effort : null,
+            });
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder={t("Choose a model")}>
+              {(slug: string) => models.models.find((model) => model.slug === slug)?.name ?? slug}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {models.models.map((model) => (
+              <SelectItem key={model.slug} value={model.slug}>
+                {model.name}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </Field>
+      {efforts.length > 0 && (
+        <Field label={t("Effort")}>
+          <Select
+            value={chosen.effort ?? DEFAULT_EFFORT}
+            onValueChange={(effort: string | null) =>
+              setChosen({ ...chosen, effort: effort === DEFAULT_EFFORT ? null : effort })
+            }
+          >
+            <SelectTrigger aria-label={t("Effort")}>
+              <SelectValue>
+                {(effort: string) => (effort === DEFAULT_EFFORT ? t("Model's default") : effort)}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value={DEFAULT_EFFORT}>{t("Model's default")}</SelectItem>
+              {efforts.map((effort) => (
+                <SelectItem key={effort} value={effort}>
+                  {effort}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </Field>
+      )}
+    </>
   );
 }
+
+/** The effort select's value when the agent leaves the effort to its model. */
+const DEFAULT_EFFORT = "default";
 
 const NETWORKS: Record<Agent["permissions"]["network"], string> = {
   provider: "Reaches only its provider",
@@ -220,9 +269,7 @@ function AgentForm({
           />
         </Section>
         <Section title={t("Execution")} card>
-          <Field label={t("Model")}>
-            <ModelPicker models={models} value={agent?.model ?? models.models[0]?.slug ?? null} />
-          </Field>
+          <ModelPicker models={models} value={agent?.model ?? models.models[0]?.slug ?? null} />
         </Section>
         <Section
           title={t("Network")}

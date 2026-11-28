@@ -36,16 +36,14 @@ export function StepComments({
       ) : (
         <ul className="flex flex-col gap-3">
           {view.comments.map((comment) => (
-            <li
-              key={comment.id}
-              className="flex flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2"
-            >
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">
+            <li key={comment.id} className="card flex flex-col gap-2 px-5 py-4">
+              <p className="text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">
                   {actorName(directory, comment.author)}
                 </span>
-                <span>{formatRelativeTimeLabel(comment.createdAt, now)}</span>
-              </div>
+                {" · "}
+                {formatRelativeTimeLabel(comment.createdAt, now)}
+              </p>
               <MarkdownText text={comment.body} />
             </li>
           ))}

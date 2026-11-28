@@ -18,8 +18,6 @@ import { type NetworkBuilder, NetworkPolicy, Sandbox as Microvm } from "microsan
 import {
   type AgentSetup,
   agentSetupFiles,
-  KEY_ENV,
-  PROVIDER_HOST,
   secretPlaceholder,
   TOOL_TOKEN_ENV,
   TOOL_TOKEN_PLACEHOLDER,
@@ -57,7 +55,7 @@ const sdk = <A>(operation: string, run: () => Promise<A>) =>
  */
 const sandboxNetwork =
   (
-    openCodeKey: Redacted.Redacted,
+    providerKey: Redacted.Redacted,
     agent: Agent,
     hostPort: number,
     serverUrl: string,
@@ -67,7 +65,7 @@ const sandboxNetwork =
   (settings: NetworkSettings) => {
     let policy = NetworkPolicy.builder().defaultEgress("deny").defaultIngress("allow");
     if (agent.permissions.network === "provider") {
-      policy = policy.egress((rule) => rule.tcp().port(443).allowDomain(PROVIDER_HOST));
+      policy = policy.egress((rule) => rule.tcp().port(443).allowDomain(agent.provider.host));
     } else {
       policy = policy.egress((rule) => rule.udp().tcp().port(53).allowHost());
       policy = policy.egress((rule) => rule.allowPublic());
@@ -88,9 +86,9 @@ const sandboxNetwork =
       .policyFromBuilder(policy)
       .secret((secret) =>
         secret
-          .env(KEY_ENV)
-          .value(Redacted.value(openCodeKey))
-          .allow(PROVIDER_HOST)
+          .env(agent.provider.keyEnv)
+          .value(Redacted.value(providerKey))
+          .allow(agent.provider.host)
           .substituteInHeaderFields(["authorization", "x-api-key"]),
       )
       // Over plain HTTP no TLS identity vouches for the server, so its host alone decides.
@@ -102,7 +100,7 @@ const sandboxNetwork =
           .value(Redacted.value(toolToken))
           .placeholder(TOOL_TOKEN_PLACEHOLDER)
           .allow(endpoint.hostname)
-          .allowPlaceholderFor(PROVIDER_HOST)
+          .allowPlaceholderFor(agent.provider.host)
           .requireTlsIdentity(endpoint.protocol === "https:")
           .substituteInHeaderFields(["authorization"]),
       );
@@ -114,7 +112,7 @@ const sandboxNetwork =
             .env(name)
             .value(Redacted.value(secretValues.get(name)!))
             .placeholder(secretPlaceholder(name))
-            .allowPlaceholderFor(PROVIDER_HOST)
+            .allowPlaceholderFor(agent.provider.host)
             .substituteInHeaders(true),
         ),
       );
@@ -212,9 +210,9 @@ const start = Effect.fn("SandboxManager.start")(function* (
   agent: Agent,
 ) {
   const runnerPort = yield* Config.Port("T45_RUNNER_PORT");
-  const openCodeKey = yield* Config.schema(
+  const providerKey = yield* Config.schema(
     Schema.Redacted(Schema.NonEmptyString),
-    "OPENCODE_API_KEY",
+    agent.provider.keyEnv,
   );
   const secretValues = new Map<string, Redacted.Redacted>();
   for (const name of agent.secrets.keys()) {
@@ -274,7 +272,7 @@ const start = Effect.fn("SandboxManager.start")(function* (
           // Removed by microsandbox once it stops, including when this runner dies.
           .ephemeral(true)
           .replace()
-          .network(sandboxNetwork(openCodeKey, agent, hostPort, serverUrl, toolToken, secretValues))
+          .network(sandboxNetwork(providerKey, agent, hostPort, serverUrl, toolToken, secretValues))
           .create(),
       );
       return { vm, remove: yield* Effect.cached(sdk("remove", () => vm.destroy())) };
