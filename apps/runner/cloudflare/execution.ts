@@ -20,8 +20,6 @@ import type * as RpcGroup from "effect/rpc/RpcGroup";
 import {
   type AgentSetup,
   agentSetupFiles,
-  KEY_ENV,
-  PROVIDER_HOST,
   secretPlaceholder,
   TOOL_TOKEN_ENV,
   TOOL_TOKEN_PLACEHOLDER,
@@ -54,6 +52,7 @@ const CONNECTION_HEADERS = new Set(["host", "content-length", "connection", "acc
 type OutboundPolicy = {
   readonly rootId: string;
   readonly isOpen: boolean;
+  readonly provider: AgentSetup["provider"];
   /** The hosts the agent's capabilities reach besides the provider. */
   readonly hosts: ReadonlyArray<string>;
   /** Each capability secret with the hosts it goes to. */
@@ -85,11 +84,18 @@ export class Outbound extends WorkerEntrypoint<Env, OutboundPolicy> {
     const url = new URL(request.url);
     const policy = this.ctx.props;
     if (url.origin === SERVER_ORIGIN) return this.#relay(request, url);
-    const isProvider = url.hostname === PROVIDER_HOST;
+    const isProvider = url.hostname === policy.provider.host;
     if (!policy.isOpen && !isProvider && !policy.hosts.includes(url.hostname))
       return new Response(`This agent can't reach ${url.hostname}.\n`, { status: 403 });
     const swaps = [
-      ...(isProvider ? [[secretPlaceholder(KEY_ENV), this.env.OPENCODE_API_KEY] as const] : []),
+      ...(isProvider
+        ? [
+            [
+              secretPlaceholder(policy.provider.keyEnv),
+              Reflect.get(this.env, policy.provider.keyEnv),
+            ] as const,
+          ]
+        : []),
       ...policy.secrets
         .filter(([, hosts]) => hosts.includes(url.hostname))
         .map(
@@ -173,6 +179,7 @@ export class Execution extends DurableObject<Env> {
     const policy: OutboundPolicy = {
       rootId: request.rootId,
       isOpen,
+      provider: agent.provider,
       hosts: agent.hosts,
       secrets: [...agent.secrets],
     };
@@ -198,7 +205,7 @@ export class Execution extends DurableObject<Env> {
           await container.interceptAllOutboundHttp(outbound);
           // An open network goes out directly except where a credential must be added.
           const intercepted = isOpen
-            ? [PROVIDER_HOST, ...new Set(policy.secrets.flatMap(([, hosts]) => hosts))]
+            ? [agent.provider.host, ...new Set(policy.secrets.flatMap(([, hosts]) => hosts))]
             : ["*"];
           for (const host of intercepted) await container.interceptOutboundHttps(host, outbound);
           log("sandbox.start", { sandboxId, kind: "execution", startedAt: toIsoTime(startedAt) });
@@ -254,7 +261,7 @@ export class Execution extends DurableObject<Env> {
               NO_UPDATE_NOTIFIER: "1",
               NODE_EXTRA_CA_CERTS: CA_PATH,
               OPENCODE_PASSWORD: password,
-              [KEY_ENV]: secretPlaceholder(KEY_ENV),
+              [agent.provider.keyEnv]: secretPlaceholder(agent.provider.keyEnv),
               [TOOL_TOKEN_ENV]: TOOL_TOKEN_PLACEHOLDER,
               ...Object.fromEntries(
                 [...agent.secrets.keys()].map((name) => [name, secretPlaceholder(name)]),

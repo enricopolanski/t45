@@ -76,7 +76,7 @@ export const canChatWithMembers = (agent: Pick<Agent, "status" | "isConversation
 const REFUSALS = {
   name_taken: "Another agent already has that name.",
   model_unavailable:
-    "OpenCode Go doesn't offer that model or effort now. Choose another, or try again once it answers.",
+    "Its provider doesn't offer that model or effort now. Choose another, or try again once it answers.",
   skill_not_found: "That skill no longer exists.",
   capability_not_found: "That capability no longer exists.",
   built_in: "T45 manages this agent, so it can't be changed or archived.",

@@ -18,6 +18,10 @@ export const serverUrl = Config.String("SERVER_URL").pipe(
 );
 export const toolInstance = Config.String("TOOL_INSTANCE").pipe(Config.withDefault(""));
 export const builtInsFile = Config.String("BUILT_INS_FILE").pipe(Config.option);
+/** With it, agents can choose Anthropic's models; the runner calls them with its own copy. */
+export const anthropicApiKey = Config.option(
+  Config.schema(Schema.Redacted(Schema.NonEmptyString), "ANTHROPIC_API_KEY"),
+);
 
 const decodeClerkIssuer = (publishableKey: string) =>
   `https://${atob(publishableKey.replace(/^pk_(?:test|live)_/u, "")).replace(/\$$/u, "")}`;

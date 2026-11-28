@@ -12,9 +12,11 @@ import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import { AutomationRepository } from "../automations/AutomationRepository.ts";
 import { CommandLogRepository } from "../persistence/CommandLogRepository.ts";
@@ -22,6 +24,7 @@ import { WorkflowRepository } from "../workflows/WorkflowRepository.ts";
 import { AgentRepository } from "./AgentRepository.ts";
 import { SkillRepository } from "./SkillRepository.ts";
 import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
+import * as ServerConfig from "../config.ts";
 
 /** OpenCode Go's models, OpenAI-style (`{ data: [{ id }] }`) with their efforts; listing them needs no key. */
 const MODELS_URL = "https://opencode.ai/zen/go/v1/models";
@@ -34,6 +37,34 @@ const decodeModels = HttpClientResponse.schemaBodyJson(
         capabilities: Schema.Struct({
           reasoning: Schema.Struct({
             effort: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
+          }),
+        }),
+      }),
+    ),
+  }),
+);
+
+/** The models Anthropic offers the server's key. */
+const ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models?limit=1000";
+
+/** The efforts Anthropic's models can offer, which OpenCode names its Anthropic variants after. */
+const ANTHROPIC_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+const EffortSupport = Schema.Struct({ supported: Schema.Boolean });
+
+const decodeAnthropicModels = HttpClientResponse.schemaBodyJson(
+  Schema.Struct({
+    data: Schema.Array(
+      Schema.Struct({
+        id: Schema.NonEmptyString,
+        display_name: Schema.NonEmptyString,
+        capabilities: Schema.Struct({
+          effort: Schema.Struct({
+            low: EffortSupport,
+            medium: EffortSupport,
+            high: EffortSupport,
+            xhigh: EffortSupport,
+            max: EffortSupport,
           }),
         }),
       }),
@@ -66,7 +97,8 @@ export const layer = Agents.middleware(Authorization).toLayer(
           () => new Refused({ reason: "built_in" }),
         ),
       );
-    const models = yield* httpClient.get(MODELS_URL).pipe(
+    const anthropicApiKey = yield* ServerConfig.anthropicApiKey;
+    const openCodeGoModels = httpClient.get(MODELS_URL).pipe(
       Effect.flatMap(HttpClientResponse.filterStatusOk),
       Effect.flatMap(decodeModels),
       Effect.map(({ data }) =>
@@ -76,6 +108,37 @@ export const layer = Agents.middleware(Authorization).toLayer(
           efforts: capabilities.reasoning.effort ?? [],
         })),
       ),
+    );
+    const anthropicModels = Option.match(anthropicApiKey, {
+      onNone: () => Effect.succeed([]),
+      onSome: (key) =>
+        httpClient
+          .execute(
+            HttpClientRequest.get(ANTHROPIC_MODELS_URL).pipe(
+              HttpClientRequest.setHeaders({
+                "x-api-key": Redacted.value(key),
+                "anthropic-version": "2023-06-01",
+              }),
+            ),
+          )
+          .pipe(
+            Effect.flatMap(HttpClientResponse.filterStatusOk),
+            Effect.flatMap(decodeAnthropicModels),
+            Effect.map(({ data }) =>
+              data.map(({ id, display_name, capabilities }) => ({
+                slug: `anthropic/${id}`,
+                name: `${display_name} (Anthropic)`,
+                efforts: ANTHROPIC_EFFORTS.filter(
+                  (effort) => capabilities.effort[effort].supported,
+                ),
+              })),
+            ),
+          ),
+    });
+    const models = yield* Effect.all([openCodeGoModels, anthropicModels], {
+      concurrency: "unbounded",
+    }).pipe(
+      Effect.map((lists) => lists.flat()),
       Effect.timeout("15 seconds"),
       Effect.cachedWithTTL("5 minutes"),
     );
@@ -123,7 +186,10 @@ export const layer = Agents.middleware(Authorization).toLayer(
       "agents.listModels": () =>
         models.pipe(
           Effect.map((models) => ({ models, reason: null })),
-          Effect.orElseSucceed(() => ({ models: [], reason: "OpenCode Go did not answer." })),
+          Effect.orElseSucceed(() => ({
+            models: [],
+            reason: "OpenCode Go or Anthropic did not answer.",
+          })),
         ),
       "agents.get": ({ agentId }) => find(agentId),
       "agents.archive": ({ agentId }) =>
