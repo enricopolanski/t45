@@ -159,7 +159,7 @@ export default {
       if (isReading) {
         prompt.text = [
           instructions,
-          "You have no tools: the documents are all below, so answer in one message, without calling anything. Read every page image and its selectable text. Answer with everything the documents state, article by article, for the automation that records the articles after you: each code and name, each value with its unit, condition and test method, prices, terms and packaging, which data sheet or specification table covers which articles, and the embedded image references that show each article, citing the document and page of each fact. Report what the documents say; record nothing yourself.",
+          "You have no tools: the documents are all below, so answer in one message, without calling anything. Read every page image and its selectable text. Answer with everything the documents state, article by article, for the automation that records the articles after you: each code and name, each value with its unit, condition and test method, prices, terms and packaging, which data sheet or specification table covers which articles, and the embedded image references that show each article, citing the document and page of each fact. When no embedded image shows an article or its family whole, give a crop of the page image that does, as pdf-page:<attachment ID>/page-<N>@<left>,<top>,<width>,<height> with the box in fractions of the page from its top left corner, tight around the product and without text. Report what the documents say; record nothing yourself.",
           sources,
           ...sheetTexts,
           ...material.map(({ text }) => text),
