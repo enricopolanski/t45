@@ -30,7 +30,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { RUN_STATUSES } from "./StepPage";
 import { useWorkDirectory } from "./useWorkDirectory";
 import { BackLink, WorkFrame } from "./WorkFrame";
-import { actorName } from "./workLogic";
+import { actorName, runNumber, runTitle } from "./workLogic";
 
 const isStepId = Schema.is(StringId);
 const tokenCount = new Intl.NumberFormat(undefined, {
@@ -58,8 +58,7 @@ export function RunPage({ stepId, chatId }: { readonly stepId: string; readonly 
   const automation = view?.automations.find(({ runs }) =>
     runs.some((run) => run.chatId === chatId),
   );
-  const at = automation?.runs.findIndex((run) => run.chatId === chatId) ?? -1;
-  const run = automation?.runs[at];
+  const run = automation?.runs.find((each) => each.chatId === chatId);
   if (view === null || error !== null || automation === undefined || run === undefined) {
     return (
       <WorkFrame title={t("Run")}>
@@ -71,10 +70,9 @@ export function RunPage({ stepId, chatId }: { readonly stepId: string; readonly 
       </WorkFrame>
     );
   }
-  // Runs are listed newest first, and numbered from the automation's first on the step.
-  const number = automation.runs.length - at;
-  const title =
-    titles.data?.find(({ id }) => id === automation.id)?.title ?? t("Unavailable automation");
+  const number = runNumber(automation.runs, run);
+  const saved = titles.data?.find(({ id }) => id === automation.id);
+  const title = saved === undefined ? t("Unavailable automation") : runTitle(saved, run.phase);
   const { label, Icon, tone } = RUN_STATUSES[run.status];
   return (
     <WorkFrame

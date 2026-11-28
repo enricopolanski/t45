@@ -1,22 +1,35 @@
 import { Automation, type AutomationId, Phase } from "@t45/contracts/models/Automation";
+import { Title } from "@t45/contracts/models/primitives";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { inJsonList } from "../persistence/JsonList.ts";
 
 const Row = Schema.Struct({
   ...Automation.fields,
+  // A first phase without a title has a null column.
+  firstPhaseTitle: Schema.NullOr(Title).pipe(
+    Schema.decodeTo(
+      Schema.optionalKey(Title),
+      SchemaTransformation.transformOptional({
+        decode: Option.flatMap(Option.fromNullishOr),
+        encode: (title) => Option.some(Option.getOrNull(title)),
+      }),
+    ),
+  ),
   nextPhases: Schema.optionalKey(Schema.fromJsonString(Schema.Array(Phase))),
   isArchived: Schema.BooleanFromBit,
 });
 const encodeAutomation = Schema.encodeEffect(Row);
 const decodeAutomations = Schema.decodeUnknownEffect(Schema.Array(Row));
 const COLUMNS = `id, title, prompt, step_context AS "stepContext",
-  agent_id AS "agentId", COALESCE(next_phases, '[]') AS "nextPhases", is_archived AS "isArchived",
+  agent_id AS "agentId", first_phase_title AS "firstPhaseTitle", COALESCE(next_phases, '[]') AS "nextPhases", is_archived AS "isArchived",
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 const make = Effect.gen(function* () {
@@ -39,13 +52,13 @@ const make = Effect.gen(function* () {
   const save = (automation: Automation) =>
     Effect.gen(function* () {
       const row = yield* encodeAutomation(automation);
-      yield* sql`INSERT INTO automations (id, title, prompt, step_context, agent_id, next_phases,
-            created_at, updated_at)
+      yield* sql`INSERT INTO automations (id, title, prompt, step_context, agent_id,
+            first_phase_title, next_phases, created_at, updated_at)
           VALUES (${row.id}, ${row.title}, ${row.prompt}, ${row.stepContext ?? "included"}, ${row.agentId},
-            ${row.nextPhases ?? null}, ${row.createdAt}, ${row.updatedAt})
+            ${row.firstPhaseTitle}, ${row.nextPhases ?? null}, ${row.createdAt}, ${row.updatedAt})
           ON CONFLICT (id) DO UPDATE SET title = excluded.title, prompt = excluded.prompt,
             step_context = excluded.step_context, agent_id = excluded.agent_id,
-            next_phases = excluded.next_phases, updated_at = excluded.updated_at`;
+            first_phase_title = excluded.first_phase_title, next_phases = excluded.next_phases, updated_at = excluded.updated_at`;
     }).pipe(Effect.orDie);
 
   return {

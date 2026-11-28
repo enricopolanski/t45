@@ -70,6 +70,7 @@ export const it = {
   "Include in the initial message": "Includi nel messaggio iniziale",
   "Read on demand": "Leggi su richiesta",
   "Phase {0}": "Fase {0}",
+  "Name of phase {0}": "Nome della fase {0}",
   "Add a phase": "Aggiungi una fase",
   "Remove phase {0}": "Rimuovi la fase {0}",
   "What should this agent do with what the phase before found?":
@@ -80,10 +81,8 @@ export const it = {
   "The step marks itself done and the ticket moves on as soon as its fields are complete and every record review is confirmed, by a person or an automation.":
     "Lo step si completa da solo e il ticket va avanti appena i suoi campi sono completi e ogni review è confermata, da una persona o da un'automazione.",
   " · {0} postponed": " · {0} rinviati",
-  "· Automatically run for": "· Avviato automaticamente per",
   "· Completed": "· Completato",
   "· keyed by": "· chiave",
-  "· Manually run by": "· Avviato manualmente da",
   "· Source record": "· Record di origine",
   "· Version": "· Versione",
   "'{0}' could not be read as an image.": "Impossibile leggere «{0}» come immagine.",

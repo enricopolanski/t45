@@ -6,7 +6,7 @@ import * as Struct from "effect/Struct";
 
 import { AutomationId } from "../models/Automation.ts";
 import { ChatId, Report } from "../models/Chat.ts";
-import { RunStatus } from "../models/ChatOrigin.ts";
+import { PhaseNumber, RunStatus } from "../models/ChatOrigin.ts";
 import { Attachment, AttachmentId } from "../models/Attachment.ts";
 import { NonNegativeInt, StringId, TrimmedNonEmptyString } from "../models/primitives.ts";
 import { Collection } from "../models/Collection.ts";
@@ -456,6 +456,8 @@ export const StepView = Schema.Struct({
           ranBy: StringId,
           /** Whether entering the step started it, rather than a member. */
           isAutomatic: Schema.Boolean,
+          /** Which of the automation's phases it ran, from 1. */
+          phase: PhaseNumber,
           startedAt: Schema.DateTimeUtcFromString,
           /** Null while it runs. */
           endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),

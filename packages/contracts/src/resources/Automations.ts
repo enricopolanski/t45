@@ -4,9 +4,14 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import { ChatId, Refused as ChatRefused, Report } from "../models/Chat.ts";
-import { RunStatus } from "../models/ChatOrigin.ts";
+import { PhaseNumber, RunStatus } from "../models/ChatOrigin.ts";
 import { StringId } from "../models/primitives.ts";
-import { Refused as AutomationRefused, Automation, AutomationId } from "../models/Automation.ts";
+import {
+  Refused as AutomationRefused,
+  Automation,
+  AutomationId,
+  Phase,
+} from "../models/Automation.ts";
 import { AdminOnly } from "../Authorization.ts";
 import { AccessDenied, NotFound } from "./errors.ts";
 
@@ -15,6 +20,7 @@ const Settings = Struct.pick(Automation.fields, [
   "prompt",
   "agentId",
   "stepContext",
+  "firstPhaseTitle",
   "nextPhases",
 ]);
 const Errors = Schema.Union([AutomationRefused, NotFound, AccessDenied]);
@@ -27,6 +33,8 @@ export const AutomationRun = Schema.Struct({
   ranBy: StringId,
   /** Whether entering its step started it, rather than a member. */
   isAutomatic: Schema.Boolean,
+  /** Which of its automation's phases it ran, from 1. */
+  phase: PhaseNumber,
   startedAt: Schema.DateTimeUtcFromString,
   /** Null while it runs. */
   endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
@@ -67,7 +75,17 @@ export const Automations = RpcGroup.make(
   .add(
     Rpc.make("listForSteps", {
       success: Schema.Array(
-        Schema.Struct(Struct.pick(Automation.fields, ["id", "title", "prompt", "agentId"])),
+        Schema.Struct({
+          ...Struct.pick(Automation.fields, [
+            "id",
+            "title",
+            "prompt",
+            "agentId",
+            "firstPhaseTitle",
+          ]),
+          /** The phases after the first, by name only. */
+          nextPhases: Schema.Array(Schema.Struct(Struct.pick(Phase.fields, ["title"]))),
+        }),
       ),
       error: AccessDenied,
     }),

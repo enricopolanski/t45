@@ -5,6 +5,9 @@ import { AutomationId } from "./Automation.ts";
 import { ChatId, type ChatStatus } from "./Chat.ts";
 import { StringId } from "./primitives.ts";
 
+/** One of an automation's phases, numbered from 1. */
+export const PhaseNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
 /** What started an automation's run, and the member on whose authority it runs. */
 export const Trigger = Schema.Union([
   Schema.Struct({

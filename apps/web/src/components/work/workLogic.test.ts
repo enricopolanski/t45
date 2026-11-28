@@ -1,6 +1,7 @@
+import { translate } from "~/i18n/locale";
 import { describe, expect, it } from "vite-plus/test";
 
-import { formatDay, formatNumber } from "./workLogic";
+import { formatDay, formatNumber, runNumber, runTitle } from "./workLogic";
 
 describe("formatDay", () => {
   it("leaves the year out for this year's dates only", () => {
@@ -33,5 +34,23 @@ describe("formatNumber", () => {
   it("sets a percent sign against the number and other units a space after it", () => {
     expect(formatNumber(43, { decimals: 1, unit: "%" })).toBe("43,0%");
     expect(formatNumber(47.6, { decimals: 2, unit: "€" })).toBe("47,60 €");
+  });
+});
+
+describe("an automation's runs", () => {
+  const nextPhases: ReadonlyArray<{ readonly title?: string }> = [{ title: "Record entries" }, {}];
+  const automation = { title: "Review the request", nextPhases };
+
+  it("go by their phase's name, else by the automation's and the phase's number", () => {
+    expect(runTitle({ ...automation, firstPhaseTitle: "Read files" }, 1)).toBe("Read files");
+    expect(runTitle(automation, 2)).toBe("Record entries");
+    expect(runTitle(automation, 3)).toBe(`Review the request · ${translate("Phase {0}", 3)}`);
+    expect(runTitle({ title: "Review the request" }, 1)).toBe("Review the request");
+  });
+
+  it("share the number of the run whose phases they are", () => {
+    // Newest first: a second run stopped in its first phase, after a first one of three phases.
+    const runs = [{ phase: 1 }, { phase: 3 }, { phase: 2 }, { phase: 1 }];
+    expect(runs.map((run) => runNumber(runs, run))).toEqual([2, 1, 1, 1]);
   });
 });

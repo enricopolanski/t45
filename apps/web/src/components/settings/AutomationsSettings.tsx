@@ -49,8 +49,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { RUN_STATUSES, RunDetail } from "../work/StepPage";
-import { useWorkDirectory } from "../work/useWorkDirectory";
-import { actorName } from "../work/workLogic";
+import { runNumber, runTitle } from "../work/workLogic";
 import {
   draftOf,
   type DraftPhase,
@@ -76,7 +75,14 @@ export function AutomationsSettings() {
   const shown = selected === null ? (automations ?? []) : [selected];
   const runs = shown
     .flatMap((automation) =>
-      automation.runs.map((run) => ({ run, automation, number: runNumber(automation, run) })),
+      automation.runs.map((run) => ({
+        run,
+        automation,
+        number: runNumber(
+          automation.runs.filter(({ stepId }) => stepId === run.stepId),
+          run,
+        ),
+      })),
     )
     .toSorted(
       (a, b) => DateTime.toEpochMillis(b.run.startedAt) - DateTime.toEpochMillis(a.run.startedAt),
@@ -172,12 +178,6 @@ export function AutomationsSettings() {
       ) : null}
     </div>
   );
-}
-
-/** Runs are numbered from the automation's first on the same step, as the run's page is. */
-function runNumber(automation: AutomationSummary, run: AutomationRun) {
-  const sameStep = automation.runs.filter(({ stepId }) => stepId === run.stepId);
-  return sameStep.length - sameStep.indexOf(run);
 }
 
 function AutomationNavButton({
@@ -281,8 +281,9 @@ function AutomationActions({
 }
 
 /**
- * One run: how it stands, who started it, and what it reported. A run on a step names its ticket
- * and offers what the step offers its viewer; a step the viewer doesn't see shows neither.
+ * One run of a phase: how it stands, what it is called, and what it reported. A run on a step
+ * names its ticket and offers what the step offers its viewer; a step the viewer doesn't see shows
+ * neither.
  */
 function AutomationRunRow({
   run,
@@ -294,9 +295,9 @@ function AutomationRunRow({
   readonly number: number;
 }) {
   const t = useTranslation();
-  const directory = useWorkDirectory();
   const now = useNowMinute();
   const { busy, act } = useAction();
+  const title = runTitle(automation, run.phase);
   const { data: view } = useApiQuery(
     run.stepId === null ? null : stepViews({ stepId: run.stepId }),
   );
@@ -326,22 +327,20 @@ function AutomationRunRow({
           <span role="img" aria-label={t(label)} className="flex size-4 shrink-0">
             <Icon aria-hidden className={`size-4 ${tone}`} />
           </span>
-          <span className="min-w-0 font-semibold">{automation.title}</span>
-        </p>
-        <p className="pl-6 text-xs text-muted-foreground">
-          {view ? (
-            <Link
-              to="/my-work/$stepId/runs/$chatId"
-              params={{ stepId: view.step.id, chatId: run.chatId }}
-              className="hover:text-foreground hover:underline"
-            >
-              #{number}
-            </Link>
-          ) : (
-            `#${number}`
-          )}{" "}
-          {run.isAutomatic ? t("· Automatically run for") : t("· Manually run by")}{" "}
-          {actorName(directory, run.ranBy)}
+          <span className="min-w-0 font-semibold">{title}</span>
+          <span className="text-xs text-muted-foreground">
+            {view ? (
+              <Link
+                to="/my-work/$stepId/runs/$chatId"
+                params={{ stepId: view.step.id, chatId: run.chatId }}
+                className="hover:text-foreground hover:underline"
+              >
+                #{number}
+              </Link>
+            ) : (
+              `#${number}`
+            )}
+          </span>
         </p>
         {run.status === "running" ? (
           <ProgressReport report={run.latestReport} isRunning />
@@ -391,7 +390,7 @@ function AutomationRunRow({
                       size="icon-xs"
                       variant="ghost"
                       disabled={busy}
-                      aria-label={t("Options for {0} run {1}", automation.title, number)}
+                      aria-label={t("Options for {0} run {1}", title, number)}
                     />
                   }
                 >
@@ -545,6 +544,16 @@ function AutomationEditorDialog({
               </Select>
             </Field>
 
+            {(draft.nextPhases ?? []).length > 0 && (
+              <Field label={t("Name of phase {0}", 1)}>
+                <Input
+                  maxLength={200}
+                  value={draft.firstPhaseTitle ?? ""}
+                  onChange={(event) => patch({ firstPhaseTitle: event.target.value })}
+                />
+              </Field>
+            )}
+
             {(draft.nextPhases ?? []).map((phase, index) => {
               const number = index + 2;
               const change = (changed: Partial<DraftPhase>) =>
@@ -553,6 +562,13 @@ function AutomationEditorDialog({
                 });
               return (
                 <Field key={phaseRows.keys[index]} label={t("Phase {0}", number)}>
+                  <Input
+                    maxLength={200}
+                    aria-label={t("Name of phase {0}", number)}
+                    placeholder={t("Name of phase {0}", number)}
+                    value={phase.title ?? ""}
+                    onChange={(event) => change({ title: event.target.value })}
+                  />
                   <div className="flex w-full items-center gap-2">
                     <Select
                       value={phase.agentId}

@@ -9,11 +9,13 @@ export interface DraftState {
   readonly stepContext?: StepContext;
   /** The agent each run talks to; null until one is picked. */
   readonly agentId: Agent["id"] | null;
+  readonly firstPhaseTitle?: string;
   /** The phases after the first, each with its agent, null until one is picked. */
   readonly nextPhases?: ReadonlyArray<DraftPhase>;
 }
 
 export interface DraftPhase {
+  readonly title?: string;
   readonly agentId: Agent["id"] | null;
   readonly prompt: string;
   readonly stepContext?: StepContext;
@@ -48,10 +50,13 @@ export function settingsFromDraft(
       },
     };
   }
-  const nextPhases = (draft.nextPhases ?? []).map((phase) => ({
+  const nextPhases = (draft.nextPhases ?? []).map(({ title: name = "", ...phase }) => ({
     ...phase,
+    ...(name.trim() === "" ? {} : { title: name.trim() }),
     prompt: phase.prompt.trim(),
   }));
+  // Only an automation with next phases names its first.
+  const firstPhaseTitle = nextPhases.length === 0 ? "" : (draft.firstPhaseTitle?.trim() ?? "");
   if (nextPhases.some(({ agentId, prompt }) => agentId === null || !prompt)) {
     return {
       problem: {
@@ -66,6 +71,7 @@ export function settingsFromDraft(
       prompt,
       agentId: draft.agentId,
       ...(draft.stepContext === undefined ? {} : { stepContext: draft.stepContext }),
+      ...(firstPhaseTitle === "" ? {} : { firstPhaseTitle }),
       nextPhases: nextPhases.flatMap(({ agentId, ...phase }) =>
         agentId === null ? [] : [{ ...phase, agentId }],
       ),

@@ -214,6 +214,31 @@ export interface WorkDirectory {
 }
 
 /** A display name for a person or agent. */
+/**
+ * A run's number on its step, shared by every phase of one run of the automation: the first phases
+ * up to its own, among `runs` listed newest first.
+ */
+export const runNumber = <Run extends { readonly phase: number }>(
+  runs: ReadonlyArray<Run>,
+  run: Run,
+) => runs.slice(runs.indexOf(run)).filter(({ phase }) => phase === 1).length;
+
+/** What a run is called: its phase's name, else its automation's, numbered once it has phases. */
+export function runTitle(
+  automation: {
+    readonly title: string;
+    readonly firstPhaseTitle?: string;
+    readonly nextPhases?: ReadonlyArray<{ readonly title?: string }>;
+  },
+  phase: number,
+) {
+  const name = phase === 1 ? automation.firstPhaseTitle : automation.nextPhases?.[phase - 2]?.title;
+  if (name !== undefined) return name;
+  return (automation.nextPhases ?? []).length === 0
+    ? automation.title
+    : `${automation.title} · ${translate("Phase {0}", phase)}`;
+}
+
 export function actorName(directory: WorkDirectory, id: string | null) {
   if (id === null) return translate("Nobody");
   return (
