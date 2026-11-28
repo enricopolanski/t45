@@ -1,4 +1,12 @@
 export const de = {
+  "Item sections": "Ticketbereiche",
+  Progress: "Fortschritt",
+  Data: "Daten",
+  "{0} automations": "{0}: Automatisierungen",
+  "Started {0}": "Gestartet {0}",
+  Viewing: "Angezeigt",
+  "See report": "Bericht ansehen",
+  "Go to step": "Zum Schritt",
   "Source records": "Quelldatensätze",
   "Calculation automation": "Berechnungsautomatisierung",
   "No calculation": "Keine Berechnung",

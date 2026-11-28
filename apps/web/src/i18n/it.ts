@@ -1,6 +1,14 @@
 import type { Message } from "./de";
 
 export const it = {
+  "Item sections": "Sezioni del ticket",
+  Progress: "Avanzamento",
+  Data: "Dati",
+  "{0} automations": "{0}: automazioni",
+  "Started {0}": "Avviata {0}",
+  Viewing: "In visualizzazione",
+  "See report": "Vedi rapporto",
+  "Go to step": "Vai al passaggio",
   "Source records": "Record di origine",
   "Calculation automation": "Automazione di calcolo",
   "No calculation": "Nessun calcolo",
