@@ -598,6 +598,8 @@ export const de = {
   Message: "Nachricht",
   "Messages loading": "Nachrichten werden geladen",
   Model: "Modell",
+  Effort: "Aufwand",
+  "Model's default": "Standard des Modells",
   "Move {0} down": "{0} nach unten verschieben",
   "Move {0} left": "{0} nach links verschieben",
   "Move {0} right": "{0} nach rechts verschieben",

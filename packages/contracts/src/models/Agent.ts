@@ -5,8 +5,19 @@ import { FilesByPath, StringId, TrimmedNonEmptyString } from "./primitives.ts";
 import type { Role } from "./User.ts";
 
 export class AgentModel extends Schema.Opaque<AgentModel>()(
-  Schema.Struct({ slug: TrimmedNonEmptyString, name: TrimmedNonEmptyString }),
+  Schema.Struct({
+    slug: TrimmedNonEmptyString,
+    name: TrimmedNonEmptyString,
+    /** The efforts its provider offers, which OpenCode calls the model's variants. */
+    efforts: Schema.Array(TrimmedNonEmptyString),
+  }),
 ) {}
+
+/** An agent's model is OpenCode's reference to it, with the effort as its variant: `provider/model#effort`. */
+export const parseModelReference = (model: string) => {
+  const [slug = model, effort = null] = model.split("#");
+  return { slug, effort };
+};
 
 /** What T45 writes in a chat's folder, and the other files OpenCode reads its configuration from. */
 export const AGENT_SETUP_PATHS = [
@@ -65,7 +76,7 @@ export const canChatWithMembers = (agent: Pick<Agent, "status" | "isConversation
 const REFUSALS = {
   name_taken: "Another agent already has that name.",
   model_unavailable:
-    "OpenCode Go doesn't offer that model now. Choose another, or try again once it answers.",
+    "OpenCode Go doesn't offer that model or effort now. Choose another, or try again once it answers.",
   skill_not_found: "That skill no longer exists.",
   capability_not_found: "That capability no longer exists.",
   built_in: "T45 manages this agent, so it can't be changed or archived.",

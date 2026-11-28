@@ -1,4 +1,11 @@
-import { type Agent, canManage, canUse, isBuiltIn, Refused } from "@t45/contracts/models/Agent";
+import {
+  type Agent,
+  canManage,
+  canUse,
+  isBuiltIn,
+  parseModelReference,
+  Refused,
+} from "@t45/contracts/models/Agent";
 import { NotFound } from "@t45/contracts/resources/errors";
 import { Agents, AgentSummary } from "@t45/contracts/resources/Agents";
 import { Authorization, CurrentUser } from "@t45/contracts/Authorization";
@@ -16,11 +23,22 @@ import { AgentRepository } from "./AgentRepository.ts";
 import { SkillRepository } from "./SkillRepository.ts";
 import { CapabilityRepository } from "../capabilities/CapabilityRepository.ts";
 
-/** OpenCode Go's models, OpenAI-style (`{ data: [{ id }] }`); listing them needs no key. */
+/** OpenCode Go's models, OpenAI-style (`{ data: [{ id }] }`) with their efforts; listing them needs no key. */
 const MODELS_URL = "https://opencode.ai/zen/go/v1/models";
 
 const decodeModels = HttpClientResponse.schemaBodyJson(
-  Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString })) }),
+  Schema.Struct({
+    data: Schema.Array(
+      Schema.Struct({
+        id: Schema.NonEmptyString,
+        capabilities: Schema.Struct({
+          reasoning: Schema.Struct({
+            effort: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
+          }),
+        }),
+      }),
+    ),
+  }),
 );
 
 export const layer = Agents.middleware(Authorization).toLayer(
@@ -51,18 +69,26 @@ export const layer = Agents.middleware(Authorization).toLayer(
     const models = yield* httpClient.get(MODELS_URL).pipe(
       Effect.flatMap(HttpClientResponse.filterStatusOk),
       Effect.flatMap(decodeModels),
-      Effect.map(({ data }) => data.map(({ id }) => ({ slug: `opencode-go/${id}`, name: id }))),
+      Effect.map(({ data }) =>
+        data.map(({ id, capabilities }) => ({
+          slug: `opencode-go/${id}`,
+          name: id,
+          efforts: capabilities.reasoning.effort ?? [],
+        })),
+      ),
       Effect.timeout("15 seconds"),
       Effect.cachedWithTTL("5 minutes"),
     );
     const requireOfferedModel = (model: string) =>
       models.pipe(
         Effect.orElseSucceed(() => []),
-        Effect.flatMap((offered) =>
-          offered.some((entry) => entry.slug === model)
+        Effect.flatMap((offered) => {
+          const { slug, effort } = parseModelReference(model);
+          const entry = offered.find((candidate) => candidate.slug === slug);
+          return entry !== undefined && (effort === null || entry.efforts.includes(effort))
             ? Effect.void
-            : new Refused({ reason: "model_unavailable" }),
-        ),
+            : new Refused({ reason: "model_unavailable" });
+        }),
       );
     const requireSkills = (skillIds: ReadonlyArray<string>) =>
       Effect.forEach(skillIds, (skillId) =>

@@ -599,6 +599,8 @@ export const it = {
   Message: "Messaggio",
   "Messages loading": "Caricamento dei messaggi",
   Model: "Modello",
+  Effort: "Impegno",
+  "Model's default": "Predefinito del modello",
   "Move {0} down": "Sposta {0} verso il basso",
   "Move {0} left": "Sposta {0} a sinistra",
   "Move {0} right": "Sposta {0} a destra",
